@@ -178,7 +178,7 @@ var purifyDomains = &cobra.Command{
 		// make a temporary dir
 		tmpDir, err := os.MkdirTemp(dirs.Tmp, "purifyTemp") // make a temporary dir to store the keys
 		if err != nil {
-			fmt.Println("Error creating temporary directory: ", err)
+			logger.Error("Error creating temporary directory", "error", err)
 			return
 		}
 		// make a temporary DB to store the keys
@@ -195,19 +195,19 @@ var purifyDomains = &cobra.Command{
 		for _, domain := range purificationDomains {
 			filesToProcess := ttx.Debug().DomainFiles(domain).Names()
 			if err := makePurifiableIndexDB(purifyDB, filesToProcess, dirs, log.New(), domain); err != nil {
-				fmt.Println("Error making purifiable index DB: ", err)
+				logger.Error("Error making purifiable index DB", "error", err)
 				return
 			}
 		}
 		for _, domain := range purificationDomains {
 			filesToProcess := ttx.Debug().DomainFiles(domain).Names()
 			if err := makePurifiedDomains(purifyDB, filesToProcess, dirs, log.New(), domain); err != nil {
-				fmt.Println("Error making purifiable index DB: ", err)
+				logger.Error("Error making purifiable index DB", "error", err)
 				return
 			}
 		}
 		if err != nil {
-			fmt.Printf("error walking the path %q: %v\n", domainDir, err)
+			logger.Error("error walking the path", "domainDir", domainDir, "error", err)
 		}
 	},
 }
@@ -270,7 +270,7 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 		}
 		defer dec.Close()
 		getter := dec.MakeGetter()
-		fmt.Printf("Indexing file %s\n", baseFileName)
+		logger.Info("Indexing file %s\n", baseFileName)
 		var buf []byte
 		for getter.HasNext() {
 			buf, _ = getter.Next(buf[:0])
@@ -281,14 +281,14 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
 			if count%100000 == 0 {
-				fmt.Printf("Indexed %d keys in file %s\n", count, baseFileName)
+				logger.Info(fmt.Sprintf("Indexed %d keys in file %s\n", count, baseFileName))
 			}
 			// skip values
 			getter.Skip()
 		}
-		fmt.Printf("Indexed %d keys in file %s\n", count, baseFileName)
+		logger.Info(fmt.Sprintf("Indexed %d keys in file %s\n", count, baseFileName))
 	}
-	fmt.Println("Loading the keys to DB")
+	logger.Info("Loading the keys to DB")
 	if err := collector.Load(tx, tbl, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 		return fmt.Errorf("failed to load: %w", err)
 	}
@@ -364,7 +364,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 		comp := seg.NewWriter(valuesComp, compressionType)
 		defer comp.Close()
 
-		fmt.Printf("Indexing file %s\n", baseFileName)
+		logger.Info("Indexing", "file", baseFileName)
 		var k, v []byte
 
 		var layer uint32
@@ -395,27 +395,27 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 			count++
 			if count%1_000_000 == 0 {
 				skipRatio := float64(skipped) / float64(count)
-				fmt.Printf("Indexed %d keys, skipped %d, in file %s. skip ratio: %.2f\n", count, skipped, baseFileName, skipRatio)
+				logger.Info(fmt.Sprintf("Indexed %d keys, skipped %d, in file %s. skip ratio: %.2f\n", count, skipped, baseFileName, skipRatio))
 			}
 		}
 
 		skipRatio := float64(skipped) / float64(count)
 		if skipRatio < minSkipRatioL0 && currentLayer == 0 {
-			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping domain %s\n", skipRatio, minSkipRatioL0, domain)
+			logger.Info(fmt.Sprintf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping domain %s\n", skipRatio, minSkipRatioL0, domain))
 			return nil
 		}
 		if skipRatio < minSkipRatio {
-			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio %.2f, skipping %s\n", skipRatio, minSkipRatioL0, baseFileName)
+			logger.Info(fmt.Sprintf("Skip ratio %.2f is less than min-skip-ratio %.2f, skipping %s\n", skipRatio, minSkipRatioL0, baseFileName))
 			continue
 		}
-		fmt.Printf("Loaded %d keys in file %s. now compressing...\n", count, baseFileName)
+		logger.Info(fmt.Sprintf("Loaded %d keys in file %s. now compressing...\n", count, baseFileName))
 		if err := comp.Compress(); err != nil {
 			return fmt.Errorf("failed to compress: %w", err)
 		}
-		fmt.Printf("Compressed %d keys in file %s\n", count, baseFileName)
+		logger.Info(fmt.Sprintf("Compressed %d keys in file %s\n", count, baseFileName))
 		comp.Close()
 		if replaceInDatadir {
-			fmt.Printf("Replacing the file %s in datadir\n", baseFileName)
+			logger.Info(fmt.Sprintf("Replacing the file %s in datadir\n", baseFileName))
 			if err := os.Rename(outputFilePath, fileInfo.Path); err != nil {
 				return fmt.Errorf("failed to replace the file %s: %w", baseFileName, err)
 			}
@@ -431,7 +431,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 				filepath.Join(dirs.SnapDomain, kviFile),
 				filepath.Join(dirs.SnapDomain, kviFile+".torrent"),
 			)
-			fmt.Printf("Removed the files %s and %s\n", kveiFile, btFile)
+			logger.Info(fmt.Sprintf("Removed the files %s and %s\n", kveiFile, btFile))
 		}
 	}
 	return nil
@@ -469,7 +469,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 				logger.Error("failed to read account", "addr", addr, "err", err)
 				continue
 			}
-			fmt.Printf("%x: nonce=%d balance=%d code=%x root=%x\n", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root)
+			logger.Info(fmt.Sprintf("%x: nonce=%d balance=%d code=%x root=%x\n", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root))
 		}
 	case "storage":
 		for _, addr := range addrs {
@@ -479,7 +479,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
 				continue
 			}
-			fmt.Printf("%s %s -> %x\n", a.String(), s.String(), st)
+			logger.Info(fmt.Sprintf("%s %s -> %x\n", a.String(), s.String(), st))
 		}
 	case "code":
 		for _, addr := range addrs {
@@ -488,7 +488,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue
 			}
-			fmt.Printf("%s: %x\n", addr, code)
+			logger.Info(fmt.Sprintf("%s: %x\n", addr, code))
 		}
 	}
 	return nil
