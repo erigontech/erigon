@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
@@ -114,9 +113,6 @@ func (cr ChainReader) FrozenBlocks() uint64    { return cr.BlockReader.FrozenBlo
 func (cr ChainReader) FrozenBorBlocks() uint64 { return cr.BlockReader.FrozenBorBlocks() }
 
 func (cr ChainReader) BorStartEventId(_ common.Hash, _ uint64) uint64 {
-	panic("bor events by block not implemented")
-}
-func (cr ChainReader) BorEventsByBlock(_ common.Hash, _ uint64) []rlp.RawValue {
 	panic("bor events by block not implemented")
 }
 

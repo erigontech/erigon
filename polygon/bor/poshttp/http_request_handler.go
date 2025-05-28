@@ -18,7 +18,7 @@ package poshttp
 
 import "net/http"
 
-//go:generate mockgen -typed=true -source=./http_request_handler.go -destination=./http_request_handler_mock.go -package=heimdall httpRequestHandler
+//go:generate mockgen -typed=true -source=./http_request_handler.go -destination=./http_request_handler_mock.go -package=poshttp httpRequestHandler
 type httpRequestHandler interface {
 	Do(req *http.Request) (*http.Response, error)
 	CloseIdleConnections()

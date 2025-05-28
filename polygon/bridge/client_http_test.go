@@ -44,7 +44,7 @@ func (ebrc emptyBodyReadCloser) Close() error {
 func TestHeimdallClientStateSyncEventsReturnsErrNoResponseWhenHttp200WithEmptyBody(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	requestHandler := NewMockhttpRequestHandler(ctrl)
+	requestHandler := poshttp.NewMockhttpRequestHandler(ctrl)
 	requestHandler.EXPECT().
 		Do(gomock.Any()).
 		Return(&http.Response{

@@ -48,7 +48,7 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	requestHandler := NewMockhttpRequestHandler(ctrl)
+	requestHandler := poshttp.NewMockhttpRequestHandler(ctrl)
 	requestHandler.EXPECT().
 		Do(gomock.Any()).
 		Return(&http.Response{

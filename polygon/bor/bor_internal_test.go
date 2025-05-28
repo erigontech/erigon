@@ -27,6 +27,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/params"
@@ -68,6 +69,14 @@ func (m mockBridgeReader) EventsWithinTime(context.Context, time.Time, time.Time
 }
 
 func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
+	panic("mock")
+}
+
+func (m mockBridgeReader) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
+	panic("mock")
+}
+
+func (m mockBridgeReader) BorStartEventId(ctx context.Context, hash common.Hash, blockNum uint64) (uint64, error) {
 	panic("mock")
 }
 

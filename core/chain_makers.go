@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
@@ -500,9 +499,6 @@ func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool       
 func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
 func (cr *FakeChainReader) FrozenBorBlocks() uint64                                 { return 0 }
-func (cr *FakeChainReader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
-	return nil
-}
 func (cr *FakeChainReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
 	return 0
 }

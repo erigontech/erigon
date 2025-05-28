@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-//go:generate mockgen -typed=true -destination=./client_mock.go -package=heimdall . Client
+//go:generate mockgen -typed=true -destination=./client_mock.go -package=bridge . Client
 type Client interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
 	FetchStateSyncEvent(ctx context.Context, id uint64) (*EventRecordWithTime, error)

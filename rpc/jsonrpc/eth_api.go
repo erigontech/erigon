@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,8 +44,6 @@ import (
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
@@ -139,8 +136,7 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
-	useBridgeReader bool
-	bridgeReader    bridgeReader
+	bridgeReader bridgeReader
 
 	evmCallTimeout      time.Duration
 	dirs                datadir.Dirs
@@ -173,7 +169,6 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		receiptsGenerator:   receipts.NewGenerator(blockReader, engine),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine),
 		dirs:                dirs,
-		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
 		bridgeReader:        bridgeReader,
 	}
 }
@@ -315,24 +310,7 @@ func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumbe
 }
 
 func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {
-	var stateSyncEvents []*types.Message
-	if api.useBridgeReader {
-		events, err := api.bridgeReader.Events(ctx, blockNum)
-		if err != nil {
-			return nil, err
-		}
-		stateSyncEvents = events
-	} else {
-		events, err := api._blockReader.EventsByBlock(ctx, tx, blockHash, blockNum)
-		if err != nil {
-			return nil, err
-		}
-
-		stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-		stateSyncEvents = bridge.NewStateSyncEventMessages(events, &stateReceiverContract, core.SysCallGasLimit)
-	}
-
-	return stateSyncEvents, nil
+	return api.bridgeReader.Events(ctx, blockNum)
 }
 
 // checks the pruning state to see if we would hold information about this
@@ -408,11 +386,6 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
-
-	if base.useBridgeReader {
-		logger.Info("starting rpc with polygon bridge")
-	}
-
 	return &APIImpl{
 		BaseAPI:                     base,
 		db:                          db,

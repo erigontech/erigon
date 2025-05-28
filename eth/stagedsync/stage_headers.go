@@ -639,22 +639,6 @@ func (cr ChainReaderImpl) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil
 }
-func (cr ChainReaderImpl) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
-	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
-	if err != nil {
-		cr.logger.Error("BorEventsByBlock failed", "err", err)
-		return nil
-	}
-	return events
-}
-func (cr ChainReaderImpl) BorStartEventId(hash common.Hash, blockNum uint64) uint64 {
-	id, err := cr.blockReader.BorStartEventId(context.Background(), cr.tx, hash, blockNum)
-	if err != nil {
-		cr.logger.Error("BorEventsByBlock failed", "err", err)
-		return 0
-	}
-	return id
-}
 func (cr ChainReaderImpl) BorSpan(spanId uint64) *heimdall.Span {
 	span, _, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
 	if err != nil {

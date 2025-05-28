@@ -76,7 +76,7 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader bloc
 			break
 		}
 
-		prevEventId, err = ValidateEvents(ctx, config, db, blockReader, eventSegment, prevEventId, maxBlockNum, failFast, logEvery)
+		prevEventId, err = ValidateEvents(ctx, config, db, blockReader, snapshots, eventSegment, prevEventId, maxBlockNum, failFast, logEvery)
 
 		if err != nil && failFast {
 			return err

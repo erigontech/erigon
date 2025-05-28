@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
 	"github.com/erigontech/erigon-lib/types"
@@ -432,6 +433,14 @@ func (s *Service) Events(ctx context.Context, blockNum uint64) ([]*types.Message
 
 func (s *Service) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
 	return s.reader.EventTxnLookup(ctx, borTxHash)
+}
+
+func (s *Service) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
+	return s.reader.EventsByBlock(ctx, hash, blockNum)
+}
+
+func (s *Service) BorStartEventId(ctx context.Context, hash common.Hash, blockNum uint64) (uint64, error) {
+	return s.store.BorStartEventId(ctx, hash, blockNum)
 }
 
 func (s *Service) blockEventsTimeWindowEnd(last ProcessedBlockInfo, blockNum uint64, blockTime uint64) (uint64, error) {

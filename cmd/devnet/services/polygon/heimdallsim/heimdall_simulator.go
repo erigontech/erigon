@@ -34,9 +34,9 @@ import (
 )
 
 type HeimdallSimulator struct {
-	snapshots   *heimdall.RoSnapshots
-	blockReader *freezeblocks.BlockReader
-
+	snapshots                *heimdall.RoSnapshots
+	blockReader              *freezeblocks.BlockReader
+	bridgeStore              bridge.Store
 	iterations               []uint64 // list of final block numbers for an iteration
 	lastAvailableBlockNumber uint64
 
@@ -167,8 +167,8 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 		blockReader: freezeblocks.NewBlockReader(nil, snapshots,
 			heimdallStore{
 				spans: heimdall.NewSpanSnapshotStore(heimdall.NoopEntityStore[*heimdall.Span]{Type: heimdall.Spans}, snapshots),
-			},
-			bridge.NewSnapshotStore(noopBridgeStore{}, snapshots, sprintLengthCalculator{})),
+			}),
+		bridgeStore: bridge.NewSnapshotStore(noopBridgeStore{}, snapshots, sprintLengthCalculator{}),
 
 		iterations: iterations,
 
@@ -223,7 +223,7 @@ func (h *HeimdallSimulator) FetchSpans(ctx context.Context, page uint64, limit u
 }
 
 func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint64, to time.Time, limit int) ([]*bridge.EventRecordWithTime, error) {
-	events, _, err := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
+	events, _, err := h.bridgeStore.EventsByIdFromSnapshot(fromId, to, limit)
 	return events, err
 }
 

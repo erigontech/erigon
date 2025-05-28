@@ -415,7 +415,7 @@ func (s *SnapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit 
 	return result, maxTime, nil
 }
 
-func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, snapshots *heimdall.RoSnapshots, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
 	g := eventSegment.Src().MakeGetter()
 
 	word := make([]byte, 0, 4096)
@@ -467,11 +467,11 @@ func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, b
 
 			if db != nil {
 				err = db.View(ctx, func(tx kv.Tx) error {
-					prevEventTime, err = checkBlockEvents(ctx, config, blockReader, block, prevBlock, eventId, prevBlockStartId, prevEventTime, tx, failFast)
+					prevEventTime, err = checkBlockEvents(ctx, config, blockReader, snapshots, block, prevBlock, eventId, prevBlockStartId, prevEventTime, tx, failFast)
 					return err
 				})
 			} else {
-				prevEventTime, err = checkBlockEvents(ctx, config, blockReader, block, prevBlock, eventId, prevBlockStartId, prevEventTime, nil, failFast)
+				prevEventTime, err = checkBlockEvents(ctx, config, blockReader, snapshots, block, prevBlock, eventId, prevBlockStartId, prevEventTime, nil, failFast)
 			}
 
 			if err != nil {
@@ -504,10 +504,9 @@ func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, b
 
 type blockReader interface {
 	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
-	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
 }
 
-func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader blockReader,
+func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader blockReader, snapshots *heimdall.RoSnapshots,
 	block uint64, prevBlock uint64, eventId uint64, prevBlockStartId uint64, prevEventTime *time.Time, tx kv.Tx, failFast bool) (*time.Time, error) {
 	header, err := blockReader.HeaderByNumber(ctx, tx, prevBlock)
 
@@ -519,7 +518,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 		log.Error("[integrity] NoGapsInBorEvents: can't get header for block", "block", block, "err", err)
 	}
 
-	events, err := blockReader.EventsByBlock(ctx, tx, header.Hash(), header.Number.Uint64())
+	events, err := NewSnapshotStore(NewTxStore(tx), snapshots, nil).EventsByBlock(ctx, header.Hash(), header.Number.Uint64())
 
 	if err != nil {
 		if failFast {
