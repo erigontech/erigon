@@ -1368,9 +1368,6 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 			var vt valueTransformer
 			if at.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
 				accStorageMerged.Wait()
-				if kid == kv.CommitmentDomain {
-					panic("acc and storage done!! LEt's crash the party")
-				}
 
 				vt, err = at.d[kv.CommitmentDomain].commitmentValTransformDomain(r.domain[kid].values, at.d[kv.AccountsDomain], at.d[kv.StorageDomain],
 					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
