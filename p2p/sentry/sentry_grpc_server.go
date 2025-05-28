@@ -28,6 +28,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -285,7 +286,7 @@ func (pi *PeerInfo) RemoveReason() *p2p.PeerError {
 	}
 }
 
-// ConvertH512ToPeerID() ensures the return type is [64]byte
+// ConvertH512ToPeerID ensures the return type is [64]byte
 // so that short variable declarations will still be formatted as hex in logs
 func ConvertH512ToPeerID(h512 *proto_types.H512) [64]byte {
 	return gointerfaces.ConvertH512ToHash(h512)
@@ -1076,11 +1077,18 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *proto_s
 func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	reply := &proto_sentry.SentPeers{}
 
+	allowedMsgCodes := []uint64{
+		eth.NewBlockMsg,
+		eth.NewPooledTransactionHashesMsg, // to broadcast new local transactions
+		eth.NewBlockHashesMsg,
+		eth.BlockRangeUpdateMsg,
+	}
+
 	msgcode, protocolVersions := ss.messageCode(req.Id)
-	if protocolVersions.Cardinality() == 0 ||
-		(msgcode != eth.NewBlockMsg &&
-			msgcode != eth.NewPooledTransactionHashesMsg && // to broadcast new local transactions
-			msgcode != eth.NewBlockHashesMsg) {
+	if protocolVersions.Cardinality() == 0 { // this message is enabled for this protocol, do nothing
+		return reply, nil
+	}
+	if !slices.Contains(allowedMsgCodes, msgcode) {
 		return reply, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
 	}
 
@@ -1102,6 +1110,8 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 		reply.Protocol = proto_sentry.Protocol_ETH67
 	case direct.ETH68:
 		reply.Protocol = proto_sentry.Protocol_ETH68
+	case direct.ETH69:
+		reply.Protocol = proto_sentry.Protocol_ETH69
 	}
 	return reply, nil
 }

@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
@@ -108,15 +108,15 @@ func makeGenesisChainHead(genesis *types.Block) ChainHead {
 	}
 }
 
-func (s *StatusDataProvider) makeStatusData(head ChainHead) *protosentry.StatusData {
-	return &protosentry.StatusData{
+func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusData {
+	return &sentryproto.StatusData{
 		NetworkId:           s.networkId,
 		TotalDifficulty:     gointerfaces.ConvertUint256IntToH256(head.HeadTd),
 		BestHash:            gointerfaces.ConvertHashToH256(head.HeadHash),
 		MaxBlockHeight:      head.HeadHeight,
 		MaxBlockTime:        head.HeadTime,
 		EarliestBlockHeight: head.EarliestHeight,
-		ForkData: &protosentry.Forks{
+		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
 			HeightForks: s.heightForks,
 			TimeForks:   s.timeForks,
@@ -124,7 +124,7 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *protosentry.StatusD
 	}
 }
 
-func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*protosentry.StatusData, error) {
+func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
 	chainHead, err := ReadChainHead(ctx, s.db, s.blockReader)
 	if err != nil {
 		if errors.Is(err, ErrNoHead) {
@@ -155,13 +155,12 @@ func ReadChainHeadWithTx(tx kv.Tx, blockReader interfaces.BlockReader) (ChainHea
 		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty conversion error: %w", err)
 	}
 
-	var earliestHeight uint64
-	res, err := blockReader.EarliestBlockNum(context.Background())
-	if err == nil {
-		earliestHeight = res
-		log.Info("ReadChainHead: earliest height is ", earliestHeight)
+	earliestHeight, err := blockReader.EarliestBlockNum(context.Background())
+	if err != nil {
+		return ChainHead{}, fmt.Errorf("ReadChainHead: earliest block number error: %w", err)
 	}
 
+	log.Info(fmt.Sprintf("ReadChainHead: earliest height is %d", earliestHeight))
 	return ChainHead{height, time, hash, earliestHeight, td256}, nil
 }
 

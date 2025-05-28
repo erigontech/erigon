@@ -35,6 +35,7 @@ import (
 var ProtocolToString = map[uint]string{
 	direct.ETH67: "eth67",
 	direct.ETH68: "eth68",
+	direct.ETH69: "eth69",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -438,3 +439,6 @@ func (*GetReceiptsPacket) Kind() byte   { return GetReceiptsMsg }
 
 func (*ReceiptsPacket) Name() string { return "Receipts" }
 func (*ReceiptsPacket) Kind() byte   { return ReceiptsMsg }
+
+func (*BlockRangeUpdatePacket) Name() string { return "BlockRangeUpdate" }
+func (*BlockRangeUpdatePacket) Kind() byte   { return BlockRangeUpdateMsg }

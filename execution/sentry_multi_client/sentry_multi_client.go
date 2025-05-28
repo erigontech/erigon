@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -60,8 +61,10 @@ import (
 // RecvUploadMessage - sending bodies/receipts - may be heavy, it's ok to not process this messages enough fast, it's also ok to drop some of these messages if we can't process.
 // RecvUploadHeadersMessage - sending headers - dedicated stream because headers propagation speed important for network health
 // PeerEventsLoop - logging peer connect/disconnect events
+// AnnounceBlockRangeLoop - announces available block range to all peers every epoch
 func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 	sentries := cs.Sentries()
+	go cs.AnnounceBlockRangeLoop(ctx)
 	for i := range sentries {
 		sentry := sentries[i]
 		go cs.RecvMessageLoop(ctx, sentry, nil)
@@ -119,6 +122,49 @@ func (cs *MultiClient) RecvMessageLoop(
 	}
 
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
+}
+
+func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
+	sentries := cs.Sentries()
+	//broadcastEvery := time.NewTicker(384 * time.Second) // 1 epoch
+	broadcastEvery := time.NewTicker(10 * time.Second)
+	defer broadcastEvery.Stop()
+
+	for {
+		select {
+		case <-broadcastEvery.C:
+			status, err := cs.statusDataProvider.GetStatusData(ctx)
+			if err != nil {
+				cs.logger.Error("blockRangeUpdate", "err", err)
+				break
+			}
+
+			request := eth.BlockRangeUpdatePacket{
+				Earliest:   status.EarliestBlockHeight,
+				Latest:     status.MaxBlockHeight,
+				LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
+			}
+
+			data, err := rlp.EncodeToBytes(&request)
+			if err != nil {
+				cs.logger.Error("blockRangeUpdate", "err", err)
+				break
+			}
+
+			for _, s := range sentries {
+				_, err := s.SendMessageToAll(ctx, &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69,
+					Data: data,
+				})
+				if err != nil {
+					cs.logger.Error("blockRangeUpdate", "err", err)
+					break
+				}
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func (cs *MultiClient) PeerEventsLoop(
