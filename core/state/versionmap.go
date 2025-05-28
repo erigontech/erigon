@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -181,7 +182,7 @@ func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Has
 				res.value = fv.data
 			}
 		default:
-			panic(fmt.Errorf("should not happen - unknown flag value"))
+			panic(errors.New("should not happen - unknown flag value"))
 		}
 	}
 
@@ -202,7 +203,7 @@ func (vm *VersionMap) MarkEstimate(addr common.Address, path AccountPath, key co
 	defer vm.mu.Unlock()
 
 	cells := vm.getKeyCells(addr, path, key, func(_ common.Address, _ AccountPath, _ common.Hash) *btree.Map[int, *WriteCell] {
-		panic(fmt.Errorf("path must already exist"))
+		panic(errors.New("path must already exist"))
 	})
 
 	if ci, ok := cells.Get(txIdx); !ok {
@@ -217,7 +218,7 @@ func (vm *VersionMap) MarkComplete(addr common.Address, path AccountPath, key co
 	defer vm.mu.Unlock()
 
 	cells := vm.getKeyCells(addr, path, key, func(_ common.Address, _ AccountPath, _ common.Hash) *btree.Map[int, *WriteCell] {
-		panic(fmt.Errorf("path must already exist"))
+		panic(errors.New("path must already exist"))
 	})
 
 	if ci, ok := cells.Get(txIdx); !ok {
@@ -237,7 +238,7 @@ func (vm *VersionMap) Delete(addr common.Address, path AccountPath, key common.H
 			return
 		}
 
-		panic(fmt.Errorf("path must already exist"))
+		panic(errors.New("path must already exist"))
 	}
 
 	cells.Delete(txIdx)

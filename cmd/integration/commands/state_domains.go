@@ -293,7 +293,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 			}
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
-			if count%100000 == 0 {
+			if count%1_000_000 == 0 {
 				fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
 			}
 			// skip values
@@ -435,7 +435,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 				return fmt.Errorf("failed to add val %x: %w", v, err)
 			}
 			count++
-			if count%1_000_000 == 0 {
+			if count%10_000_000 == 0 {
 				skipRatio := float64(skipped) / float64(count)
 				fmt.Printf("Indexed %d keys, skipped %d, in file %s. skip ratio: %.2f\n", count, skipped, fileName, skipRatio)
 			}
@@ -492,8 +492,8 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		return err
 	}
 
-	r := state.NewReaderV3(domains, stateTx)
-	if err != nil && startTxNum != 0 {
+	r := state.NewReaderV3(domains.AsGetter(temporalTx))
+	if startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)
 	}
 	latestTx := domains.TxNum()

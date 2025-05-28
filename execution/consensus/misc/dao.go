@@ -24,9 +24,8 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -87,8 +86,8 @@ func ApplyDAOHardFork(statedb *state.IntraBlockState) error {
 		if err != nil {
 			return err
 		}
-		statedb.AddBalance(DAORefundContract, &balance, tracing.BalanceIncreaseDaoContract)
-		statedb.SetBalance(addr, new(uint256.Int), tracing.BalanceDecreaseDaoAccount)
+		statedb.AddBalance(DAORefundContract, balance, tracing.BalanceIncreaseDaoContract)
+		statedb.SetBalance(addr, *u256.N0, tracing.BalanceDecreaseDaoAccount)
 	}
 	return nil
 }

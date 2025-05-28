@@ -158,7 +158,7 @@ func TestCall(t *testing.T) {
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	state := state.New(state.NewReaderV3(domains, tx))
+	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	address := common.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -233,7 +233,7 @@ func BenchmarkCall(b *testing.B) {
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
 	//cfg.w = state.NewWriter(sd, nil)
-	cfg.State = state.New(state.NewReaderV3(sd,tx))
+	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
@@ -262,7 +262,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	require.NoError(b, err)
 
 	var (
-		statedb  = state.New(state.NewReaderV3(domains, tx))
+		statedb  = state.New(state.NewReaderV3(domains.AsGetter(tx)))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)
@@ -334,7 +334,8 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	require.NoError(b, err)
 	defer domains.Close()
 
-	statedb := state.New(state.NewReaderV3(domains,tx))
+
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 
 	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
@@ -532,7 +533,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
-	cfg.State = state.New(state.NewReaderV3(domains, tx))
+	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	cfg.GasLimit = gas
 	//if len(tracerCode) > 0 {
 	//	tracer, err := tracers.DefaultDirectory.New(tracerCode, new(tracers.Context), nil, cfg.ChainConfig)
@@ -777,7 +778,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
-	state := state.New(state.NewReaderV3(domains,tx))
+	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 
 	b.Run("10k", func(b *testing.B) {

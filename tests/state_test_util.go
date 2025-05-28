@@ -211,9 +211,10 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	defer domains.Close()
-	txc.Doms = domains
-	r := rpchelper.NewLatestStateReader(domains, tx)
-	w := rpchelper.NewLatestStateWriter(txc, nil, writeBlockNr)
+	blockNum, txNum := readBlockNr, uint64(1)
+
+	r := rpchelper.NewLatestStateReader(txc.Ttx)
+	w := rpchelper.NewLatestStateWriter(tx, domains, nil, writeBlockNr)
 	statedb := state.New(r)
 
 	var baseFee *big.Int
@@ -244,6 +245,8 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
 	header := block.HeaderNoCopy()
+	//blockNum, txNum := header.Number.Uint64(), 1
+
 	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
@@ -289,7 +292,7 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 	}
 
 	var root common.Hash
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, header.Number.Uint64(), "")
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), true, blockNum, txNum, "")
 	if err != nil {
 		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 	}
@@ -297,21 +300,15 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 }
 
 func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	domains, err := libstate.NewSharedDomains(tx, log.New())
-	if err != nil {
-		return nil, err
-	}
-	defer domains.Close()
-
-	r := rpchelper.NewLatestStateReader(domains, tx)
+	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		balance := uint256.NewInt(0)
+		var balance uint256.Int
 		if a.Balance != nil {
-			balance, _ = uint256.FromBig(a.Balance)
+			_ = balance.SetFromBig(a.Balance)
 		}
 		statedb.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 		for k, v := range a.Storage {
@@ -331,22 +328,22 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.Genesis
 		}
 	}
 
-	txc := wrap.NewTxContainer(tx, nil)
-	domains, err = libstate.NewSharedDomains(txc.Ttx, log.New())
+	domains, err := state2.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, err
 	}
 	defer domains.Close()
-	defer domains.Flush(context2.Background(), tx, 0)
-	txc.Doms = domains
 
-	w := rpchelper.NewLatestStateWriter(txc, nil, blockNr-1)
+	w := rpchelper.NewLatestStateWriter(tx, domains, nil, blockNr-1)
 
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
 	}
 	if err := statedb.CommitBlock(rules, w); err != nil {
+		return nil, err
+	}
+	if err := domains.Flush(context2.Background(), tx); err != nil {
 		return nil, err
 	}
 	return statedb, nil

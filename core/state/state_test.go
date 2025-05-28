@@ -64,7 +64,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj3, err := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
 	c.Check(err, checker.IsNil)
-	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
+	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
 	// write some of them to the trie
 	err = s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
@@ -144,15 +144,16 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	defer domains.Close()
 
-	domains.SetTxNum(1)
+	txNum := uint64(1)
+	domains.SetTxNum(txNum)
 	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		panic(err)
 	}
 	s.tx = tx
-	s.r = NewReaderV3(domains, tx)
-	s.w = NewWriter(domains.AsPutDel(tx), nil)
+	s.r = NewReaderV3(domains.AsGetter(tx))
+	s.w = NewWriter(domains.AsPutDel(tx), nil, txNum)
 	s.state = New(s.r)
 }
 
@@ -254,14 +255,15 @@ func TestSnapshot2(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
+	txNum := uint64(1)
+	domains.SetTxNum(txNum)
 	domains.SetBlockNum(2)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	w := NewWriter(domains.AsPutDel(tx), nil)
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	state := New(NewReaderV3(domains, tx))
+	state := New(NewReaderV3(domains.AsGetter(tx)))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -278,7 +280,7 @@ func TestSnapshot2(t *testing.T) {
 	if err != nil {
 		t.Fatal("getting state", err)
 	}
-	so0.SetBalance(uint256.NewInt(42), tracing.BalanceChangeUnspecified)
+	so0.SetBalance(*uint256.NewInt(42), tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43)
 	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
 	so0.selfdestructed = false
@@ -300,7 +302,7 @@ func TestSnapshot2(t *testing.T) {
 	if err != nil {
 		t.Fatal("getting state", err)
 	}
-	so1.SetBalance(uint256.NewInt(52), tracing.BalanceChangeUnspecified)
+	so1.SetBalance(*uint256.NewInt(52), tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53)
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
 	so1.selfdestructed = true
@@ -430,7 +432,7 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV3(domains, tx))
+	st := New(NewReaderV3(domains.AsGetter(tx)))
 
 	// generate a few entries
 	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -442,9 +444,9 @@ func TestDump(t *testing.T) {
 	obj2.setIncarnation(1)
 	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
 	require.NoError(t, err)
-	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
+	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
-	w := NewWriter(domains.AsPutDel(tx), nil)
+	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)
@@ -453,7 +455,7 @@ func TestDump(t *testing.T) {
 	err = st.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	blockWriter := NewWriter(domains.AsPutDel(tx), nil)
+	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
 	err = domains.Flush(context.Background(), tx, 0)

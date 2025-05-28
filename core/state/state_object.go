@@ -282,11 +282,10 @@ func (so *stateObject) setState(key common.Hash, value uint256.Int) {
 // updateStotage writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateStotage(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
-		original := so.blockOriginStorage[key]
-		so.originStorage[key] = value
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, original, value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, so.blockOriginStorage[key], value); err != nil {
 			return err
 		}
+		so.originStorage[key] = value
 	}
 	return nil
 }
@@ -296,19 +295,19 @@ func (so *stateObject) printTrie() {
 	}
 }
 
-func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
+func (so *stateObject) SetBalance(amount uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
 		account: &so.address,
 		prev:    so.data.Balance,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
-		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, *amount, reason)
+		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
 	}
 	so.setBalance(amount)
 }
 
-func (so *stateObject) setBalance(amount *uint256.Int) {
-	so.data.Balance.Set(amount)
+func (so *stateObject) setBalance(amount uint256.Int) {
+	so.data.Balance = amount
 	so.data.Initialised = true
 }
 

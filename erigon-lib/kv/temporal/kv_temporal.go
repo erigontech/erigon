@@ -389,31 +389,36 @@ func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step ui
 	return v, step, err
 }
 
-func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
+func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return tx.hasPrefix(name, tx.Tx, prefix)
 }
 
-func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
+func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return tx.hasPrefix(name, tx.RwTx, prefix)
 }
 
-func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, bool, error) {
-	it, err := tx.rangeLatest(name, dbTx, prefix, nil, 1)
+func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []byte, bool, error) {
+	to, ok := kv.NextSubtree(prefix)
+	if !ok {
+		to = nil
+	}
+
+	it, err := tx.rangeLatest(name, dbTx, prefix, to, 1)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
 	defer it.Close()
 	if !it.HasNext() {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 
-	k, _, err := it.Next()
+	k, v, err := it.Next()
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
-	return k, true, nil
+	return k, v, true, nil
 }
 
 func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
@@ -484,13 +489,13 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 
 // Write methods
 
-func (tx *tx) DomainPut(domain kv.Domain, k, v, prevVal []byte, prevStep uint64) error {
+func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *tx) DomainDel(domain kv.Domain, k []byte, prevVal []byte, prevStep uint64) error {
+func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
 

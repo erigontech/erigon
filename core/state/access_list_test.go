@@ -97,7 +97,7 @@ func TestAccessList(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	state := New(NewReaderV3(domains, tx))
+	state := New(NewReaderV3(domains.AsGetter(tx)))
 
 	state.accessList = newAccessList()
 

@@ -100,7 +100,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 	preparedTxns := current.PreparedTxns
-	stateReader := state.NewReaderV3(txc.Doms, txc.Tx)
+
+	stateReader := state.NewReaderV3(txc.Doms.AsGetter(txc.Tx))
 	ibs := state.New(stateReader)
 	// Clique consensus needs forced author in the evm context
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
@@ -119,6 +120,16 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		return header, nil
 	}
 
+	mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
+	defer mb.Close()
+	sd, err := state2.NewSharedDomains(mb, logger)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+
+	txNum := sd.TxNum()
+
 	if len(preparedTxns) > 0 {
 		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
 		if err != nil {
@@ -131,15 +142,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		var simStateReader state.StateReader
 		var simStateWriter state.StateWriter
 
-		mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
-		defer mb.Close()
-		sd, err := state2.NewSharedDomains(mb, logger)
-		if err != nil {
-			return err
-		}
-		defer sd.Close()
-		simStateWriter = state.NewWriter(sd.AsPutDel(txc.Tx), nil)
-		simStateReader = state.NewReaderV3(sd, txc.Tx)
+		simStateWriter = state.NewWriter(sd.AsPutDel(txc.Tx), nil, txNum)
+		simStateReader = state.NewReaderV3(sd.AsGetter(txc.Tx))
 
 		executionAt, err := s.ExecutionAt(mb)
 		if err != nil {
@@ -191,7 +195,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		return err
 	}
 
-	var err error
 	var block *types.Block
 	block, current.Txns, current.Receipts, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger, nil)
 	if err != nil {
@@ -235,7 +238,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		return err
 	}
 
-	rh, err := txc.Doms.ComputeCommitment(ctx, txc.Tx, true, blockHeight, s.LogPrefix())
+	rh, err := txc.Doms.ComputeCommitment(ctx, true, blockHeight, txNum, s.LogPrefix())
 	if err != nil {
 		return fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}

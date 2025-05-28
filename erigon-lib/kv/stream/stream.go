@@ -84,6 +84,22 @@ func (it *RangeIter[T]) Next() (T, error) {
 	return v, nil
 }
 
+func ReverseRange[T constraints.Integer](from, to T) *ReverseRangeIter[T] {
+	return &ReverseRangeIter[T]{i: from, to: to}
+}
+
+type ReverseRangeIter[T constraints.Integer] struct {
+	i, to T
+}
+
+func (it *ReverseRangeIter[T]) HasNext() bool { return it.i > it.to }
+func (it *ReverseRangeIter[T]) Close()        {}
+func (it *ReverseRangeIter[T]) Next() (T, error) {
+	v := it.i
+	it.i--
+	return v, nil
+}
+
 // UnionUno
 type UnionUno[T cmp.Ordered] struct {
 	x, y           Uno[T]
@@ -185,15 +201,16 @@ type Intersected[T cmp.Ordered] struct {
 	x, y               Uno[T]
 	xHasNext, yHasNext bool
 	xNextK, yNextK     T
+	asc                order.By
 	limit              int
 	err                error
 }
 
-func Intersect[T cmp.Ordered](x, y Uno[T], limit int) Uno[T] {
+func Intersect[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
 		return &Empty[T]{}
 	}
-	m := &Intersected[T]{x: x, y: y, limit: limit}
+	m := &Intersected[T]{x: x, y: y, asc: asc, limit: limit}
 	m.advance()
 	return m
 }
@@ -207,14 +224,26 @@ func (m *Intersected[T]) advance() {
 		if m.err != nil {
 			break
 		}
-		if m.xNextK < m.yNextK {
-			m.advanceX()
-			continue
-		} else if m.xNextK == m.yNextK {
+		if m.xNextK == m.yNextK {
 			return
+		}
+		if m.asc {
+			if m.xNextK < m.yNextK {
+				m.advanceX()
+				continue
+			} else {
+				m.advanceY()
+				continue
+			}
 		} else {
-			m.advanceY()
-			continue
+			if m.xNextK < m.yNextK {
+				m.advanceY()
+				continue
+			} else {
+				m.advanceX()
+				continue
+			}
+
 		}
 	}
 	m.xHasNext = false

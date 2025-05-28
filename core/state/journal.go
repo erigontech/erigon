@@ -199,7 +199,7 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 	}
 	if obj != nil {
 		obj.selfdestructed = ch.prev
-		obj.setBalance(&ch.prevbalance)
+		obj.setBalance(ch.prevbalance)
 	}
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prevbalance {
@@ -235,7 +235,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	if traceAccount(*ch.account) {
 		fmt.Printf("Revert Balance %x: %d, prev: %d, orig: %d\n", *ch.account, obj.data.Balance, ch.prev, obj.original.Balance)
 	}
-	obj.setBalance(&ch.prev)
+	obj.setBalance(ch.prev)
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prev {
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})

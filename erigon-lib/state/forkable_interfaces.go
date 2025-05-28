@@ -64,8 +64,11 @@ type ForkableFilesTxI interface {
 	VisibleFilesMaxRootNum() RootNum
 	VisibleFilesMaxNum() Num
 
-	Files() []FilesItem
+	VisibleFiles() VisibleFiles
+	vfs() visibleFiles
 	GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error)
+
+	Garbage(merged *filesItem) (outs []*filesItem)
 }
 
 type ForkableDbCommonTxI interface {
