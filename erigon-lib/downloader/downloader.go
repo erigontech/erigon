@@ -424,28 +424,6 @@ func (d *Downloader) messyLogWrapper() {
 	}
 }
 
-func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo.MetaInfo, error) {
-	torrentRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadUrl.String()+".torrent", nil)
-
-	if err != nil {
-		return nil, err
-	}
-
-	torrentResponse, err := http.DefaultClient.Do(torrentRequest)
-
-	if err != nil {
-		return nil, err
-	}
-
-	defer torrentResponse.Body.Close()
-
-	if torrentResponse.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("can't get webpeer torrent unexpected http response: %s", torrentResponse.Status)
-	}
-
-	return metainfo.Load(torrentResponse.Body)
-}
-
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
 func (d *Downloader) allTorrentsComplete() (ret bool) {
