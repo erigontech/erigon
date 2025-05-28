@@ -73,7 +73,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	}
 
 	// 3. calculate commitment with all data +removed key
-	expectedHash, err := domains.ComputeCommitment(context.Background(), rwTx, false, domains.txNum/stepSize, "")
+	expectedHash, err := domains.ComputeCommitment(context.Background(), false, domains.txNum/stepSize, "")
 	require.NoError(t, err)
 	domains.Close()
 
@@ -102,7 +102,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, maxTx+1, nil, 0)
 	require.NoError(t, err)
 
-	resultHash, err := domains.ComputeCommitment(context.Background(), rwTx, false, domains.txNum/stepSize, "")
+	resultHash, err := domains.ComputeCommitment(context.Background(), false, domains.txNum/stepSize, "")
 	require.NoError(t, err)
 
 	t.Logf("result hash: %x", resultHash)
@@ -172,7 +172,7 @@ Loop:
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
@@ -306,7 +306,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
 	}
 	{ // delete marker is in DB
-		_, err = domains.ComputeCommitment(ctx, rwTx, true, domains.TxNum()/2, "")
+		_, err = domains.ComputeCommitment(ctx, true, domains.TxNum()/2, "")
 		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)
@@ -358,7 +358,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
 	}
 	{ // flush delete/updates to DB
-		_, err = domains.ComputeCommitment(ctx, rwTx, true, domains.TxNum()/2, "")
+		_, err = domains.ComputeCommitment(ctx, true, domains.TxNum()/2, "")
 		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)
@@ -446,7 +446,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)

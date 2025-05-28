@@ -143,8 +143,8 @@ func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, st
 	return rv, endTx / sd.StepSize(), false, nil
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.Tx, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, logPrefix, sd.txNum)
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix, sd.txNum)
 	return
 }
 

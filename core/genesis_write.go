@@ -522,7 +522,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			return err
 		}
 
-		rh, err := sd.ComputeCommitment(context.Background(), tx, true, 0, "genesis")
+		rh, err := sd.ComputeCommitment(context.Background(), true, 0, "genesis")
 		if err != nil {
 			return err
 		}

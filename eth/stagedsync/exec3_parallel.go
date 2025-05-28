@@ -247,7 +247,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				if pe.doms.BlockNum() != pe.outputBlockNum.GetValueUint64() {
 					panic(fmt.Errorf("%d != %d", pe.doms.BlockNum(), pe.outputBlockNum.GetValueUint64()))
 				}
-				_, err := pe.doms.ComputeCommitment(ctx, tx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
+				_, err := pe.doms.ComputeCommitment(ctx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
 				if err != nil {
 					return err
 				}

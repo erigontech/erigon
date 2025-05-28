@@ -288,7 +288,7 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 	}
 
 	var root common.Hash
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, header.Number.Uint64(), "")
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), true, header.Number.Uint64(), "")
 	if err != nil {
 		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 	}
