@@ -16,6 +16,7 @@ require (
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.4.5
+	github.com/anacrolix/chansync v0.6.0
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/generics v0.0.3-0.20250526144502-593be7092deb
 	github.com/anacrolix/go-libutp v1.3.2
@@ -80,7 +81,6 @@ require (
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20241129212102-9c50ad6b591e // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
-	github.com/pion/udp v0.1.4 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
@@ -96,7 +96,6 @@ require (
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
 	github.com/alecthomas/assert/v2 v2.8.1 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
-	github.com/anacrolix/chansync v0.6.0 // indirect
 	github.com/anacrolix/envpprof v1.3.0 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
@@ -139,29 +138,20 @@ require (
 	github.com/multiformats/go-varint v0.0.6 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/pion/datachannel v1.5.9 // indirect
-	github.com/pion/dtls/v2 v2.2.4 // indirect
 	github.com/pion/dtls/v3 v3.0.3 // indirect
-	github.com/pion/ice/v2 v2.2.6 // indirect
 	github.com/pion/ice/v4 v4.0.2 // indirect
 	github.com/pion/interceptor v0.1.37 // indirect
 	github.com/pion/logging v0.2.2 // indirect
-	github.com/pion/mdns v0.0.5 // indirect
 	github.com/pion/mdns/v2 v2.0.7 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.14 // indirect
 	github.com/pion/rtp v1.8.9 // indirect
 	github.com/pion/sctp v1.8.33 // indirect
 	github.com/pion/sdp/v3 v3.0.9 // indirect
-	github.com/pion/srtp/v2 v2.0.9 // indirect
 	github.com/pion/srtp/v3 v3.0.4 // indirect
-	github.com/pion/stun v0.3.5 // indirect
 	github.com/pion/stun/v3 v3.0.0 // indirect
-	github.com/pion/transport v0.13.1 // indirect
-	github.com/pion/transport/v2 v2.0.0 // indirect
 	github.com/pion/transport/v3 v3.0.7 // indirect
-	github.com/pion/turn/v2 v2.0.8 // indirect
 	github.com/pion/turn/v4 v4.0.0 // indirect
-	github.com/pion/webrtc/v3 v3.1.42 // indirect
 	github.com/pion/webrtc/v4 v4.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
