@@ -184,12 +184,12 @@ var createGasTests = []struct {
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	for i, tt := range createGasTests {
 		address := common.BytesToAddress([]byte("contract"))
-
-		tx, err := db.BeginTemporalRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
 
 		domains, err := state3.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
@@ -224,7 +224,7 @@ func TestCreateGas(t *testing.T) {
 		if gasUsed := startGas - gas; gasUsed != tt.gasUsed {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
-		tx.Rollback()
 		domains.Close()
 	}
+	tx.Rollback()
 }
