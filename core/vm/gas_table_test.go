@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -190,25 +189,19 @@ func TestCreateGas(t *testing.T) {
 	for i, tt := range createGasTests {
 		address := common.BytesToAddress([]byte("contract"))
 
-		tx, err := db.BeginRw(context.Background())
+		tx, err := db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
 		defer tx.Rollback()
-
-		var stateReader state.StateReader
-		var stateWriter state.StateWriter
-		txc := wrap.NewTxContainer(tx, nil)
 
 		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
 		fmt.Printf("init tx %x\n", eface[1])
 
-		domains, err := state3.NewSharedDomains(txc.Ttx, log.New())
+		domains, err := state3.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
-		txc.Doms = domains
 
-		//stateReader = rpchelper.NewLatestStateReader(domains)
-		stateReader = rpchelper.NewLatestStateReader(domains.AsGetter(tx))
-		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
+		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
+		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, nil, 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
