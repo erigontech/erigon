@@ -22,22 +22,16 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/c2h5oh/datasize"
-	"github.com/hashicorp/go-retryablehttp"
-	"github.com/pelletier/go-toml/v2"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 // WebSeeds - allow use HTTP-based infrastructure to support Bittorrent network
@@ -232,87 +226,6 @@ func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, webSeedProviderUR
 	return report, nil
 }
 
-func (d *WebSeeds) Discover(ctx context.Context, files []string, rootDir string) {
-	listsOfFiles := d.constructListsOfFiles(ctx, d.seeds, files)
-	torrentMap := d.makeTorrentUrls(listsOfFiles)
-	webSeedMap := d.downloadTorrentFilesFromProviders(ctx, rootDir, torrentMap)
-	d.makeWebSeedUrls(listsOfFiles, webSeedMap)
-}
-
-func (d *WebSeeds) constructListsOfFiles(
-	ctx context.Context,
-	httpProviders []*url.URL,
-	diskProviders []string,
-) []snaptype.WebSeedsFromProvider {
-	log.Debug("[snapshots.webseed] providers", "http", len(httpProviders), "disk", len(diskProviders))
-	listsOfFiles := make([]snaptype.WebSeedsFromProvider, 0, len(httpProviders)+len(diskProviders))
-
-	for _, webSeedProviderURL := range httpProviders {
-		if ctx.Err() != nil {
-			return listsOfFiles
-		}
-		manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
-		if err != nil { // don't fail on error
-			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
-			continue
-		}
-		listsOfFiles = append(listsOfFiles, manifestResponse)
-	}
-
-	// add to list files from disk
-	for _, webSeedFile := range diskProviders {
-		response, err := d.readWebSeedsFile(webSeedFile)
-		if err != nil { // don't fail on error
-			d.logger.Debug("[snapshots.webseed] get from File provider", "err", err)
-			continue
-		}
-		listsOfFiles = append(listsOfFiles, response)
-	}
-	return listsOfFiles
-}
-
-func (d *WebSeeds) makeTorrentUrls(listsOfFiles []snaptype.WebSeedsFromProvider) map[url.URL]string {
-	torrentMap := map[url.URL]string{}
-	torrentUrls := snaptype.TorrentUrls{}
-	for _, urls := range listsOfFiles {
-		for name, wUrl := range urls {
-			if !strings.HasSuffix(name, ".torrent") {
-				continue
-			}
-			uri, err := url.ParseRequestURI(wUrl)
-			if err != nil {
-				d.logger.Debug("[snapshots] url is invalid", "url", wUrl, "err", err)
-				continue
-			}
-			torrentUrls[name] = append(torrentUrls[name], uri)
-			torrentMap[*uri] = strings.TrimSuffix(name, ".torrent")
-		}
-	}
-
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	d.torrentUrls = torrentUrls
-	return torrentMap
-}
-
-func (d *WebSeeds) makeWebSeedUrls(listsOfFiles []snaptype.WebSeedsFromProvider, webSeedMap map[string]struct{}) {
-	webSeedUrls := snaptype.WebSeedUrls{}
-	for _, urls := range listsOfFiles {
-		for name, wUrl := range urls {
-			if strings.HasSuffix(name, ".torrent") {
-				continue
-			}
-			if _, ok := webSeedMap[name]; ok {
-				webSeedUrls[name] = append(webSeedUrls[name], wUrl)
-			}
-		}
-	}
-
-	d.lock.Lock()
-	d.byFileName = webSeedUrls
-	d.lock.Unlock()
-}
-
 func (d *WebSeeds) TorrentUrls() snaptype.TorrentUrls {
 	d.lock.Lock()
 	defer d.lock.Unlock()
@@ -393,120 +306,4 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 
 	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "manifest-len", len(response), "url", webSeedProviderUrl.String())
 	return response, nil
-}
-
-func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSeedsFromProvider, error) {
-	_, fileName := filepath.Split(webSeedProviderPath)
-	data, err := os.ReadFile(webSeedProviderPath)
-	if err != nil {
-		return nil, fmt.Errorf("webseed.readWebSeedsFile: file=%s, %w", fileName, err)
-	}
-	response := snaptype.WebSeedsFromProvider{}
-	if err := toml.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("webseed.readWebSeedsFile: file=%s, %w", fileName, err)
-	}
-	d.logger.Debug("[snapshots.webseed] get from File provider", "urls", len(response), "file", fileName)
-	return response, nil
-}
-
-// downloadTorrentFilesFromProviders - if they are not exist on file-system
-func (d *WebSeeds) downloadTorrentFilesFromProviders(
-	ctx context.Context,
-	rootDir string,
-	torrentMap map[url.URL]string,
-) map[string]struct{} {
-	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
-	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
-	//  - maybe need download new files if --snap.stop=true
-	webSeedMap := map[string]struct{}{}
-	var webSeedMapLock sync.RWMutex
-	if !d.downloadTorrentFile {
-		return webSeedMap
-	}
-	if len(d.TorrentUrls()) == 0 {
-		return webSeedMap
-	}
-	var addedNew int
-	e, ctx := errgroup.WithContext(ctx)
-	e.SetLimit(1024)
-	urlsByName := d.TorrentUrls()
-
-	for fileName, tUrls := range urlsByName {
-		name := fileName
-		addedNew++
-		whiteListed := strings.HasSuffix(name, ".seg.torrent") ||
-			strings.HasSuffix(name, ".kv.torrent") ||
-			strings.HasSuffix(name, ".v.torrent") ||
-			strings.HasSuffix(name, ".ef.torrent") ||
-			strings.HasSuffix(name, ".idx.torrent") ||
-			strings.HasSuffix(name, ".kvei.torrent") ||
-			strings.HasSuffix(name, ".bt.torrent") ||
-			strings.HasSuffix(name, ".kvi.torrent") ||
-			strings.HasSuffix(name, ".vi.torrent") ||
-			strings.HasSuffix(name, ".txt.torrent") ||
-			strings.HasSuffix(name, ".efi.torrent")
-		if !whiteListed {
-			_, fName := filepath.Split(name)
-			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
-			continue
-		}
-		//Erigon3 doesn't provide history of commitment (.v, .ef files), but does provide .kv:
-		// - prohibit v1.0-commitment...v, v2.0-commitment...ef, etc...
-		// - allow v1.0-commitment...kv
-		e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
-		if e3blackListed {
-			_, fName := filepath.Split(name)
-			d.logger.Debug("[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
-			continue
-		}
-
-		e.Go(func() error {
-			for _, url := range tUrls {
-				//validation happens inside
-				_, err := d.callTorrentHttpProvider(ctx, url)
-				if err != nil {
-					d.logger.Debug("[snapshots] got from webseed", "name", name, "err", err, "url", url)
-					continue
-				}
-				//don't save .torrent here - do it inside downloader.Add
-				webSeedMapLock.Lock()
-				webSeedMap[torrentMap[*url]] = struct{}{}
-				webSeedMapLock.Unlock()
-				return nil
-			}
-			return nil
-		})
-	}
-	if err := e.Wait(); err != nil {
-		d.logger.Debug("[snapshots] webseed discover", "err", err)
-	}
-	return webSeedMap
-}
-
-func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([]byte, error) {
-	if !strings.HasSuffix(url.Path, ".torrent") {
-		return nil, fmt.Errorf("seems not-torrent url passed: %s", url.String())
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	insertCloudflareHeaders(request)
-
-	request = request.WithContext(ctx)
-	resp, err := d.client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("webseed.downloadTorrentFile: url=%s, %w", url.String(), err)
-	}
-	defer resp.Body.Close()
-	//protect against too small and too big data
-	if resp.ContentLength == 0 || resp.ContentLength > int64(128*datasize.MB) {
-		return nil, fmt.Errorf(".torrent downloading size attack prevention: resp.ContentLength=%d, url=%s", resp.ContentLength, url.EscapedPath())
-	}
-	res, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("webseed.downloadTorrentFile: read body: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
-	}
-	return res, nil
 }

@@ -18,7 +18,6 @@ package downloader
 
 import (
 	"bufio"
-	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -46,10 +45,8 @@ import (
 
 	"github.com/anacrolix/missinggo/v2/panicif"
 
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/time/rate"
-
 	g "github.com/anacrolix/generics"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
@@ -85,8 +82,6 @@ type Downloader struct {
 	stopMainLoop context.CancelFunc
 	wg           sync.WaitGroup
 
-	webseeds *WebSeeds
-
 	logger    log.Logger
 	verbosity log.Lvl
 	// Whether to log seeding (for snap downloaders I think).
@@ -94,12 +89,7 @@ type Downloader struct {
 	// Reset the log interval after making new requests.
 	resetLogInterval chansync.BroadcastCond
 
-	torrentFS       *AtomicTorrentFS
-	webDownloadInfo map[string]webDownloadInfo
-	downloading     map[string]*downloadInfo
-	downloadLimit   *rate.Limit
-
-	stuckFileDetailedLogs bool
+	torrentFS *AtomicTorrentFS
 
 	logPrefix         string
 	startTime         time.Time
@@ -345,26 +335,21 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 
 	d := &Downloader{
-		cfg:             cfg,
-		torrentStorage:  m,
-		torrentClient:   torrentClient,
-		stats:           stats,
-		webseeds:        NewWebSeeds(cfg.WebSeedUrls, verbosity, logger),
-		logger:          logger,
-		verbosity:       verbosity,
-		torrentFS:       &AtomicTorrentFS{dir: cfg.Dirs.Snap},
-		webDownloadInfo: map[string]webDownloadInfo{},
-		downloading:     map[string]*downloadInfo{},
-		logPrefix:       "",
+		cfg:            cfg,
+		torrentStorage: m,
+		torrentClient:  torrentClient,
+		stats:          stats,
+		logger:         logger,
+		verbosity:      verbosity,
+		torrentFS:      &AtomicTorrentFS{dir: cfg.Dirs.Snap},
+		logPrefix:      "",
 	}
-	d.webseeds.SetTorrent(d.torrentFS, cfg.DownloadTorrentFilesFromWebseed)
+
+	if len(cfg.WebSeedUrls) == 0 {
+		logger.Warn("downloader has no webseed urls configured")
+	}
 
 	requestHandler.downloader = d
-
-	if cfg.ClientConfig.DownloadRateLimiter != nil {
-		downloadLimit := cfg.ClientConfig.DownloadRateLimiter.Limit()
-		d.downloadLimit = &downloadLimit
-	}
 
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
@@ -733,18 +718,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 		logger.Log(verbosity, "[snapshots] files progress", "files", amount, "list", strings.Join(files, ", "))
 	}
 
-	if d.stuckFileDetailedLogs && time.Since(stats.lastTorrentStatus) > 5*time.Minute {
-		stats.lastTorrentStatus = time.Now()
-
-		if len(noDownloadProgress) > 0 {
-			progressStatus := getProgressStatus(torrentClient, noDownloadProgress)
-			for file, status := range progressStatus {
-				logger.Debug(fmt.Sprintf("[snapshots] torrent status: %s\n    %s", file,
-					string(bytes.TrimRight(bytes.ReplaceAll(status, []byte("\n"), []byte("\n    ")), "\n "))))
-			}
-		}
-	}
-
 	stats.When = time.Now()
 	interval := stats.When.Sub(prevStats.When)
 	stats.DownloadRate = calculateRate(stats.BytesDownload, prevStats.BytesDownload, prevStats.DownloadRate, interval)
@@ -1055,15 +1028,7 @@ func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent
 }
 
 func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
-	return func(yield func(string) bool) {
-		for _, u := range d.cfg.WebSeedUrls {
-			// WebSeed URLs must have a trailing slash if the implementation should append the file
-			// name.
-			if !yield(u.String() + "/") {
-				return
-			}
-		}
-	}
+	return slices.Values(d.cfg.WebSeedUrls)
 }
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
@@ -1076,11 +1041,16 @@ func (d *Downloader) addPreverifiedTorrent(
 	}
 	t, ok := d.torrentClient.Torrent(infoHash)
 	if ok {
-		// Assume the info is already obtained. Pretty sure the node won't try to add torrents until
-		// previous stages are complete and this means the info is known. This can be changed.
-		existingName := t.Info().Name
-		if existingName != name {
-			return fmt.Errorf("torrent with hash %v already exists with name %q", infoHash, existingName)
+		if t.Info() == nil {
+			d.logger.Warn("infohash already added but info not obtained. can't verify unique name", "infohash", infoHash, "name", name)
+		} else {
+			// Assume the info is already obtained. Pretty sure the node won't try to add torrents
+			// until previous stages are complete and this means the info is known. This can be
+			// changed.
+			existingName := t.Info().Name
+			if existingName != name {
+				return fmt.Errorf("torrent with hash %v already exists with name %q", infoHash, existingName)
+			}
 		}
 		return nil
 	} else if d.alreadyHaveThisName(name) {

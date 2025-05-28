@@ -24,7 +24,6 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -336,12 +335,8 @@ func (d *Downloader) addTorrentSpec(
 	if err != nil {
 		return
 	}
-	var urlStrs = slices.Collect(d.webSeedUrlStrs())
-	if len(urlStrs) == 0 {
-		panic(fmt.Sprintf("no webseeds for %q", ts.DisplayName))
-	}
 	t.AddWebSeeds(
-		urlStrs,
+		d.cfg.WebSeedUrls,
 		// TODO: We add a truly massive number of torrents, this is a workaround until goroutine
 		// counts are managed more effectively for them.
 		//torrent.WebSeedTorrentMaxRequests(1),

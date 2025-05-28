@@ -60,8 +60,8 @@ type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
 	DownloadSlots int
 
-	WebSeedUrls                     []*url.URL
-	WebSeedFileProviders            []string
+	// These are WebSeed URLs conforming to the requirements in anacrolix/torrent.
+	WebSeedUrls                     []string
 	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
 	// TODO: Have I rendered this obsolete?
@@ -285,6 +285,10 @@ func New(
 			continue
 		}
 	}
+	log.Info("processed webseed configuration",
+		"webseedHttpProviders", webseedHttpProviders,
+		"webseedFileProviders", webseedFileProviders,
+		"webseedUrlsOrFiles", webseedUrlsOrFiles)
 	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
 	exists, err := dir.FileExist(localCfgFile)
 	if err != nil {
@@ -301,19 +305,23 @@ func New(
 		return nil, err
 	}
 
-	return &Cfg{
+	cfg := Cfg{
 		Dirs:                            dirs,
 		ChainName:                       chainName,
 		ClientConfig:                    torrentConfig,
 		DownloadSlots:                   downloadSlots,
-		WebSeedUrls:                     webseedHttpProviders,
-		WebSeedFileProviders:            webseedFileProviders,
 		DownloadTorrentFilesFromWebseed: true,
 		AddTorrentsFromDisk:             true,
 		SnapshotConfig:                  preverifiedCfg,
 		MdbxWriteMap:                    mdbxWriteMap,
 		VerifyTorrentData:               opts.Verify,
-	}, nil
+	}
+	for _, s := range webseedHttpProviders {
+		// WebSeed URLs must have a trailing slash if the implementation should append the file
+		// name.
+		cfg.WebSeedUrls = append(cfg.WebSeedUrls, s.String()+"/")
+	}
+	return &cfg, nil
 }
 
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
