@@ -132,8 +132,8 @@ integration stage_exec
 ```cgo
 # By parallel executing blocks on existing historical state. Can be 1 or many domains:
 erigon seg rm-state-snapshots --domain=rcache,logtopics,logaddrs,tracesfrom,tracesto
-integration stage_custom_trace --produce=rcache,logindex,traceindex --reset
-integration stage_custom_trace --produce=rcache,logindex,traceindex
+integration stage_custom_trace --domain=rcache,logindex,traceindex --reset
+integration stage_custom_trace --domain=rcache,logindex,traceindex
 ```
 
 ## How to re-gen bor checkpoints
