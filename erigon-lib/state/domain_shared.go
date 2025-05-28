@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -79,6 +78,7 @@ type SharedDomains struct {
 	//muMaps   sync.RWMutex
 	//walLock sync.RWMutex
 
+	isDirty bool //if chandes was made between ComputeCommitment and Flush
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
@@ -489,6 +489,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 		aggTx.d[di].closeValsCursor() //TODO: why?
+		w.Close()
 	}
 	for _, w := range sd.iiWriters {
 		if w == nil {
@@ -496,23 +497,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
-		}
-	}
-	if dbg.PruneOnFlushTimeout != 0 {
-		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
-			return err
-		}
-	}
-
-	for _, w := range sd.domainWriters {
-		if w == nil {
-			continue
-		}
-		w.Close()
-	}
-	for _, w := range sd.iiWriters {
-		if w == nil {
-			continue
 		}
 		w.close()
 	}
