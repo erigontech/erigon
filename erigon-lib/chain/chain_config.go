@@ -198,7 +198,7 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
 		c.ChainID,
 		c.TerminalTotalDifficulty,
 		timestampToTime(c.ShanghaiTime),
@@ -207,6 +207,9 @@ func (c *Config) String() string {
 		timestampToTime(c.OsakaTime),
 		timestampToTime(c.Bpo1Time),
 		timestampToTime(c.Bpo2Time),
+		timestampToTime(c.Bpo3Time),
+		timestampToTime(c.Bpo4Time),
+		timestampToTime(c.Bpo5Time),
 		engine,
 	)
 }

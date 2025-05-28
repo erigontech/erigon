@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -42,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/sentry"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -55,7 +53,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -323,29 +320,23 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	return nil
 }
 
-func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, gasUsed uint64, err error) {
+func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, polygonSync, fin uint64, gasUsed uint64, err error) {
 	if tx != nil {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-			return head, bor, fin, gasUsed, err
+			return head, polygonSync, fin, gasUsed, err
 		}
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-			return head, bor, fin, gasUsed, err
+			return head, polygonSync, fin, gasUsed, err
 		}
-		if bor, err = stages.GetStageProgress(tx, stages.BorHeimdall); err != nil {
-			return head, bor, fin, gasUsed, err
-		}
-		var polygonSync uint64
 		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
-			return head, bor, fin, gasUsed, err
+			return head, polygonSync, fin, gasUsed, err
 		}
 
-		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
-		bor = max(bor, polygonSync)
 		h := rawdb.ReadHeaderByNumber(tx, head)
 		if h != nil {
 			gasUsed = h.GasUsed
 		}
-		return head, bor, fin, gasUsed, nil
+		return head, polygonSync, fin, gasUsed, nil
 	}
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
@@ -354,15 +345,9 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, gasUse
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
 			return err
 		}
-		if bor, err = stages.GetStageProgress(tx, stages.BorHeimdall); err != nil {
-			return err
-		}
-		var polygonSync uint64
 		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
 			return err
 		}
-		bor = max(bor, polygonSync)
-
 		h := rawdb.ReadHeaderByNumber(tx, head)
 		if h != nil {
 			gasUsed = h.GasUsed
@@ -370,9 +355,9 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, gasUse
 		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
 		return nil
 	}); err != nil {
-		return head, bor, fin, gasUsed, err
+		return head, polygonSync, fin, gasUsed, err
 	}
-	return head, bor, fin, gasUsed, nil
+	return head, polygonSync, fin, gasUsed, nil
 }
 
 type Hook struct {
@@ -701,7 +686,6 @@ func NewDefaultStages(ctx context.Context,
 	return stagedsync.DefaultStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, silkworm, cfg.Prune),
 		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications),
-		stagedsync.StageBorHeimdallCfg(db, snapDb, stagedsync.MiningState{}, controlServer.ChainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, controlServer.Hd, controlServer.Penalize, recents, signatures, cfg.WithHeimdallWaypointRecording, nil),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, controlServer.ChainConfig, blockReader, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
@@ -774,87 +758,5 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 		nil, /* pruneOrder */
 		logger,
 		stages.ModeForkValidation,
-	)
-}
-
-func NewPolygonSyncStages(
-	ctx context.Context,
-	logger log.Logger,
-	db kv.TemporalRwDB,
-	config *ethconfig.Config,
-	chainConfig *chain.Config,
-	consensusEngine consensus.Engine,
-	notifications *shards.Notifications,
-	snapDownloader proto_downloader.DownloaderClient,
-	blockReader services.FullBlockReader,
-	blockRetire services.BlockRetire,
-	silkworm *silkworm.Silkworm,
-	forkValidator *engine_helpers.ForkValidator,
-	heimdallClient heimdall.Client,
-	heimdallStore heimdall.Store,
-	bridgeStore bridge.Store,
-	sentry sentryproto.SentryClient,
-	maxPeers int,
-	statusDataProvider *sentry.StatusDataProvider,
-	stopNode func() error,
-	engineAPISwitcher sync.EngineAPISwitcher,
-	minedBlockReg sync.MinedBlockObserverRegistrar,
-	tracer *tracers.Tracer,
-) []*stagedsync.Stage {
-	var tracingHooks *tracing.Hooks
-	if tracer != nil {
-		tracingHooks = tracer.Hooks
-	}
-
-	return stagedsync.PolygonSyncStages(
-		ctx,
-		stagedsync.StageSnapshotsCfg(
-			db,
-			chainConfig,
-			config.Sync,
-			config.Dirs,
-			blockRetire,
-			snapDownloader,
-			blockReader,
-			notifications,
-			config.InternalCL && config.CaplinConfig.ArchiveBlocks,
-			config.CaplinConfig.ArchiveBlobs,
-			config.CaplinConfig.ArchiveStates,
-			silkworm,
-			config.Prune,
-		),
-		stagedsync.NewPolygonSyncStageCfg(
-			config,
-			logger,
-			chainConfig,
-			db,
-			heimdallClient,
-			heimdallStore,
-			bridgeStore,
-			sentry,
-			maxPeers,
-			statusDataProvider,
-			blockReader,
-			stopNode,
-			config.LoopBlockLimit,
-			nil, /* userUnwindTypeOverrides */
-			notifications,
-			engineAPISwitcher,
-			minedBlockReg,
-		),
-		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),
-		stagedsync.StageExecuteBlocksCfg(db, config.Prune, config.BatchSize, chainConfig, consensusEngine, &vm.Config{Tracer: tracingHooks}, notifications, config.StateStream, false, config.Dirs, blockReader, nil, config.Genesis, config.Sync, SilkwormForExecutionStage(silkworm, config)),
-		stagedsync.StageTxLookupCfg(
-			db,
-			config.Prune,
-			config.Dirs.Tmp,
-			chainConfig.Bor,
-			blockReader,
-		),
-		stagedsync.StageFinishCfg(
-			db,
-			config.Dirs.Tmp,
-			forkValidator,
-		),
 	)
 }

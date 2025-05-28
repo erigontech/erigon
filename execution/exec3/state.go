@@ -118,9 +118,9 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	if rw.background {
 		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
 	} else {
-		rw.SetReader(state.NewReaderV3(rs.Domains()))
+		rw.SetReader(state.NewReaderV3(rs.TemporalGetter()))
 	}
-	rw.stateWriter = state.NewWriter(rs.Domains(), accumulator)
+	rw.stateWriter = state.NewWriter(rs.TemporalPutDel(), accumulator, 0)
 }
 
 func (rw *Worker) SetGaspool(gp *core.GasPool) {
@@ -193,7 +193,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		if rw.background {
 			rw.SetReader(state.NewReaderParallelV3(rw.rs.Domains()))
 		} else {
-			rw.SetReader(state.NewReaderV3(rw.rs.Domains()))
+			rw.SetReader(state.NewReaderV3(rw.rs.TemporalGetter()))
 		}
 	}
 	if rw.background && rw.chainTx == nil {

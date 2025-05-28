@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -436,7 +437,12 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	ctx := context.Background()
 	wg, ctx := errgroup.WithContext(ctx)
 	// we may run inside write tx, can't open 2nd write tx in same goroutine
-	wg.Go(func() error {
+	wg.Go(func() (err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("panic: %v, %s", rec, dbg.Stack())
+			}
+		}()
 		// some users creating > 1Gb custome genesis by `erigon init`
 		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
@@ -470,7 +476,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		defer sd.Close()
 
 		//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
-		r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
+		r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 		statedb = state.New(r)
 		statedb.SetTrace(false)
 
@@ -518,7 +524,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			return err
 		}
 
-		rh, err := sd.ComputeCommitment(context.Background(), true, 0, "genesis")
+		rh, err := sd.ComputeCommitment(context.Background(), tx, true, 0, "genesis")
 		if err != nil {
 			return err
 		}

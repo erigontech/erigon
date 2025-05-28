@@ -311,7 +311,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewParallelExecutionState(doms, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
+	rs := state.NewParallelExecutionState(doms, applyTx, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -390,11 +390,6 @@ func ExecV3(ctx context.Context,
 		executor = pe
 	} else {
 		applyWorker.ResetTx(applyTx)
-		temporalTx, ok := applyTx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("applyTx is not a temporal transaction")
-		}
-		doms.SetTx(temporalTx)
 
 		se := &serialExecutor{
 			txExecutor: txExecutor{
@@ -459,13 +454,16 @@ Loop:
 		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
 		// where during initial sync we can expect bogus blocks to be imported.
 		if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
+			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
 			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 			// First compute and commit the progress done so far
-			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
+			if _, err := executor.domains().ComputeCommitment(ctx, applyTx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
 			ts += time.Since(start)
+			aggTx.RestrictSubsetFileDeletions(false)
 			shouldGenerateChangesets = true // now we can generate changesets for the safety net
 		}
 		changeset := &state2.StateChangeSet{}
@@ -681,8 +679,10 @@ Loop:
 		mxExecBlocks.Add(1)
 
 		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
+			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
-			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
+			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, executor.tx(), true, blockNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
@@ -693,6 +693,7 @@ Loop:
 			//}
 
 			ts += time.Since(start)
+			aggTx.RestrictSubsetFileDeletions(false)
 			if shouldGenerateChangesets {
 				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 				if !inMemExec {
@@ -730,7 +731,7 @@ Loop:
 				//	}
 				//}
 
-				aggregatorRo := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+				aggregatorRo := state2.AggTx(executor.tx())
 
 				needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
 					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
@@ -882,7 +883,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 		return false, nil
 	}
 
-	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	aggTx := state2.AggTx(applyTx)
 	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err
@@ -935,7 +936,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}
