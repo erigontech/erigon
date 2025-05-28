@@ -62,6 +62,6 @@ type DummyView struct {
 func (c *DummyView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }
 func (c *DummyView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
 func (c *DummyView) HasStorage(address common.Address) (bool, error) {
-	_, _, hasStorage, err := c.tx.(kv.TemporalTx).HasPrefix(kv.StorageDomain, address[:])
+	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
 }
