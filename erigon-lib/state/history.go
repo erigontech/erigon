@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
@@ -126,14 +125,6 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 		_visibleFiles: []visibleFile{},
 	}
 
-	cfg.iiCfg.integrity = func(fromStep, toStep uint64) bool {
-		exists, err := dir.FileExist(h.vFilePath(fromStep, toStep))
-		if err != nil {
-			panic(err)
-		}
-		return exists
-	}
-
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggStep, logger)
 	if err != nil {
@@ -203,11 +194,6 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 		panic("assert: empty `aggregationStep`")
 	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, h.aggregationStep, h.filenameBase, "v", h.logger) {
-		//startStep, endStep := dirtyFile.startTxNum/h.aggregationStep, dirtyFile.endTxNum/h.aggregationStep
-		//if h.integrity != nil && !h.integrity(startStep, endStep) {
-		//	h.logger.Debug("[agg] skip garbage file", "name", h.filenameBase, "startStep", startStep, "endStep", endStep)
-		//	continue
-		//}
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
 			h.dirtyFiles.Set(dirtyFile)
 		}
