@@ -159,7 +159,8 @@ var Schema = SchemaGen{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
-		Accessors:            AccessorBTree | AccessorExistence,
+		//Accessors:            AccessorBTree | AccessorExistence,
+		Accessors:            AccessorBTree,
 		crossDomainIntegrity: domainIntegrityCheck,
 
 		hist: histCfg{
@@ -180,7 +181,8 @@ var Schema = SchemaGen{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors: AccessorBTree | AccessorExistence,
+		//Accessors: AccessorBTree | AccessorExistence,
+		Accessors: AccessorBTree,
 
 		hist: histCfg{
 			valuesTable:   kv.TblStorageHistoryVals,
@@ -200,7 +202,8 @@ var Schema = SchemaGen{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
-		Accessors:   AccessorBTree | AccessorExistence,
+		//Accessors:   AccessorBTree | AccessorExistence,
+		Accessors:   AccessorBTree,
 		largeValues: true,
 
 		hist: histCfg{
@@ -221,7 +224,8 @@ var Schema = SchemaGen{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors:           AccessorHashMap | AccessorExistence,
+		//Accessors:           AccessorHashMap | AccessorExistence,
+		Accessors:           AccessorHashMap,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
