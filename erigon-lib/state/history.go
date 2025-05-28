@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
@@ -74,7 +73,6 @@ type History struct {
 	_visibleFiles []visibleFile
 }
 
-type rangeDomainIntegrityChecker func(d kv.Domain, dirs datadir.Dirs, fromStep, toStep uint64) bool
 type rangeIntegrityChecker func(fromStep, toStep uint64) bool
 
 type histCfg struct {
