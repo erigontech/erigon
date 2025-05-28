@@ -366,7 +366,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		err = tx.Commit()
 		require.NoError(t, err)
-		tx = nil
 
 		err = agg.BuildFiles(txs)
 		require.NoError(t, err)
