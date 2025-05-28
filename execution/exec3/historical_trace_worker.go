@@ -512,7 +512,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		if err != nil {
 			return err
 		}
-		toTxNum, err := txNumsReader.Min(tx, fromBlock)
+		toTxNum, err := txNumsReader.Min(tx, toBlock)
 		if err != nil {
 			return err
 		}
