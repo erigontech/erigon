@@ -37,7 +37,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg2.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg2.NewCfgOpts{})
+	cfg, err := downloadercfg2.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg2.NewCfgOpts{})
 	require.NoError(err)
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
@@ -95,7 +95,7 @@ func TestVerifyData(t *testing.T) {
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg2.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg2.NewCfgOpts{})
+	cfg, err := downloadercfg2.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg2.NewCfgOpts{})
 	require.NoError(err)
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)

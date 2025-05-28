@@ -138,7 +138,6 @@ func InitMiner(
 		uploadRate,
 		utils.TorrentPortFlag.Value,
 		utils.TorrentConnsPerFileFlag.Value,
-		utils.TorrentDownloadSlotsFlag.Value,
 		[]string{},
 		[]string{},
 		"",

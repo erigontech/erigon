@@ -678,7 +678,9 @@ var (
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name: "torrent.download.rate",
-		// TODO: Set this higher to demonstrate effectiveness.
+		// TODO: Set this higher to demonstrate effectiveness. This should exceed 128 MB (256 might
+		// be good) to demonstrate when webseeding is working optimally. A separate rate limit could
+		// be used for peers.
 		Value: "128mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
@@ -688,11 +690,7 @@ var (
 		Value: "4mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
-	TorrentDownloadSlotsFlag = cli.IntFlag{
-		Name:  "torrent.download.slots",
-		Value: 32,
-		Usage: "Amount of files to download in parallel.",
-	}
+	// TODO: Unused.
 	TorrentStaticPeersFlag = cli.StringFlag{
 		Name:  "torrent.staticpeers",
 		Usage: "Comma separated host:port to connect to",
@@ -2089,7 +2087,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			uploadRate,
 			ctx.Int(TorrentPortFlag.Name),
 			ctx.Int(TorrentConnsPerFileFlag.Name),
-			ctx.Int(TorrentDownloadSlotsFlag.Name),
 			common.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)),
 			webseedsList,
 			chain,

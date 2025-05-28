@@ -243,7 +243,6 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 		uploadRate,
 		config.TorrentPort,
 		config.ConnsPerFile,
-		0,
 		nil,
 		webseedsList,
 		config.Chain,

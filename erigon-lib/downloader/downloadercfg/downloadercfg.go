@@ -57,13 +57,11 @@ const DefaultPieceSize = 2 * 1024 * 1024
 const DefaultNetworkChunkSize = 256 << 10
 
 type Cfg struct {
-	ClientConfig  *torrent.ClientConfig
-	DownloadSlots int
+	ClientConfig *torrent.ClientConfig
 
 	// These are WebSeed URLs conforming to the requirements in anacrolix/torrent.
-	WebSeedUrls                     []string
-	SnapshotConfig                  *snapcfg.Cfg
-	DownloadTorrentFilesFromWebseed bool
+	WebSeedUrls    []string
+	SnapshotConfig *snapcfg.Cfg
 	// TODO: Have I rendered this obsolete?
 	AddTorrentsFromDisk bool
 
@@ -119,7 +117,7 @@ func New(
 	version string,
 	verbosity log.Lvl,
 	downloadRate, uploadRate datasize.ByteSize,
-	port, connsPerFile, downloadSlots int,
+	port, connsPerFile int,
 	staticPeers, webseeds []string,
 	chainName string,
 	mdbxWriteMap bool,
@@ -306,15 +304,13 @@ func New(
 	}
 
 	cfg := Cfg{
-		Dirs:                            dirs,
-		ChainName:                       chainName,
-		ClientConfig:                    torrentConfig,
-		DownloadSlots:                   downloadSlots,
-		DownloadTorrentFilesFromWebseed: true,
-		AddTorrentsFromDisk:             true,
-		SnapshotConfig:                  preverifiedCfg,
-		MdbxWriteMap:                    mdbxWriteMap,
-		VerifyTorrentData:               opts.Verify,
+		Dirs:                dirs,
+		ChainName:           chainName,
+		ClientConfig:        torrentConfig,
+		AddTorrentsFromDisk: true,
+		SnapshotConfig:      preverifiedCfg,
+		MdbxWriteMap:        mdbxWriteMap,
+		VerifyTorrentData:   opts.Verify,
 	}
 	for _, s := range webseedHttpProviders {
 		// WebSeed URLs must have a trailing slash if the implementation should append the file
