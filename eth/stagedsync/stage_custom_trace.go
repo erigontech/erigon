@@ -138,8 +138,20 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	//defer tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).MadvNormal().DisableReadAhead()
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
-	batchSize := uint64(25_000)
+	batchSize := uint64(50_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
+		_nextBlock := startBlock + batchSize
+		fromStep, toStep, err := exec3.BlkRangeToStepsOnDB(cfg.db, startBlock, _nextBlock, txNumsReader)
+		if err != nil {
+			return err
+		}
+		if toStep-fromStep > 1 { // reduce big jump
+			_nextBlock -= batchSize / 2
+		}
+		if toStep-fromStep < 1 { // increase small jump
+			_nextBlock += batchSize * 3
+		}
+
 		to := min(endBlock+1, startBlock+batchSize)
 		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", logger); err != nil {
 			return err
