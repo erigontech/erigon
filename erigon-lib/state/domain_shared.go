@@ -464,7 +464,7 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
-func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+func (sd *SharedDomains) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
@@ -472,15 +472,10 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+	return nil
+}
+func (sd *SharedDomains) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
-
-	defer mxFlushTook.ObserveDuration(time.Now())
-	_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
-	if err != nil {
-		return err
-	}
-
 	for di, w := range sd.domainWriters {
 		if w == nil {
 			continue
@@ -499,6 +494,35 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 		w.close()
+	}
+	return nil
+}
+
+func (sd *SharedDomains) FlushWithoutCommitment(ctx context.Context, tx kv.RwTx) error {
+	defer mxFlushTook.ObserveDuration(time.Now())
+	if err := sd.flushDiffSet(ctx, tx); err != nil {
+		return err
+	}
+	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+	if err := sd.flushWriters(ctx, tx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+	defer mxFlushTook.ObserveDuration(time.Now())
+	if err := sd.flushDiffSet(ctx, tx); err != nil {
+		return err
+	}
+	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+	_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
+	if err != nil {
+		return err
+	}
+
+	if err := sd.flushWriters(ctx, tx); err != nil {
+		return err
 	}
 	return nil
 }
