@@ -146,7 +146,10 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		if err != nil {
 			return err
 		}
-		if toStep-fromStep < 1 {
+		if toStep-fromStep > 1 { // reduce big jump
+			_nextBlock -= batchSize / 2
+		}
+		if toStep-fromStep < 1 { // increase small jump
 			_nextBlock += batchSize * 3
 		}
 
