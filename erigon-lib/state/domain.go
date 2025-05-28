@@ -1353,6 +1353,12 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
 
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("buildHashMapAccessor: %s, %s, %s", rs.FileName(), rec, dbg.Stack())
+		}
+	}()
+
 	var keyPos, valPos uint64
 	for {
 		word := make([]byte, 0, 256)

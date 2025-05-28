@@ -567,7 +567,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 				return err
 			}
 			txCtx = core.NewEVMTxContext(msg)
-			ibs := evm.IntraBlockState().(*state.IntraBlockState)
+			ibs := evm.IntraBlockState()
 			ibs.SetTxContext(txnIndex)
 			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, block.Hash(), txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {

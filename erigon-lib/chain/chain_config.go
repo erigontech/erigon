@@ -137,6 +137,31 @@ var (
 		LondonBlock:           big.NewInt(0),
 		Aura:                  &AuRaConfig{},
 	}
+
+	// AllProtocolChanges contains every protocol change (EIPs) introduced
+	// and accepted by the Ethereum core developers into the main net protocol.
+	AllProtocolChanges = &Config{
+		ChainID:                       big.NewInt(1337),
+		Consensus:                     EtHashConsensus,
+		HomesteadBlock:                big.NewInt(0),
+		TangerineWhistleBlock:         big.NewInt(0),
+		SpuriousDragonBlock:           big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  big.NewInt(0),
+		CancunTime:                    big.NewInt(0),
+		PragueTime:                    big.NewInt(0),
+		Ethash:                        new(EthashConfig),
+	}
 )
 
 type BorConfig interface {

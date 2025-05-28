@@ -541,7 +541,7 @@ type (
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
-	HasPrefix(name Domain, prefix []byte) (firstKey []byte, ok bool, err error)
+	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 }
 type TemporalTx interface {
 	Tx
@@ -620,7 +620,7 @@ type TemporalPutDel interface {
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
-	DomainPut(domain Domain, k, v []byte, prevVal []byte, prevStep uint64) error
+	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error
 	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
@@ -628,8 +628,8 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k, prevVal []byte, prevStep uint64) error
-	DomainDelPrefix(domain Domain, prefix []byte) error
+	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error
+	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
 type TemporalRoDB interface {

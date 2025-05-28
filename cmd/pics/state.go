@@ -29,6 +29,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -41,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -280,7 +280,7 @@ func initialState1() error {
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		theAddr  = common.Address{1}
 		gspec    = &types.Genesis{
-			Config: params.AllProtocolChanges,
+			Config: chain.AllProtocolChanges,
 			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -289,7 +289,7 @@ func initialState1() error {
 			GasLimit: 10000000,
 		}
 		// this code generates a log
-		signer = types.MakeSigner(params.AllProtocolChanges, 1, 0)
+		signer = types.MakeSigner(chain.AllProtocolChanges, 1, 0)
 	)
 	m := mock.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()

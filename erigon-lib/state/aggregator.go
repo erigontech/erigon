@@ -40,7 +40,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -439,7 +439,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
 				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
-				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			}
 		}
 	}()
@@ -609,6 +609,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
 		if ii.disable {
+			log.Warn("[dbg] here1?", "n", ii.name)
 			continue
 		}
 
@@ -617,6 +618,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
 		dc.Close()
 		if step < firstStepNotInFiles {
+			log.Warn("[dbg] here2?", "n", ii.name, "step", step, "firstStepNotInFiles", firstStepNotInFiles)
 			continue
 		}
 
@@ -693,7 +695,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 		}
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(ctx, step); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					panic(err)
 				}
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
@@ -1495,7 +1497,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(a.ctx, step); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					close(fin)
 					return
 				}
@@ -1508,7 +1510,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer close(fin)
 
 			if err := a.MergeLoop(a.ctx); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					return
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)

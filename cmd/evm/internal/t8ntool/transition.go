@@ -202,7 +202,7 @@ func Main(ctx *cli.Context) error {
 	var chainConfig *chain.Config
 	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
 		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
-	} else { //nolint:golint
+	} else {
 		chainConfig = cConf
 		vmConfig.ExtraEips = extraEips
 	}
@@ -667,7 +667,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
 		}
 	}
 	c.Close()
-	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}

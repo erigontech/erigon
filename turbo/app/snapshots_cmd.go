@@ -40,6 +40,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-db/rawdb/blockio"
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -65,7 +66,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
@@ -532,20 +532,12 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	var removed uint64
-	var cleanedSize datasize.ByteSize
 	for _, res := range toRemove {
-		s, err := os.Stat(res.Path)
-		if err != nil {
-			return fmt.Errorf("failed to stat %s: %w", res.Path, err)
-		}
-		cleanedSize += datasize.ByteSize(s.Size())
-
-		if err := os.Remove(res.Path); err != nil {
-			return fmt.Errorf("failed to remove %s: %w", res.Path, err)
-		}
+		os.Remove(res.Path)
+		os.Remove(res.Path + ".torrent")
 		removed++
 	}
-	fmt.Printf("removed %d (%v) state snapshot segments files\n", removed, cleanedSize.HumanReadable())
+	fmt.Printf("removed %d state snapshot segments files\n", removed)
 
 	return nil
 }
@@ -1065,7 +1057,9 @@ func doClearIndexing(cliCtx *cli.Context) error {
 
 	// remove salt-state.txt and salt-blocks.txt
 	os.Remove(filepath.Join(snapDir, "salt-state.txt"))
+	os.Remove(filepath.Join(snapDir, "salt-state.txt.torrent"))
 	os.Remove(filepath.Join(snapDir, "salt-blocks.txt"))
+	os.Remove(filepath.Join(snapDir, "salt-blocks.txt.torrent"))
 
 	return nil
 }
@@ -1700,13 +1694,14 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer br.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 
-	blockSnapBuildSema := semaphore.NewWeighted(max(int64(runtime.NumCPU()), int64(dbg.BuildSnapshotAllowance)))
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
 	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
-	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
+	agg.SetMergeWorkers(2)
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PeriodicalyPrintProcessSet(ctx)
 
 	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil); err != nil {
 		return err
