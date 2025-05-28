@@ -351,7 +351,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, "")
+			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "")
 			require.NoError(t, err)
 		}
 
@@ -447,7 +447,9 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	// each key changes value on every txNum which is multiple of the key
 	var maxWrite uint64
 	addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
-	for txNum := uint64(1); txNum <= txs; txNum++ {
+	var txNum uint64
+	for i := uint64(1); i <= txs; i++ {
+		txNum = i
 		domains.SetTxNum(txNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
@@ -476,7 +478,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
-	_, err = domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+	_, err = domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 	require.NoError(t, err)
 
 	err = domains.Flush(context.Background(), tx)
@@ -757,7 +759,7 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, tx kv.Tx
 		}
 		if txNum%commitEvery == 0 {
 			// domains.SetTrace(true)
-			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, "")
+			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, txNum, "")
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			t.Logf("commitment %x txn=%d", rh, txNum)
 		}
@@ -1313,7 +1315,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
-		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
@@ -1360,7 +1362,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
@@ -1408,7 +1410,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)

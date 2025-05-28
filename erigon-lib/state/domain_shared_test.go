@@ -63,17 +63,19 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 
 	// 2. remove just one key and compute commitment
+	var txNum uint64
 	removedKey := []byte{}
 	for key := range data {
 		removedKey = []byte(key)[:length.Addr]
-		domains.SetTxNum(maxTx + 1)
+		txNum = maxTx + 1
+		domains.SetTxNum(txNum)
 		err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, maxTx+1, nil, 0)
 		require.NoError(t, err)
 		break
 	}
 
 	// 3. calculate commitment with all data +removed key
-	expectedHash, err := domains.ComputeCommitment(context.Background(), false, domains.txNum/stepSize, "")
+	expectedHash, err := domains.ComputeCommitment(context.Background(), false, txNum/stepSize, txNum, "")
 	require.NoError(t, err)
 	domains.Close()
 
@@ -98,11 +100,12 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	defer domains.Close()
 
 	// 5. delete same key. commitment should be the same
-	domains.SetTxNum(maxTx + 1)
+	txNum = maxTx + 1
+	domains.SetTxNum(txNum)
 	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, maxTx+1, nil, 0)
 	require.NoError(t, err)
 
-	resultHash, err := domains.ComputeCommitment(context.Background(), false, domains.txNum/stepSize, "")
+	resultHash, err := domains.ComputeCommitment(context.Background(), false, txNum/stepSize, txNum, "")
 	require.NoError(t, err)
 
 	t.Logf("result hash: %x", resultHash)
@@ -154,10 +157,11 @@ Loop:
 	commitStep := 3
 
 	for ; i < int(maxTx); i++ {
-		domains.SetTxNum(uint64(i))
+		txNum := uint64(i)
+		domains.SetTxNum(txNum)
 		for accs := 0; accs < 256; accs++ {
 			acc := accounts3.Account{
-				Nonce:       uint64(i),
+				Nonce:       txNum,
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
 				CodeHash:    common.Hash{},
 				Incarnation: 0,
@@ -172,7 +176,7 @@ Loop:
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
@@ -279,6 +283,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
 	}
+	var txNum uint64
 	{ // delete marker is in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
@@ -287,6 +292,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
 
+		txNum = stepSize
 		domains.SetTxNum(stepSize)
 		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(1)...), stepSize, nil, 0); err != nil {
 			panic(err)
@@ -295,7 +301,8 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 			panic(err)
 		}
 		for i := stepSize; i < stepSize*2+2; i++ {
-			domains.SetTxNum(i)
+			txNum = i
+			domains.SetTxNum(txNum)
 			if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), i, nil, 0); err != nil {
 				panic(err)
 			}
@@ -306,7 +313,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
 	}
 	{ // delete marker is in DB
-		_, err = domains.ComputeCommitment(ctx, true, domains.TxNum()/2, "")
+		_, err = domains.ComputeCommitment(ctx, true, txNum/2, txNum, "")
 		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)
@@ -347,7 +354,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		defer domains.Close()
 
-		txNum := stepSize*2 + 1
+		txNum = stepSize*2 + 1
 		domains.SetTxNum(txNum)
 		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(4)...), txNum, nil, 0); err != nil {
 			panic(err)
@@ -358,7 +365,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
 	}
 	{ // flush delete/updates to DB
-		_, err = domains.ComputeCommitment(ctx, true, domains.TxNum()/2, "")
+		_, err = domains.ComputeCommitment(ctx, true, txNum/2, txNum, "")
 		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)
@@ -417,7 +424,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		domains.SetTxNum(uint64(i))
+		domains.SetTxNum(txNum)
 		for accs := 0; accs < accounts; accs++ {
 			acc := accounts3.Account{
 				Nonce:       uint64(i),
@@ -446,7 +453,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)

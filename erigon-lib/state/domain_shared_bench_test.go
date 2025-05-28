@@ -51,8 +51,9 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 		rnd.Read(keys[i])
 	}
 
+	var txNum uint64
 	for i := uint64(0); i < maxTx; i++ {
-		txNum := i
+		txNum = i
 		domains.SetTxNum(txNum)
 		v := make([]byte, 8)
 		binary.BigEndian.PutUint64(v, i)
@@ -62,7 +63,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 		}
 
 		if i%stepSize == 0 {
-			_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 			require.NoError(t, err)
 			err = domains.Flush(ctx, rwTx)
 			require.NoError(t, err)
@@ -72,7 +73,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			}
 		}
 	}
-	_, err = domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+	_, err = domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
@@ -129,6 +130,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	data := generateTestDataForDomainCommitment(b, length.Addr, length.Addr+length.Hash, maxTx, 15, 100)
 	require.NotNil(b, data)
 
+	var txNum uint64
 	for domName, d := range data {
 		fom := kv.AccountsDomain
 		if domName == "storage" {
@@ -136,8 +138,9 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 		}
 		for key, upd := range d {
 			for _, u := range upd {
-				domains.SetTxNum(u.txNum)
-				err := domains.DomainPut(fom, rwTx, []byte(key), u.value, u.txNum, nil, 0)
+				txNum = u.txNum
+				domains.SetTxNum(txNum)
+				err := domains.DomainPut(fom, rwTx, []byte(key), u.value, txNum, nil, 0)
 				require.NoError(b, err)
 			}
 		}
@@ -145,7 +148,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+		_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 		require.NoError(b, err)
 	}
 }
