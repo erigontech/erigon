@@ -476,7 +476,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
 
 	defer mxFlushTook.ObserveDuration(time.Now())
-	_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), "flush-commitment")
+	_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
 	if err != nil {
 		return err
 	}
