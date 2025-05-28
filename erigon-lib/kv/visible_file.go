@@ -1,7 +1,7 @@
 package kv
 
 type VisibleFile interface {
-	Filename() string
+	Filename() string //filepath
 	StartRootNum() uint64
 	EndRootNum() uint64
 }
@@ -9,6 +9,7 @@ type VisibleFile interface {
 type VisibleFiles []VisibleFile
 
 func (v VisibleFiles) Names() []string {
+	// filepaths
 	names := make([]string, 0, len(v))
 	for _, f := range v {
 		names = append(names, f.Filename())
