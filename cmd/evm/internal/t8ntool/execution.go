@@ -81,8 +81,11 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.StateWriter) {
+	var blockNr uint64 = 0
+
+	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
+	sd.SetBlockNum(blockNr)
 
 	statedb := state.New(stateReader) //ibs
 	for addr, a := range accounts {
@@ -104,6 +107,8 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *state3.Shared
 			tx.Put(kv.IncarnationMap, addr[:], b[:])
 		}
 	}
+	// Commit and re-open to start with a clean state.
+	sd.SetBlockNum(blockNr + 1)
 	if err := statedb.FinalizeTx(chainRules, stateWriter); err != nil {
 		panic(err)
 	}
