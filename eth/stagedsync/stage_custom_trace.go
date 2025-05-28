@@ -149,7 +149,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 			_nextBlock -= batchSize / 2
 		}
 		if toStep-fromStep < 1 { // increase small jump
-			_nextBlock += batchSize * 3
+			_nextBlock += batchSize
 		}
 
 		to := min(endBlock+1, startBlock+batchSize)
