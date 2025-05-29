@@ -188,6 +188,7 @@ var purifyDomains = &cobra.Command{
 			logger.Error("Error creating temporary directory", "error", err)
 			return
 		}
+		defer os.RemoveAll(tmpDir)
 		// make a temporary DB to store the keys
 
 		purifyDB := mdbx.MustOpen(tmpDir)
