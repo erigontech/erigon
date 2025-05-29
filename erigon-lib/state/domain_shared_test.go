@@ -196,7 +196,7 @@ Loop:
 	for idx, d := range stateChangeset.Diffs {
 		a[idx] = d.GetDiffSet()
 	}
-	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &a)
+	err = rwTx.Unwind(ctx, unwindTo, &a)
 	require.NoError(t, err)
 
 	err = rwTx.Commit()
