@@ -277,7 +277,7 @@ func ValidateHeaderTime(
 		// early block announcements. Note that this is a loose check and would allow early blocks
 		// from non-primary producer. Such blocks will be rejected later when we know the succession
 		// number of the signer in the current sprint.
-		if header.Time-config.CalculatePeriod(header.Number.Uint64()) > uint64(now.Unix()) {
+		if header.Time > uint64(now.Unix())+config.CalculatePeriod(header.Number.Uint64()) {
 			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
 		}
 	} else {
@@ -526,7 +526,7 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		// early block announcements. Note that this is a loose check and would allow early blocks
 		// from non-primary producer. Such blocks will be rejected later when we know the succession
 		// number of the signer in the current sprint.
-		if header.Time-c.config.CalculatePeriod(number) > uint64(now) {
+		if header.Time > uint64(now)+c.config.CalculatePeriod(number) {
 			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
 		}
 	} else {
@@ -1060,7 +1060,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 		// need a check for hard fork as it doesn't change any consensus rules, we
 		// still keep it for safety and testing.
 		if c.config.IsBhilai(number) && succession == 0 {
-			startTime := time.Unix(int64(header.Time-c.config.CalculatePeriod(number)), 0)
+			startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
 			time.Sleep(time.Until(startTime))
 		}
 	}
@@ -1258,7 +1258,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.B
 	if c.config.IsBhilai(header.Number.Uint64()) && successionNumber == 0 {
 		// For primary producers, set the delay to `header.Time - block time` instead of `header.Time`
 		// for early block announcement instead of waiting for full block time.
-		delay = time.Until(time.Unix(int64(header.Time-c.config.CalculatePeriod(number)), 0))
+		delay = time.Until(time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0))
 	} else {
 		delay = time.Until(time.Unix(int64(header.Time), 0)) // Wait until we reach header time
 	}
