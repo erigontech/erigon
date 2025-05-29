@@ -634,6 +634,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 
 	tx, err = db.BeginRw(ctx)
 	require.NoError(err)
+	defer tx.Rollback()
 
 	_, _, _, err = dc.GetLatest([]byte("key1"), tx)
 	require.NoError(err)
@@ -645,6 +646,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 
 	otherTx, err := db.BeginRw(ctx)
 	require.NoError(err)
+	defer otherTx.Rollback()
 	//dc.valsC.Close()
 	//dc.valsC = nil
 
