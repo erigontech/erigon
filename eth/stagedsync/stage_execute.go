@@ -231,17 +231,12 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	return nil
 }
 
-var (
-	mxState3UnwindRunning = metrics.GetOrCreateGauge("state3_unwind_running")
-	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
-)
+var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 
 func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *libstate.SharedDomains,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
-	mxState3UnwindRunning.Inc()
-	defer mxState3UnwindRunning.Dec()
 	st := time.Now()
 	defer mxState3Unwind.ObserveDuration(st)
 	var currentInc uint64
@@ -302,9 +297,6 @@ func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *libstate.Shar
 		return err
 	}
 
-	//sd.logger.Info("aggregator unwind", "txUnwindTo", txUnwindTo)
-	//sf := time.Now()
-	//defer mxUnwindSharedTook.ObserveDuration(sf)
 	if err := sd.Flush(ctx, tx); err != nil {
 		return err
 	}
