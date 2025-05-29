@@ -76,13 +76,13 @@ type Config struct {
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
 	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
+	Bpo1Time              *big.Int                      `json:"bpo1Time,omitempty"`
+	Bpo2Time              *big.Int                      `json:"bpo2Time,omitempty"`
+	Bpo3Time              *big.Int                      `json:"bpo3Time,omitempty"`
+	Bpo4Time              *big.Int                      `json:"bpo4Time,omitempty"`
+	Bpo5Time              *big.Int                      `json:"bpo5Time,omitempty"`
 	parseBlobScheduleOnce sync.Once                     `copier:"-"`
 	parsedBlobSchedule    map[uint64]*params.BlobConfig
-	Bpo1Time              *big.Int `json:"bpo1Time,omitempty"`
-	Bpo2Time              *big.Int `json:"bpo2Time,omitempty"`
-	Bpo3Time              *big.Int `json:"bpo3Time,omitempty"`
-	Bpo4Time              *big.Int `json:"bpo4Time,omitempty"`
-	Bpo5Time              *big.Int `json:"bpo5Time,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
