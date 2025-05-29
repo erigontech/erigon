@@ -29,7 +29,7 @@ import (
 	"unicode"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	jsonstream "github.com/erigontech/erigon-lib/json"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 

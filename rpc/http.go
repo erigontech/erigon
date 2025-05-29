@@ -38,7 +38,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 
 	"github.com/erigontech/erigon-lib/common"
-	jsonstream "github.com/erigontech/erigon-lib/json"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/dbg"

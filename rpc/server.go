@@ -28,7 +28,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 
-	jsonstream "github.com/erigontech/erigon-lib/json"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
