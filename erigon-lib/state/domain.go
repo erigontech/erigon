@@ -705,7 +705,7 @@ type DomainRoTx struct {
 
 	dataReaders []*seg.Reader
 	btReaders   []*BtIndex
-	idxReaders  []*recsplit.IndexReader
+	mapReaders  []*recsplit.IndexReader
 
 	comBuf []byte
 
@@ -1657,27 +1657,23 @@ func (dt *DomainRoTx) dataReader(i int) *seg.Reader {
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
-	if dt.idxReaders == nil {
-		dt.idxReaders = make([]*recsplit.IndexReader, len(dt.files))
+	if dt.mapReaders == nil {
+		dt.mapReaders = make([]*recsplit.IndexReader, len(dt.files))
 	}
-	r := dt.idxReaders[i]
-	if r == nil {
-		r = dt.files[i].src.index.GetReaderFromPool()
-		dt.idxReaders[i] = r
+	if dt.mapReaders[i] == nil {
+		dt.mapReaders[i] = dt.files[i].src.index.GetReaderFromPool()
 	}
-	return r
+	return dt.mapReaders[i]
 }
 
 func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 	if dt.btReaders == nil {
 		dt.btReaders = make([]*BtIndex, len(dt.files))
 	}
-	r := dt.btReaders[i]
-	if r == nil {
-		r = dt.files[i].src.bindex
-		dt.btReaders[i] = r
+	if dt.btReaders[i] == nil {
+		dt.btReaders[i] = dt.files[i].src.bindex
 	}
-	return r
+	return dt.btReaders[i]
 }
 
 var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
