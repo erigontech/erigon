@@ -515,10 +515,10 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
-	_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
-	if err != nil {
-		return err
-	}
+	//_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
+	//if err != nil {
+	//	return err
+	//}
 
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
