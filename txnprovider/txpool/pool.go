@@ -777,8 +777,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 	best := p.pending.best
 
-	isShanghai := p.isShanghai() || p.isAgra()
-	isPrague := p.isPrague() || p.isBhilai()
+	isEIP3860 := p.isShanghai() || p.isAgra()
+	isEIP7623 := p.isPrague() || p.isBhilai()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -833,8 +833,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// this stage
 		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
-		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague, isAATxn)
-		if isPrague && floorGas > intrinsicGas {
+		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isEIP3860, isEIP7623, isAATxn)
+		if isEIP7623 && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
 		}
 		if intrinsicGas > availableGas {
@@ -945,8 +945,9 @@ func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
-	isShanghai := p.isShanghai() || p.isAgra()
-	if isShanghai && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
+	isEIP3860 := p.isShanghai() || p.isAgra()
+	isPrague := p.isPrague() || p.isBhilai()
+	if isEIP3860 && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
 		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
 	if txn.Type == BlobTxnType {
@@ -1014,7 +1015,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 
 	authorizationLen := len(txn.AuthAndNonces)
 	if txn.Type == SetCodeTxnType {
-		if !p.isPrague() {
+		if !isPrague {
 			return txpoolcfg.TypeNotActivated
 		}
 		if txn.Creation {
@@ -1034,15 +1035,15 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	isAATxn := txn.Type == types.AccountAbstractionTxType
-	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isShanghai, p.isPrague(), isAATxn)
-	if p.isPrague() && floorGas > gas {
+	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isEIP3860, isPrague, isAATxn)
+	if isPrague && floorGas > gas {
 		gas = floorGas
 	}
 
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
-	if overflow != false {
+	if overflow {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed due to overflow idHash=%x", txn.IDHash))
 		}
