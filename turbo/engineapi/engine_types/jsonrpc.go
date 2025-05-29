@@ -87,6 +87,12 @@ type BlobAndProofV1 struct {
 	Proof hexutil.Bytes `json:"proof" gencodec:"required"`
 }
 
+// BlobAndProofV2 holds one item for engine_getBlobsV1
+type BlobAndProofV2 struct {
+	Blob       hexutil.Bytes   `json:"blob" gencodec:"required"`
+	CellProofs []hexutil.Bytes `json:"proofs" gencodec:"required"`
+}
+
 type ExecutionPayloadBody struct {
 	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
