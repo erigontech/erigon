@@ -735,7 +735,7 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 	return m.db.(kv.TemporalTx).GetAsOf(name, k, ts)
 }
 
-func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return m.db.(kv.TemporalTx).HasPrefix(name, prefix)
 }
 

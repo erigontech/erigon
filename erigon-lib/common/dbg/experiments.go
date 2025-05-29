@@ -56,9 +56,6 @@ var (
 	// allows to collect reading metrics for kv by file level
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
-	// run prune on flush with given timeout. If timeout is 0, no prune on flush will be performed
-	PruneOnFlushTimeout = EnvDuration("PRUNE_ON_FLUSH_TIMEOUT", time.Duration(0))
-
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously

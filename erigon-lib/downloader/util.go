@@ -400,7 +400,7 @@ func torrentInfoUpdater(fileName string, infoHash []byte, length int64, completi
 
 		changed := false
 
-		if err != nil || (len(infoHash) > 0 && !bytes.Equal(info.Hash, infoHash)) {
+		if err != nil || (len(infoHash) > 0 && !bytes.Equal(info.Hash, infoHash)) { //nolint
 			now := time.Now()
 			info.Name = fileName
 			info.Hash = infoHash
