@@ -708,7 +708,8 @@ type DomainRoTx struct {
 
 	comBuf []byte
 
-	valsCs map[kv.Tx]kv.Cursor
+	valsC      kv.Cursor
+	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
 
 	getFromFileCache *DomainGetFromFileCache
 }
@@ -1638,16 +1639,6 @@ func (dt *DomainRoTx) Close() {
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
-// statelessFileIndex figures out ordinal of file within required range
-func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int { //nolint:unused
-	for fi, f := range dt.files {
-		if f.startTxNum == txFrom && f.endTxNum == txTo {
-			return fi
-		}
-	}
-	return -1
-}
-
 func (dt *DomainRoTx) reader(i int) *seg.Reader {
 	// readers are not stateless - getters contain the current data pointer
 	return seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.Compression)
@@ -1677,41 +1668,52 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 	return r
 }
 
+var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
+
 func (dt *DomainRoTx) closeValsCursor() {
-	for _, c := range dt.valsCs {
-		c.Close()
+	if dt.valsC != nil {
+		dt.valsC.Close()
+		dt.valCViewID = 0
+		dt.valsC = nil
+		// dt.vcParentPtr.Store(0)
 	}
-	dt.valsCs = nil
+}
+
+type canCheckClosed interface {
+	IsClosed() bool
 }
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	c = dt.valsCs[tx]
-
-	if c != nil {
-		return c, nil
-	}
-
-	if dt.valsCs == nil {
-		dt.valsCs = map[kv.Tx]kv.Cursor{}
-	} else {
-		if c = dt.valsCs[tx]; c != nil {
-			return c, nil
+	if dt.valsC != nil { // run in assert mode only
+		if asserts {
+			if tx.ViewID() != dt.valCViewID {
+				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", sdTxImmutabilityInvariant, dt.d.filenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
+			}
+			if mc, ok := dt.valsC.(canCheckClosed); !ok && mc.IsClosed() {
+				panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
+			}
+			// if dt.d.largeValues {
+			// 	if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && mc.IsClosed() {
+			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
+			// 	}
+			// } else {
+			// 	if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && mc.IsClosed() {
+			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than DupCursor (=> than tx opened that cursor)", dt.d.filenameBase))
+			// 	}
+			// }
 		}
+		return dt.valsC, nil
 	}
 
+	if asserts {
+		dt.valCViewID = tx.ViewID()
+	}
 	if dt.d.largeValues {
-		c, err = tx.Cursor(dt.d.valuesTable) //nolint:gocritic
-		if err == nil {
-			dt.valsCs[tx] = c
-		}
-		return c, err
-
+		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
+		return dt.valsC, err
 	}
-	c, err = tx.CursorDupSort(dt.d.valuesTable) //nolint:gocritic
-	if err == nil {
-		dt.valsCs[tx] = c
-	}
-	return c, err
+	dt.valsC, err = tx.CursorDupSort(dt.d.valuesTable)
+	return dt.valsC, err
 }
 
 func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
