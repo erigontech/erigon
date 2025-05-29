@@ -1497,17 +1497,13 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 
 	hi, _ := dt.ht.iit.hashKey(k)
 
-	dt.readerMutex.RLock()
 	getFromFileCache := dt.getFromFileCache
-	dt.readerMutex.RUnlock()
 
 	if useCache && getFromFileCache == nil {
-		dt.readerMutex.Lock()
 		if dt.getFromFileCache == nil {
 			dt.getFromFileCache = dt.visible.newGetFromFileCache()
 		}
 		getFromFileCache = dt.getFromFileCache
-		dt.readerMutex.Unlock()
 	}
 	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
 		if cv, ok := getFromFileCache.Get(hi); ok {
@@ -1638,8 +1634,6 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.ht.Close()
 
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
@@ -1680,9 +1674,6 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 }
 
 func (dt *DomainRoTx) closeValsCursor() {
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
-
 	for _, c := range dt.valsCs {
 		c.Close()
 	}
@@ -1690,16 +1681,11 @@ func (dt *DomainRoTx) closeValsCursor() {
 }
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	dt.readerMutex.RLock()
 	c = dt.valsCs[tx]
-	dt.readerMutex.RUnlock()
 
 	if c != nil {
 		return c, nil
 	}
-
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
 
 	if dt.valsCs == nil {
 		dt.valsCs = map[kv.Tx]kv.Cursor{}
@@ -1734,6 +1720,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	if err != nil {
 		return nil, 0, false, err
 	}
+
+	var v []byte
+	var foundStep uint64
 
 	if dt.d.largeValues {
 		fullkey, val, err := valsC.Seek(key)
