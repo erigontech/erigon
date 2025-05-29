@@ -51,7 +51,7 @@ import (
 var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 var BorDefaultMinerGasLimit uint64 = 45_000_000
 
-var DefaultMinerGasLimit uint64 = 36_000_000
+var DefaultMinerGasLimit uint64 = 60_000_000
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
