@@ -26,7 +26,7 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 	accFiles := at.DomainFiles(kv.AccountsDomain)
 	str := make([]string, 0, len(accFiles))
 	for _, item := range accFiles {
-		if !strings.HasSuffix(item.Filename(), ".kv") {
+		if !strings.HasSuffix(item.Fullpath(), ".kv") {
 			continue
 		}
 		bn, err := tx2block(item.EndRootNum())

@@ -166,7 +166,7 @@ func filesFromDir(dir string) ([]string, error) {
 	}
 	filtered := make([]string, 0, len(allFiles))
 	for _, f := range allFiles {
-		if f.IsDir() || !f.Type().IsRegular() {
+		if f.IsDir() || (!f.Type().IsRegular() && f.Type()&os.ModeSymlink == 0) {
 			continue
 		}
 		if strings.HasPrefix(f.Name(), ".") { // hidden files

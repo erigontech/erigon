@@ -528,6 +528,10 @@ func (db *DB) ReloadSalt() error                         { return db.agg.ReloadS
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.agg.InvertedIdxTables(domain...)
 }
+func (db *DB) ReloadFiles() error { return db.agg.ReloadFiles() }
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
+	return db.agg.BuildMissedAccessors(ctx, workers)
+}
 
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
