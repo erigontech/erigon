@@ -61,8 +61,8 @@ func TestNonceFromAddress(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotEqual(pool, nil)
+	assert.NoError(err)
+	require.True(pool != nil)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -186,9 +186,9 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0 /* shanghaiTime */, nil /* agraBlock */, nil /* bhilaiBlock */, common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(t, err)
-	require.NotEqual(t, pool, nil)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0 /* shanghaiTime */, nil /* agraBlock */, nil /* bhiliaBlock */, common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	assert.NoError(t, err)
+	require.True(t, pool != nil)
 
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
@@ -442,8 +442,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotNil(pool)
+	assert.NoError(err)
+	require.NotEqual(nil, pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -565,8 +565,8 @@ func TestReverseNonces(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotEqual(pool, nil)
+	assert.NoError(err)
+	require.True(pool != nil)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(1_000_000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -695,8 +695,8 @@ func TestTxnPoke(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotEqual(pool, nil)
+	assert.NoError(err)
+	require.True(pool != nil)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -931,7 +931,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
-			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* bhilaiBlock */, nil /* cancunTime */, nil, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
+			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, nil, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
 
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
@@ -978,8 +978,8 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotEqual(pool, nil)
+	assert.NoError(err)
+	require.True(pool != nil)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -1042,9 +1042,9 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	chainID := *maxUint256
 	cache := kvcache.NewDummy()
 	logger := log.New()
-	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil /* agraBlock */, nil, /* bhilaiBlock */
+	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */ nil, /* bhiliaBlock */
 		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
-	require.NoError(t, err)
+	assert.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
 	tx, err := coreDB.BeginRw(ctx)
 	defer tx.Rollback()
@@ -1093,8 +1093,8 @@ func TestBlobTxnReplacement(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	assert.NoError(err)
 
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -1278,8 +1278,8 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotEqual(txnPool, nil)
+	assert.NoError(err)
+	require.True(txnPool != nil)
 
 	err = txnPool.start(ctx)
 	assert.NoError(err)
@@ -1388,9 +1388,9 @@ func TestBlobSlots(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotEqual(pool, nil)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	assert.NoError(err)
+	require.True(pool != nil)
 	var stateVersionID uint64 = 0
 
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
@@ -1471,9 +1471,9 @@ func TestGetBlobsV1(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotEqual(pool, nil)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	assert.NoError(err)
+	require.True(pool != nil)
 	pool.blockGasLimit.Store(30000000)
 	var stateVersionID uint64 = 0
 
@@ -1547,8 +1547,8 @@ func TestGasLimitChanged(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotEqual(pool, nil)
+	assert.NoError(err)
+	require.True(pool != nil)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
