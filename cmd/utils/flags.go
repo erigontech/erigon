@@ -1670,11 +1670,12 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 		panic(err)
 	}
 	cfg.ExtraData = []byte(extraDataStr)
-	gasLimit, err := flags.GetUint64(MinerGasLimitFlag.Name)
-	if _, ok := err.(*strconv.NumError); ok || err == nil {
+	if flags.Changed(MinerGasLimitFlag.Name) {
+		gasLimit, err := flags.GetUint64(MinerGasLimitFlag.Name)
+		if err != nil {
+			panic(err)
+		}
 		cfg.GasLimit = &gasLimit
-	} else {
-		panic(err)
 	}
 	price, err := flags.GetInt64(MinerGasPriceFlag.Name)
 	if err != nil {
