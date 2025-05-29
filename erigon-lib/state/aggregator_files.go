@@ -119,7 +119,10 @@ func (mf MergedFilesV3) FrozenList() (frozen []string) {
 	}
 	return frozen
 }
-func (mf MergedFilesV3) Close() {
+func (mf *MergedFilesV3) Close() {
+	if mf == nil {
+		return
+	}
 	clist := make([]*filesItem, 0, kv.DomainLen+4)
 	for id := range mf.d {
 		clist = append(clist, mf.d[id], mf.dHist[id], mf.dIdx[id])

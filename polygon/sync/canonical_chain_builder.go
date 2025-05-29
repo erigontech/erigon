@@ -24,8 +24,8 @@ import (
 	"slices"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor"
 )
 
@@ -35,7 +35,7 @@ type forkTreeNode struct {
 	parent          *forkTreeNode
 	children        map[producerSlotIndex]*forkTreeNode
 	header          *types.Header
-	headerHash      libcommon.Hash
+	headerHash      common.Hash
 	totalDifficulty uint64
 }
 
@@ -90,7 +90,7 @@ func (ccb *CanonicalChainBuilder) enumerate(visitFunc func(*forkTreeNode) bool) 
 	}
 }
 
-func (ccb *CanonicalChainBuilder) nodeByHash(hash libcommon.Hash) *forkTreeNode {
+func (ccb *CanonicalChainBuilder) nodeByHash(hash common.Hash) *forkTreeNode {
 	var result *forkTreeNode
 	ccb.enumerate(func(node *forkTreeNode) bool {
 		if node.headerHash == hash {
@@ -101,7 +101,7 @@ func (ccb *CanonicalChainBuilder) nodeByHash(hash libcommon.Hash) *forkTreeNode 
 	return result
 }
 
-func (ccb *CanonicalChainBuilder) ContainsHash(hash libcommon.Hash) bool {
+func (ccb *CanonicalChainBuilder) ContainsHash(hash common.Hash) bool {
 	return ccb.nodeByHash(hash) != nil
 }
 
@@ -153,7 +153,7 @@ func (ccb *CanonicalChainBuilder) PruneRoot(newRootNum uint64) error {
 	return nil
 }
 
-func (ccb *CanonicalChainBuilder) PruneNode(hash libcommon.Hash) error {
+func (ccb *CanonicalChainBuilder) PruneNode(hash common.Hash) error {
 	if ccb.root.headerHash == hash {
 		return errors.New("CanonicalChainBuilder.PruneNode: can't prune root node")
 	}
@@ -240,7 +240,7 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 		return nil, errors.New("CanonicalChainBuilder.Connect: can't connect headers")
 	}
 
-	headersHashes := libcommon.SliceMap(headers, func(header *types.Header) libcommon.Hash {
+	headersHashes := common.SliceMap(headers, func(header *types.Header) common.Hash {
 		return header.Hash()
 	})
 
@@ -277,16 +277,16 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 	// attach nodes for the new headers
 	for i, header := range headers {
 		if (header.Number == nil) || (header.Number.Uint64() != parent.header.Number.Uint64()+1) {
-			return nil, errors.New("CanonicalChainBuilder.Connect: invalid header.Number")
+			return nil, fmt.Errorf("can't connect %s: invalid number: expected %d", header.Number, parent.header.Number.Uint64()+1)
 		}
 
 		if err := ccb.headerValidator.ValidateHeader(ctx, header, parent.header, time.Now()); err != nil {
-			return nil, fmt.Errorf("CanonicalChainBuilder.Connect: invalid header error %w", err)
+			return nil, fmt.Errorf("can't connect %s: invalid header: error %w", header.Number, err)
 		}
 
 		difficulty, err := ccb.difficultyCalc.HeaderDifficulty(ctx, header)
 		if err != nil {
-			return nil, fmt.Errorf("CanonicalChainBuilder.Connect: header difficulty error %w", err)
+			return nil, fmt.Errorf("can't connect %s: header difficulty error %w", header.Number, err)
 		}
 		if (header.Difficulty == nil) || (header.Difficulty.Uint64() != difficulty) {
 			err := &bor.WrongDifficultyError{
@@ -300,7 +300,7 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 
 		slot := producerSlotIndex(difficulty)
 		if _, ok := parent.children[slot]; ok {
-			return nil, errors.New("CanonicalChainBuilder.Connect: producer slot is already filled by a different header")
+			return nil, fmt.Errorf("can't connect %s: producer slot is already filled by a different header", header.Number)
 		}
 
 		node := &forkTreeNode{
@@ -319,7 +319,7 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 	return headers, nil
 }
 
-func (ccb *CanonicalChainBuilder) LowestCommonAncestor(a, b libcommon.Hash) (*types.Header, bool) {
+func (ccb *CanonicalChainBuilder) LowestCommonAncestor(a, b common.Hash) (*types.Header, bool) {
 	pathA := ccb.pathToRoot(a)
 	if len(pathA) == 0 {
 		// 'a' doesn't exist in the tree
@@ -353,13 +353,13 @@ func (ccb *CanonicalChainBuilder) LowestCommonAncestor(a, b libcommon.Hash) (*ty
 	return nil, false
 }
 
-func (ccb *CanonicalChainBuilder) pathToRoot(from libcommon.Hash) []*forkTreeNode {
+func (ccb *CanonicalChainBuilder) pathToRoot(from common.Hash) []*forkTreeNode {
 	path := make([]*forkTreeNode, 0, ccb.Tip().Number.Uint64()-ccb.Root().Number.Uint64())
 	pathToRootRec(ccb.root, from, &path)
 	return path
 }
 
-func pathToRootRec(node *forkTreeNode, from libcommon.Hash, path *[]*forkTreeNode) bool {
+func pathToRootRec(node *forkTreeNode, from common.Hash, path *[]*forkTreeNode) bool {
 	if node.headerHash == from {
 		*path = append(*path, node)
 		return true

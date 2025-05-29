@@ -26,8 +26,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/polygon/p2p"
-	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func TestBlockEventsSpamGuard(t *testing.T) {
@@ -73,8 +73,8 @@ func TestTipEventsCompositeChannel(t *testing.T) {
 	events[1] = read(ctx, t, ch.Events()).Type
 	events[2] = read(ctx, t, ch.Events()).Type
 	require.ElementsMatch(t, events, []EventType{EventTypeNewMilestone, EventTypeNewBlock, EventTypeNewBlockHashes})
-	require.Len(t, ch.heimdallEventsChannel.events, 0)
-	require.Len(t, ch.p2pEventsChannel.events, 0)
+	require.Empty(t, ch.heimdallEventsChannel.events)
+	require.Empty(t, ch.p2pEventsChannel.events)
 	cancel()
 	err := eg.Wait()
 	require.ErrorIs(t, err, context.Canceled)

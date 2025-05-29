@@ -5,14 +5,14 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 )
 
 func chargeGas(
@@ -20,11 +20,12 @@ func chargeGas(
 	tx *types.AccountAbstractionTransaction,
 	gasPool *core.GasPool,
 	ibs *state.IntraBlockState,
+	preTxCost uint64,
 ) error {
 	baseFee := uint256.MustFromBig(header.BaseFee)
 	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
 
-	totalGasLimit := fixedgas.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	totalGasLimit := preTxCost + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 
@@ -59,7 +60,7 @@ func refundGas(
 	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
 	actualGasCost := new(uint256.Int).Mul(effectiveGasPrice, new(uint256.Int).SetUint64(gasUsed))
 
-	totalGasLimit := fixedgas.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	totalGasLimit := params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 
@@ -85,7 +86,7 @@ func payCoinbase(
 	effectiveTip := u256.Num0
 
 	if tx.FeeCap.Gt(baseFee) {
-		effectiveTip = math.Min256(tx.Tip, new(uint256.Int).Sub(tx.FeeCap, baseFee))
+		effectiveTip = math.U256Min(tx.Tip, new(uint256.Int).Sub(tx.FeeCap, baseFee))
 	}
 
 	amount := new(uint256.Int).SetUint64(gasUsed)

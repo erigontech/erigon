@@ -26,7 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -174,7 +174,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 		// in BatchVerification function. After validating signatures, if they are valid we will publish the
 		// gossip ourselves or ban the peer which sent that particular invalid signature.
-		return ErrIgnore
+		return nil
 	})
 }
 
@@ -182,7 +182,7 @@ func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 	headState *state.CachingBeaconState,
 	contributionAndProof *cltypes.ContributionAndProof,
 	signedContribution *SignedContributionAndProofForGossip,
-	subcommiteePubsKeys []libcommon.Bytes48) (*AggregateVerificationData, error) {
+	subcommiteePubsKeys []common.Bytes48) (*AggregateVerificationData, error) {
 
 	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
 	signature1, signatureRoot1, pubKey1, err := verifySyncContributionSelectionProof(headState, contributionAndProof)
@@ -224,7 +224,7 @@ func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 //	return sync_committee.pubkeys[i:i + sync_subcommittee_size]
 
 // getSyncSubcommitteePubkeys returns the public keys of the validators in the given subcommittee.
-func (s *syncContributionService) getSyncSubcommitteePubkeys(st *state.CachingBeaconState, subcommitteeIndex uint64) ([]libcommon.Bytes48, error) {
+func (s *syncContributionService) getSyncSubcommitteePubkeys(st *state.CachingBeaconState, subcommitteeIndex uint64) ([]common.Bytes48, error) {
 	var syncCommittee *solid.SyncCommittee
 	if s.beaconCfg.SyncCommitteePeriod(st.Slot()) == s.beaconCfg.SyncCommitteePeriod(st.Slot()+1) {
 		syncCommittee = st.CurrentSyncCommittee()
@@ -285,7 +285,7 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 }
 
 // verifySyncContributionProof verifies the contribution aggregated signature.
-func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []libcommon.Bytes48) ([]byte, []byte, []byte, error) {
+func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []common.Bytes48) ([]byte, []byte, []byte, error) {
 	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.Epoch(s))
 	if err != nil {
 		return nil, nil, nil, err
@@ -296,7 +296,7 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
 	for i, key := range subCommitteeKeys {
 		if utils.IsBitOn(contribution.AggregationBits, i) {
-			subCommitteePubsKeys = append(subCommitteePubsKeys, libcommon.CopyBytes(key[:]))
+			subCommitteePubsKeys = append(subCommitteePubsKeys, common.CopyBytes(key[:]))
 		}
 	}
 

@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/chain/params"
 )
 
 func TestShanghaiIntrinsicGas(t *testing.T) {
@@ -75,6 +77,6 @@ func TestZeroDataIntrinsicGas(t *testing.T) {
 	assert := assert.New(t)
 	gas, floorGas7623, overflow := CalcIntrinsicGas(0, 0, 0, 0, 0, false, true, true, true, true, false)
 	assert.False(overflow)
-	assert.Equal(TxGas, gas)
-	assert.Equal(TxGas, floorGas7623)
+	assert.Equal(params.TxGas, gas)
+	assert.Equal(params.TxGas, floorGas7623)
 }

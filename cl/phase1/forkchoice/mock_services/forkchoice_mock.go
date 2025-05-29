@@ -23,7 +23,6 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -302,43 +301,43 @@ func (f *ForkChoiceStorageMock) GetLightClientUpdate(
 }
 
 func (f *ForkChoiceStorageMock) GetHeader(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (*cltypes.BeaconBlockHeader, bool) {
 	return f.Headers[blockRoot], f.Headers[blockRoot] != nil
 }
 
-func (f *ForkChoiceStorageMock) GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
+func (f *ForkChoiceStorageMock) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetInactivitiesScores(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (solid.Uint64ListSSZ, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetPreviousParticipationIndicies(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (*solid.ParticipationBitList, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetValidatorSet(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (*solid.ValidatorSet, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetCurrentParticipationIndicies(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (*solid.ParticipationBitList, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 	idx uint64,
-) (libcommon.Bytes48, error) {
+) (common.Bytes48, error) {
 	panic("implement me")
 }
 

@@ -32,8 +32,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	libchain "github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -44,15 +46,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
+	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -65,7 +65,7 @@ var (
 // makeBlockChain creates a deterministic chain of blocks rooted at parent.
 func makeBlockChain(parent *types.Block, n int, m *mock.MockSentry, seed int) *core.ChainPack {
 	chain, _ := core.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, n, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{0: byte(seed), 19: byte(i)})
+		b.SetCoinbase(common.Address{0: byte(seed), 19: byte(i)})
 	})
 	return chain
 }
@@ -97,7 +97,7 @@ func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, t
 	ctx := context.Background()
 
 	// Assert the chains have the same header/block at #i
-	var hash1, hash2 libcommon.Hash
+	var hash1, hash2 common.Hash
 	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		if hash1, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
@@ -196,9 +196,11 @@ func TestLastBlock(t *testing.T) {
 
 // Tests that given a starting canonical chain of a given size, it can be extended
 // with various length chains.
-func TestExtendCanonicalBlocks(t *testing.T) { testExtendCanonical(t) }
+func TestExtendCanonicalBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
-func testExtendCanonical(t *testing.T) {
 	t.Parallel()
 	length := 5
 
@@ -254,6 +256,10 @@ func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
 func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
 
 func testLongerFork(t *testing.T, full bool) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	length := 10
 
 	// Make first chain starting from genesis
@@ -358,7 +364,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 		t.Fatal(err)
 	}
 
-	hashPacket := make([]libcommon.Hash, 0)
+	hashPacket := make([]common.Hash, 0)
 	queryNum := 0
 
 	for block.NumberU64() != 0 {
@@ -374,50 +380,48 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 		}
 	}
 
-	if sentry_multi_client.EnableP2PReceipts {
-		b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
-			RequestId:         1,
-			GetReceiptsPacket: hashPacket,
-		})
+	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
+		RequestId:         1,
+		GetReceiptsPacket: hashPacket,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m.ReceiveWg.Add(1)
+	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
 
-		m.ReceiveWg.Add(1)
-		for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
+	m.ReceiveWg.Wait()
 
-		m.ReceiveWg.Wait()
+	msg := m.SentMessage(0)
 
-		msg := m.SentMessage(0)
+	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
 
-		require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
+	encoded, err := rlp.EncodeToBytes(types.Receipts{})
+	require.NoError(err)
 
-		encoded, err := rlp.EncodeToBytes(types.Receipts{})
-		require.NoError(err)
+	res := make([]rlp.RawValue, 0, queryNum)
+	for i := 0; i < queryNum; i++ {
+		res = append(res, encoded)
+	}
 
-		res := make([]rlp.RawValue, 0, queryNum)
-		for i := 0; i < queryNum; i++ {
-			res = append(res, encoded)
-		}
+	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+		RequestId:         1,
+		ReceiptsRLPPacket: res,
+	})
+	require.NoError(err)
+	require.Equal(b, msg.GetData())
 
-		b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
-			RequestId:         1,
-			ReceiptsRLPPacket: res,
-		})
-		require.NoError(err)
-		require.Equal(b, msg.GetData())
-
-		// Make sure the chain total difficulty is the correct one
-		want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
-		have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
-		require.NoError(err)
-		if have.Cmp(want) != 0 {
-			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
-		}
+	// Make sure the chain total difficulty is the correct one
+	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
+	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
+	require.NoError(err)
+	if have.Cmp(want) != 0 {
+		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 	}
 }
 
@@ -445,6 +449,10 @@ func testBadHashes(t *testing.T) {
 
 // Tests that chain reorganisations handle transaction removals and reinsertions.
 func TestChainTxReorgs(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -454,7 +462,7 @@ func TestChainTxReorgs(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		addr3   = crypto.PubkeyToAddress(key3.PublicKey)
 		gspec   = &types.Genesis{
-			Config:   params.TestChainConfig,
+			Config:   libchain.TestChainConfig,
 			GasLimit: 3141592,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: big.NewInt(1000000)},
@@ -576,31 +584,31 @@ func TestChainTxReorgs(t *testing.T) {
 	}
 }
 
-func readReceipt(db kv.TemporalTx, txHash libcommon.Hash, m *mock.MockSentry) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
+func readReceipt(db kv.TemporalTx, txHash common.Hash, m *mock.MockSentry) (*types.Receipt, common.Hash, uint64, uint64, error) {
 	// Retrieve the context of the receipt based on the transaction hash
 	blockNumber, _, err := rawdb.ReadTxLookupEntry(db, txHash)
 	if err != nil {
-		return nil, libcommon.Hash{}, 0, 0, err
+		return nil, common.Hash{}, 0, 0, err
 	}
 	if blockNumber == nil {
-		return nil, libcommon.Hash{}, 0, 0, nil
+		return nil, common.Hash{}, 0, 0, nil
 	}
 	blockHash, _, err := m.BlockReader.CanonicalHash(context.Background(), db, *blockNumber)
 	if err != nil {
-		return nil, libcommon.Hash{}, 0, 0, err
+		return nil, common.Hash{}, 0, 0, err
 	}
-	if blockHash == (libcommon.Hash{}) {
-		return nil, libcommon.Hash{}, 0, 0, nil
+	if blockHash == (common.Hash{}) {
+		return nil, common.Hash{}, 0, 0, nil
 	}
 	b, _, err := m.BlockReader.BlockWithSenders(context.Background(), db, blockHash, *blockNumber)
 	if err != nil {
-		return nil, libcommon.Hash{}, 0, 0, err
+		return nil, common.Hash{}, 0, 0, err
 	}
 
 	// Read all the receipts from the block and return the one with the matching hash
 	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b)
 	if err != nil {
-		return nil, libcommon.Hash{}, 0, 0, err
+		return nil, common.Hash{}, 0, 0, err
 	}
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == txHash {
@@ -608,7 +616,7 @@ func readReceipt(db kv.TemporalTx, txHash libcommon.Hash, m *mock.MockSentry) (*
 		}
 	}
 	log.Error("Receipt not found", "number", blockNumber, "hash", blockHash, "txhash", txHash)
-	return nil, libcommon.Hash{}, 0, 0, nil
+	return nil, common.Hash{}, 0, 0, nil
 }
 
 // Tests if the canonical block can be fetched from the database during chain insertion.
@@ -634,7 +642,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		if ch == (libcommon.Hash{}) {
+		if ch == (common.Hash{}) {
 			continue // busy wait for canonical hash to be written
 		}
 		if ch != block.Hash() {
@@ -661,7 +669,7 @@ func TestEIP155Transition(t *testing.T) {
 		key, _     = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address    = crypto.PubkeyToAddress(key.PublicKey)
 		funds      = big.NewInt(1000000000)
-		deleteAddr = libcommon.Address{1}
+		deleteAddr = common.Address{1}
 		gspec      = &types.Genesis{
 			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
@@ -674,7 +682,7 @@ func TestEIP155Transition(t *testing.T) {
 			tx      types.Transaction
 			err     error
 			basicTx = func(signer types.Signer) (types.Transaction, error) {
-				return types.SignTx(types.NewTransaction(block.TxNonce(address), libcommon.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
 			}
 		)
 		switch i {
@@ -740,7 +748,7 @@ func TestEIP155Transition(t *testing.T) {
 	chain, chainErr = core.GenerateChain(config, chain.TopBlock, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
 			basicTx = func(signer types.Signer) (types.Transaction, error) {
-				return types.SignTx(types.NewTransaction(block.TxNonce(address), libcommon.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
 			}
 		)
 		if i == 0 {
@@ -760,6 +768,10 @@ func TestEIP155Transition(t *testing.T) {
 }
 
 func TestModes(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// run test on all combination of flags
 	runWithModesPermuations(
@@ -776,7 +788,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		key, _     = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address    = crypto.PubkeyToAddress(key.PublicKey)
 		funds      = big.NewInt(1000000000)
-		deleteAddr = libcommon.Address{1}
+		deleteAddr = common.Address{1}
 		gspec      = &types.Genesis{
 			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
@@ -790,7 +802,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			tx      types.Transaction
 			err     error
 			basicTx = func(signer types.Signer) (types.Transaction, error) {
-				return types.SignTx(types.NewTransaction(block.TxNonce(address), libcommon.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
 			}
 		)
 		switch i {
@@ -870,7 +882,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 				afterPrune++
 				return nil
 			})
-			require.Greater(afterPrune, uint64(0))
+			require.Positive(afterPrune)
 			require.NoError(err)
 		} else {
 			found, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, address[:], 0, 1024)
@@ -907,7 +919,6 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 
 			err := tx.ForEach(bucketName, nil, func(k, v []byte) error {
 				// we ignore empty account history
-				//nolint:scopelint
 				if bucketName == dbutils.AccountsHistory && len(v) == 0 {
 					return nil
 				}
@@ -969,7 +980,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		theAddr = libcommon.Address{1}
+		theAddr = common.Address{1}
 		gspec   = &types.Genesis{
 			Config: &libchain.Config{
 				ChainID:               big.NewInt(1),
@@ -1070,13 +1081,13 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		input       = hexutil.MustDecode("0xadbd8465")
 		kill        = hexutil.MustDecode("0x41c0e1b5")
 		gspec       = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: libchain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
 	m := mock.MockWithGenesis(t, gspec, bankKey, false)
 
-	var theAddr libcommon.Address
+	var theAddr common.Address
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
@@ -1145,11 +1156,15 @@ func TestDoubleAccountRemoval(t *testing.T) {
 //
 // https://github.com/ethereum/go-ethereum/pull/15941
 func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
 	m, m2 := mock.Mock(t), mock.Mock(t)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) { b.SetCoinbase(libcommon.Address{1}) })
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) { b.SetCoinbase(common.Address{1}) })
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1158,12 +1173,11 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	forks := make([]*core.ChainPack, chain.Length())
 	for i := 0; i < len(forks); i++ {
 		fork, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, i+1, func(j int, b *core.BlockGen) {
-			//nolint:scopelint
 			if j == i {
-				b.SetCoinbase(libcommon.Address{2})
+				b.SetCoinbase(common.Address{2})
 				b.OffsetTime(-2) // By reducing time, we increase difficulty of the fork, so that it can overwrite the canonical chain
 			} else {
-				b.SetCoinbase(libcommon.Address{1})
+				b.SetCoinbase(common.Address{1})
 			}
 		})
 		if err != nil {
@@ -1208,22 +1222,26 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 // Tests that doing large reorgs works even if the state associated with the
 // forking point is not available any more.
 func TestLargeReorgTrieGC(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Generate the original common chain segment and the two competing forks
 
 	m, m2 := mock.Mock(t), mock.Mock(t)
 
 	shared, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate shared chain: %v", err)
 	}
 	original, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*core.TriesInMemory, func(i int, b *core.BlockGen) {
 		if i < 64 {
-			b.SetCoinbase(libcommon.Address{1})
+			b.SetCoinbase(common.Address{1})
 		} else {
-			b.SetCoinbase(libcommon.Address{2})
+			b.SetCoinbase(common.Address{2})
 		}
 	})
 	if err != nil {
@@ -1231,9 +1249,9 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	}
 	competitor, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*core.TriesInMemory+1, func(i int, b *core.BlockGen) {
 		if i < 64 {
-			b.SetCoinbase(libcommon.Address{1})
+			b.SetCoinbase(common.Address{1})
 		} else {
-			b.SetCoinbase(libcommon.Address{3})
+			b.SetCoinbase(common.Address{3})
 			b.OffsetTime(-2)
 		}
 	})
@@ -1268,6 +1286,10 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //   - https://github.com/ethereum/go-ethereum/issues/18977
 //   - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
 	m := mock.Mock(t)
@@ -1275,7 +1297,7 @@ func TestLowDiffLongChain(t *testing.T) {
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6*core.TriesInMemory, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 		b.OffsetTime(-9)
 	})
 	if err != nil {
@@ -1284,10 +1306,10 @@ func TestLowDiffLongChain(t *testing.T) {
 	// Generate fork chain, starting from an early block
 	fork, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11+8*core.TriesInMemory, func(i int, b *core.BlockGen) {
 		if i < 11 {
-			b.SetCoinbase(libcommon.Address{1})
+			b.SetCoinbase(common.Address{1})
 			b.OffsetTime(-9)
 		} else {
-			b.SetCoinbase(libcommon.Address{2})
+			b.SetCoinbase(common.Address{2})
 		}
 	})
 	if err != nil {
@@ -1342,8 +1364,8 @@ func TestLowDiffLongChain(t *testing.T) {
 func TestDeleteCreateRevert(t *testing.T) {
 	t.Parallel()
 	var (
-		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
-		bb = libcommon.HexToAddress("0x000000000000000000000000000000000000bbbb")
+		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
+		bb = common.HexToAddress("0x000000000000000000000000000000000000bbbb")
 		// Generate a canonical chain to act as the main dataset
 
 		// A sender who makes transactions, has some funds
@@ -1351,7 +1373,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: libchain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAAA selfdestructs if called
@@ -1382,7 +1404,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
 			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
@@ -1416,13 +1438,13 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		key, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address   = crypto.PubkeyToAddress(key.PublicKey)
 		funds     = big.NewInt(1000000000)
-		bb        = libcommon.HexToAddress("0x000000000000000000000000000000000000bbbb")
-		aaStorage = make(map[libcommon.Hash]libcommon.Hash)    // Initial storage in AA
+		bb        = common.HexToAddress("0x000000000000000000000000000000000000bbbb")
+		aaStorage = make(map[common.Hash]common.Hash)          // Initial storage in AA
 		aaCode    = []byte{byte(vm.PC), byte(vm.SELFDESTRUCT)} // Code for AA (simple selfdestruct)
 	)
 	// Populate two slots
-	aaStorage[libcommon.HexToHash("01")] = libcommon.HexToHash("01")
-	aaStorage[libcommon.HexToHash("02")] = libcommon.HexToHash("02")
+	aaStorage[common.HexToHash("01")] = common.HexToHash("01")
+	aaStorage[common.HexToHash("02")] = common.HexToHash("02")
 
 	// The bb-code needs to CREATE2 the aa contract. It consists of
 	// both initcode and deployment code
@@ -1468,7 +1490,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1488,7 +1510,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	}
 	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
 			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
@@ -1512,25 +1534,25 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 	// If all is correct, then slot 1 and 2 are zero
-	key1 := libcommon.HexToHash("01")
+	key1 := common.HexToHash("01")
 	var got uint256.Int
-	statedb.GetState(aa, &key1, &got)
+	statedb.GetState(aa, key1, &got)
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
-	key2 := libcommon.HexToHash("02")
-	statedb.GetState(aa, &key2, &got)
+	key2 := common.HexToHash("02")
+	statedb.GetState(aa, key2, &got)
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
 	// Also, 3 and 4 should be set
-	key3 := libcommon.HexToHash("03")
-	statedb.GetState(aa, &key3, &got)
+	key3 := common.HexToHash("03")
+	statedb.GetState(aa, key3, &got)
 	if got.Uint64() != 3 {
 		t.Errorf("got %d exp %d", got.Uint64(), 3)
 	}
-	key4 := libcommon.HexToHash("04")
-	statedb.GetState(aa, &key4, &got)
+	key4 := common.HexToHash("04")
+	statedb.GetState(aa, key4, &got)
 	if got.Uint64() != 4 {
 		t.Errorf("got %d exp %d", got.Uint64(), 4)
 	}
@@ -1546,8 +1568,8 @@ func TestCVE2020_26265(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 
-		aa        = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
-		aaStorage = make(map[libcommon.Hash]libcommon.Hash) // Initial storage in AA
+		aa        = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
+		aaStorage = make(map[common.Hash]common.Hash) // Initial storage in AA
 		aaCode    = []byte{
 			byte(vm.CALLVALUE),
 			byte(vm.PUSH1), 0x06, // Destination for JUMPI
@@ -1560,8 +1582,8 @@ func TestCVE2020_26265(t *testing.T) {
 			byte(vm.SSTORE),
 		} // Code for AAAA (selfdestruct to itself, but only when CALLVALUE is 0)
 
-		caller        = libcommon.HexToAddress("0x000000000000000000000000000000000000bbbb")
-		callerStorage = make(map[libcommon.Hash]libcommon.Hash) // Initial storage in CALLER
+		caller        = common.HexToAddress("0x000000000000000000000000000000000000bbbb")
+		callerStorage = make(map[common.Hash]common.Hash) // Initial storage in CALLER
 		callerCode    = []byte{
 			byte(vm.PC),          // [0]
 			byte(vm.DUP1),        // [0,0]
@@ -1585,7 +1607,7 @@ func TestCVE2020_26265(t *testing.T) {
 		} // Code for CALLER
 	)
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1608,7 +1630,7 @@ func TestCVE2020_26265(t *testing.T) {
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, caller,
 			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
@@ -1654,16 +1676,16 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 
-		aa        = libcommon.HexToAddress("0x7217d81b76bdd8707601e959454e3d776aee5f43")
-		aaStorage = make(map[libcommon.Hash]libcommon.Hash)    // Initial storage in AA
+		aa        = common.HexToAddress("0x7217d81b76bdd8707601e959454e3d776aee5f43")
+		aaStorage = make(map[common.Hash]common.Hash)          // Initial storage in AA
 		aaCode    = []byte{byte(vm.PC), byte(vm.SELFDESTRUCT)} // Code for AA (simple selfdestruct)
 	)
 	// Populate two slots
-	aaStorage[libcommon.HexToHash("01")] = libcommon.HexToHash("01")
-	aaStorage[libcommon.HexToHash("02")] = libcommon.HexToHash("02")
+	aaStorage[common.HexToHash("01")] = common.HexToHash("01")
+	aaStorage[common.HexToHash("02")] = common.HexToHash("02")
 
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1679,7 +1701,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
 			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
@@ -1700,14 +1722,14 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 		// If all is correct, then both slots are zero
-		key1 := libcommon.HexToHash("01")
+		key1 := common.HexToHash("01")
 		var got uint256.Int
-		statedb.GetState(aa, &key1, &got)
+		statedb.GetState(aa, key1, &got)
 		if !got.IsZero() {
 			t.Errorf("got %x exp %x", got, 0)
 		}
-		key2 := libcommon.HexToHash("02")
-		statedb.GetState(aa, &key2, &got)
+		key2 := common.HexToHash("02")
+		statedb.GetState(aa, key2, &got)
 		if !got.IsZero() {
 			t.Errorf("got %x exp %x", got, 0)
 		}
@@ -1724,6 +1746,10 @@ func TestDeleteRecreateAccount(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
@@ -1731,14 +1757,14 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		key, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address   = crypto.PubkeyToAddress(key.PublicKey)
 		funds     = big.NewInt(1000000000)
-		bb        = libcommon.HexToAddress("0x000000000000000000000000000000000000bbbb")
-		aaStorage = make(map[libcommon.Hash]libcommon.Hash)    // Initial storage in AA
+		bb        = common.HexToAddress("0x000000000000000000000000000000000000bbbb")
+		aaStorage = make(map[common.Hash]common.Hash)          // Initial storage in AA
 		aaCode    = []byte{byte(vm.PC), byte(vm.SELFDESTRUCT)} // Code for AA (simple selfdestruct)
 	)
 
 	// Populate two slots
-	aaStorage[libcommon.HexToHash("01")] = libcommon.HexToHash("01")
-	aaStorage[libcommon.HexToHash("02")] = libcommon.HexToHash("02")
+	aaStorage[common.HexToHash("01")] = common.HexToHash("01")
+	aaStorage[common.HexToHash("02")] = common.HexToHash("02")
 
 	// The bb-code needs to CREATE2 the aa contract. It consists of
 	// both initcode and deployment code
@@ -1785,7 +1811,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1849,7 +1875,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		}
 		exp.exist = current.exist
 
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 		if i%2 == 0 {
 			b.AddTx(newDestruct(exp))
 		}
@@ -1869,8 +1895,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	var asHash = func(num int) libcommon.Hash {
-		return libcommon.BytesToHash([]byte{byte(num)})
+	var asHash = func(num int) common.Hash {
+		return common.BytesToHash([]byte{byte(num)})
 	}
 	for i := range chain.Blocks {
 		blockNum := i + 1
@@ -1881,14 +1907,14 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 
 			statedb := state.New(m.NewStateReader(tx))
 			// If all is correct, then slot 1 and 2 are zero
-			key1 := libcommon.HexToHash("01")
+			key1 := common.HexToHash("01")
 			var got uint256.Int
-			statedb.GetState(aa, &key1, &got)
+			statedb.GetState(aa, key1, &got)
 			if !got.IsZero() {
 				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 			}
-			key2 := libcommon.HexToHash("02")
-			statedb.GetState(aa, &key2, &got)
+			key2 := common.HexToHash("02")
+			statedb.GetState(aa, key2, &got)
 			if !got.IsZero() {
 				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 			}
@@ -1904,7 +1930,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 				for slot, val := range exp.values {
 					key := asHash(slot)
 					var gotValue uint256.Int
-					statedb.GetState(aa, &key, &gotValue)
+					statedb.GetState(aa, key, &gotValue)
 					if gotValue.Uint64() != uint64(val) {
 						t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
 					}
@@ -1947,7 +1973,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		bb      = libcommon.HexToAddress("0x000000000000000000000000000000000000bbbb")
+		bb      = common.HexToAddress("0x000000000000000000000000000000000000bbbb")
 	)
 
 	// The bb-code needs to CREATE2 the aa contract. It consists of
@@ -1989,7 +2015,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address aa has some funds
@@ -2005,7 +2031,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	nonce := uint64(0)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 		// One transaction to BB
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
 			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
@@ -2061,7 +2087,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 func TestEIP2718Transition(t *testing.T) {
 	t.Parallel()
 	var (
-		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
+		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 
 		// Generate a canonical chain to act as the main dataset
 
@@ -2070,7 +2096,7 @@ func TestEIP2718Transition(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: libchain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01
@@ -2090,7 +2116,7 @@ func TestEIP2718Transition(t *testing.T) {
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 		gasPrice, _ := uint256.FromBig(big.NewInt(1))
 		chainID, _ := uint256.FromBig(gspec.Config.ChainID)
 
@@ -2108,7 +2134,7 @@ func TestEIP2718Transition(t *testing.T) {
 			},
 			AccessList: types.AccessList{{
 				Address:     aa,
-				StorageKeys: []libcommon.Hash{{0}},
+				StorageKeys: []common.Hash{{0}},
 			}},
 		})
 		b.AddTx(tx)
@@ -2153,7 +2179,7 @@ func TestEIP1559Transition(t *testing.T) {
 	t.Parallel()
 	t.Skip("needs fixing")
 	var (
-		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
+		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 
 		// Generate a canonical chain to act as the main dataset
 
@@ -2162,9 +2188,9 @@ func TestEIP1559Transition(t *testing.T) {
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
-		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(params.Ether))
+		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(common.Ether))
 		gspec   = &types.Genesis{
-			Config: params.SepoliaChainConfig,
+			Config: params2.SepoliaChainConfig,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: funds.ToBig()},
 				addr2: {Balance: funds.ToBig()},
@@ -2187,15 +2213,15 @@ func TestEIP1559Transition(t *testing.T) {
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *core.BlockGen) {
 		if i == 500 {
-			b.SetCoinbase(libcommon.Address{1})
+			b.SetCoinbase(common.Address{1})
 		} else {
-			b.SetCoinbase(libcommon.Address{0})
+			b.SetCoinbase(common.Address{0})
 		}
 		if i == 500 {
 			// One transaction to 0xAAAA
 			accesses := types.AccessList{types.AccessTuple{
 				Address:     aa,
-				StorageKeys: []libcommon.Hash{{0}},
+				StorageKeys: []common.Hash{{0}},
 			}}
 
 			var chainID uint256.Int
@@ -2208,7 +2234,7 @@ func TestEIP1559Transition(t *testing.T) {
 					Data:     []byte{},
 				},
 				ChainID:    &chainID,
-				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
+				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(common.GWei)),
 				TipCap:     u256.Num2,
 				AccessList: accesses,
 			}
@@ -2266,9 +2292,9 @@ func TestEIP1559Transition(t *testing.T) {
 	require.NoError(t, err)
 
 	chain, err = core.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{2})
+		b.SetCoinbase(common.Address{2})
 
-		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
+		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(common.GWei)), nil)
 		txn, _ = types.SignTx(txn, *signer, key2)
 
 		b.AddTx(txn)

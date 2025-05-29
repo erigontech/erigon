@@ -31,7 +31,7 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -91,7 +91,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 }
 
 func isIgnoredHttpServerError(serveErr error) bool {
-	return (errors.Is(serveErr, context.Canceled) || errors.Is(serveErr, libcommon.ErrStopped) || errors.Is(serveErr, http.ErrServerClosed))
+	return (errors.Is(serveErr, context.Canceled) || errors.Is(serveErr, common.ErrStopped) || errors.Is(serveErr, http.ErrServerClosed))
 
 }
 
@@ -130,7 +130,7 @@ func StartHTTPSEndpoint(urlEndpoint string,
 	go func() {
 		serveErr := httpSrv.ServeTLS(listener, certFile, keyFile)
 		if serveErr != nil &&
-			!(errors.Is(serveErr, context.Canceled) || errors.Is(serveErr, libcommon.ErrStopped) || errors.Is(serveErr, http.ErrServerClosed)) {
+			!(errors.Is(serveErr, context.Canceled) || errors.Is(serveErr, common.ErrStopped) || errors.Is(serveErr, http.ErrServerClosed)) {
 			log.Warn("Failed to serve http endpoint", "err", serveErr)
 		}
 	}()

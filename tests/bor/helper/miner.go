@@ -16,14 +16,14 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -77,10 +77,8 @@ func NewNodeConfig() *nodecfg.Config {
 }
 
 // InitNode initializes a node with the given genesis file and config
-func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
+func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
-
-	logger := log.New()
 
 	nodeCfg := &nodecfg.Config{
 		Name:    "erigon",
@@ -136,7 +134,7 @@ func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, priv
 		GPO:       ethconfig.Defaults.GPO,
 		Miner: params.MiningConfig{
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
-			GasLimit:   genesis.GasLimit,
+			GasLimit:   &genesis.GasLimit,
 			GasPrice:   big.NewInt(1),
 			Recommit:   125 * time.Second,
 			SigKey:     privKey,
@@ -151,6 +149,7 @@ func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, priv
 		RPCTxFeeCap:     1, // 1 ether
 		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
 		StateStream:     true,
+		PolygonSync:     true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.TxPool.CommitEvery = 15 * time.Second

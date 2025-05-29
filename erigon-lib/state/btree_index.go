@@ -22,11 +22,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
@@ -54,26 +53,6 @@ var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
 
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
-
-func logBase(n, base uint64) uint64 {
-	return uint64(math.Ceil(math.Log(float64(n)) / math.Log(float64(base))))
-}
-
-type markupCursor struct {
-	l  uint64 //l - level
-	p  uint64 //p - pos inside level
-	di uint64 //di - data array index
-	si uint64 //si - current, actual son index
-}
-
-type node struct {
-	p   uint64 // pos inside level
-	d   uint64
-	s   uint64 // sons pos inside level
-	fc  uint64
-	key []byte
-	val []byte
-}
 
 type Cursor struct {
 	ef         *eliasfano32.EliasFano
@@ -158,427 +137,6 @@ func (c *Cursor) readKV() error {
 		return fmt.Errorf("pair %d/%d val not found, file: %s/%s", c.d, c.ef.Count(), c.getter.FileName(), c.getter.FileName())
 	}
 	c.value, _ = c.getter.Next(nil) // if value is not compressed, we getting ptr to slice from mmap, may need to copy
-	return nil
-}
-
-type btAlloc struct {
-	d       uint64 // depth
-	M       uint64 // child limit of any node
-	N       uint64
-	K       uint64
-	vx      []uint64   // vertex count on level
-	sons    [][]uint64 // i - level; 0 <= i < d; j_k - amount, j_k+1 - child count
-	cursors []markupCursor
-	nodes   [][]node
-	naccess uint64
-	trace   bool
-
-	dataLookup dataLookupFunc
-	keyCmp     keyCmpFunc
-}
-
-func newBtAlloc(k, M uint64, trace bool, dataLookup dataLookupFunc, keyCmp keyCmpFunc) *btAlloc {
-	if k == 0 {
-		return nil
-	}
-
-	d := logBase(k, M)
-	a := &btAlloc{
-		vx:         make([]uint64, d+1),
-		sons:       make([][]uint64, d+1),
-		cursors:    make([]markupCursor, d),
-		nodes:      make([][]node, d),
-		M:          M,
-		K:          k,
-		d:          d,
-		trace:      trace,
-		dataLookup: dataLookup,
-		keyCmp:     keyCmp,
-	}
-
-	if trace {
-		fmt.Printf("k=%d d=%d, M=%d\n", k, d, M)
-	}
-	a.vx[0], a.vx[d] = 1, k
-
-	if k < M/2 {
-		a.N = k
-		a.nodes = make([][]node, 1)
-		return a
-	}
-
-	//nnc := func(vx uint64) uint64 {
-	//	return uint64(math.Ceil(float64(vx) / float64(M)))
-	//}
-	nvc := func(vx uint64) uint64 {
-		return uint64(math.Ceil(float64(vx) / float64(M>>1)))
-	}
-
-	for i := a.d - 1; i > 0; i-- {
-		nnc := uint64(math.Ceil(float64(a.vx[i+1]) / float64(M)))
-		//nvc := uint64(math.Floor(float64(a.vx[i+1]) / float64(m))-1)
-		//nnc := a.vx[i+1] / M
-		//nvc := a.vx[i+1] / m
-		//bvc := a.vx[i+1] / (m + (m >> 1))
-		a.vx[i] = min(uint64(math.Pow(float64(M), float64(i))), nnc)
-	}
-
-	ncount := uint64(0)
-	pnv := uint64(0)
-	for l := a.d - 1; l > 0; l-- {
-		//s := nnc(a.vx[l+1])
-		sh := nvc(a.vx[l+1])
-
-		if sh&1 == 1 {
-			a.sons[l] = append(a.sons[l], sh>>1, M, 1, M>>1)
-		} else {
-			a.sons[l] = append(a.sons[l], sh>>1, M)
-		}
-
-		for ik := 0; ik < len(a.sons[l]); ik += 2 {
-			ncount += a.sons[l][ik] * a.sons[l][ik+1]
-			if l == 1 {
-				pnv += a.sons[l][ik]
-			}
-		}
-	}
-	a.sons[0] = []uint64{1, pnv}
-	ncount += a.sons[0][0] * a.sons[0][1] // last one
-	a.N = ncount
-
-	if trace {
-		for i, v := range a.sons {
-			fmt.Printf("L%d=%v\n", i, v)
-		}
-	}
-
-	return a
-}
-
-func (a *btAlloc) traverseDfs() {
-	for l := 0; l < len(a.sons)-1; l++ {
-		a.cursors[l] = markupCursor{uint64(l), 1, 0, 0}
-		a.nodes[l] = make([]node, 0)
-	}
-
-	if len(a.cursors) <= 1 {
-		if a.nodes[0] == nil {
-			a.nodes[0] = make([]node, 0)
-		}
-		a.nodes[0] = append(a.nodes[0], node{d: a.K})
-		a.N = a.K
-		if a.trace {
-			fmt.Printf("ncount=%d ∂%.5f\n", a.N, float64(a.N-a.K)/float64(a.N))
-		}
-		return
-	}
-
-	c := a.cursors[len(a.cursors)-1]
-	pc := a.cursors[(len(a.cursors) - 2)]
-	root := new(node)
-	trace := false
-
-	var di uint64
-	for stop := false; !stop; {
-		// fill leaves, mark parent if needed (until all grandparents not marked up until root)
-		// check if eldest parent has brothers
-		//     -- has bros -> fill their leaves from the bottom
-		//     -- no bros  -> shift cursor (tricky)
-		if di > a.K {
-			a.N = di - 1 // actually filled node count
-			if a.trace {
-				fmt.Printf("ncount=%d ∂%.5f\n", a.N, float64(a.N-a.K)/float64(a.N))
-			}
-			break
-		}
-
-		bros, parents := a.sons[c.l][c.p], a.sons[c.l][c.p-1]
-		for i := uint64(0); i < bros; i++ {
-			c.di = di
-			if trace {
-				fmt.Printf("L%d |%d| d %2d s %2d\n", c.l, c.p, c.di, c.si)
-			}
-			c.si++
-			di++
-
-			if i == 0 {
-				pc.di = di
-				if trace {
-					fmt.Printf("P%d |%d| d %2d s %2d\n", pc.l, pc.p, pc.di, pc.si)
-				}
-				pc.si++
-				di++
-			}
-			if di > a.K {
-				a.N = di - 1 // actually filled node count
-				stop = true
-				break
-			}
-		}
-
-		a.nodes[c.l] = append(a.nodes[c.l], node{p: c.p, d: c.di, s: c.si})
-		a.nodes[pc.l] = append(a.nodes[pc.l], node{p: pc.p, d: pc.di, s: pc.si, fc: uint64(len(a.nodes[c.l]) - 1)})
-
-		pid := c.si / bros
-		if pid >= parents {
-			if c.p+2 >= uint64(len(a.sons[c.l])) {
-				stop = true // end of row
-				if trace {
-					fmt.Printf("F%d |%d| d %2d\n", c.l, c.p, c.di)
-				}
-			} else {
-				c.p += 2
-				c.si = 0
-				c.di = 0
-			}
-		}
-		a.cursors[c.l] = c
-		a.cursors[pc.l] = pc
-
-		//nolint
-		for l := pc.l; l >= 0; l-- {
-			pc := a.cursors[l]
-			uncles := a.sons[pc.l][pc.p]
-			grands := a.sons[pc.l][pc.p-1]
-
-			pi1 := pc.si / uncles
-			pc.si++
-			pc.di = 0
-
-			pi2 := pc.si / uncles
-			moved := pi2-pi1 != 0
-
-			switch {
-			case pc.l > 0:
-				gp := a.cursors[pc.l-1]
-				if gp.di == 0 {
-					gp.di = di
-					di++
-					if trace {
-						fmt.Printf("P%d |%d| d %2d s %2d\n", gp.l, gp.p, gp.di, gp.si)
-					}
-					a.nodes[gp.l] = append(a.nodes[gp.l], node{p: gp.p, d: gp.di, s: gp.si, fc: uint64(len(a.nodes[l]) - 1)})
-					a.cursors[gp.l] = gp
-				}
-			default:
-				if root.d == 0 {
-					root.d = di
-					//di++
-					if trace {
-						fmt.Printf("ROOT | d %2d\n", root.d)
-					}
-				}
-			}
-
-			//fmt.Printf("P%d |%d| d %2d s %2d pid %d\n", pc.l, pc.p, pc.di, pc.si-1)
-			if pi2 >= grands { // skip one step of si due to different parental filling order
-				if pc.p+2 >= uint64(len(a.sons[pc.l])) {
-					if trace {
-						fmt.Printf("EoRow %d |%d|\n", pc.l, pc.p)
-					}
-					break // end of row
-				}
-				//fmt.Printf("N %d d%d s%d\n", pc.l, pc.di, pc.si)
-				//fmt.Printf("P%d |%d| d %2d s %2d pid %d\n", pc.l, pc.p, pc.di, pc.si, pid)
-				pc.p += 2
-				pc.si = 0
-				pc.di = 0
-			}
-			a.cursors[pc.l] = pc
-
-			if !moved {
-				break
-			}
-		}
-	}
-
-	if a.trace {
-		fmt.Printf("ncount=%d ∂%.5f\n", a.N, float64(a.N-a.K)/float64(a.N))
-	}
-}
-
-func (a *btAlloc) bsKey(x []byte, l, r uint64, g *seg.Reader) (k []byte, di uint64, found bool, err error) {
-	//i := 0
-	var cmp int
-	for l <= r {
-		di = (l + r) >> 1
-
-		cmp, k, err = a.keyCmp(x, di, g, k[:0])
-		a.naccess++
-
-		switch {
-		case err != nil:
-			if errors.Is(err, ErrBtIndexLookupBounds) {
-				return k, 0, false, nil
-			}
-			return k, 0, false, err
-		case cmp == 0:
-			return k, di, true, err
-		case cmp == -1:
-			l = di + 1
-		default:
-			r = di
-		}
-		if l == r {
-			break
-		}
-	}
-	return k, l, true, nil
-}
-
-func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) {
-	lm, rm = -1, -1
-	var m uint64
-
-	for l < r {
-		m = (l + r) >> 1
-		cmp := bytes.Compare(a.nodes[i][m].key, x)
-		a.naccess++
-		switch {
-		case cmp == 0:
-			return a.nodes[i][m], int64(m), int64(m)
-		case cmp > 0:
-			r = m
-			rm = int64(m)
-		case cmp < 0:
-			lm = int64(m)
-			l = m + 1
-		default:
-			panic(fmt.Errorf("compare error %d, %x ? %x", cmp, n.key, x))
-		}
-	}
-	return a.nodes[i][m], lm, rm
-}
-
-// find position of key with node.di <= d at level lvl
-func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
-	//TODO: this seems calculatable from M and tree depth
-	return uint64(sort.Search(len(a.nodes[lvl]), func(i int) bool {
-		return a.nodes[lvl][i].d >= d
-	}))
-}
-
-// Get returns value if found exact match of key
-// TODO k as return is useless(almost)
-func (a *btAlloc) Get(g *seg.Reader, key []byte) (k []byte, found bool, di uint64, err error) {
-	k, di, found, err = a.Seek(g, key)
-	if err != nil {
-		return nil, false, 0, err
-	}
-	if !found || !bytes.Equal(k, key) {
-		return nil, false, 0, nil
-	}
-	return k, found, di, nil
-}
-
-func (a *btAlloc) Seek(g *seg.Reader, seek []byte) (k []byte, di uint64, found bool, err error) {
-	if a.trace {
-		fmt.Printf("seek key %x\n", seek)
-	}
-
-	var (
-		lm, rm     int64
-		L, R       = uint64(0), uint64(len(a.nodes[0]) - 1)
-		minD, maxD = uint64(0), a.K
-		ln         node
-	)
-
-	for l, level := range a.nodes {
-		if len(level) == 1 && l == 0 {
-			ln = a.nodes[0][0]
-			maxD = ln.d
-			break
-		}
-		ln, lm, rm = a.bsNode(uint64(l), L, R, seek)
-		if ln.key == nil { // should return node which is nearest to key from the left so never nil
-			if a.trace {
-				fmt.Printf("found nil key %x pos_range[%d-%d] naccess_ram=%d\n", l, lm, rm, a.naccess)
-			}
-			return nil, 0, false, fmt.Errorf("bt index nil node at level %d", l)
-		}
-		//fmt.Printf("b: %x, %x\n", ik, ln.key)
-		cmp := bytes.Compare(ln.key, seek)
-		switch cmp {
-		case 1: // key > ik
-			maxD = ln.d
-		case -1: // key < ik
-			minD = ln.d
-		case 0:
-			if a.trace {
-				fmt.Printf("found key %x v=%x naccess_ram=%d\n", seek, ln.val /*level[m].d,*/, a.naccess)
-			}
-			return ln.key, ln.d, true, nil
-		}
-
-		if lm >= 0 {
-			minD = a.nodes[l][lm].d
-			L = level[lm].fc
-		} else if l+1 != len(a.nodes) {
-			L = a.seekLeast(uint64(l+1), minD)
-			if L == uint64(len(a.nodes[l+1])) {
-				L--
-			}
-		}
-		if rm >= 0 {
-			maxD = a.nodes[l][rm].d
-			R = level[rm].fc
-		} else if l+1 != len(a.nodes) {
-			R = a.seekLeast(uint64(l+1), maxD)
-			if R == uint64(len(a.nodes[l+1])) {
-				R--
-			}
-		}
-
-		if maxD-minD <= a.M+2 {
-			break
-		}
-
-		if a.trace {
-			fmt.Printf("range={%x d=%d p=%d} (%d, %d) L=%d naccess_ram=%d\n", ln.key, ln.d, ln.p, minD, maxD, l, a.naccess)
-		}
-	}
-
-	a.naccess = 0 // reset count before actually go to disk
-	if maxD-minD > a.M+2 {
-		log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K, "key", fmt.Sprintf("%x", seek))
-		//return nil, nil, 0, fmt.Errorf("too big binary search: minD=%d, maxD=%d, keysCount=%d, key=%x", minD, maxD, a.K, ik)
-	}
-	k, di, found, err = a.bsKey(seek, minD, maxD, g)
-	if err != nil {
-		if a.trace {
-			fmt.Printf("key %x not found\n", seek)
-		}
-		return nil, 0, false, err
-	}
-	return k, di, found, nil
-}
-
-func (a *btAlloc) WarmUp(gr *seg.Reader) error {
-	a.traverseDfs()
-
-	for i, n := range a.nodes {
-		if a.trace {
-			fmt.Printf("D%d |%d| ", i, len(n))
-		}
-		for j, s := range n {
-			if a.trace {
-				fmt.Printf("%d ", s.d)
-			}
-			if s.d >= a.K {
-				break
-			}
-
-			kb, v, _, err := a.dataLookup(s.d, gr)
-			if err != nil {
-				fmt.Printf("d %d not found %v\n", s.d, err)
-			}
-			a.nodes[i][j].key = kb
-			a.nodes[i][j].val = v
-		}
-		if a.trace {
-			fmt.Printf("\n")
-		}
-	}
 	return nil
 }
 
@@ -763,9 +321,7 @@ type BtIndex struct {
 	data     []byte
 	ef       *eliasfano32.EliasFano
 	file     *os.File
-	alloc    *btAlloc // pointless?
 	bplus    *BpsTree
-	useBplus bool
 	size     int64
 	modTime  time.Time
 	filePath string
@@ -773,8 +329,8 @@ type BtIndex struct {
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed seg.FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger, noFsync)
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed seg.FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors Accessors) (*BtIndex, error) {
+	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger, noFsync, accessors)
 	if err != nil {
 		return nil, err
 	}
@@ -796,20 +352,24 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 	return kv, bt, nil
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors Accessors) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
-	defer kv.EnableReadAhead().DisableReadAhead()
+	defer kv.MadvSequential().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
-	bloom, err := NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
-	if err != nil {
-		return err
-	}
-	if noFsync {
-		bloom.DisableFsync()
+	var bloom *existence.Filter
+	if accessors.Has(AccessorExistence) {
+		var err error
+		bloom, err = existence.NewFilter(uint64(kv.Count()/2), bloomPath)
+		if err != nil {
+			return err
+		}
+		if noFsync {
+			bloom.DisableFsync()
+		}
 	}
 
 	args := BtIndexWriterArgs{
@@ -843,7 +403,9 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 			return err
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
-		bloom.AddHash(hi)
+		if bloom != nil {
+			bloom.AddHash(hi)
+		}
 		pos, _ = getter.Skip()
 
 		p.Processed.Add(1)
@@ -863,10 +425,11 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 
 // For now, M is not stored inside index file.
 func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress seg.FileCompression) (bt *BtIndex, err error) {
-	var validationPassed = false
 	idx := &BtIndex{
 		filePath: indexPath,
 	}
+
+	var validationPassed bool
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if r := recover(); r != nil {
@@ -911,31 +474,20 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
-	defer kv.EnableMadvNormal().DisableReadAhead()
+	defer kv.MadvNormal().DisableReadAhead()
 	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
 
-	idx.useBplus = true
-
-	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
-	switch idx.useBplus {
-	case true:
-		if len(idx.data[pos:]) == 0 {
-			idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
-			idx.bplus.cursorGetter = idx.newCursor
-			// fallback for files without nodes encoded
-		} else {
-			nodes, err := decodeListNodes(idx.data[pos:])
-			if err != nil {
-				return nil, err
-			}
-			idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
-			idx.bplus.cursorGetter = idx.newCursor
+	if len(idx.data[pos:]) == 0 {
+		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
+		idx.bplus.cursorGetter = idx.newCursor
+		// fallback for files without nodes encoded
+	} else {
+		nodes, err := decodeListNodes(idx.data[pos:])
+		if err != nil {
+			return nil, err
 		}
-	default:
-		idx.alloc = newBtAlloc(idx.ef.Count(), M, false, idx.dataLookup, idx.keyCmp)
-		if idx.alloc != nil {
-			idx.alloc.WarmUp(kvGetter)
-		}
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
+		idx.bplus.cursorGetter = idx.newCursor
 	}
 
 	validationPassed = true
@@ -1049,47 +601,23 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 		return k, v, 0, false, nil
 	}
 
-	var index uint64
 	// defer func() {
 	// 	fmt.Printf("[Bindex][%s] Get (%t) '%x' -> '%x' di=%d err %v\n", b.FileName(), found, lookup, v, index, err)
 	// }()
-	if b.useBplus {
-		if b.bplus == nil {
-			panic(fmt.Errorf("Get: `b.bplus` is nil: %s", gr.FileName()))
-		}
-		// weak assumption that k will be ignored and used lookup instead.
-		// since fetching k and v from data file is required to use Getter.
-		// Why to do Getter.Reset twice when we can get kv right there.
-
-		v, found, offsetInFile, err = b.bplus.Get(gr, lookup)
-		if err != nil {
-			if errors.Is(err, ErrBtIndexLookupBounds) {
-				return k, v, offsetInFile, false, nil
-			}
-			return lookup, v, offsetInFile, false, err
-		}
-		return lookup, v, offsetInFile, found, nil
-	} else {
-		if b.alloc == nil {
-			return k, v, 0, false, err
-		}
-		k, found, index, err = b.alloc.Get(gr, lookup)
+	if b.bplus == nil {
+		panic(fmt.Errorf("Get: `b.bplus` is nil: %s", gr.FileName()))
 	}
-	if err != nil || !found {
-		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return k, v, offsetInFile, false, nil
-		}
-		return nil, nil, 0, false, err
-	}
-
-	k, v, offsetInFile, err = b.dataLookup(index, gr)
+	// weak assumption that k will be ignored and used lookup instead.
+	// since fetching k and v from data file is required to use Getter.
+	// Why to do Getter.Reset twice when we can get kv right there.
+	v, found, offsetInFile, err = b.bplus.Get(gr, lookup)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return k, v, offsetInFile, false, nil
 		}
-		return k, v, offsetInFile, false, err
+		return lookup, v, offsetInFile, false, err
 	}
-	return k, v, offsetInFile, true, nil
+	return lookup, v, offsetInFile, found, nil
 }
 
 // Seek moves cursor to position where key >= x.
@@ -1102,34 +630,17 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
-	if b.useBplus {
-		c, err := b.bplus.Seek(g, x)
-		if err != nil || c == nil {
-			if errors.Is(err, ErrBtIndexLookupBounds) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		return c, nil
-	}
-	_, dt, found, err := b.alloc.Seek(g, x)
-	if err != nil || !found {
+	c, err := b.bplus.Seek(g, x)
+	if err != nil || c == nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
 		}
 		return nil, err
 	}
-
-	k, v, _, err := b.dataLookup(dt, g)
-	if err != nil {
-		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return b.newCursor(k, v, dt, g), nil
+	return c, nil
 }
 
+// OrdinalLookup returns cursor for key at position i
 func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 	k, v, _, err := b.dataLookup(i, getter)
 	if err != nil {
@@ -1137,5 +648,6 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 	}
 	return b.newCursor(k, v, i, getter)
 }
+
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }

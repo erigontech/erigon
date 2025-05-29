@@ -14,39 +14,27 @@ integration stage_senders
 integration stage_exec
 integration stage_exec --block=1_000_000 # stop at 1M block
 integration stage_exec --sync.mode.chaintip # every block: `ComputeCommitment`, `rwtx.Commit()`, write diffs/changesets
-integration stage_hash_state
-integration stage_trie
-integration stage_history
-integration stage_tx_lookup
 
 # Unwind single stage 10 blocks backward
 integration stage_exec --unwind=10
 
 # Drop data of single stage
 integration stage_exec --reset
-integration stage_history --reset
 
 # Unwind single stage N blocks backward
 integration stage_exec --unwind=N
-integration stage_history --unwind=N
 
 # Run stage prune to block N
 integration stage_exec --prune.to=N
-integration stage_history --prune.to=N
 
-# Reset stage_headers
+# To remove all blocks (together with bodies/txs) from db 
 integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
 
 # Exec blocks, but don't commit changes (loose them)
 integration stage_exec --no-commit
-...
 
 # Run txn replay with domains [requires 6th stage to be done before run]
-integration state_domains --chain sepolia --last-step=4 # stop replay when 4th step is merged
 integration read_domains --chain sepolia account <addr> <addr> ... # read values for given accounts
-
-# hack which allows to force clear unwind stack of all stages
-clear_unwind_stack
 ```
 
 ## For testing run all stages in "N blocks forward M blocks re-org" loop
@@ -73,16 +61,15 @@ For example:
 --chaindata.reference # When finish all cycles, does comparison to this db file.
 ```
 
-## "Wrong trie root" problem - temporary solution
+## How to unwind node
 
-```
-make all
-./build/bin/integration stage_hash_state --datadir=<datadir> --reset
-./build/bin/integration stage_trie --datadir=<datadir> --reset
-# Then run TurobGeth as usually. It will take 2-3 hours to re-calculate dropped db tables
-```
+In Erigon3 - better do `rm -rf chaindata` (for bor maybe also need remove `polygon-bridge`, `bor`, `heimdall` folders
+until https://github.com/erigontech/erigon/issues/13674 is fixed)
 
 ## Copy data to another db
+
+In Erigon3 - better do `rm -rf chaindata` (for bor maybe also need remove `polygon-bridge`, `bor`, `heimdall` folders
+until https://github.com/erigontech/erigon/issues/13674 is fixed)
 
 ```
 0. You will need 2x disk space (can be different disks).
@@ -122,4 +109,38 @@ It allows to process this blocks again
 
 ```
 1. ./build/bin/integration clear_bad_blocks --datadir=<datadir>
+```
+
+# FAQ
+
+## How to re-exec all blocks
+
+```cgo
+# Option 1 (on empty datadir):
+erigon --snap.skip-state-snapshot-download
+
+# Option 2 (on synced datadir):
+erigon seg rm-all-state-snapshots
+integration stage_exec --reset
+integration stage_exec 
+
+# Option 2 is good 
+```
+
+## How to re-generate some Domain/Index
+
+```cgo
+# By parallel executing blocks on existing historical state. Can be 1 or many domains:
+erigon seg rm-state-snapshots --domain=rcache,logtopics,logaddrs,tracesfrom,tracesto
+integration stage_custom_trace --domain=rcache,logindex,traceindex --reset
+integration stage_custom_trace --domain=rcache,logindex,traceindex
+```
+
+## How to re-gen bor checkpoints
+
+```cgo
+rm -rf datadir/heimdall
+rm -rf datadir/snapshots/*borch*
+# Start erigon, it will gen. Then:
+erigon seg integrity --datadir /erigon-data/ --check=BorCheckpoints
 ```

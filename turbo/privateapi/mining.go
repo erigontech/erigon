@@ -22,18 +22,16 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 )
 
 // MiningAPIVersion
@@ -80,7 +78,7 @@ func (s *MiningServer) SubmitWork(_ context.Context, req *proto_txpool.SubmitWor
 	}
 	var nonce types.BlockNonce
 	copy(nonce[:], req.BlockNonce)
-	ok := s.ethash.SubmitWork(nonce, libcommon.BytesToHash(req.PowHash), libcommon.BytesToHash(req.Digest))
+	ok := s.ethash.SubmitWork(nonce, common.BytesToHash(req.PowHash), common.BytesToHash(req.Digest))
 	return &proto_txpool.SubmitWorkReply{Ok: ok}, nil
 }
 
@@ -88,7 +86,7 @@ func (s *MiningServer) SubmitHashRate(_ context.Context, req *proto_txpool.Submi
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
-	ok := s.ethash.SubmitHashRate(hexutil.Uint64(req.Rate), libcommon.BytesToHash(req.Id))
+	ok := s.ethash.SubmitHashRate(hexutil.Uint64(req.Rate), common.BytesToHash(req.Id))
 	return &proto_txpool.SubmitHashRateReply{Ok: ok}, nil
 }
 

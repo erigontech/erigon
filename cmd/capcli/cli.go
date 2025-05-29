@@ -35,9 +35,9 @@ import (
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
@@ -194,7 +194,7 @@ type ChainEndpoint struct {
 	outputFolder
 }
 
-func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
+func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *common.Hash) (*cltypes.SignedBeaconBlock, error) {
 	log.Debug("[Checkpoint Sync] Requesting beacon block", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
@@ -283,7 +283,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	log.Info("Starting with", "root", libcommon.Hash(currentRoot), "slot", currentBlock.Block.Slot)
+	log.Info("Starting with", "root", common.Hash(currentRoot), "slot", currentBlock.Block.Slot)
 	currentRoot = currentBlock.Block.ParentRoot
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 		return err
@@ -303,9 +303,9 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		}
 		defer tx.Rollback()
 
-		stringifiedRoot := libcommon.Bytes2Hex(currentRoot[:])
+		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
-		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
+		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*common.Hash)(&currentRoot))
 		if err != nil {
 			return false, fmt.Errorf("failed to retrieve block: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot))
 		}
@@ -620,7 +620,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
+	log.Info("Got state", "slot", haveState.Slot(), "root", common.Hash(hRoot), "elapsed", endTime)
 
 	if err := haveState.InitBeaconState(); err != nil {
 		return err
@@ -695,7 +695,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 				log.Error("WithdrawableEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).WithdrawableEpoch(), "want", wantState.ValidatorSet().Get(i).WithdrawableEpoch())
 			}
 		}
-		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
+		return fmt.Errorf("state mismatch: got %s, want %s", common.Hash(hRoot), common.Hash(wRoot))
 	}
 	return nil
 }
@@ -740,31 +740,31 @@ func getHead(beaconApiURL string) (uint64, error) {
 	return slot, nil
 }
 
-func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error) {
+func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
 	response := map[string]interface{}{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return libcommon.Hash{}, nil
+		return common.Hash{}, nil
 	}
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	data := response["data"].(map[string]interface{})
 	if len(data) == 0 {
-		return libcommon.Hash{}, errors.New("no head found")
+		return common.Hash{}, errors.New("no head found")
 	}
 	rootStr := data["root"].(string)
 
-	return libcommon.HexToHash(rootStr), nil
+	return common.HexToHash(rootStr), nil
 }
 
 func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
@@ -821,7 +821,7 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		if stateRoot == (libcommon.Hash{}) {
+		if stateRoot == (common.Hash{}) {
 			continue
 		}
 		state, err := getBeaconState(ctx, beaconConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i), i)
@@ -1221,7 +1221,7 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if blockRoot == (common.Hash{}) {
 			continue
 		}
 		if err := blobStore.WriteBlobSidecars(ctx, blockRoot, sds); err != nil {

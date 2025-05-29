@@ -30,26 +30,27 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
+	debugtracer "github.com/erigontech/erigon/eth/tracers/debug"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/tests"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // prestateTrace is the result of a prestateTrace run.
-type prestateTrace = map[libcommon.Address]*account
+type prestateTrace = map[common.Address]*account
 
 type account struct {
-	Balance string                            `json:"balance"`
-	Code    string                            `json:"code"`
-	Nonce   uint64                            `json:"nonce"`
-	Storage map[libcommon.Hash]libcommon.Hash `json:"storage"`
+	Balance string                      `json:"balance"`
+	Code    string                      `json:"code"`
+	Nonce   uint64                      `json:"nonce"`
+	Storage map[common.Hash]common.Hash `json:"storage"`
 }
 
 // testcase defines a single test to check the stateDiff tracer against.
@@ -95,7 +96,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(libcommon.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
@@ -115,7 +116,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
+			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
@@ -123,6 +124,28 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
+			}
+			if outputDir, ok := os.LookupEnv("PRESTATE_TRACER_TEST_DEBUG_TRACER_OUTPUT_DIR"); ok {
+				recordOptions := debugtracer.RecordOptions{
+					DisableOnOpcodeMemoryRecording:    true,
+					DisableOnOpcodeStackRecording:     true,
+					DisableOnBlockchainInitRecording:  true,
+					DisableOnBlockStartRecording:      true,
+					DisableOnBlockEndRecording:        true,
+					DisableOnGenesisBlockRecording:    true,
+					DisableOnSystemCallStartRecording: true,
+					DisableOnSystemCallEndRecording:   true,
+					DisableOnBalanceChangeRecording:   true,
+					DisableOnNonceChangeRecording:     true,
+					DisableOnStorageChangeRecording:   true,
+					DisableOnLogRecording:             true,
+				}
+				tracer = debugtracer.New(
+					outputDir,
+					debugtracer.WithWrappedTracer(tracer),
+					debugtracer.WithRecordOptions(recordOptions),
+					debugtracer.WithFlushMode(debugtracer.FlushModeTxn),
+				)
 			}
 			statedb.SetHooks(tracer.Hooks)
 			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
@@ -137,7 +160,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
-			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.UsedGas}, nil)
+			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.GasUsed}, nil)
 			// Retrieve the trace result and compare against the expected
 			res, err := tracer.GetResult()
 			if err != nil {

@@ -19,15 +19,15 @@ package heimdall
 import (
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
 )
 
 func TestSpanJsonMarshall(t *testing.T) {
 	validators := []*valset.Validator{
-		valset.NewValidator(libcommon.HexToAddress("deadbeef"), 1),
-		valset.NewValidator(libcommon.HexToAddress("cafebabe"), 2),
+		valset.NewValidator(common.HexToAddress("deadbeef"), 1),
+		valset.NewValidator(common.HexToAddress("cafebabe"), 2),
 	}
 
 	validatorSet := valset.ValidatorSet{

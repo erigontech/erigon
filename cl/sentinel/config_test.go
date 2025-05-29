@@ -60,7 +60,7 @@ func TestConvertToCryptoPrivkey(t *testing.T) {
 		require.NoError(t, err)
 
 		rawString := fmt.Sprintf("%x", raw)
-		require.EqualValues(t, rawString, testCase.expected)
+		require.EqualValues(t, testCase.expected, rawString)
 	}
 }
 
@@ -99,6 +99,6 @@ func TestMultiAddressBuilder(t *testing.T) {
 			continue
 		}
 		require.NoError(t, err)
-		require.EqualValues(t, testCase.expected, multiAddr.String())
+		require.Equal(t, testCase.expected, multiAddr.String())
 	}
 }

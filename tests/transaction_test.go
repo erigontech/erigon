@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
@@ -28,6 +26,10 @@ import (
 )
 
 func TestTransaction(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	txt := new(testMatcher)
 
 	// We don't allow more than uint64 in gas amount

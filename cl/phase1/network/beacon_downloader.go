@@ -17,6 +17,7 @@
 package network
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
 )
 
 // Input: the currently highest slot processed and the list of blocks we want to know process
@@ -111,7 +113,11 @@ Loop:
 				// this is so we do not get stuck on a side-fork
 				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
 				if err != nil {
-					log.Debug("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
+					if errors.Is(err, peers.ErrNoPeers) {
+						log.Trace("No peers available for beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
+					} else {
+						log.Debug("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
+					}
 					return
 				}
 				if responses == nil {

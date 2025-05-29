@@ -39,7 +39,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v29.4/protoc-29.4-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
@@ -60,7 +60,7 @@ protoc-clean:
 	rm -f "$(GOBIN)/protoc"*
 	rm -rf "$(PROTOC_INCLUDE)"
 
-grpc: protoc-all
+grpc: protoc-clean protoc-all
 	go mod vendor
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
 		--go_opt=Mtypes/types.proto=./typesproto \
@@ -110,7 +110,7 @@ lint-deps: lintci-deps
 lint: lintci lint-mod-tidy
 
 test:
-	$(GOTEST) --count 1 -p 2 -coverprofile=coverage.out ./...
+	$(GOTEST_NOFUZZ) -short -coverprofile=coverage-test.out ./...
 
-test-no-fuzz:
-	$(GOTEST_NOFUZZ) --count 1 -p 2 ./...
+test-all:
+	$(GOTEST) -coverprofile=coverage-test-all.out -race ./...

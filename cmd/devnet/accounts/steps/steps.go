@@ -22,17 +22,16 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/cmd/devnet/transactions"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func init() {
@@ -213,7 +212,7 @@ func GetBalance(ctx context.Context, accountName string, blockNum rpc.BlockNumbe
 	return bal.Uint64(), nil
 }
 
-func GetNonce(ctx context.Context, address libcommon.Address) (uint64, error) {
+func GetNonce(ctx context.Context, address common.Address) (uint64, error) {
 	node := devnet.CurrentNode(ctx)
 
 	if node == nil {

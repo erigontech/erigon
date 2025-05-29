@@ -5,9 +5,9 @@ env:
   APPLICATION: "erigon"
   APPLICATION_VERSION: "Erigon3"
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
-  TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
+  TEST_TOTAL_TIME_SECONDS: 172800  # 2 days
   TEST_CHAIN: "mainnet"
-  BUILDER_IMAGE: "golang:1.23-bookworm"
+  BUILDER_IMAGE: "golang:1.24-bookworm"
   DOCKER_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
@@ -206,7 +206,7 @@ jobs:
     name: test on ${{ matrix.id }}
     if: ${{ ! inputs.skip_tests }}
     runs-on: [ self-hosted, qa, Release, "${{ matrix.runner-arch }}" ]
-    timeout-minutes: 7200  # 5 days
+    timeout-minutes: 2800  # nearly 2 days
     needs: [ build-release ]
     strategy:
       matrix:
@@ -249,7 +249,7 @@ jobs:
           ref: main
           path: erigon-qa
 
-      - name: Checkout QA Tests Repository & Install Requirements
+      - name: Run QA Tests
         run: |
           cd ./erigon-qa/test_system
           pwd
@@ -272,7 +272,7 @@ jobs:
           # Capture monitoring script exit status
           test_exit_status=$?
           # Save the subsection reached status
-          echo "::set-output name=test_executed::true"
+          echo "test_executed=true" >> "$GITHUB_OUTPUT"
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "Tests completed successfully"

@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -295,6 +296,10 @@ func splitDataset(in TxnSlots) (TxnSlots, TxnSlots, TxnSlots, TxnSlots) {
 }
 
 func FuzzOnNewBlocks(f *testing.F) {
+	if testing.Short() {
+		f.Skip()
+	}
+
 	var u64 = [1 * 4]byte{1}
 	var senderAddr = [1 + 1 + 1]byte{1}
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(12))
@@ -319,12 +324,12 @@ func FuzzOnNewBlocks(f *testing.F) {
 		var prevHashes Hashes
 		ch := make(chan Announcements, 100)
 
-		coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+		coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 		db := memdb.NewTestPoolDB(t)
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
 
 		err = pool.start(ctx)
@@ -412,14 +417,14 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 			// all txns in side data structures must be in some queue
 			for _, txn := range pool.byHash {
-				require.True(txn.bestIndex >= 0, msg)
-				assert.True(txn.worstIndex >= 0, msg)
+				require.GreaterOrEqual(txn.bestIndex, 0, msg)
+				assert.GreaterOrEqual(txn.worstIndex, 0, msg)
 			}
 			for id := range senders {
 				//assert.True(senders[i].all.Len() > 0)
 				pool.all.ascend(id, func(mt *metaTxn) bool {
-					require.True(mt.worstIndex >= 0, msg)
-					assert.True(mt.bestIndex >= 0, msg)
+					require.GreaterOrEqual(mt.worstIndex, 0, msg)
+					assert.GreaterOrEqual(mt.bestIndex, 0, msg)
 					return true
 				})
 			}
@@ -442,7 +447,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify := func(unwindTxns, minedTxns TxnSlots, msg string) {
 			select {
 			case newAnnouncements := <-ch:
-				assert.Greater(newAnnouncements.Len(), 0)
+				assert.Positive(newAnnouncements.Len())
 				for i := 0; i < newAnnouncements.Len(); i++ {
 					_, _, newHash := newAnnouncements.At(i)
 					for j := range unwindTxns.Txns {
@@ -550,11 +555,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxnSlots{}, "after_flush")
 		checkNotify(p2pReceived, TxnSlots{}, "after_flush")
 
-		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted
-		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })
+		err = coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error { return p2.fromDB(ctx, tx, coreTx) })
 		require.NoError(err)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.TxnSlot.Rlp)

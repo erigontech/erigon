@@ -29,10 +29,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 var defaultBorConfig = borcfg.BorConfig{
@@ -171,7 +171,7 @@ func TestService(t *testing.T) {
 
 	res, err := b.Events(ctx, 2)
 	require.NoError(t, err)
-	require.Len(t, res, 0)
+	require.Empty(t, res)
 
 	res, err = b.Events(ctx, 4)
 	require.NoError(t, err)
@@ -191,16 +191,16 @@ func TestService(t *testing.T) {
 
 	// get non-sprint block
 	res, err = b.Events(ctx, 1)
-	require.Equal(t, len(res), 0)
+	require.Empty(t, res)
 	require.NoError(t, err)
 
 	res, err = b.Events(ctx, 3)
-	require.Equal(t, len(res), 0)
+	require.Empty(t, res)
 	require.NoError(t, err)
 
 	// check block 0
 	res, err = b.Events(ctx, 0)
-	require.Equal(t, len(res), 0)
+	require.Empty(t, res)
 	require.NoError(t, err)
 
 	cancel()
@@ -299,10 +299,10 @@ func TestService_Unwind(t *testing.T) {
 	require.Len(t, res, 2)
 	res, err = b.Events(ctx, 6)
 	require.NoError(t, err)
-	require.Len(t, res, 0)
+	require.Empty(t, res)
 	res, err = b.Events(ctx, 10)
 	require.NoError(t, err)
-	require.Len(t, res, 0)
+	require.Empty(t, res)
 
 	cancel()
 	wg.Wait()
@@ -421,7 +421,7 @@ func TestService_ProcessNewBlocksWithZeroOverride(t *testing.T) {
 
 	res, err := b.Events(ctx, 4) // both event1 and event2 are in block 6
 	require.NoError(t, err)
-	require.Len(t, res, 0)
+	require.Empty(t, res)
 
 	res, err = b.Events(ctx, 6)
 	require.NoError(t, err)
@@ -430,6 +430,110 @@ func TestService_ProcessNewBlocksWithZeroOverride(t *testing.T) {
 	res, err = b.Events(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, res, 1)
+
+	cancel()
+	wg.Wait()
+}
+
+func TestReaderEventsWithinTime(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	heimdallClient, b := setup(t, defaultBorConfig)
+	event1 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      1,
+			ChainID: "80002",
+			Data:    hexutil.MustDecode("0x01"),
+		},
+		Time: time.Unix(50, 0),
+	}
+	event1Data, err := event1.MarshallBytes()
+	require.NoError(t, err)
+	event2 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      2,
+			ChainID: "80002",
+			Data:    hexutil.MustDecode("0x02"),
+		},
+		Time: time.Unix(99, 0),
+	}
+	event2Data, err := event2.MarshallBytes()
+	require.NoError(t, err)
+	event3 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      3,
+			ChainID: "80002",
+			Data:    hexutil.MustDecode("0x03"),
+		},
+		Time: time.Unix(199, 0),
+	}
+	event3Data, err := event3.MarshallBytes()
+	require.NoError(t, err)
+	event4 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      4,
+			ChainID: "80002",
+			Data:    hexutil.MustDecode("0x04"),
+		},
+		Time: time.Unix(498, 0),
+	}
+
+	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4}
+
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func(bridge *Service) {
+		defer wg.Done()
+
+		err := bridge.Run(ctx)
+		if err != nil {
+			if !errors.Is(err, ctx.Err()) {
+				t.Error(err)
+			}
+
+			return
+		}
+	}(b)
+
+	err = b.store.Prepare(ctx)
+	require.NoError(t, err)
+
+	replayBlockNum, replayNeeded, err := b.InitialBlockReplayNeeded(ctx)
+	require.NoError(t, err)
+	require.True(t, replayNeeded)
+	require.Equal(t, uint64(0), replayBlockNum)
+
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: big.NewInt(0)})
+	err = b.ReplayInitialBlock(ctx, genesis)
+	require.NoError(t, err)
+
+	blocks := getBlocks(t, 10)
+	err = b.ProcessNewBlocks(ctx, blocks)
+	require.NoError(t, err)
+
+	res, err := b.EventsWithinTime(ctx, time.Unix(1, 0), time.Unix(500, 0))
+	require.NoError(t, err)
+	require.Len(t, res, 4)
+
+	res, err = b.EventsWithinTime(ctx, time.Unix(50, 0), time.Unix(100, 0))
+	require.NoError(t, err)
+	require.Len(t, res, 2)                      // have first two events
+	require.Equal(t, event1Data, res[0].Data()) // check data fields
+	require.Equal(t, event2Data, res[1].Data())
+
+	res, err = b.EventsWithinTime(ctx, time.Unix(199, 0), time.Unix(498, 0))
+	require.NoError(t, err)
+	require.Len(t, res, 1)                      // have third event but not fourth because [A, B) does not include B
+	require.Equal(t, event3Data, res[0].Data()) // check data fields
+
+	res, err = b.EventsWithinTime(ctx, time.Unix(500, 0), time.Unix(600, 0))
+	require.Empty(t, res)
+	require.NoError(t, err)
 
 	cancel()
 	wg.Wait()

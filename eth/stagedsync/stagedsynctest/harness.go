@@ -31,30 +31,28 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/kv/order"
-
+	"github.com/erigontech/erigon-db/interfaces"
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
@@ -67,26 +65,8 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockClient(ctrl)
 	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
-	bridgeStore := bridge.NewDbStore(m.DB)
-	heimdallStore := heimdall.NewDbStore(m.DB)
 
-	bhCfg := stagedsync.StageBorHeimdallCfg(
-		chainDataDB,
-		borConsensusDB,
-		miningState,
-		*cfg.ChainConfig,
-		heimdallClient,
-		heimdallStore,
-		bridgeStore,
-		blockReader,
-		nil, // headerDownloader
-		nil, // penalize
-		nil, // recent bor snapshots cached
-		nil, // signatures
-		false,
-		nil,
-	)
-	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, bhCfg, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
+	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
 	stateSync := stagedsync.New(
 		ethconfig.Defaults.Sync,
 		stateSyncStages,
@@ -98,7 +78,6 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	miningSyncStages := stagedsync.MiningStages(
 		ctx,
 		stagedsync.MiningCreateBlockCfg{},
-		bhCfg,
 		stagedsync.ExecuteBlockCfg{},
 		stagedsync.SendersCfg{},
 		stagedsync.MiningExecCfg{},
@@ -128,7 +107,6 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		miningSyncStages:          miningSyncStages,
 		miningSync:                miningSync,
 		miningState:               miningState,
-		bhCfg:                     bhCfg,
 		heimdallClient:            heimdallClient,
 		heimdallProducersOverride: cfg.GetOrCreateDefaultHeimdallProducersOverride(),
 		sealedHeaders:             make(map[uint64]*types.Header),
@@ -152,8 +130,8 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 type genesisInitData struct {
 	genesis                 *types.Genesis
 	genesisAllocPrivateKey  *ecdsa.PrivateKey
-	genesisAllocPrivateKeys map[libcommon.Address]*ecdsa.PrivateKey
-	fundedAddresses         []libcommon.Address
+	genesisAllocPrivateKeys map[common.Address]*ecdsa.PrivateKey
+	fundedAddresses         []common.Address
 }
 
 type HarnessCfg struct {
@@ -173,17 +151,16 @@ func (hc *HarnessCfg) GetOrCreateDefaultHeimdallProducersOverride() map[uint64][
 
 type Harness struct {
 	logger                     log.Logger
-	chainDataDB                kv.RwDB
+	chainDataDB                kv.TemporalRwDB
 	borConsensusDB             kv.RwDB
 	chainConfig                *chain.Config
 	borConfig                  *borcfg.BorConfig
-	blockReader                services.BlockReader
+	blockReader                interfaces.BlockReader
 	stateSyncStages            []*stagedsync.Stage
 	stateSync                  *stagedsync.Sync
 	miningSyncStages           []*stagedsync.Stage
 	miningSync                 *stagedsync.Sync
 	miningState                stagedsync.MiningState
-	bhCfg                      stagedsync.BorHeimdallCfg
 	heimdallClient             *heimdall.MockClient
 	heimdallNextMockSpan       *heimdall.Span
 	heimdallLastEventID        uint64
@@ -191,7 +168,7 @@ type Harness struct {
 	heimdallProducersOverride  map[uint64][]valset.Validator // spanID -> selected producers override
 	sealedHeaders              map[uint64]*types.Header
 	borSpanner                 *bor.MockSpanner
-	validatorAddress           libcommon.Address
+	validatorAddress           common.Address
 	validatorKey               *ecdsa.PrivateKey
 	genesisInitData            *genesisInitData
 }
@@ -238,11 +215,11 @@ func (h *Harness) RunStateSyncStageForward(t *testing.T, id stages.SyncStage) {
 }
 
 func (h *Harness) RunStateSyncStageForwardWithErrorIs(t *testing.T, id stages.SyncStage, wantErr error) {
-	h.runSyncStageForwardWithErrorIs(t, id, h.stateSync, h.stateSyncStages, wantErr, wrap.TxContainer{})
+	h.runSyncStageForwardWithErrorIs(t, id, h.stateSync, h.stateSyncStages, wantErr, wrap.NewTxContainer(nil, nil))
 }
 
 func (h *Harness) RunStateStageForwardWithReturnError(t *testing.T, id stages.SyncStage) error {
-	return h.runSyncStageForwardWithReturnError(t, id, h.stateSync, h.stateSyncStages, wrap.TxContainer{})
+	return h.runSyncStageForwardWithReturnError(t, id, h.stateSync, h.stateSyncStages, wrap.NewTxContainer(nil, nil))
 }
 
 func (h *Harness) RunMiningStageForward(ctx context.Context, t *testing.T, id stages.SyncStage) {
@@ -254,7 +231,7 @@ func (h *Harness) RunMiningStageForwardWithErrorIs(ctx context.Context, t *testi
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 	h.runSyncStageForwardWithErrorIs(t, id, h.miningSync, h.miningSyncStages, wantErr, txc)
 
 	err = tx.Commit()
@@ -266,7 +243,7 @@ func (h *Harness) RunMiningStageForwardWithReturnError(ctx context.Context, t *t
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 	err = h.runSyncStageForwardWithReturnError(t, id, h.miningSync, h.miningSyncStages, txc)
 	if err != nil {
 		return err
@@ -290,8 +267,7 @@ func (h *Harness) SetMiningBlockEmptyHeader(ctx context.Context, t *testing.T, p
 	require.NotNil(t, parent)
 
 	timestamp := uint64(time.Now().Unix())
-	gasLimit := &h.miningState.MiningConfig.GasLimit
-	h.miningState.MiningBlock.Header = core.MakeEmptyHeader(parent, h.chainConfig, timestamp, gasLimit)
+	h.miningState.MiningBlock.Header = core.MakeEmptyHeader(parent, h.chainConfig, timestamp, h.miningState.MiningConfig.GasLimit)
 }
 
 func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, err error) {
@@ -411,10 +387,10 @@ func createGenesisInitData(t *testing.T, chainConfig *chain.Config) *genesisInit
 				},
 			},
 		},
-		genesisAllocPrivateKeys: map[libcommon.Address]*ecdsa.PrivateKey{
+		genesisAllocPrivateKeys: map[common.Address]*ecdsa.PrivateKey{
 			accountAddress: accountPrivateKey,
 		},
-		fundedAddresses: []libcommon.Address{
+		fundedAddresses: []common.Address{
 			accountAddress,
 		},
 	}
@@ -523,7 +499,7 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 			nil,
 		)
 
-		borConsensusEng.Authorize(h.validatorAddress, func(_ libcommon.Address, _ string, msg []byte) ([]byte, error) {
+		borConsensusEng.Authorize(h.validatorAddress, func(_ common.Address, _ string, msg []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(msg), h.validatorKey)
 		})
 
@@ -556,7 +532,7 @@ func (h *Harness) mockChainHeaderReader(ctrl *gomock.Controller) consensus.Chain
 	mockChainHR.
 		EXPECT().
 		GetHeader(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ libcommon.Hash, number uint64) *types.Header {
+		DoAndReturn(func(_ common.Hash, number uint64) *types.Header {
 			return h.sealedHeaders[number]
 		}).
 		AnyTimes()

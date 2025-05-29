@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
@@ -27,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	accounts_steps "github.com/erigontech/erigon/cmd/devnet/accounts/steps"
 	contracts_steps "github.com/erigontech/erigon/cmd/devnet/contracts/steps"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func TestStateSync(t *testing.T) {
@@ -60,13 +58,13 @@ func TestStateSync(t *testing.T) {
 		require.NoError(t, err)
 	})
 	t.Run("GenerateSyncEvents", func(t *testing.T) {
-		require.Nil(t, contracts_steps.GenerateSyncEvents(ctx, "root-funder", 10, 2, 2))
+		require.NoError(t, contracts_steps.GenerateSyncEvents(ctx, "root-funder", 10, 2, 2))
 	})
 	t.Run("ProcessRootTransfers", func(t *testing.T) {
-		require.Nil(t, contracts_steps.ProcessRootTransfers(ctx, "root-funder", 10, 2, 2))
+		require.NoError(t, contracts_steps.ProcessRootTransfers(ctx, "root-funder", 10, 2, 2))
 	})
 	t.Run("BatchProcessRootTransfers", func(t *testing.T) {
-		require.Nil(t, contracts_steps.BatchProcessRootTransfers(ctx, "root-funder", 1, 10, 2, 2))
+		require.NoError(t, contracts_steps.BatchProcessRootTransfers(ctx, "root-funder", 1, 10, 2, 2))
 	})
 }
 
@@ -96,7 +94,7 @@ func TestChildChainExit(t *testing.T) {
 		require.NoError(t, err)
 	})
 	t.Run("ProcessChildTransfers", func(t *testing.T) {
-		require.Nil(t, contracts_steps.ProcessChildTransfers(ctx, "child-funder", 1, 2, 2))
+		require.NoError(t, contracts_steps.ProcessChildTransfers(ctx, "child-funder", 1, 2, 2))
 	})
 	//t.Run("BatchProcessTransfers", func(t *testing.T) {
 	//	require.Nil(t, contracts_steps.BatchProcessTransfers(ctx, "child-funder", 1, 10, 2, 2))

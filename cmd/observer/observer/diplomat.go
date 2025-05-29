@@ -23,9 +23,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon/cmd/observer/database"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/enode"
 )
 
 type Diplomat struct {
@@ -132,11 +132,7 @@ func (diplomat *Diplomat) NextRetryDelay(handshakeErr *HandshakeError) time.Dura
 	}
 
 	backOffDelay := 2 * lastErrors[0].Time.Sub(lastErrors[1].Time)
-	if backOffDelay < diplomat.handshakeRetryDelay {
-		return diplomat.handshakeRetryDelay
-	}
-
-	return backOffDelay
+	return max(backOffDelay, diplomat.handshakeRetryDelay)
 }
 
 func (diplomat *Diplomat) transientError() *HandshakeError {

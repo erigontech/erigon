@@ -71,7 +71,7 @@ Examples:
 ![img](./_images/downloader/example_downloader_files.png)
 - `./build/bin/diag downloader files --downloader.file.filter=downloaded`
 ![img](./_images/downloader/example_downloader_files_downloaded.png)
-- `./build/bin/diag downloader files --downloader.file.name=v1-005400-005500-transactions.seg`
+- `./build/bin/diag downloader files --downloader.file.name=v1.0-005400-005500-transactions.seg`
 ![img](./_images/downloader/example_downloader_files_filename.png)
 
 ### Stages

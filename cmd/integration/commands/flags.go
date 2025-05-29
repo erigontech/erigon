@@ -19,36 +19,30 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/turbo/cli"
-
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/turbo/cli"
 )
 
 var (
-	chaindata                                string
-	databaseVerbosity                        int
-	referenceChaindata                       string
-	block, pruneTo, unwind                   uint64
-	unwindEvery                              uint64
-	batchSizeStr                             string
-	reset, noCommit                          bool
-	resetPruneAt                             bool
-	bucket                                   string
-	datadirCli, toChaindata                  string
-	migration                                string
-	integrityFast, integritySlow             bool
-	file                                     string
-	HeimdallURL                              string
-	txtrace                                  bool // Whether to trace the execution (should only be used together with `block`)
-	pruneFlag                                string
-	pruneB, pruneH, pruneR, pruneT, pruneC   uint64
-	pruneBBefore, pruneHBefore, pruneRBefore uint64
-	pruneTBefore, pruneCBefore               uint64
-	experiments                              []string
-	unwindTypes                              []string
-	chain                                    string // Which chain to use (mainnet, sepolia, etc.)
-	outputCsvFile                            string
+	chaindata                    string
+	databaseVerbosity            int
+	referenceChaindata           string
+	block, pruneTo, unwind       uint64
+	unwindEvery                  uint64
+	batchSizeStr                 string
+	domain                       string
+	reset, noCommit              bool
+	bucket                       string
+	datadirCli, toChaindata      string
+	migration                    string
+	integrityFast, integritySlow bool
+	file                         string
+	HeimdallURL                  string
+	txtrace                      bool // Whether to trace the execution (should only be used together with `block`)
+	unwindTypes                  []string
+	chain                        string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                string
 
 	startTxNum uint64
 
@@ -71,7 +65,7 @@ func withConfig(cmd *cobra.Command) {
 func withMining(cmd *cobra.Command) {
 	cmd.Flags().Bool("mine", false, "Enable mining")
 	cmd.Flags().StringArray("miner.notify", nil, "Comma separated HTTP URL list to notify of new work packages")
-	cmd.Flags().Uint64("miner.gaslimit", ethconfig.Defaults.Miner.GasLimit, "Target gas limit for mined blocks")
+	cmd.Flags().Uint64("miner.gaslimit", ethconfig.DefaultMinerGasLimit, "Target gas limit for mined blocks")
 	cmd.Flags().Int64("miner.gasprice", ethconfig.Defaults.Miner.GasPrice.Int64(), "Target gas price for mined blocks")
 	cmd.Flags().String("miner.etherbase", "0", "Public address for block mining rewards (default = first account")
 	cmd.Flags().String("miner.extradata", "", "Block extra data set by the miner (default = client version)")
@@ -118,10 +112,6 @@ func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
 }
 
-func withResetPruneAt(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&resetPruneAt, "resetPruneAt", false, "reset prune_at to 0 for a given stage")
-}
-
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
@@ -153,6 +143,10 @@ func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
 }
 
+func withDomain(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&domain, "domain", "", "Comma separated names of domain/inverted_indices")
+}
+
 func withIntegrityChecks(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", false, "enable slow data-integrity checks")
 	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", false, "enable fast data-integrity checks")
@@ -167,7 +161,7 @@ func withTxTrace(cmd *cobra.Command) {
 }
 
 func withChain(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, sepolia, etc.)")
+	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, sepolia, etc.)")
 	must(cmd.MarkFlagRequired("chain"))
 }
 

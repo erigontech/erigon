@@ -27,10 +27,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types/testdata"
 )
 
 func TestParseTransactionRLP(t *testing.T) {
@@ -114,22 +116,22 @@ func TestTxnSlotsGrowth(t *testing.T) {
 	assert := assert.New(t)
 	s := &TxnSlots{}
 	s.Resize(11)
-	assert.Equal(11, len(s.Txns))
+	assert.Len(s.Txns, 11)
 	assert.Equal(11, s.Senders.Len())
 	s.Resize(23)
-	assert.Equal(23, len(s.Txns))
+	assert.Len(s.Txns, 23)
 	assert.Equal(23, s.Senders.Len())
 
 	s = &TxnSlots{Txns: make([]*TxnSlot, 20), Senders: make(Addresses, 20*20)}
 	s.Resize(20)
-	assert.Equal(20, len(s.Txns))
+	assert.Len(s.Txns, 20)
 	assert.Equal(20, s.Senders.Len())
 	s.Resize(23)
-	assert.Equal(23, len(s.Txns))
+	assert.Len(s.Txns, 23)
 	assert.Equal(23, s.Senders.Len())
 
 	s.Resize(2)
-	assert.Equal(2, len(s.Txns))
+	assert.Len(s.Txns, 2)
 	assert.Equal(2, s.Senders.Len())
 }
 
@@ -158,8 +160,8 @@ func TestDedupHashes(t *testing.T) {
 	c = h.DedupCopy()
 	assert.Zero(h.Len())
 	assert.Zero(c.Len())
-	assert.Zero(len(h))
-	assert.Zero(len(c))
+	assert.Empty(h)
+	assert.Empty(c)
 
 	h = toHashes(1, 2, 3, 4)
 	c = h.DedupCopy()
@@ -216,10 +218,10 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.Size))
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
 	assert.Equal(t, BlobTxnType, thinTxn.Type)
-	assert.Equal(t, 2, len(thinTxn.BlobHashes))
-	assert.Equal(t, 0, len(thinTxn.Blobs))
-	assert.Equal(t, 0, len(thinTxn.Commitments))
-	assert.Equal(t, 0, len(thinTxn.Proofs))
+	assert.Len(t, thinTxn.BlobHashes, 2)
+	assert.Empty(t, thinTxn.Blobs)
+	assert.Empty(t, thinTxn.Commitments)
+	assert.Empty(t, thinTxn.Proofs)
 
 	// Now parse the same txn body, but wrapped with blobs/commitments/proofs
 	wrappedWithBlobs = true
@@ -227,9 +229,9 @@ func TestBlobTxnParsing(t *testing.T) {
 
 	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
 	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
-	blob0 := make([]byte, fixedgas.BlobSize)
+	blob0 := make([]byte, params.BlobSize)
 	rand.Read(blob0)
-	blob1 := make([]byte, fixedgas.BlobSize)
+	blob1 := make([]byte, params.BlobSize)
 	rand.Read(blob1)
 
 	proofsRlpPrefix := hexutil.MustDecodeHex("f862")
@@ -284,9 +286,9 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, thinTxn.BlobFeeCap, fatTxn.BlobFeeCap)
 	assert.Equal(t, thinTxn.BlobHashes, fatTxn.BlobHashes)
 
-	require.Equal(t, 2, len(fatTxn.Blobs))
-	require.Equal(t, 2, len(fatTxn.Commitments))
-	require.Equal(t, 2, len(fatTxn.Proofs))
+	require.Len(t, fatTxn.Blobs, 2)
+	require.Len(t, fatTxn.Commitments, 2)
+	require.Len(t, fatTxn.Proofs, 2)
 	assert.Equal(t, blob0, fatTxn.Blobs[0])
 	assert.Equal(t, blob1, fatTxn.Blobs[1])
 	assert.Equal(t, commitment0, fatTxn.Commitments[0])
@@ -295,79 +297,44 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, proof1, fatTxn.Proofs[1])
 }
 
-func TestSetCodeAuthRawParsing(t *testing.T) {
-	// generated using this in core/types/encdec_test.go
-	/*
-		func TestGenerateSetCodeTxnRlp(t *testing.T) {
-			tr := NewTRand()
-			var txn Transaction
-			requiredAuthLen := 1
-			for txn = tr.RandTransaction(SetCodeTxType); txn.Type() != SetCodeTxType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction(SetCodeTxType) {
-			}
-			v, _, _ := txn.RawSignatureValues()
-			v.SetUint64(uint64(randIntInRange(0, 2)))
+func TestSetCodeAuthSignatureRecover(t *testing.T) {
+	txnRlpHex := testdata.ValidSetCodeTxn1
+	// For authorizationList[0] in the above :-
+	// expectedAddress := common.HexToAddress("0x0e2dadd8081919cd0534c4144a74204f2db229ec")
+	// expectedNonce := 0x17
+	// expectedYParity := 0x1
+	// expectedR := "0x837da79f8b17c1db2371cdc4b2b134cd5aef1b588f811a5e3b4f2329c2107116"
+	// expectedS := "0x66aab6e4baa71dd601f4211e1bbf27c297e47dc845e73b9147ab1823064df2b9"
 
-			txn.GetChainID().SetUint64(1)
+	// Should match with (but commented for efficiency) -
+	// expectedSigner, err := setCodeTx.Authorizations[0].RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
 
-			auths := txn.(*SetCodeTransaction).GetAuthorizations()
-			auths[0].ChainID = 1
-			auths[0].Nonce = 10
-			auths[0].Address = libcommon.HexToAddress("0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe")
-			w := bytes.NewBuffer(nil)
-			if err := txn.MarshalBinary(w); err != nil {
-				t.Error(err)
-			}
+	expectedChainId := 11155111 // Sepolia
+	expectedSigner := common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3")
 
-			hex := hexutil.Bytes(w.Bytes()).String()
-			authj, err := json.Marshal(txn.(*SetCodeTransaction).GetAuthorizations())
-			if err != nil {
-				t.Error(err)
-			}
-			fmt.Println("txn", hex, len(txn.(*SetCodeTransaction).GetAuthorizations()), string(authj))
-		}
-	*/
-	bodyRlxHex := "0x04f9049e018889ee3d6b9ebf6ba1888b1a5f65f3cdca7d88f68834f2b4d0715588dd8a498e12c308cb945fd038e869663db8dd239fe1a9147c2a99ddcb0188c901aea8e00d085cb902cd7be4e3a63e15d2dec92a4de7787cd3bf97c422b9824ce02e032d987beb6518e8020b1ab8d4cb290b509b9dc7833f006da4979cf7cfb697edd7222778ced565d1a999a44e31f080638f918e0eec79b4b2dd46f0e964f3e405bfe235f1fd27bffeb90cf393711147799321dee0d3ae22eacb60c4024bae203b82968111ef579d0a3e68a14c31c12abdddfae54a9c488bfde0b1f3f5635b275d67a49530501fafedf9e29a4a04b8720c3d77ccc00d8772816d4b16292a995b4a44840f2e149c35bc62bdbbd64a47ffcf506d41e3b72da2387e8daf2e96131fa74a91172bf14350773a85628b3a2213d37cf8624d55bfab63133f4da0da5559431dbf2178c8a69f0549c100871abfbcec9099092f0027f2a146ad8e73d705dcee036385b2ba8fcc6bb43a98298e4149689d62d20e2b7aa229ea4ddabc8cc17243faacbc1b405c4e0d66babb42761ac0109b852d6f3486de201a39d639a685cf35bb122b500f6533970beaa003a124b12dff03dadd7de82f5f8487e3deb6c0debd3675b1d9bfbb568a4ad3eeea8d76f11ab76c1403e3b094ab6af4bcf89971ca8ee2821960a0a8892c0160bbfd92f69891aeec50c6a1f01b411cc7d1902e101acb5672821192e8ba80be74937a59b497d4bb6f766612b8f487e299f76e505bd0a10af95494bee0fbd1ba95aa52fd739f896d13b09bb605f9ba8cfb2b413a5d590c5e351ecd99ae4737443493a2d3fbfd165b5669118f82c4a6e6fc184a1880203fc6e1fd917abfd77110ba01b1867a38bd1286c6557efc630feb385c533cd84194a9c95def3a0a132116c6d75107db7ad114329425817e152c30069b6556f34559ed678699fddcd35a05fee0144f7964995f09faa4cde325cb5c2da4224f8252b55b987fc54296d0316a9e40b7aae0cb2f58d33d3418bf29fb21e6cabea12563c83cdfe4e2d848823d450f43eee919d5591f719006d9545b6773f14a1ff076fb5774e4de4eed61efd44d105b43a1768aaded355355c0f9010ff794a1d26391185070ad08c5b4bf1df855ffc0e897c5e1a026452ffaac6a96832bf62b550b30b4825a5dbd3c2f46419b6a857eaec43e2764f859946867fce4bcb4339a4fda05f556336499ebf0182df842a021824f29b1b799cf739d944ec397754facbd8d0b16b2afe56d26616466b1a760a01e979136ab5dcc20835eed318eb62413dfd5f3f69787c0f07e1a079371b71a2bf87a946416515c2d28ac7c7e9afa09fc30b550e4996677f863a0aa40e5bfbb7f445acc791c24c6db15ef7e9167cd8fb5dd2940d96135ff4d6a4fa01869b7699d771b48e973b84e916b4bc2a06b0dec665214f5ec43a2a4fb5b4ec1a05c371dc0735b30ef12037f33c1239e0e1211173f1e59cf6c04561a94a7867f3ff84df84b0194de0b295669a9fd93d5f28d9ec85e40f4cb697bae0a579309053d89140f8cee2816d5b671d40401b111d19e37a34b21c05c0f22be62b95a6a019d8395bbeeb2ebaa12e60b652e8f95000194297aef1a6b3c8065bdb0c233ef83e529307a19ad93ef44f0dd4adddc83ad8b0dad25d1072d034400"
-	bodyRlx := hexutil.MustDecodeHex(bodyRlxHex)
+	var (
+		txn TxnSlot
+	)
 
-	ctx := NewTxnParseContext(*uint256.NewInt(1))
+	txnRlpBytes := hexutil.FromHex(txnRlpHex)
+	ctx := NewTxnParseContext(*uint256.NewInt(uint64(expectedChainId)))
 	ctx.withSender = false
-	var txn TxnSlot
-
-	_, err := ctx.ParseTransaction(bodyRlx, 0, &txn, nil, false, false, nil)
+	_, err := ctx.ParseTransaction(txnRlpBytes, 0, &txn, nil, false, false, nil)
 	require.NoError(t, err)
-	require.Len(t, txn.AuthRaw, 1)
 
-	payload := txn.AuthRaw[0]
-	p := 0
-
-	var chainID uint256.Int
-	var nonce uint64
-	var address common.Address
-	actualAddress := common.HexToAddress("0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe")
-
-	p, err = rlp.ParseU256(payload, p, &chainID)
-	require.NoError(t, err)
-	require.Equal(t, chainID.Uint64(), uint64(1))
-
-	p, datalen, err := rlp.ParseString(payload, p)
-	require.NoError(t, err)
-	require.Equal(t, datalen, 20)
-
-	address = common.BytesToAddress(payload[p : p+datalen])
-	require.Equal(t, address, actualAddress)
-
-	p += 20
-	_, nonce, err = rlp.ParseU64(payload, p)
-	require.NoError(t, err)
-	require.Equal(t, nonce, uint64(10))
+	setCodeTx := types.SetCodeTransaction{}
+	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
+	setCodeTx.DecodeRLP(rlpStream)
+	require.Len(t, txn.AuthAndNonces, 1)
+	require.Equal(t, expectedSigner.String(), txn.AuthAndNonces[0].authority)
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {
-	bodyRlxHex := "0x04f9041701880124ec419e9796da8868b499f209983df888bb35ca86e3d9ea47882486c24309101b0e94e4ec12c49d6bcf7cc1325aa50afff92a561229fe880c716dca0e3e3d28b902b6779e563691f1ca8a86a02efdd93db261215047dad430a475d0e191f66b580d6e759a7c7a739532455e65160acf92dc1e1cc11970e7851277278e9d5d2549e451de8c8dd98ebdd3c55e73cd0b465875b72ea6d54917474f7ddfbd1f66d1a929694becc69bc3064c79c32b2db2a094844b400133724e046d9a96f2b6c7888fe008e6a667a970068487ce9a8e6c1260973956b26c1b78235f3452e21c5ed6d47507023ec4072b9ebea8ea9bde77ea64352ef7a6a8efb2ca61fbd0cf7c31491a4c38e3081dfc7b5e8066fca60d8f57b641032f23119a67a37ad0514529df22ba73b4028dc4a6aef0b26161371d731a81d8ac20ea90515b924f2534e32c240d0b75b5d1683e1bc7ecf8b82b73fb4c40d7cfc38e8c32f2c4d3424a86ba8c6e867f13328be201dd8d5e8ee47e03c1d9096968b71228b068cc21514f6bab7867a0d0a2651f40e927079b008c3ef11d571eb5f71d729ee9cfb3d2a99d258c10371fa1df271f4588e031498b155244295490fd842b3055e240ea89843a188b7f15be53252367761b9a8d21818d2c756822c0383246e167dd645722aefe4ecc5e78608bcc851dc5a51255a3f91e908bb5fa53063596458f45c6e25a712de4b2a5b36eea57f5b772c84f1d0f2f2ae103445fb7f2d38493041ca452f1e846c34331bea7b5b350d02306fa3a15b50e978b4efebccce8a3479479d51c95a08e0cab0732fc4f8095337d7502c6a962199342ed127701a6f5b0e54cbdd88f23556aab406a3a7ef49f848c3efbf4cf62052999bde1940abf4944158aefc5472f4ec9e23308cfb63deedc79e9a4f39d8b353c7e6f15d36f4c63987ae6f32701c6579e68f05f9ae86b6fbbc8d57bc17e5c2f3e5389ea75d102017767205c10d6bf5cf6e33a94ad9e6cfac5accf56d61dcee39f2e954ea89b7241e480e6021fa099a81bc9d28d6ca58a11d36f406b212be70c721bd8a4d1d643fa2bf30ebd59a4f838f794fbba2afaae8cabd778b6e151b0431e3fef0a033ce1a07081820b2a08cc2ed4355811644547f23597f7ebe516538baac51d97cbccee97f8ccf201941d994a07f0b3e925d332d4eae10c9ba474da3d8a8806320d2ae09c60e880887dbf8422d2f6549088321947f20ebcbfeff20194327d773bdc6c27cd28a533e81074372dc33a8afd884ef63dce09c5e56c8088cb702ac89cff765f88d26fe11c3d471949f20194f61ffc773a97207c8124c29526a59e6fa0b34a52880e563a787da952ab808884f2a19b171abfb2882d473907f3ada086f20194c1d608bb39e078a99086e7564e89a7625ed86dca88e8a0ab45821912e88088df6c3d43080350518895a828c35680a0278088e2487fd89ca40b3488689accdbeb8d4d2e"
+	bodyRlxHex := testdata.ValidSetCodeTxn2
 	bodyRlx := hexutil.MustDecodeHex(bodyRlxHex)
 
 	hasEnvelope := false
-	ctx := NewTxnParseContext(*uint256.NewInt(1))
+	ctx := NewTxnParseContext(*uint256.NewInt(11155111))
 	ctx.withSender = false
 
 	var txn TxnSlot
@@ -377,7 +344,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 4, len(txn.Authorizations))
+	assert.Len(t, txn.AuthAndNonces, 2)
 	assert.Equal(t, SetCodeTxnType, txn.Type)
 
 	// test empty authorizations
@@ -393,7 +360,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx2, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 0, len(tx2.Authorizations))
+	assert.Empty(t, tx2.AuthAndNonces)
 	assert.Equal(t, SetCodeTxnType, tx2.Type)
 
 	// generated using this in core/types/encdec_test.go
@@ -402,7 +369,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 			tr := NewTRand()
 			var txn Transaction
 			requiredAuthLen := 0
-			for txn = tr.RandTransaction(); txn.Type() != types2.SetCodeTxnType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction() {
+			for txn = tr.RandTransaction(); txn.Type() != types.SetCodeTxnType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction() {
 			}
 			v, _, _ := txn.RawSignatureValues()
 			v.SetUint64(uint64(randIntInRange(0, 2)))
@@ -420,7 +387,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 			}
 
 			hex := hexutil.Bytes(w.Bytes()).String()
-			//hex := libcommon.BytesToHash().Hex()
+			//hex := common.BytesToHash().Hex()
 			authj, err := json.Marshal(txn.(*SetCodeTransaction).GetAuthorizations())
 			if err != nil {
 				t.Error(err)
@@ -438,7 +405,7 @@ func TestSetCodeTxnParsingWithLargeAuthorizationValues(t *testing.T) {
 			tr := NewTRand()
 			var txn. Transaction
 			requiredAuthLen := 1
-			for txn. = tr.RandTransaction(); txn..Type() != types2.SetCodeTxnType || len(txn..(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn. = tr.RandTransaction() {
+			for txn. = tr.RandTransaction(); txn..Type() != types.SetCodeTxnType || len(txn..(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn. = tr.RandTransaction() {
 			}
 			v, _, _ := txn..RawSignatureValues()
 			v.SetUint64(uint64(randIntInRange(0, 2)))

@@ -22,9 +22,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -77,8 +77,11 @@ func (noopBridgeStore) LastFrozenEventId() uint64 {
 func (noopBridgeStore) LastFrozenEventBlockNum() uint64 {
 	return 0
 }
-func (noopBridgeStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+func (noopBridgeStore) EventTxnToBlockNum(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
 	return 0, false, errors.New("noop")
+}
+func (noopBridgeStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, []uint64, error) {
+	return nil, nil, errors.New("noop")
 }
 func (noopBridgeStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	return nil, errors.New("noop")
@@ -86,7 +89,7 @@ func (noopBridgeStore) Events(ctx context.Context, start, end uint64) ([][]byte,
 func (noopBridgeStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, ok bool, err error) {
 	return 0, 0, false, errors.New("noop")
 }
-func (noopBridgeStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error {
+func (noopBridgeStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[common.Hash]uint64) error {
 	return nil
 }
 func (noopBridgeStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
@@ -101,10 +104,10 @@ func (noopBridgeStore) PutProcessedBlockInfo(ctx context.Context, info []bridge.
 func (noopBridgeStore) Unwind(ctx context.Context, blockNum uint64) error {
 	return nil
 }
-func (noopBridgeStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
+func (noopBridgeStore) BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error) {
 	return 0, errors.New("noop")
 }
-func (noopBridgeStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockNum uint64) ([]rlp.RawValue, error) {
+func (noopBridgeStore) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return nil, errors.New("noop")
 }
 func (noopBridgeStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {

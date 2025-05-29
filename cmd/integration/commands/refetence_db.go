@@ -30,11 +30,13 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
 	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 
 	"github.com/erigontech/erigon/turbo/debug"
 )
@@ -42,13 +44,10 @@ import (
 var stateBuckets = []string{
 	kv.HashedAccountsDeprecated,
 	kv.HashedStorageDeprecated,
-	kv.ContractCode,
 	kv.PlainState,
 	kv.PlainContractCode,
 	kv.IncarnationMap,
 	kv.Code,
-	kv.TrieOfAccounts,
-	kv.TrieOfStorage,
 	kv.E2AccountsHistory,
 	kv.E2StorageHistory,
 	kv.TxLookup,
@@ -57,7 +56,7 @@ var stateBuckets = []string{
 var cmdMdbxTopDup = &cobra.Command{
 	Use: "mdbx_top_dup",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := libcommon.RootContext()
+		ctx, _ := common.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		err := mdbxTopDup(ctx, chaindata, bucket, logger)
 		if err != nil {
@@ -72,7 +71,7 @@ var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := libcommon.RootContext()
+		ctx, _ := common.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
@@ -91,7 +90,7 @@ var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
 	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := libcommon.RootContext()
+		ctx, _ := common.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
@@ -110,7 +109,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Use:   "mdbx_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := libcommon.RootContext()
+		ctx, _ := common.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		from, to := backup.OpenPair(chaindata, toChaindata, kv.ChainDB, 0, logger)
 		err := backup.Kv2kv(ctx, from, to, nil, backup.ReadAheadThreads, logger)
@@ -127,7 +126,7 @@ var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := libcommon.RootContext()
+		ctx, _ := common.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -394,16 +393,16 @@ MainLoop:
 			if !fileScanner.Scan() {
 				break MainLoop
 			}
-			k := libcommon.CopyBytes(fileScanner.Bytes())
+			k := common.CopyBytes(fileScanner.Bytes())
 			if bytes.Equal(k, endData) {
 				break
 			}
-			k = libcommon.FromHex(string(k[1:]))
+			k = common.FromHex(string(k[1:]))
 			if !fileScanner.Scan() {
 				break MainLoop
 			}
-			v := libcommon.CopyBytes(fileScanner.Bytes())
-			v = libcommon.FromHex(string(v[1:]))
+			v := common.CopyBytes(fileScanner.Bytes())
+			v = common.FromHex(string(v[1:]))
 
 			if casted, ok := c.(kv.RwCursorDupSort); ok {
 				if err = casted.AppendDup(k, v); err != nil {
@@ -433,5 +432,16 @@ MainLoop:
 		return err
 	}
 
+	return nil
+}
+
+func CheckSaltFilesExist(dirs datadir.Dirs) error {
+	ok, err := ee.CheckSaltFilesExist(dirs)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ee.ErrCannotStartWithoutSaltFiles
+	}
 	return nil
 }

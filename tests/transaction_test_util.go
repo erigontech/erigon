@@ -27,12 +27,13 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/testutil"
 )
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
@@ -56,13 +57,13 @@ type ttForks struct {
 
 type ttFork struct {
 	Exception    string                `json:"exception"`
-	Sender       libcommon.Address     `json:"sender"`
-	Hash         libcommon.Hash        `json:"hash"`
+	Sender       common.Address        `json:"sender"`
+	Hash         common.Hash           `json:"hash"`
 	IntrinsicGas *math.HexOrDecimal256 `json:"intrinsicGas"`
 }
 
 func (tt *TransactionTest) Run(chainID *big.Int) error {
-	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*libcommon.Address, *libcommon.Hash, uint64, error) {
+	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*common.Address, *common.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlpData)
 		if err != nil {
 			return nil, nil, 0, err
@@ -117,16 +118,16 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		fork   ttFork
 		config *chain.Config
 	}{
-		{"Frontier", types.MakeFrontierSigner(), tt.Forks.Frontier, Forks["Frontier"]},
-		{"Homestead", types.LatestSignerForChainID(nil), tt.Forks.Homestead, Forks["Homestead"]},
-		{"EIP150", types.LatestSignerForChainID(nil), tt.Forks.EIP150, Forks["EIP150"]},
-		{"EIP158", types.LatestSignerForChainID(chainID), tt.Forks.EIP158, Forks["EIP158"]},
-		{"Byzantium", types.LatestSignerForChainID(chainID), tt.Forks.Byzantium, Forks["Byzantium"]},
-		{"Constantinople", types.LatestSignerForChainID(chainID), tt.Forks.Constantinople, Forks["Constantinople"]},
-		{"ConstantinopleFix", types.LatestSignerForChainID(chainID), tt.Forks.ConstantinopleFix, Forks["ConstantinopleFix"]},
-		{"Istanbul", types.LatestSignerForChainID(chainID), tt.Forks.Istanbul, Forks["Istanbul"]},
-		{"Berlin", types.LatestSignerForChainID(chainID), tt.Forks.Berlin, Forks["Berlin"]},
-		{"London", types.LatestSignerForChainID(chainID), tt.Forks.London, Forks["London"]},
+		{"Frontier", types.MakeFrontierSigner(), tt.Forks.Frontier, testutil.Forks["Frontier"]},
+		{"Homestead", types.LatestSignerForChainID(nil), tt.Forks.Homestead, testutil.Forks["Homestead"]},
+		{"EIP150", types.LatestSignerForChainID(nil), tt.Forks.EIP150, testutil.Forks["EIP150"]},
+		{"EIP158", types.LatestSignerForChainID(chainID), tt.Forks.EIP158, testutil.Forks["EIP158"]},
+		{"Byzantium", types.LatestSignerForChainID(chainID), tt.Forks.Byzantium, testutil.Forks["Byzantium"]},
+		{"Constantinople", types.LatestSignerForChainID(chainID), tt.Forks.Constantinople, testutil.Forks["Constantinople"]},
+		{"ConstantinopleFix", types.LatestSignerForChainID(chainID), tt.Forks.ConstantinopleFix, testutil.Forks["ConstantinopleFix"]},
+		{"Istanbul", types.LatestSignerForChainID(chainID), tt.Forks.Istanbul, testutil.Forks["Istanbul"]},
+		{"Berlin", types.LatestSignerForChainID(chainID), tt.Forks.Berlin, testutil.Forks["Berlin"]},
+		{"London", types.LatestSignerForChainID(chainID), tt.Forks.London, testutil.Forks["London"]},
 	} {
 		sender, txhash, intrinsicGas, err := validateTx(tt.RLP, *testcase.signer, testcase.config.Rules(0, 0))
 

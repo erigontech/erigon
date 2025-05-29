@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"runtime"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/utils/bls"
 
@@ -49,7 +49,7 @@ func Epoch(b abstract.BeaconStateBasic) uint64 {
 	return GetEpochAtSlot(b.BeaconConfig(), b.Slot())
 }
 
-func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature libcommon.Bytes96) bool {
+func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature common.Bytes96) bool {
 	modulo := max(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
 	hashSlotSignatue := utils.Sha256(slotSignature[:])
 	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
@@ -94,7 +94,7 @@ func PreviousEpoch(b abstract.BeaconState) uint64 {
 }
 
 // GetBlockRoot returns blook root at start of a given epoch
-func GetBlockRoot(b abstract.BeaconState, epoch uint64) (libcommon.Hash, error) {
+func GetBlockRoot(b abstract.BeaconState, epoch uint64) (common.Hash, error) {
 	return b.GetBlockRootAtSlot(epoch * b.BeaconConfig().SlotsPerEpoch)
 }
 
@@ -294,7 +294,7 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltype
 				withdrawals = append(withdrawals, &cltypes.Withdrawal{
 					Index:     nextWithdrawalIndex,
 					Validator: w.Index,
-					Address:   libcommon.BytesToAddress(wd[12:]),
+					Address:   common.BytesToAddress(wd[12:]),
 					Amount:    withdrawableBalance,
 				})
 				nextWithdrawalIndex++
@@ -333,7 +333,7 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltype
 			newWithdrawal := &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
-				Address:   libcommon.BytesToAddress(wd[12:]),
+				Address:   common.BytesToAddress(wd[12:]),
 				Amount:    currentBalance,
 			}
 			withdrawals = append(withdrawals, newWithdrawal)
@@ -347,7 +347,7 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltype
 			newWithdrawal := &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
-				Address:   libcommon.BytesToAddress(wd[12:]),
+				Address:   common.BytesToAddress(wd[12:]),
 				Amount:    amount,
 			}
 			withdrawals = append(withdrawals, newWithdrawal)

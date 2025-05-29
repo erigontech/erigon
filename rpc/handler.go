@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -152,12 +153,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 func (h *handler) isRpcMethodNeedsCheck(method string) bool {
-	for _, m := range h.slowLogBlacklist {
-		if m == method {
-			return false
-		}
-	}
-	return true
+	return !slices.Contains(h.slowLogBlacklist, method)
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
@@ -431,7 +427,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 			}
 		}
 
-		if resp != nil && resp.Error != nil {
+		if resp != nil && resp.Error != nil && resp.Error.Message != "context canceled" {
 			if resp.Error.Data != nil {
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)

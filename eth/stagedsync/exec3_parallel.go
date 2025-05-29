@@ -8,23 +8,22 @@ import (
 	"sync/atomic"
 	"time"
 
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
-
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/exec3"
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -49,18 +48,18 @@ Flush of data to lower-level-of-abstraction is done by method `agg.ApplyState` (
 only for performance - to reduce time of RwLock on state, but by meaning `ApplyState+ApplyHistory` it's 1 method to
 flush changes from TxTask to lower-level-of-abstraction).
 
-- StateV3 - it's all updates which are stored in RAM - all parallel workers can see this updates.
+- ParallelExecutionState - it's all updates which are stored in RAM - all parallel workers can see this updates.
 Execution of txs always done on Valid version of state (no partial-updates of state).
-Flush of updates to lower-level-of-abstractions done by method `StateV3.Flush`.
+Flush of updates to lower-level-of-abstractions done by method `ParallelExecutionState.Flush`.
 On this level-of-abstraction also exists ReaderV3.
-IntraBlockState does call ReaderV3, and ReaderV3 call StateV3(in-mem-cache) or DB (RoTx).
+IntraBlockState does call ReaderV3, and ReaderV3 call ParallelExecutionState(in-mem-cache) or DB (RoTx).
 WAL - also on this level-of-abstraction - agg.ApplyHistory does write updates from TxTask to WAL.
-WAL it's like StateV3 just without reading api (can only write there). WAL flush to disk periodically (doesn't need much RAM).
+WAL it's like ParallelExecutionState just without reading api (can only write there). WAL flush to disk periodically (doesn't need much RAM).
 
 - RoTx - see everything what committed to DB. Commit is done by rwLoop goroutine.
 rwloop does:
   - stop all Workers
-  - call StateV3.Flush()
+  - call ParallelExecutionState.Flush()
   - commit
   - open new RoTx
   - set new RoTx to all Workers
@@ -70,14 +69,14 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 */
 
 type executor interface {
-	execute(ctx context.Context, tasks []*state.TxTask) (bool, error)
+	execute(ctx context.Context, tasks []*state.TxTask, gp *core.GasPool) (bool, error)
 	status(ctx context.Context, commitThreshold uint64) error
 	wait() error
 	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header)
 
 	//these are reset by commit - so need to be read from the executor once its processing
 	tx() kv.RwTx
-	readState() *state.StateV3
+	readState() *state.ParallelExecutionState
 	domains() *state2.SharedDomains
 }
 
@@ -86,7 +85,7 @@ type txExecutor struct {
 	cfg            ExecuteBlockCfg
 	execStage      *StageState
 	agg            *state2.Aggregator
-	rs             *state.StateV3
+	rs             *state.ParallelExecutionState
 	doms           *state2.SharedDomains
 	accumulator    *shards.Accumulator
 	u              Unwinder
@@ -103,7 +102,7 @@ func (te *txExecutor) tx() kv.RwTx {
 	return te.applyTx
 }
 
-func (te *txExecutor) readState() *state.StateV3 {
+func (te *txExecutor) readState() *state.ParallelExecutionState {
 	return te.rs
 }
 
@@ -221,8 +220,6 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 		defer tx.Rollback()
 	}
 
-	pe.doms.SetTx(tx)
-
 	defer pe.applyLoopWg.Wait()
 	applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 	defer cancelApplyCtx()
@@ -240,7 +237,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 
 		case <-pe.logEvery.C:
 			stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-			pe.progress.Log("", pe.rs, pe.in, pe.rws, pe.rs.DoneCount(), 0 /* TODO logGas*/, pe.lastBlockNum.Load(), pe.outputBlockNum.GetValueUint64(), pe.outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangesets, pe.inMemExec)
+			pe.progress.Log("", pe.rs, pe.in, pe.rws, pe.rs.DoneCount(), 0 /* TODO logGas*/, pe.lastBlockNum.Load(), pe.outputBlockNum.GetValueUint64(), pe.outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs, pe.inMemExec)
 			if pe.agg.HasBackgroundFilesBuild() {
 				logger.Info(fmt.Sprintf("[%s] Background files build", pe.execStage.LogPrefix()), "progress", pe.agg.BackgroundProgress())
 			}
@@ -249,15 +246,13 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				if pe.doms.BlockNum() != pe.outputBlockNum.GetValueUint64() {
 					panic(fmt.Errorf("%d != %d", pe.doms.BlockNum(), pe.outputBlockNum.GetValueUint64()))
 				}
-				_, err := pe.doms.ComputeCommitment(ctx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
+				_, err := pe.doms.ComputeCommitment(ctx, true, pe.outputBlockNum.GetValueUint64(), pe.outputTxNum.Load(), pe.execStage.LogPrefix())
 				if err != nil {
 					return err
 				}
-				ac := pe.agg.BeginFilesRo()
-				if _, err = ac.PruneSmallBatches(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
+				if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 					return err
 				}
-				ac.Close()
 				if !pe.inMemExec {
 					if err = pe.doms.Flush(ctx, tx); err != nil {
 						return err
@@ -353,7 +348,6 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				return err
 			}
 			defer tx.Rollback()
-			pe.doms.SetTx(tx)
 
 			applyCtx, cancelApplyCtx = context.WithCancel(ctx) //nolint:fatcontext
 			defer cancelApplyCtx()
@@ -417,9 +411,9 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 
 		if txTask.Final {
 			pe.rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
-			err := pe.rs.ApplyState4(ctx, txTask)
+			err := pe.rs.ApplyState(ctx, txTask)
 			if err != nil {
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
+				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 			}
 
 			if processedBlockNum > pe.lastBlockNum.Load() {
@@ -439,8 +433,8 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			default:
 			}
 		}
-		if err := pe.rs.ApplyLogsAndTraces4(txTask, pe.rs.Domains()); err != nil {
-			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
+		if err := pe.rs.ApplyLogsAndTraces(txTask, pe.rs.Domains()); err != nil {
+			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 		}
 		processedBlockNum = txTask.BlockNum
 		if !stopedAtBlockEnd {
@@ -532,7 +526,7 @@ func (pe *parallelExecutor) wait() error {
 	return nil
 }
 
-func (pe *parallelExecutor) execute(ctx context.Context, tasks []*state.TxTask) (bool, error) {
+func (pe *parallelExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp *core.GasPool) (bool, error) {
 	for _, txTask := range tasks {
 		if txTask.Sender() != nil {
 			if ok := pe.rs.RegisterSender(txTask); ok {

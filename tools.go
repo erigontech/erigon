@@ -38,5 +38,6 @@ import (
 	_ "github.com/fjl/gencodec"
 	_ "go.uber.org/mock/mockgen"
 	_ "go.uber.org/mock/mockgen/model"
+	_ "golang.org/x/tools/cmd/stringer"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 )

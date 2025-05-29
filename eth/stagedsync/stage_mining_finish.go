@@ -19,19 +19,18 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/builder"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
 type MiningFinishCfg struct {
 	db                    kv.RwDB
-	chainConfig           chain.Config
+	chainConfig           *chain.Config
 	engine                consensus.Engine
 	sealCancel            chan struct{}
 	miningState           MiningState
@@ -41,7 +40,7 @@ type MiningFinishCfg struct {
 
 func StageMiningFinishCfg(
 	db kv.RwDB,
-	chainConfig chain.Config,
+	chainConfig *chain.Config,
 	engine consensus.Engine,
 	miningState MiningState,
 	sealCancel chan struct{},
