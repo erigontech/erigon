@@ -444,7 +444,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 			kveiFile := strings.ReplaceAll(baseFileName, ".kv", ".kvei")
 			btFile := strings.ReplaceAll(baseFileName, ".kv", ".bt")
 			kviFile := strings.ReplaceAll(baseFileName, ".kv", ".kvi")
-			removeMany(
+			removeManyIgnoreError(
 				filepath.Join(dirs.SnapDomain, baseFileName+".torrent"),
 				filepath.Join(dirs.SnapDomain, btFile),
 				filepath.Join(dirs.SnapDomain, btFile+".torrent"),
