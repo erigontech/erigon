@@ -73,7 +73,7 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender remote.ETHBACKEND_Subscri
 }
 
 func (a *LogsFilterAggregator) checkEmpty() {
-	a.events.EmptyLogSubsctiption(a.aggLogsFilter.allAddrs == 0 && len(a.aggLogsFilter.addrs) == 0 && a.aggLogsFilter.allTopics == 0 && len(a.aggLogsFilter.topics) == 0)
+	a.events.EmptyLogSubscription(a.aggLogsFilter.allAddrs == 0 && len(a.aggLogsFilter.addrs) == 0 && a.aggLogsFilter.allTopics == 0 && len(a.aggLogsFilter.topics) == 0)
 }
 
 func (a *LogsFilterAggregator) removeLogsFilter(filterId uint64, filter *LogsFilter) {

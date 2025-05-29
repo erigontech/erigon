@@ -24,11 +24,14 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -81,9 +84,10 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	txIndex int
-	logs    []types.Logs
-	logSize uint
+	txIndex  int
+	blockNum uint64
+	logs     []types.Logs
+	logSize  uint
 
 	// Per-transaction access list
 	accessList *accessList
@@ -99,6 +103,17 @@ type IntraBlockState struct {
 	trace          bool
 	tracingHooks   *tracing.Hooks
 	balanceInc     map[common.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+
+	// Versioned storage used for parallel tx processing, versions
+	// are maintaned across transactions until they are reset
+	// at the block level
+	versionMap          *VersionMap
+	versionedWrites     WriteSet
+	versionedReads      ReadSet
+	storageReadDuration time.Duration
+	storageReadCount    int64
+	version             int
+	dep                 int
 }
 
 // Create a new state from a given trie
@@ -135,7 +150,7 @@ func (sdb *IntraBlockState) TxIndex() int {
 }
 
 func (sdb *IntraBlockState) Incarnation() int {
-	return 0
+	return sdb.version
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
@@ -504,7 +519,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int,
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
+func (sdb *IntraBlockState) SetBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -1093,4 +1108,165 @@ func (sdb *IntraBlockState) AddressInAccessList(addr common.Address) bool {
 
 func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Hash) (addressPresent bool, slotPresent bool) {
 	return sdb.accessList.Contains(addr, slot)
+}
+
+func (s *IntraBlockState) accountRead(addr common.Address, account *accounts.Account) {
+	if s.versionMap != nil {
+		// record the originating account data so that
+		// re-reads will return a complete account - note
+		// this is not used by the version map wich works
+		// at the level of individual account elements
+		data := *account
+		s.versionRead(addr, AddressPath, common.Hash{}, StorageRead, &data)
+	}
+}
+
+func (s *IntraBlockState) versionWritten(addr common.Address, path AccountPath, key common.Hash, val any) {
+	if s.versionMap != nil {
+		if s.versionedWrites == nil {
+			s.versionedWrites = WriteSet{}
+		}
+
+		vw := VersionedWrite{
+			Address: addr,
+			Path:    path,
+			Key:     key,
+			Version: s.Version(),
+			Val:     val,
+		}
+
+		//if s.trace {
+		//	fmt.Printf("%d (%d.%d) WRT %s\n", s.blockNum, s.txIndex, s.version, vw.String())
+		//}
+
+		s.versionedWrites.Set(vw)
+	}
+}
+
+func (s *IntraBlockState) versionRead(addr common.Address, path AccountPath, key common.Hash, source ReadSource, val any) {
+	if s.versionMap != nil {
+		if s.versionedReads == nil {
+			s.versionedReads = ReadSet{}
+		}
+
+		s.versionedReads.Set(VersionedRead{
+			Address: addr,
+			Path:    path,
+			Key:     key,
+			Source:  source,
+			Version: s.Version(),
+			Val:     val,
+		})
+	}
+}
+
+func (sdb *IntraBlockState) versionedWrite(addr common.Address, path AccountPath, key common.Hash) (*VersionedWrite, bool) {
+	if sdb.versionMap == nil || sdb.versionedWrites == nil {
+		return nil, false
+	}
+
+	v, ok := sdb.versionedWrites[addr][AccountKey{Path: path, Key: key}]
+
+	if !ok {
+		return nil, ok
+	}
+
+	if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
+		return nil, false
+	}
+
+	return v, ok
+}
+
+func (ibs *IntraBlockState) HadInvalidRead() bool {
+	return ibs.dep >= 0
+}
+
+func (ibs *IntraBlockState) DepTxIndex() int {
+	return ibs.dep
+}
+
+func (ibs *IntraBlockState) SetVersion(inc int) {
+	ibs.version = inc
+}
+
+func (s *IntraBlockState) Version() Version {
+	return Version{
+		TxIndex:     s.txIndex,
+		Incarnation: s.version,
+	}
+}
+
+func (ibs *IntraBlockState) VersionedReads() ReadSet {
+	return ibs.versionedReads
+}
+
+// VersionedWrites returns the current versioned write set if this block
+// checkDirty - is mainly for testing, for block processing this is called
+// after the block execution is completed and non dirty writes (due to reversions)
+// will already have been cleaned in MakeWriteSet
+func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
+	var writes VersionedWrites
+
+	if ibs.versionedWrites != nil {
+		writes = make(VersionedWrites, 0, ibs.versionedWrites.Len())
+
+		for addr, vwrites := range ibs.versionedWrites {
+			if checkDirty {
+				if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+					for _, v := range vwrites {
+						ibs.versionMap.Delete(v.Address, v.Path, v.Key, ibs.txIndex, false)
+					}
+					continue
+				}
+			}
+
+			// if an account has been destructed remove any additional
+			// writes to avoid ambiguity
+			var appends = make(VersionedWrites, 0, len(vwrites))
+			for _, v := range vwrites {
+				if v.Path == SelfDestructPath {
+					appends = VersionedWrites{v}
+					break
+				} else {
+					appends = append(appends, v)
+				}
+			}
+			writes = append(writes, appends...)
+		}
+	}
+
+	return writes
+}
+
+var tracedKeys map[common.Hash]struct{}
+
+func traceKey(key common.Hash) bool {
+	if tracedKeys == nil {
+		tracedKeys = map[common.Hash]struct{}{}
+		for _, key := range dbg.TraceStateKeys {
+			key, _ = strings.CutPrefix(strings.ToLower(key), "Ox")
+			tracedKeys[common.HexToHash(key)] = struct{}{}
+		}
+	}
+	_, ok := tracedKeys[key]
+	return len(tracedKeys) == 0 || ok
+}
+
+var tracedAccounts map[common.Address]struct{} = func() map[common.Address]struct{} {
+	ta := map[common.Address]struct{}{}
+	for _, account := range dbg.TraceAccounts {
+		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
+		ta[common.HexToAddress(account)] = struct{}{}
+	}
+	return ta
+}()
+
+func traceAccount(addr common.Address) bool {
+	_, ok := tracedAccounts[addr]
+	return ok
+}
+
+func (sdb *IntraBlockState) TraceAccount(addr common.Address) bool {
+	return traceAccount(addr)
 }

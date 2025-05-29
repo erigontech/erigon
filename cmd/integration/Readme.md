@@ -111,11 +111,36 @@ It allows to process this blocks again
 1. ./build/bin/integration clear_bad_blocks --datadir=<datadir>
 ```
 
-# Manually delete and generate some Domain/Index - by parallel executing blocks on existing historical state 
+# FAQ
+
+## How to re-exec all blocks
 
 ```cgo
-# can be 1 or several domain/indices
+# Option 1 (on empty datadir):
+erigon --snap.skip-state-snapshot-download
+
+# Option 2 (on synced datadir):
+erigon seg rm-all-state-snapshots
+integration stage_exec --reset
+integration stage_exec 
+
+# Option 2 is good 
+```
+
+## How to re-generate some Domain/Index
+
+```cgo
+# By parallel executing blocks on existing historical state. Can be 1 or many domains:
 erigon seg rm-state-snapshots --domain=rcache,logtopics,logaddrs,tracesfrom,tracesto
-integration stage_custom_trace --produce=rcache,logindex,traceindex --reset
-integration stage_custom_trace --produce=rcache,logindex,traceindex
+integration stage_custom_trace --domain=rcache,logindex,traceindex --reset
+integration stage_custom_trace --domain=rcache,logindex,traceindex
+```
+
+## How to re-gen bor checkpoints
+
+```cgo
+rm -rf datadir/heimdall
+rm -rf datadir/snapshots/*borch*
+# Start erigon, it will gen. Then:
+erigon seg integrity --datadir /erigon-data/ --check=BorCheckpoints
 ```

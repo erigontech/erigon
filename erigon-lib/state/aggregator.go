@@ -93,6 +93,8 @@ type Aggregator struct {
 	logger       log.Logger
 
 	produce bool
+
+	checker *DependencyIntegrityChecker
 }
 
 const AggregatorSqueezeCommitmentValues = true
@@ -204,7 +206,6 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
 	cfg := Schema.GetDomainCfg(name)
 	//TODO: move dynamic part of config to InvertedIndex
-	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
 	cfg.hist.iiCfg.salt.Store(salt)
 	cfg.hist.iiCfg.dirs = dirs
 	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
@@ -263,6 +264,42 @@ func (a *Aggregator) ReloadSalt() error {
 	}
 
 	return nil
+}
+
+func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
+	// "hard alignment":
+	// only corresponding files should be included. e.g. commitment + account -
+	// cannot have merged account visibleFile, and unmerged commitment visibleFile for same step range.
+	if a.checker == nil {
+		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+	}
+
+	a.checker.AddDependency(dependency, &DependentInfo{
+		domain:      dependent,
+		filesGetter: func() *btree.BTreeG[*filesItem] { return a.d[dependent].dirtyFiles },
+		accessors:   a.d[dependent].Accessors,
+	})
+	a.d[dependency].SetDependency(a.checker)
+}
+
+func (a *Aggregator) EnableAllDependencies() {
+	if a.checker == nil {
+		return
+	}
+	a.checker.Enable()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+}
+
+func (a *Aggregator) DisableAllDependencies() {
+	if a.checker == nil {
+		return
+	}
+	a.checker.Disable()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 }
 
 func (a *Aggregator) OpenFolder() error {
@@ -609,6 +646,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
 		if ii.disable {
+			log.Warn("[dbg] here1?", "n", ii.name)
 			continue
 		}
 
@@ -617,6 +655,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
 		dc.Close()
 		if step < firstStepNotInFiles {
+			log.Warn("[dbg] here2?", "n", ii.name, "step", step, "firstStepNotInFiles", firstStepNotInFiles)
 			continue
 		}
 
@@ -724,6 +763,8 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	maxSpan := config3.StepsInFrozenFile * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
+		a.cleanAfterMerge(nil)
+		// TODO: add files notification here too.
 		return false, nil
 	}
 
@@ -838,9 +879,10 @@ func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64
 	if len(entitySet) == 0 {
 		panic("assert: missed arguments")
 	}
-	for i, domain := range entitySet {
+	minTxNum = math.MaxUint64
+	for _, domain := range entitySet {
 		domainEnd := at.d[domain].files.EndTxNum()
-		if i == 0 || domainEnd < minTxNum {
+		if domainEnd < minTxNum {
 			minTxNum = domainEnd
 		}
 	}
@@ -1290,12 +1332,6 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 	return r
 }
 
-func (at *AggregatorRoTx) RestrictSubsetFileDeletions(b bool) {
-	at.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = b
-	at.a.d[kv.StorageDomain].restrictSubsetFileDeletions = b
-	at.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = b
-}
-
 func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {
 	mf = &MergedFilesV3{iis: make([]*filesItem, len(at.a.iis))}
 	g, ctx := errgroup.WithContext(ctx)
@@ -1331,7 +1367,6 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		g.Go(func() (err error) {
 			var vt valueTransformer
 			if at.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
-				at.RestrictSubsetFileDeletions(true)
 				accStorageMerged.Wait()
 
 				vt, err = at.d[kv.CommitmentDomain].commitmentValTransformDomain(r.domain[kid].values, at.d[kv.AccountsDomain], at.d[kv.StorageDomain],
@@ -1346,9 +1381,6 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 			if at.a.commitmentValuesTransform {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
-				}
-				if err == nil && kid == kv.CommitmentDomain {
-					at.RestrictSubsetFileDeletions(false)
 				}
 			}
 			return err
@@ -1383,11 +1415,11 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
-		d.integrateMergedDirtyFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
+		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
 	for id, ii := range a.iis {
-		ii.integrateMergedDirtyFiles(outs.ii[id], in.iis[id])
+		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
 
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
