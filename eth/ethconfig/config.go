@@ -244,7 +244,7 @@ type Config struct {
 	// Consensus layer
 	InternalCL bool
 
-	OverridePragueTime *big.Int `toml:",omitempty"`
+	OverrideOsakaTime *big.Int `toml:",omitempty"`
 
 	// Embedded Silkworm support
 	SilkwormExecution            bool
