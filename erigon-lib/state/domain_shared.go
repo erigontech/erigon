@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -75,9 +76,9 @@ type SharedDomains struct {
 	blockNum atomic.Uint64
 	estSize  int
 	trace    bool //nolint
-	//muMaps   sync.RWMutex
 	//walLock sync.RWMutex
 
+	muMaps  sync.RWMutex
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
@@ -88,9 +89,6 @@ type SharedDomains struct {
 	pastChangesAccumulator    map[string]*StateChangeSet
 }
 
-type HasAggTx interface {
-	AggTx() any
-}
 type HasAgg interface {
 	Agg() any
 }
@@ -227,8 +225,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, block
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	//sd.muMaps.Lock()
-	//defer sd.muMaps.Unlock()
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
 	for i := range sd.domains {
 		sd.domains[i] = map[string]dataWithPrevStep{}
 	}
@@ -242,8 +240,8 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 }
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
-	// disable mutex - because work on parallel execution postponed after E3 release.
-	//sd.muMaps.Lock()
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: txNum / sd.stepSize}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
@@ -260,12 +258,13 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uin
 		sd.estSize += len(key) + len(val)
 	}
 	sd.domains[domain][key] = valWithPrevStep
-	//sd.muMaps.Unlock()
 }
 
 // get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep uint64, ok bool) {
-	//sd.muMaps.RLock()
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
+
 	keyS := toStringZeroCopy(key)
 	var dataWithPrevStep dataWithPrevStep
 	if table == kv.StorageDomain {
@@ -273,14 +272,14 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep ui
 		return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
 
 	}
+
 	dataWithPrevStep, ok = sd.domains[table][keyS]
 	return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
-	//sd.muMaps.RUnlock()
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
-	//sd.muMaps.RLock()
-	//defer sd.muMaps.RUnlock()
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
@@ -290,8 +289,8 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
-	//sd.muMaps.RLock()
-	//defer sd.muMaps.RUnlock()
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 
 	for table, list := range readLists {
 		switch table {
@@ -432,6 +431,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, roTx kv.Tx, it func
 }
 
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 	var haveRamUpdates bool
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
@@ -628,6 +629,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 		step uint64
 	}
 	tombs := make([]tuple, 0, 8)
+
 	if err := sd.IterateStoragePrefix(prefix, roTx, func(k, v []byte, step uint64) (bool, error) {
 		tombs = append(tombs, tuple{k, v, step})
 		return true, nil

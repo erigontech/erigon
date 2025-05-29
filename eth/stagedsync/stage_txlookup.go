@@ -20,10 +20,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"time"
+
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/types"
-	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"

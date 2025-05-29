@@ -386,7 +386,9 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) (valueTransformer, error) {
+	var keyBuf [60]byte // 52b key and 8b for inverted step
 	var err error
+
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
 		if mergedStorage, err = storage.rawLookupFileByRange(rng.from, rng.to); err != nil {
@@ -458,7 +460,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
 			var found bool
-			auxBuf := dt.keyBuf[:0]
+			auxBuf := keyBuf[:0]
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
 					// Non-optimised key originating from a database record

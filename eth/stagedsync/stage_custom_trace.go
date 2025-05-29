@@ -489,7 +489,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 func progressOfDomains(tx kv.Tx, produce Produce) uint64 {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
-	ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	ac := state2.AggTx(tx)
 	txNum := uint64(math.MaxUint64)
 	if produce.ReceiptDomain {
 		txNum = min(txNum, ac.HistoryProgress(kv.ReceiptDomain, tx))
@@ -514,7 +514,7 @@ func progressOfDomains(tx kv.Tx, produce Produce) uint64 {
 
 func firstStepNotInFiles(tx kv.Tx, produce Produce) uint64 {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
-	ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	ac := state2.AggTx(tx)
 	fromStep := uint64(math.MaxUint64)
 	if produce.ReceiptDomain {
 		fromStep = min(fromStep, ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles())

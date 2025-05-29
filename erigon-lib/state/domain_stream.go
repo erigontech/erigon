@@ -168,7 +168,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 
 	for i, item := range dc.files {
 		// todo release btcursor when iter over/make it truly stateless
-		btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), hi.from)
+		btCursor, err := dc.statelessBtree(i).Seek(dc.reusableReader(i), hi.from)
 		if err != nil {
 			return err
 		}
@@ -350,7 +350,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, haveRamUpdates boo
 	}
 
 	for i, item := range dt.files {
-		cursor, err := item.src.bindex.Seek(dt.statelessGetter(i), prefix)
+		cursor, err := item.src.bindex.Seek(dt.reusableReader(i), prefix)
 		if err != nil {
 			return err
 		}
