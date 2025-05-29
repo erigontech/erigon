@@ -23,6 +23,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -225,7 +226,7 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 		l.BlockNumber = blockNumber
 		l.BlockHash = blockHash
 	}
-	return logs
+	return slices.Clone(logs)
 }
 
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
@@ -234,7 +235,7 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	if txIndex >= len(sdb.logs) {
 		return nil
 	}
-	return sdb.logs[txIndex]
+	return slices.Clone(sdb.logs[txIndex])
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
