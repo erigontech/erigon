@@ -173,6 +173,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
 
+	fmt.Println("X")
+
 	if s.caplin {
 		s.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled
@@ -208,7 +210,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
 	}
-
+	fmt.Println("Y")
 	var withdrawals types.Withdrawals
 	if version >= clparams.CapellaVersion {
 		withdrawals = req.Withdrawals
@@ -225,6 +227,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if err := s.checkRequestsPresence(version, executionRequests); err != nil {
 		return nil, err
 	}
+	fmt.Println("Z")
 	if version >= clparams.ElectraVersion {
 		requests = make(types.FlatRequests, 0)
 		lastReqType := -1
@@ -247,7 +250,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "Unexpected pre-cancun excessBlobGas"}
 		}
 	}
-
+	fmt.Println("W")
 	if version >= clparams.DenebVersion {
 		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas/beaconRoot missing"}
@@ -263,7 +266,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-
+	fmt.Println("W1")
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
 		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash(),
@@ -274,6 +277,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}, nil
 	}
 
+	fmt.Println("W2")
 	for _, txn := range req.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
 			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", libcommon.Bytes2Hex(txn))
@@ -284,6 +288,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	fmt.Println("W5")
 	transactions, err := types.DecodeTransactions(txs)
 	if err != nil {
 		s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
@@ -317,6 +322,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	fmt.Println("W7")
 	possibleStatus, err := s.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
 	if err != nil {
 		return nil, err
@@ -341,7 +347,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 		return nil, err
 	}
-	s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
+	s.logger.Info("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
@@ -377,7 +383,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Println("W2324q5")
 	// Some Consensus layer clients sometimes sends us repeated FCUs and make Erigon print a gazillion logs.
 	// E.G teku sometimes will end up spamming fcu on the terminal block if it has not synced to that point.
 	if forkchoiceMessage != nil &&
@@ -386,7 +392,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		forkchoiceMessage.SafeBlockHash == safeHash {
 		return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 	}
-
+	fmt.Println("W2111")
 	header := s.chainRW.GetHeaderByHash(ctx, blockHash)
 
 	// Retrieve parent and total difficulty.
@@ -403,7 +409,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		s.logger.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &libcommon.Hash{}, ValidationError: engine_types.NewStringifiedErrorFromString("Beacon Chain request before TTD")}, nil
 	}
-
+	fmt.Println("W211345")
 	var isCanonical bool
 	if header != nil {
 		isCanonical, err = s.chainRW.IsCanonicalHash(ctx, blockHash)
@@ -422,6 +428,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block number"),
 		}, nil
 	}
+	fmt.Println("W21134512s")
 	// Check if we already determined if the hash is attributed to a previously received invalid header.
 	bad, lastValidHash := s.hd.IsBadHeaderPoS(blockHash)
 	if bad {
@@ -438,6 +445,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	}
 
 	currentHeader := s.chainRW.CurrentHeader(ctx)
+	fmt.Println("W21134512s1")
 	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
 	if newPayload {
 		if header != nil && isCanonical {
@@ -464,10 +472,13 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
+
+	fmt.Println("W21134512s199")
 	waitingForExecutionReady, err := waitForStuff(500*time.Millisecond, func() (bool, error) {
 		isReady, err := s.chainRW.Ready(ctx)
 		return !isReady, err
 	})
+	fmt.Println("W21134512s199989")
 	if err != nil {
 		return nil, err
 	}
@@ -734,7 +745,7 @@ func (e *EngineServer) HandleNewPayload(
 	headerHash := block.Hash()
 
 	e.logger.Info(fmt.Sprintf("[%s] Handling new payload", logPrefix), "height", headerNumber, "hash", headerHash)
-
+	fmt.Println("W15")
 	if headerNumber == 0 {
 		return nil, errors.New("new payload cannot be used for genesis")
 	}
@@ -745,6 +756,7 @@ func (e *EngineServer) HandleNewPayload(
 		currentHeadNumber = new(uint64)
 		*currentHeadNumber = currentHeader.Number.Uint64()
 	}
+	fmt.Println("W16")
 	parent := e.chainRW.GetHeader(ctx, header.ParentHash, headerNumber-1)
 	if parent == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download parent", logPrefix), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
@@ -755,7 +767,7 @@ func (e *EngineServer) HandleNewPayload(
 		if !e.blockDownloader.StartDownloading(ctx, 0, header.ParentHash, block) {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
-
+		fmt.Println("W17")
 		if currentHeadNumber != nil {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
@@ -764,6 +776,7 @@ func (e *EngineServer) HandleNewPayload(
 			}); stillSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
+			fmt.Println("W18")
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := eth1.GetBlockHashFromMissingSegmentError(err)
@@ -779,6 +792,7 @@ func (e *EngineServer) HandleNewPayload(
 				}
 				return nil, err
 			}
+			fmt.Println("W20")
 
 			if status == execution.ExecutionStatus_Busy || status == execution.ExecutionStatus_TooFarAway {
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
@@ -790,7 +804,7 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-
+	fmt.Println("W21")
 	if err := e.chainRW.InsertBlockAndWait(ctx, block); err != nil {
 		return nil, err
 	}
@@ -799,9 +813,9 @@ func (e *EngineServer) HandleNewPayload(
 		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}
 
-	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
+	e.logger.Info(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
-	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
+	e.logger.Info(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := eth1.GetBlockHashFromMissingSegmentError(err)
 		if isMissingChainErr {
@@ -816,7 +830,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 		return nil, err
 	}
-
+	fmt.Println("W2324")
 	if status == execution.ExecutionStatus_BadBlock {
 		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
 	}
