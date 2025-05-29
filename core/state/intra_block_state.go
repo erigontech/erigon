@@ -1239,8 +1239,10 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 	return writes
 }
 
-var tracedKeys map[common.Hash]struct{}
+// nolint
+var tracedKeys map[common.Hash]struct{} //nolint
 
+// nolint
 func traceKey(key common.Hash) bool {
 	if tracedKeys == nil {
 		tracedKeys = map[common.Hash]struct{}{}
@@ -1253,6 +1255,7 @@ func traceKey(key common.Hash) bool {
 	return len(tracedKeys) == 0 || ok
 }
 
+// nolint
 var tracedAccounts map[common.Address]struct{} = func() map[common.Address]struct{} {
 	ta := map[common.Address]struct{}{}
 	for _, account := range dbg.TraceAccounts {
@@ -1262,6 +1265,7 @@ var tracedAccounts map[common.Address]struct{} = func() map[common.Address]struc
 	return ta
 }()
 
+// nolint
 func traceAccount(addr common.Address) bool {
 	_, ok := tracedAccounts[addr]
 	return ok
