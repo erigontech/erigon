@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 )
 
@@ -1501,16 +1502,16 @@ func TestUpdate_EncodeDecode(t *testing.T) {
 	t.Parallel()
 
 	updates := []Update{
-		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: [32]byte(EmptyCodeHash)},
-		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: empty.CodeHash},
+		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
 		{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
 			CodeHash: [length.Hash]byte{
 				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
 				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
-		{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: [32]byte(EmptyCodeHash)},
-		{Flags: DeleteUpdate, CodeHash: [32]byte(EmptyCodeHash)},
+		{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+		{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 	}
 
 	var numBuf [10]byte
@@ -1538,17 +1539,17 @@ func TestUpdate_Merge(t *testing.T) {
 
 	updates := []tcase{
 		{
-			a: Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: [32]byte(EmptyCodeHash)},
-			b: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
-			e: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+			a: Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: empty.CodeHash},
+			b: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
+			e: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
 		},
 		{
-			a: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
-			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: [32]byte(EmptyCodeHash)},
-			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: [32]byte(EmptyCodeHash)},
+			a: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
+			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: empty.CodeHash},
+			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: empty.CodeHash},
 		},
 		{
-			a: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(4568314), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+			a: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(4568314), Nonce: 123, CodeHash: empty.CodeHash},
 			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124,
 				CodeHash: [length.Hash]byte{
 					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
@@ -1562,9 +1563,9 @@ func TestUpdate_Merge(t *testing.T) {
 				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
 		},
 		{
-			a: Update{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: [32]byte(EmptyCodeHash)},
-			b: Update{Flags: DeleteUpdate, CodeHash: [32]byte(EmptyCodeHash)},
-			e: Update{Flags: DeleteUpdate, CodeHash: [32]byte(EmptyCodeHash)},
+			a: Update{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+			b: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
+			e: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 		},
 	}
 
@@ -1644,7 +1645,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	require.True(t, update.Balance.Eq(&target.Balance))
 	require.Equal(t, update.Nonce, target.Nonce)
 	require.Equal(t, update.CodeHash, target.CodeHash)
-	require.EqualValues(t, EmptyCodeHashArray[:], target.CodeHash)
+	require.EqualValues(t, empty.CodeHash[:], target.CodeHash)
 	require.Equal(t, update.StorageLen, target.StorageLen)
 	require.Equal(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
 
@@ -1655,7 +1656,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 
 	require.True(t, update.Balance.Eq(&target.Balance))
 	require.Equal(t, update.Nonce, target.Nonce)
-	require.EqualValues(t, EmptyCodeHashArray[:], target.CodeHash)
+	require.EqualValues(t, empty.CodeHash[:], target.CodeHash)
 	require.Equal(t, update.StorageLen, target.StorageLen)
 	require.Equal(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
 }

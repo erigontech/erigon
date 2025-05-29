@@ -6,12 +6,11 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
-
-	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +22,9 @@ type testAggConfig struct {
 
 func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
 	tb.Helper()
-	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
+	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
+	db := wrapDbWithCtx(_db, agg)
+
 	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
 
@@ -33,21 +34,23 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
 	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
 
-	keys, vals := generateInputData(tb, length.Addr, 16, txCount)
+	keys, vals := generateInputData(tb, length.Addr, 5, txCount)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
+	var txNum uint64
 	for i := 0; i < len(vals); i++ {
-		domains.SetTxNum(uint64(i))
+		txNum = uint64(i)
+		domains.SetTxNum(txNum)
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts3.Account{
@@ -57,14 +60,14 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 				Incarnation: 0,
 			}
 			buf := accounts3.SerialiseV3(&acc)
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j])
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
 			require.NoError(tb, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev, step)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 			require.NoError(tb, err)
 			require.NotEmpty(tb, rh)
 		}
@@ -87,23 +90,20 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 		t.Skip()
 	}
 
-	cfgd := &testAggConfig{stepSize: 32, disableCommitmentBranchTransform: true}
-	db, agg := testDbAggregatorWithFiles(t, cfgd)
-	defer db.Close()
+	cfgd := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
+	_db, agg := testDbAggregatorWithFiles(t, cfgd)
+	db := wrapDbWithCtx(_db, agg)
 
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	// get latest commited root
-	latestRoot, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
+	latestRoot, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), 0, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, latestRoot)
 	domains.Close()
@@ -111,20 +111,22 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	// now do the squeeze
 	agg.commitmentValuesTransform = true
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = true
-	err = SqueezeCommitmentFiles(ac, log.New())
+	err = SqueezeCommitmentFiles(AggTx(rwTx), log.New())
 	require.NoError(t, err)
-	ac.Close()
+
 	agg.recalcVisibleFiles(math.MaxUint64)
+	err = rwTx.Commit()
+	require.NoError(t, err)
 
-	// check now
-	ac = agg.BeginFilesRo()
-	defer ac.Close()
+	rwTx, err = db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
 
-	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
-	acit, err := ac.DebugRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
+	acit, err := rwTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
 	require.NoError(t, err)
 	defer acit.Close()
 
@@ -136,9 +138,9 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	}
 
 	// check if the commitment is the same
-	root, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), 0, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)
-	require.NotEqual(t, commitment.EmptyRootHash, root)
+	require.NotEqual(t, empty.RootHash.Bytes(), root)
 }

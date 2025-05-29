@@ -332,8 +332,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		return nil, err
 	}
 	defer domains.Close()
-	stateReader := state.NewReaderV3(domains)
-	stateWriter := state.NewWriter(domains, nil)
+
+	stateReader := state.NewReaderV3(domains.AsGetter(tx))
+	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
@@ -341,6 +342,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	txNumIncrement := func() {
 		txNum++
+		stateWriter.SetTxNum(uint64(txNum))
 		domains.SetTxNum(uint64(txNum))
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
@@ -387,7 +389,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			//	return nil, nil, err
 			//}
 			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), "")
+			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), uint64(txNum), "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}

@@ -35,8 +35,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
@@ -74,9 +72,6 @@ type History struct {
 	_visibleFiles []visibleFile
 }
 
-type rangeDomainIntegrityChecker func(d kv.Domain, dirs datadir.Dirs, fromStep, toStep uint64) bool
-type rangeIntegrityChecker func(fromStep, toStep uint64) bool
-
 type histCfg struct {
 	iiCfg iiCfg
 
@@ -106,9 +101,6 @@ type histCfg struct {
 	Compression   seg.FileCompression // defines type of Compression for history files
 	historyIdx    kv.InvertedIdx
 
-	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
-	integrity rangeIntegrityChecker
-
 	version HistVersionTypes
 }
 
@@ -129,14 +121,6 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 		histCfg:       cfg,
 		dirtyFiles:    btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visibleFiles: []visibleFile{},
-	}
-
-	cfg.iiCfg.integrity = func(fromStep, toStep uint64) bool {
-		exists, err := dir.FileExist(h.vFilePath(fromStep, toStep))
-		if err != nil {
-			panic(err)
-		}
-		return exists
 	}
 
 	var err error
@@ -208,11 +192,6 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 		panic("assert: empty `aggregationStep`")
 	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, h.aggregationStep, h.filenameBase, "v", h.logger) {
-		startStep, endStep := dirtyFile.startTxNum/h.aggregationStep, dirtyFile.endTxNum/h.aggregationStep
-		if h.integrity != nil && !h.integrity(startStep, endStep) {
-			h.logger.Debug("[agg] skip garbage file", "name", h.filenameBase, "startStep", startStep, "endStep", endStep)
-			continue
-		}
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
 			h.dirtyFiles.Set(dirtyFile)
 		}
@@ -504,7 +483,7 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 	}
 }
 
-func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, original []byte) (err error) {
+func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
 	}
@@ -519,9 +498,9 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, or
 	//}()
 
 	if w.largeValues {
-		lk := len(key1) + len(key2)
+		lk := len(k)
 
-		w.historyKey = append(append(append(w.historyKey[:0], key1...), key2...), w.ii.txNumBytes[:]...)
+		w.historyKey = append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...)
 		historyKey := w.historyKey[:lk+8]
 
 		if err := w.historyVals.Collect(historyKey, original); err != nil {
@@ -536,15 +515,15 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, or
 		return nil
 	}
 
-	lk := len(key1) + len(key2)
-	w.historyKey = append(append(append(append(w.historyKey[:0], key1...), key2...), w.ii.txNumBytes[:]...), original...)
+	lk := len(k)
+	w.historyKey = append(append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...), original...)
 	historyKey := w.historyKey[:lk+8+len(original)]
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
 
 	if len(original) > 2048 {
-		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(key1)-len(key2))
+		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(k))
 		panic("History value is too large while largeValues=false")
 	}
 
@@ -865,7 +844,7 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 func (h *History) reCalcVisibleFiles(toTxNum uint64) {
-	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.Accessors, false, toTxNum)
+	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
 	h.InvertedIndex.reCalcVisibleFiles(toTxNum)
 }
 
@@ -1107,15 +1086,22 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
+func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	if !forced {
+		if ht.files.EndTxNum() > 0 {
+			txTo = min(txTo, ht.files.EndTxNum())
+		}
 		var can bool
-		can, txTo = ht.canPruneUntil(rwTx, txTo)
+		can, txTo = ht.canPruneUntil(tx, txTo)
 		if !can {
 			return nil, nil
 		}
 	}
+	return ht.prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
+}
+
+func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (

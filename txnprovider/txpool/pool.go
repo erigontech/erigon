@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,6 +126,7 @@ type TxPool struct {
 	promoted                Announcements
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
+	chainConfig             *chain.Config
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -139,11 +139,12 @@ type TxPool struct {
 	isPostShanghai          atomic.Bool
 	agraBlock               *uint64
 	isPostAgra              atomic.Bool
+	bhilaiBlock             *uint64
+	isPostBhilai            atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
-	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -173,12 +174,7 @@ func New(
 	chainDB kv.TemporalRoDB,
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
-	chainID uint256.Int,
-	shanghaiTime *big.Int,
-	agraBlock *big.Int,
-	cancunTime *big.Int,
-	pragueTime *big.Int,
-	blobSchedule *chain.BlobSchedule,
+	chainConfig *chain.Config,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -208,6 +204,11 @@ func New(
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
+	configChainID, overflow := uint256.FromBig(chainConfig.ChainID)
+	if overflow {
+		return nil, errors.New("chainID overflow")
+	}
+
 	lock := &sync.Mutex{}
 
 	res := &TxPool{
@@ -227,12 +228,12 @@ func New(
 		poolDB:                  poolDB,
 		_chainDB:                chainDB,
 		cfg:                     cfg,
-		chainID:                 chainID,
+		chainID:                 *configChainID,
+		chainConfig:             chainConfig,
 		unprocessedRemoteTxns:   &TxnSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
-		blobSchedule:            blobSchedule,
 		feeCalculator:           options.feeCalculator,
 		ethBackend:              ethBackend,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
@@ -245,36 +246,47 @@ func New(
 		}),
 	}
 
-	if shanghaiTime != nil {
-		if !shanghaiTime.IsUint64() {
+	if chainConfig.ShanghaiTime != nil {
+		if !chainConfig.ShanghaiTime.IsUint64() {
 			return nil, errors.New("shanghaiTime overflow")
 		}
-		shanghaiTimeU64 := shanghaiTime.Uint64()
+		shanghaiTimeU64 := chainConfig.ShanghaiTime.Uint64()
 		res.shanghaiTime = &shanghaiTimeU64
 	}
-	if agraBlock != nil {
-		if !agraBlock.IsUint64() {
-			return nil, errors.New("agraBlock overflow")
+	if chainConfig.Bor != nil {
+		agraBlock := chainConfig.Bor.GetAgraBlock()
+		if agraBlock != nil {
+			if !agraBlock.IsUint64() {
+				return nil, errors.New("agraBlock overflow")
+			}
+			agraBlockU64 := agraBlock.Uint64()
+			res.agraBlock = &agraBlockU64
 		}
-		agraBlockU64 := agraBlock.Uint64()
-		res.agraBlock = &agraBlockU64
+		bhilaiBlock := chainConfig.Bor.GetBhilaiBlock()
+		if bhilaiBlock != nil {
+			if !bhilaiBlock.IsUint64() {
+				return nil, errors.New("bhilaiBlock overflow")
+			}
+			bhilaiBlockU64 := bhilaiBlock.Uint64()
+			res.bhilaiBlock = &bhilaiBlockU64
+		}
 	}
-	if cancunTime != nil {
-		if !cancunTime.IsUint64() {
+	if chainConfig.CancunTime != nil {
+		if !chainConfig.CancunTime.IsUint64() {
 			return nil, errors.New("cancunTime overflow")
 		}
-		cancunTimeU64 := cancunTime.Uint64()
+		cancunTimeU64 := chainConfig.CancunTime.Uint64()
 		res.cancunTime = &cancunTimeU64
 	}
-	if pragueTime != nil {
-		if !pragueTime.IsUint64() {
+	if chainConfig.PragueTime != nil {
+		if !chainConfig.PragueTime.IsUint64() {
 			return nil, errors.New("pragueTime overflow")
 		}
-		pragueTimeU64 := pragueTime.Uint64()
+		pragueTimeU64 := chainConfig.PragueTime.Uint64()
 		res.pragueTime = &pragueTimeU64
 	}
 
-	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, chainID, logger, opts...)
+	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
 
 	return res, nil
@@ -766,7 +778,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	best := p.pending.best
 
 	isShanghai := p.isShanghai() || p.isAgra()
-	isPrague := p.isPrague()
+	isPrague := p.isPrague() || p.isBhilai()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -1173,6 +1185,42 @@ func (p *TxPool) isAgra() bool {
 	return activated
 }
 
+func (p *TxPool) isBhilai() bool {
+	// once this flag has been set for the first time we no longer need to check the block
+	set := p.isPostBhilai.Load()
+	if set {
+		return true
+	}
+	if p.bhilaiBlock == nil {
+		return false
+	}
+	bhilaiBlock := *p.bhilaiBlock
+
+	// a zero here means Bhilai is always active
+	if bhilaiBlock == 0 {
+		p.isPostBhilai.Swap(true)
+		return true
+	}
+
+	tx, err := p._chainDB.BeginRo(context.Background())
+	if err != nil {
+		return false
+	}
+	defer tx.Rollback()
+
+	headBlock, err := chain.CurrentBlockNumber(tx)
+	if headBlock == nil || err != nil {
+		return false
+	}
+	// A new block is built on top of the head block, so when the head is bhilaiBlock-1,
+	// the new block should use the Bhilai rules.
+	activated := (*headBlock + 1) >= bhilaiBlock
+	if activated {
+		p.isPostBhilai.Swap(true)
+	}
+	return activated
+}
+
 func (p *TxPool) isCancun() bool {
 	return isTimeBasedForkActivated(&p.isPostCancun, p.cancunTime)
 }
@@ -1182,7 +1230,8 @@ func (p *TxPool) isPrague() bool {
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
-	return p.blobSchedule.MaxBlobsPerBlock(p.isPrague())
+	now := time.Now().Unix()
+	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
 }
 
 // Check that the serialized txn should not exceed a certain max size

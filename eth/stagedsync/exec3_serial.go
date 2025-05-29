@@ -22,7 +22,7 @@ type serialExecutor struct {
 	skipPostEvaluation bool
 	// outputs
 	txCount     uint64
-	usedGas     uint64
+	gasUsed     uint64
 	blobGasUsed uint64
 }
 
@@ -52,8 +52,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			}
 
 			se.txCount++
-			se.usedGas += txTask.UsedGas
-			mxExecGas.Add(float64(txTask.UsedGas))
+			se.gasUsed += txTask.GasUsed
+			mxExecGas.Add(float64(txTask.GasUsed))
 			mxExecTransactions.Add(1)
 
 			if txTask.Tx != nil {
@@ -69,7 +69,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
 				if txTask.BlockNum > 0 && !se.skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -117,7 +117,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
-			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
+			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
 		} else {
@@ -133,7 +133,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
 						FirstLogIndexWithinBlock: uint32(firstIndex),
 					}
-					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
+					if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), &receipt, se.blobGasUsed, txTask.TxNum); err != nil {
 						return false, err
 					}
 				}
@@ -182,7 +182,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 		return t2, err
 	}
 	se.doms.SetTxNum(txNum)
-	se.rs = state.NewParallelExecutionState(se.doms, se.cfg.syncCfg, se.cfg.chainConfig.Bor != nil, se.logger)
+	se.rs = state.NewParallelExecutionState(se.doms, se.applyTx, se.cfg.syncCfg, se.cfg.chainConfig.Bor != nil, se.logger)
 
 	se.applyWorker.ResetTx(se.applyTx)
 	se.applyWorker.ResetState(se.rs, se.accumulator)

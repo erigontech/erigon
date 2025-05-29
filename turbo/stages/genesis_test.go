@@ -71,7 +71,7 @@ func TestSetupGenesis(t *testing.T) {
 				return core.CommitGenesisBlock(db, new(types.Genesis), datadir.New(tmpdir), logger)
 			},
 			wantErr:    types.ErrGenesisNoConfig,
-			wantConfig: params.AllProtocolChanges,
+			wantConfig: chain.AllProtocolChanges,
 		},
 		{
 			name: "no block in DB, genesis == nil",
