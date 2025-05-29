@@ -364,6 +364,8 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 // This should be called synchronously after Downloader.New and probably before adding
 // torrents/requests. However, I call it based on the existing config field for now.
 func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	// Does WalkDir do path or filepath?
 	return fs.WalkDir(
 		os.DirFS(d.SnapDir()),
@@ -467,8 +469,6 @@ func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
 func (d *Downloader) allTorrentsComplete() (ret bool) {
 	ret = true
-	d.lock.Lock()
-	defer d.lock.Unlock()
 	for _, t := range d.torrentClient.Torrents() {
 		if !t.Complete().Bool() {
 			if g.MapContains(d.requiredTorrents, t) {
@@ -1045,13 +1045,13 @@ func (d *Downloader) RequestSnapshot(
 	infoHash metainfo.Hash,
 	name string,
 ) (err error) {
+	d.lock.Lock()
 	t, err := d.addPreverifiedTorrent(g.Some(infoHash), name)
 	if err == nil {
-		d.lock.Lock()
 		g.MakeMapIfNil(&d.requiredTorrents)
 		g.MapInsert(d.requiredTorrents, t, struct{}{})
-		d.lock.Unlock()
 	}
+	d.lock.Unlock()
 	return
 }
 
@@ -1440,6 +1440,8 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 func (d *Downloader) Completed() bool {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	return d.allTorrentsComplete()
 }
 
