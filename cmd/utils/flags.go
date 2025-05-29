@@ -236,7 +236,6 @@ var (
 	MinerGasLimitFlag = cli.Uint64Flag{
 		Name:  "miner.gaslimit",
 		Usage: "Target gas limit for mined blocks",
-		Value: ethconfig.Defaults.Miner.GasLimit,
 	}
 	MinerGasPriceFlag = flags.BigFlag{
 		Name:  "miner.gasprice",
@@ -1671,8 +1670,10 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 		panic(err)
 	}
 	cfg.ExtraData = []byte(extraDataStr)
-	cfg.GasLimit, err = flags.GetUint64(MinerGasLimitFlag.Name)
-	if err != nil {
+	gasLimit, err := flags.GetUint64(MinerGasLimitFlag.Name)
+	if _, ok := err.(*strconv.NumError); ok || err == nil {
+		cfg.GasLimit = &gasLimit
+	} else {
 		panic(err)
 	}
 	price, err := flags.GetInt64(MinerGasPriceFlag.Name)
@@ -1766,7 +1767,9 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	}
 
 	if ctx.IsSet(MinerGasLimitFlag.Name) {
-		cfg.GasLimit = ctx.Uint64(MinerGasLimitFlag.Name)
+		if gasLimit := ctx.Uint64(MinerGasLimitFlag.Name); gasLimit != 0 {
+			cfg.GasLimit = &gasLimit
+		}
 	}
 	if ctx.IsSet(MinerGasPriceFlag.Name) {
 		cfg.GasPrice = flags.GlobalBig(ctx, MinerGasPriceFlag.Name)

@@ -33,8 +33,8 @@ type MiningConfig struct {
 	Etherbase  libcommon.Address `toml:",omitempty"` // Public address for block mining rewards
 	SigKey     *ecdsa.PrivateKey // ECDSA private key for signing blocks
 	Notify     []string          `toml:",omitempty"` // HTTP URL list to be notified of new work packages(only useful in ethash).
-	ExtraData  hexutility.Bytes  `toml:",omitempty"` // Block extra data set by the miner
-	GasLimit   uint64            // Target gas limit for mined blocks.
+	ExtraData  hexutility.Bytes     `toml:",omitempty"` // Block extra data set by the miner
+	GasLimit   *uint64           // Target gas limit for mined blocks.
 	GasPrice   *big.Int          // Minimum gas price for mining a transaction
 	Recommit   time.Duration     // The time interval for miner to re-create mining work.
 }
