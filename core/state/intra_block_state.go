@@ -190,7 +190,10 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[common.Address]struct{})
 	//clear(sdb.stateObjectsDirty)
-	clear(sdb.logs) // free pointers
+	for i := range sdb.logs {
+		clear(sdb.logs[i]) // free p¬ointers
+		sdb.logs[i] = sdb.logs[i][:0]
+	}
 	sdb.logs = sdb.logs[:0]
 	sdb.balanceInc = make(map[common.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
