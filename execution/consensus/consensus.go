@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -76,14 +75,9 @@ type ChainHeaderReader interface {
 //go:generate mockgen -typed=true -destination=./chain_reader_mock.go -package=consensus . ChainReader
 type ChainReader interface {
 	ChainHeaderReader
-
 	// GetBlock retrieves a block from the database by hash and number.
 	GetBlock(hash common.Hash, number uint64) *types.Block
-
 	HasBlock(hash common.Hash, number uint64) bool
-
-	BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue
-	BorStartEventId(hash common.Hash, number uint64) uint64
 }
 
 type SystemCall func(contract common.Address, data []byte) ([]byte, error)

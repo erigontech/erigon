@@ -60,7 +60,7 @@ func TestEthSubscribe(t *testing.T) {
 
 	ctx := context.Background()
 	logger := log.New()
-	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), nil)
+	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 	// Creating a new filter will set up new internal subscription channels actively managed by subscription tasks.

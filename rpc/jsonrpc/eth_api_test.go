@@ -20,14 +20,11 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -251,16 +248,6 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	} else {
 		t.Error("error expected")
 	}
-}
-
-func TestUseBridgeReader(t *testing.T) {
-	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
-	var br *mockBridgeReader
-	api := NewBaseApi(nil, nil, nil, false, time.Duration(0), nil, datadir.Dirs{}, br)
-	require.False(t, api.useBridgeReader)
-	br = &mockBridgeReader{}
-	api = NewBaseApi(nil, nil, nil, false, time.Duration(0), nil, datadir.Dirs{}, br)
-	require.True(t, api.useBridgeReader)
 }
 
 var _ bridgeReader = mockBridgeReader{}

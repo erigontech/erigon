@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -33,15 +32,6 @@ import (
 
 type All struct {
 	BlockReader FullBlockReader
-}
-
-type BorEventReader interface {
-	LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error)
-	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
-	BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error)
-	LastFrozenEventId() uint64
-	LastFrozenEventBlockNum() uint64
 }
 
 type BorSpanReader interface {
@@ -87,7 +77,6 @@ type FullBlockReader interface {
 	interfaces.BlockReader
 	interfaces.BodyReader
 	interfaces.HeaderReader
-	BorEventReader
 	BorSpanReader
 	BorMilestoneReader
 	BorCheckpointReader

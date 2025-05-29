@@ -34,9 +34,9 @@ import (
 )
 
 type HeimdallSimulator struct {
-	snapshots   *heimdall.RoSnapshots
-	blockReader *freezeblocks.BlockReader
-
+	snapshots                *heimdall.RoSnapshots
+	blockReader              *freezeblocks.BlockReader
+	bridgeStore              bridge.Store
 	iterations               []uint64 // list of final block numbers for an iteration
 	lastAvailableBlockNumber uint64
 
@@ -92,7 +92,7 @@ func (noopBridgeStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) 
 func (noopBridgeStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[common.Hash]uint64) error {
 	return nil
 }
-func (noopBridgeStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
+func (noopBridgeStore) PutEvents(ctx context.Context, events []*bridge.EventRecordWithTime) error {
 	return nil
 }
 func (noopBridgeStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
@@ -110,7 +110,7 @@ func (noopBridgeStore) BorStartEventId(ctx context.Context, hash common.Hash, bl
 func (noopBridgeStore) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return nil, errors.New("noop")
 }
-func (noopBridgeStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+func (noopBridgeStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*bridge.EventRecordWithTime, bool, error) {
 	return nil, false, errors.New("noop")
 }
 func (noopBridgeStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
@@ -167,8 +167,8 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 		blockReader: freezeblocks.NewBlockReader(nil, snapshots,
 			heimdallStore{
 				spans: heimdall.NewSpanSnapshotStore(heimdall.NoopEntityStore[*heimdall.Span]{Type: heimdall.Spans}, snapshots),
-			},
-			bridge.NewSnapshotStore(noopBridgeStore{}, snapshots, sprintLengthCalculator{})),
+			}),
+		bridgeStore: bridge.NewSnapshotStore(noopBridgeStore{}, snapshots, sprintLengthCalculator{}),
 
 		iterations: iterations,
 
@@ -222,12 +222,12 @@ func (h *HeimdallSimulator) FetchSpans(ctx context.Context, page uint64, limit u
 	return nil, errors.New("method FetchSpans is not implemented")
 }
 
-func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	events, _, err := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
+func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint64, to time.Time, limit int) ([]*bridge.EventRecordWithTime, error) {
+	events, _, err := h.bridgeStore.EventsByIdFromSnapshot(fromId, to, limit)
 	return events, err
 }
 
-func (h *HeimdallSimulator) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+func (h *HeimdallSimulator) FetchStateSyncEvent(ctx context.Context, id uint64) (*bridge.EventRecordWithTime, error) {
 	return nil, errors.New("method FetchStateSyncEvent not implemented")
 }
 

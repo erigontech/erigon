@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -260,11 +261,11 @@ func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) err
 	return errors.New("TODO")
 }
 
-func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*bridge.EventRecordWithTime, error) {
 	return nil, errors.New("TODO")
 }
 
-func (h *Heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+func (h *Heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*bridge.EventRecordWithTime, error) {
 	return nil, errors.New("TODO")
 }
 
@@ -423,11 +424,11 @@ func (h *Heimdall) Start(ctx context.Context) error {
 	// if this is a restart
 	h.unsubscribe()
 
-	server := &http.Server{Addr: h.listenAddr, Handler: makeHeimdallRouter(ctx, h)}
+	server := &http.Server{Addr: h.listenAddr, Handler: makeHeimdallRouter(ctx, h, h)}
 	return startHTTPServer(ctx, server, "devnet Heimdall service", h.logger)
 }
 
-func makeHeimdallRouter(ctx context.Context, client heimdall.Client) *chi.Mux {
+func makeHeimdallRouter(ctx context.Context, heimdallClient heimdall.Client, bridgeClient bridge.Client) *chi.Mux {
 	router := chi.NewRouter()
 
 	writeResponse := func(w http.ResponseWriter, result any, err error) {
@@ -473,7 +474,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.Client) *chi.Mux {
 			return
 		}
 
-		result, err := client.FetchStateSyncEvents(ctx, fromId, time.Unix(toTime, 0), 0)
+		result, err := bridgeClient.FetchStateSyncEvents(ctx, fromId, time.Unix(toTime, 0), 0)
 		writeResponse(w, result, err)
 	})
 
@@ -484,7 +485,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.Client) *chi.Mux {
 			http.Error(w, http.StatusText(400), 400)
 			return
 		}
-		result, err := client.FetchSpan(ctx, id)
+		result, err := heimdallClient.FetchSpan(ctx, id)
 		writeResponse(w, result, err)
 	})
 
@@ -495,17 +496,17 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.Client) *chi.Mux {
 			http.Error(w, http.StatusText(400), 400)
 			return
 		}
-		result, err := client.FetchCheckpoint(ctx, number)
+		result, err := heimdallClient.FetchCheckpoint(ctx, number)
 		writeResponse(w, result, err)
 	})
 
 	router.Get("/checkpoints/latest", func(w http.ResponseWriter, r *http.Request) {
-		result, err := client.FetchCheckpoint(ctx, -1)
+		result, err := heimdallClient.FetchCheckpoint(ctx, -1)
 		writeResponse(w, result, err)
 	})
 
 	router.Get("/checkpoints/count", func(w http.ResponseWriter, r *http.Request) {
-		result, err := client.FetchCheckpointCount(ctx)
+		result, err := heimdallClient.FetchCheckpointCount(ctx)
 		writeResponse(w, wrapResult(result), err)
 	})
 
@@ -524,7 +525,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.Client) *chi.Mux {
 			return
 		}
 
-		result, err := client.FetchCheckpoints(ctx, page, limit)
+		result, err := heimdallClient.FetchCheckpoints(ctx, page, limit)
 		writeResponse(w, wrapResult(result), err)
 	})
 
@@ -535,35 +536,35 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.Client) *chi.Mux {
 			http.Error(w, http.StatusText(400), 400)
 			return
 		}
-		result, err := client.FetchMilestone(ctx, number)
+		result, err := heimdallClient.FetchMilestone(ctx, number)
 		writeResponse(w, result, err)
 	})
 
 	router.Get("/milestone/latest", func(w http.ResponseWriter, r *http.Request) {
-		result, err := client.FetchMilestone(ctx, -1)
+		result, err := heimdallClient.FetchMilestone(ctx, -1)
 		writeResponse(w, result, err)
 	})
 
 	router.Get("/milestone/count", func(w http.ResponseWriter, r *http.Request) {
-		result, err := client.FetchMilestoneCount(ctx)
+		result, err := heimdallClient.FetchMilestoneCount(ctx)
 		writeResponse(w, heimdall.MilestoneCount{Count: result}, err)
 	})
 
 	router.Get("/milestone/noAck/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		err := client.FetchNoAckMilestone(ctx, id)
+		err := heimdallClient.FetchNoAckMilestone(ctx, id)
 		result := err == nil
 		writeResponse(w, wrapResult(result), err)
 	})
 
 	router.Get("/milestone/lastNoAck", func(w http.ResponseWriter, r *http.Request) {
-		result, err := client.FetchLastNoAckMilestone(ctx)
+		result, err := heimdallClient.FetchLastNoAckMilestone(ctx)
 		writeResponse(w, wrapResult(result), err)
 	})
 
 	router.Get("/milestone/ID/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		err := client.FetchMilestoneID(ctx, id)
+		err := heimdallClient.FetchMilestoneID(ctx, id)
 		result := err == nil
 		writeResponse(w, wrapResult(result), err)
 	})

@@ -497,11 +497,7 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 	// Private API returns 0 if transaction is not found.
 	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 	if isBorStateSyncTx {
-		if api.useBridgeReader {
-			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		} else {
-			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
-		}
+		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 
 		if err != nil {
 			return nil, err

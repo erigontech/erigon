@@ -116,11 +116,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 
 		var ok bool
-		if api.useBridgeReader {
-			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-		} else {
-			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
-		}
+		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		if err != nil {
 			stream.WriteArrayEnd()
 			return err
@@ -258,11 +254,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		if api.useBridgeReader {
-			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
-		} else {
-			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)
-		}
+		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
 		if err != nil {
 			stream.WriteNil()
 			return err
@@ -271,7 +263,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			stream.WriteNil()
 			return nil
 		}
-		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
+		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
 			return nil
 		}

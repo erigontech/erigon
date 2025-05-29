@@ -1,19 +1,3 @@
-// Copyright 2024 The Erigon Authors
-// This file is part of Erigon.
-//
-// Erigon is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Erigon is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-
 package bridge
 
 import (
@@ -22,7 +6,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type Store interface {
@@ -42,7 +25,7 @@ type Store interface {
 	EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) (events [][]byte, eventIds []uint64, err error) // [timeFrom, timeTo)
 
 	PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[common.Hash]uint64) error
-	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error
+	PutEvents(ctx context.Context, events []*EventRecordWithTime) error
 	PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error
 	PutProcessedBlockInfo(ctx context.Context, info []ProcessedBlockInfo) error
 
@@ -51,6 +34,6 @@ type Store interface {
 	// block reader compatibility
 	BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error)
 	EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
-	EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error)
+	EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*EventRecordWithTime, bool, error)
 	PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error)
 }
