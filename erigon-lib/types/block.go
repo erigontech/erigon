@@ -588,6 +588,19 @@ func (h *Header) Hash() (hash common.Hash) {
 	return hash
 }
 
+// CalcHash calculates the block hash of the header, which is simply the keccak256 hash of its
+// RLP encoding.
+func (h *Header) CalcHash() (hash common.Hash) {
+	hash = rlpHash(h)
+	if hashLoaded := h.hash.Load(); hashLoaded != nil {
+		if hashLoaded.Cmp(hash) == 0 {
+			return hash
+		}
+	}
+	h.hash.Store(&hash)
+	return hash
+}
+
 var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
 
 // Size returns the approximate memory used by all internal contents. It is used

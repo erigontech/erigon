@@ -302,7 +302,7 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 			}
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
-			if count%100000 == 0 {
+			if count%1_000_000 == 0 {
 				logger.Info(fmt.Sprintf("Indexed %d keys in file %s", count, baseFileName))
 			}
 			// skip values
@@ -415,7 +415,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 				return false, fmt.Errorf("failed to add val %x: %w", v, err)
 			}
 			count++
-			if count%1_000_000 == 0 {
+			if count%10_000_000 == 0 {
 				skipRatio := float64(skipped) / float64(count)
 				logger.Info(fmt.Sprintf("Indexed %d keys, skipped %d, in file %s. skip ratio: %.2f", count, skipped, baseFileName, skipRatio))
 			}

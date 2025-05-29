@@ -1199,7 +1199,7 @@ func (hph *HexPatriciaHashed) nCellsInRow(row int) int { //nolint:unused
 	return count
 }
 
-// Traverse the grid following `hashedKey` and produce the witness `trie.Trie` for that key
+// Traverse the grid following `hashedKey` and produce the witness `triedeprecated.Trie` for that key
 func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
@@ -1998,7 +1998,7 @@ func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, error) {
 }
 
 // Generate the block witness. This works by loading each key from the list of updates (they are not really updates since we won't modify the trie,
-// but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `trie.Trie`.
+// but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `triedeprecated.Trie`.
 // All the individual tries are combined to create the final witness trie.
 // Because the grid is lacking information about the code in smart contract accounts which is also part of the witness, we need to provide that as an input parameter to this function (`codeReads`)
 func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[common.Hash]witnesstypes.CodeWithHash, expectedRootHash []byte, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {

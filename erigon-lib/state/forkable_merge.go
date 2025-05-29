@@ -29,6 +29,14 @@ type ForkableMergeFiles struct {
 	buffered []*filesItem
 }
 
+func NewForkableMergeFiles(markedSize, unmarkedSize, bufferedSize int) *ForkableMergeFiles {
+	return &ForkableMergeFiles{
+		marked:   make([]*filesItem, markedSize),
+		unmarked: make([]*filesItem, unmarkedSize),
+		buffered: make([]*filesItem, bufferedSize),
+	}
+}
+
 func (f ForkableMergeFiles) Close() {
 	fn := func(items []*filesItem) {
 		for _, item := range items {
@@ -38,6 +46,19 @@ func (f ForkableMergeFiles) Close() {
 	fn(f.marked)
 	fn(f.unmarked)
 	fn(f.buffered)
+}
+
+func (f ForkableMergeFiles) MergedFilePresent() bool {
+	fn := func(items []*filesItem) bool {
+		for _, item := range items {
+			if item != nil {
+				return true
+			}
+		}
+		return false
+	}
+
+	return fn(f.marked) || fn(f.unmarked) || fn(f.buffered)
 }
 
 func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleFile, compressWorkers int, ps *background.ProgressSet) (mergedFile *filesItem, err error) {

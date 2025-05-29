@@ -26,6 +26,7 @@ jobs:
       TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 43200 # 12 hours
       CHAIN: ${{ matrix.chain }}
+      ERIGON_ASSERT: true
 
     steps:
     - name: Check out repository

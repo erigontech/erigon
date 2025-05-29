@@ -139,6 +139,8 @@ type TxPool struct {
 	isPostShanghai          atomic.Bool
 	agraBlock               *uint64
 	isPostAgra              atomic.Bool
+	bhilaiBlock             *uint64
+	isPostBhilai            atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
@@ -176,6 +178,7 @@ func New(
 	chainID uint256.Int,
 	shanghaiTime *big.Int,
 	agraBlock *big.Int,
+	bhilaiBlock *big.Int,
 	cancunTime *big.Int,
 	pragueTime *big.Int,
 	blobSchedule *chain.BlobSchedule,
@@ -258,6 +261,13 @@ func New(
 		}
 		agraBlockU64 := agraBlock.Uint64()
 		res.agraBlock = &agraBlockU64
+	}
+	if bhilaiBlock != nil {
+		if !bhilaiBlock.IsUint64() {
+			return nil, errors.New("bhilaiBlock overflow")
+		}
+		bhilaiBlockU64 := bhilaiBlock.Uint64()
+		res.bhilaiBlock = &bhilaiBlockU64
 	}
 	if cancunTime != nil {
 		if !cancunTime.IsUint64() {
@@ -766,7 +776,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	best := p.pending.best
 
 	isShanghai := p.isShanghai() || p.isAgra()
-	isPrague := p.isPrague()
+	isPrague := p.isPrague() || p.isBhilai()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -1169,6 +1179,42 @@ func (p *TxPool) isAgra() bool {
 	activated := (*headBlock + 1) >= agraBlock
 	if activated {
 		p.isPostAgra.Swap(true)
+	}
+	return activated
+}
+
+func (p *TxPool) isBhilai() bool {
+	// once this flag has been set for the first time we no longer need to check the block
+	set := p.isPostBhilai.Load()
+	if set {
+		return true
+	}
+	if p.bhilaiBlock == nil {
+		return false
+	}
+	bhilaiBlock := *p.bhilaiBlock
+
+	// a zero here means Bhilai is always active
+	if bhilaiBlock == 0 {
+		p.isPostBhilai.Swap(true)
+		return true
+	}
+
+	tx, err := p._chainDB.BeginRo(context.Background())
+	if err != nil {
+		return false
+	}
+	defer tx.Rollback()
+
+	headBlock, err := chain.CurrentBlockNumber(tx)
+	if headBlock == nil || err != nil {
+		return false
+	}
+	// A new block is built on top of the head block, so when the head is bhilaiBlock-1,
+	// the new block should use the Bhilai rules.
+	activated := (*headBlock + 1) >= bhilaiBlock
+	if activated {
+		p.isPostBhilai.Swap(true)
 	}
 	return activated
 }

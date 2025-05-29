@@ -61,17 +61,18 @@ type executionClient struct {
 }
 
 func (e *executionClient) Prepare(ctx context.Context) error {
-	ready, err := e.client.Ready(ctx, &emptypb.Empty{})
+	return e.retryBusy(ctx, "ready", func() error {
+		ready, err := e.client.Ready(ctx, &emptypb.Empty{})
+		if err != nil {
+			return err
+		}
 
-	if err != nil {
-		return err
-	}
+		if !ready.Ready {
+			return ErrExecutionClientBusy // gets retried
+		}
 
-	if !ready.Ready {
-		return errors.New("excecution client not ready")
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {

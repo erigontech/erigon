@@ -57,6 +57,10 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err := a.registerII(kv.TracesToIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
+
+	a.AddDependency(kv.AccountsDomain, kv.CommitmentDomain)
+	a.AddDependency(kv.StorageDomain, kv.CommitmentDomain)
+
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 
 	a.dirtyFilesLock.Lock()
@@ -73,7 +77,6 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
-	InitAccountSchemaIntegrity()
 }
 
 type SchemaGen struct {
@@ -159,8 +162,7 @@ var Schema = SchemaGen{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
-		Accessors:            AccessorBTree | AccessorExistence,
-		crossDomainIntegrity: domainIntegrityCheck,
+		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblAccountHistoryVals,
