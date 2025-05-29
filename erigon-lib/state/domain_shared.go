@@ -76,9 +76,9 @@ type SharedDomains struct {
 	blockNum atomic.Uint64
 	estSize  int
 	trace    bool //nolint
-	muMaps   sync.RWMutex
 	//walLock sync.RWMutex
 
+	muMaps  sync.RWMutex
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
@@ -431,6 +431,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, txNum uint64, roTx 
 }
 
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, txNum uint64, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 	var haveRamUpdates bool
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
@@ -627,6 +629,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 		step uint64
 	}
 	tombs := make([]tuple, 0, 8)
+
 	if err := sd.IterateStoragePrefix(prefix, txNum, roTx, func(k, v []byte, step uint64) (bool, error) {
 		tombs = append(tombs, tuple{k, v, step})
 		return true, nil
