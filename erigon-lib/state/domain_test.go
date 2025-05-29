@@ -78,7 +78,6 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	cfg := Schema.AccountsDomain
-	cfg.crossDomainIntegrity = nil //no other domains
 	cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
@@ -1047,7 +1046,6 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 func emptyTestDomain(aggStep uint64) *Domain {
 	cfg := Schema.AccountsDomain
-	cfg.crossDomainIntegrity = nil
 
 	salt := uint32(1)
 	if cfg.hist.iiCfg.salt == nil {

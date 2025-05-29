@@ -144,8 +144,13 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *big.Int {
 
 func getBaseFeeChangeDenominator(borConfig chain.BorConfig, number uint64) uint64 {
 	// If we're running bor based chain post delhi hardfork, return the new value
-	if borConfig, ok := borConfig.(*borcfg.BorConfig); ok && borConfig.IsDelhi(number) {
-		return params.BaseFeeChangeDenominatorPostDelhi
+	if borConfig, ok := borConfig.(*borcfg.BorConfig); ok {
+		switch {
+		case borConfig.IsBhilai(number):
+			return params.BaseFeeChangeDenominatorPostBhilai
+		case borConfig.IsDelhi(number):
+			return params.BaseFeeChangeDenominatorPostDelhi
+		}
 	}
 
 	// Return the original once for other chains and pre-fork cases
