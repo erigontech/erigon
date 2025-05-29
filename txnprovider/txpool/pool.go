@@ -257,7 +257,7 @@ func New(
 	}
 	if bhilaiBlock != nil {
 		if !bhilaiBlock.IsUint64() {
-			return nil, errors.New("agraBlock overflow")
+			return nil, errors.New("bhilaiBlock overflow")
 		}
 		bhilaiBlockU64 := bhilaiBlock.Uint64()
 		res.bhilaiBlock = &bhilaiBlockU64
