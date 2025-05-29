@@ -604,16 +604,8 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
+
 	stats.BytesCompleted = 0
-	// If this is an issue, might be better to do it as a torrent.Client method.
-	for _, t := range torrents {
-		stats.BytesCompleted += uint64(t.BytesCompleted())
-	}
-
-	if prevStats.BytesCompleted == 0 {
-		prevStats.BytesCompleted = stats.BytesCompleted
-	}
-
 	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0
 	stats.TorrentsCompleted = 0
 	stats.NumTorrents = len(torrents)
@@ -630,9 +622,8 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 		diagnostics.Send(diagnostics.SnapshoFilesList{Files: filesList})
 	}
 
-	downloadedBytes := int64(0)
-
 	for _, t := range torrents {
+		stats.BytesCompleted += uint64(t.BytesCompleted())
 		select {
 		case <-t.GotInfo():
 		default: // if some torrents have no metadata, we are for-sure incomplete
@@ -669,7 +660,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			}
 		}
 
-		downloadedBytes += bytesCompleted
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
@@ -1362,16 +1352,13 @@ func (d *Downloader) SetLogPrefix(prefix string) {
 	d.logPrefix = prefix
 }
 
+// Currently only called if not all torrents are complete.
 func (d *Downloader) logProgress() {
 	var m runtime.MemStats
 	prefix := d.logPrefix
 
 	if d.logPrefix == "" {
 		prefix = "snapshots"
-	}
-
-	if d.stats.AllTorrentsComplete() {
-		log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
 	}
 
 	dbg.ReadMemStats(&m)
@@ -1436,7 +1423,7 @@ func calculateTime(amountLeft, rate uint64) string {
 	if rate == 0 {
 		return "inf"
 	}
-	return (time.Duration(amountLeft) * time.Second / time.Duration(rate)).Truncate(time.Second).String()
+	return time.Duration(float64(amountLeft) / float64(rate) * float64(time.Second)).Truncate(time.Second).String()
 }
 
 func (d *Downloader) Completed() bool {
