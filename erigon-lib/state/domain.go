@@ -703,8 +703,9 @@ type DomainRoTx struct {
 
 	d *Domain
 
-	readers    []*BtIndex
-	idxReaders []*recsplit.IndexReader
+	dataReaders []*seg.Reader
+	btReaders   []*BtIndex
+	idxReaders  []*recsplit.IndexReader
 
 	comBuf []byte
 
@@ -726,9 +727,8 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
-	g := dt.reader(i)
 	if dt.d.Accessors.Has(AccessorBTree) {
-		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
+		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, dt.reusableReader(i))
 		if err != nil || !ok {
 			return nil, false, 0, err
 		}
@@ -744,6 +744,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if !ok {
 			return nil, false, 0, nil
 		}
+		g := dt.reusableReader(i)
 		g.Reset(offset)
 
 		k, _ := g.Next(nil)
@@ -1639,8 +1640,19 @@ func (dt *DomainRoTx) Close() {
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
-func (dt *DomainRoTx) reader(i int) *seg.Reader {
-	// readers are not stateless - getters contain the current data pointer
+// reusableReader - for short read-and-forget operations. Must Reset this reader before use
+func (dt *DomainRoTx) reusableReader(i int) *seg.Reader {
+	if dt.dataReaders == nil {
+		dt.dataReaders = make([]*seg.Reader, len(dt.files))
+	}
+	if dt.dataReaders[i] == nil {
+		dt.dataReaders[i] = dt.dataReader(i)
+	}
+	return dt.dataReaders[i]
+}
+
+// dataReader - creating new dataReader
+func (dt *DomainRoTx) dataReader(i int) *seg.Reader {
 	return seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.Compression)
 }
 
@@ -1657,13 +1669,13 @@ func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
-	if dt.readers == nil {
-		dt.readers = make([]*BtIndex, len(dt.files))
+	if dt.btReaders == nil {
+		dt.btReaders = make([]*BtIndex, len(dt.files))
 	}
-	r := dt.readers[i]
+	r := dt.btReaders[i]
 	if r == nil {
 		r = dt.files[i].src.bindex
-		dt.readers[i] = r
+		dt.btReaders[i] = r
 	}
 	return r
 }
