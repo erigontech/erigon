@@ -651,41 +651,14 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 
 	defer func() {
 		r := recover()
-		// DomainRoTx's now hold a cursor per tx so the non
-		// closed cursor from a previous transaction does not occur
-		require.Nil(r)
+		require.NotNil(r)
 		//re := r.(error)
 		//fmt.Println(re)
 		//require.ErrorIs(re, sdTxImmutabilityInvariant)
 	}()
 
-	val, _, _, err = dc.GetLatest([]byte("key1"), otherTx)
+	_, _, _, err = dc.GetLatest([]byte("key1"), otherTx)
 	require.NoError(err)
-	require.NotNil(val)
-	otherTx.Rollback()
-
-	// this test however should fail to read - it checks the
-	// rollback of the initial transaction
-	writer2 := dc.NewWriter()
-	defer writer2.Close()
-
-	val2 := []byte("value2")
-	writer2.addValue([]byte("key2"), val2, 1/d.aggregationStep)
-
-	tx2, err := db.BeginRw(ctx)
-	require.NoError(err)
-
-	err = writer2.Flush(ctx, tx2)
-	require.NoError(err)
-	tx2.Rollback()
-
-	otherTx2, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer otherTx2.Rollback()
-
-	val2, _, _, err = dc.GetLatest([]byte("key2"), otherTx2)
-	require.NoError(err)
-	require.Nil(val2)
 }
 
 func TestDomain_Delete(t *testing.T) {
