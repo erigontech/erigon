@@ -76,9 +76,9 @@ type SharedDomains struct {
 	blockNum atomic.Uint64
 	estSize  int
 	trace    bool //nolint
-	muMaps   sync.RWMutex
 	//walLock sync.RWMutex
 
+	muMaps  sync.RWMutex
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
@@ -240,8 +240,8 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 }
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
-	// disable mutex - because work on parallel execution postponed after E3 release.
-	//sd.muMaps.Lock()
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: txNum / sd.stepSize}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
@@ -414,7 +414,7 @@ func (sd *SharedDomains) SetTrace(b bool) {
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
 	var firstKey, firstVal []byte
 	var hasPrefix bool
-	err := sd.IteratePrefix(domain, prefix, sd.txNum, roTx, func(k []byte, v []byte, step uint64) (bool, error) {
+	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step uint64) (bool, error) {
 		firstKey = common.CopyBytes(k)
 		firstVal = common.CopyBytes(v)
 		hasPrefix = true
@@ -426,11 +426,13 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, txNum uint64, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
-	return sd.IteratePrefix(kv.StorageDomain, prefix, txNum, roTx, it)
+func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+	return sd.IteratePrefix(kv.StorageDomain, prefix, roTx, it)
 }
 
-func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, txNum uint64, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 	var haveRamUpdates bool
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
@@ -438,7 +440,7 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, txNum ui
 		ramIter = sd.storage.Iter()
 	}
 
-	return AggTx(roTx).d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, txNum, sd.stepSize, roTx)
+	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, haveRamUpdates, ramIter, it, sd.stepSize, roTx)
 }
 
 func (sd *SharedDomains) Close() {
@@ -627,7 +629,8 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 		step uint64
 	}
 	tombs := make([]tuple, 0, 8)
-	if err := sd.IterateStoragePrefix(prefix, txNum, roTx, func(k, v []byte, step uint64) (bool, error) {
+
+	if err := sd.IterateStoragePrefix(prefix, roTx, func(k, v []byte, step uint64) (bool, error) {
 		tombs = append(tombs, tuple{k, v, step})
 		return true, nil
 	}); err != nil {
@@ -641,7 +644,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 
 	if assert.Enable {
 		forgotten := 0
-		if err := sd.IterateStoragePrefix(prefix, txNum, roTx, func(k, v []byte, step uint64) (bool, error) {
+		if err := sd.IterateStoragePrefix(prefix, roTx, func(k, v []byte, step uint64) (bool, error) {
 			forgotten++
 			return true, nil
 		}); err != nil {

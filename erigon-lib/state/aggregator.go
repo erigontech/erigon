@@ -100,34 +100,6 @@ type Aggregator struct {
 const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
-func commitmentFileMustExist(dirs datadir.Dirs, fromStep, toStep uint64) bool {
-	fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", commitmentDomainVersion.String(), kv.CommitmentDomain, fromStep, toStep))
-	exists, err := dir.FileExist(fPath)
-	if err != nil {
-		panic(err)
-	}
-	return exists
-}
-
-func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep uint64) bool {
-	// case1: `kill -9` during building new .kv
-	//  - `accounts` domain may be at step X and `commitment` domain at step X-1
-	//  - not a problem because `commitment` domain still has step X in DB
-	// case2: `kill -9` during building new .kv and `rm -rf chaindata`
-	//  - `accounts` domain may be at step X and `commitment` domain at step X-1
-	//  - problem! `commitment` domain doesn't have step X in DB
-	// solution: ignore step X files in both cases
-	switch name {
-	case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
-		if toStep-fromStep > 1 { // only recently built files
-			return true
-		}
-		return commitmentFileMustExist(dirs, fromStep, toStep)
-	default:
-		return true
-	}
-}
-
 func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
@@ -335,6 +307,13 @@ func (a *Aggregator) openFolder() error {
 	return nil
 }
 
+func (a *Aggregator) ReloadFiles() error {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.closeDirtyFiles()
+	return a.openFolder()
+}
+
 func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	return a.OpenFolder()
 }
@@ -414,7 +393,7 @@ func (at *AggregatorRoTx) StepSize() uint64                    { return at.a.Ste
 func (a *Aggregator) Files() []string {
 	ac := a.BeginFilesRo()
 	defer ac.Close()
-	return ac.AllFiles().Names()
+	return ac.AllFiles().Fullpaths()
 }
 func (a *Aggregator) LS() {
 	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {

@@ -202,11 +202,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 }
 
 func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
-	aggTx := state.AggTx(tx)
-	if aggTx == nil {
-		return 0, errors.New("tx does not support state.HasAggTx")
-	}
-	return aggTx.CanUnwindToBlockNum(tx)
+	return state.AggTx(tx).CanUnwindToBlockNum(tx)
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {

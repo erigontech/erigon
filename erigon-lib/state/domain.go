@@ -100,8 +100,6 @@ type domainCfg struct {
 	valuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	largeValues bool
 
-	crossDomainIntegrity rangeDomainIntegrityChecker
-
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
 	replaceKeysInValues bool
@@ -328,12 +326,6 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 	}
 	l := scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
-		//startStep, endStep := dirtyFile.startTxNum/d.aggregationStep, dirtyFile.endTxNum/d.aggregationStep
-		//domainName, _ := kv.String2Domain(d.filenameBase)
-		//if d.crossDomainIntegrity != nil && !d.crossDomainIntegrity(domainName, d.dirs, startStep, endStep) {
-		//	d.logger.Debug("[agg] skip garbage file", "name", d.filenameBase, "startStep", startStep, "endStep", endStep)
-		//	continue
-		//}
 		dirtyFile.frozen = false
 
 		if _, has := d.dirtyFiles.Get(dirtyFile); !has {
@@ -703,9 +695,9 @@ type DomainRoTx struct {
 
 	d *Domain
 
-	readerMutex sync.RWMutex
-	readers     []*BtIndex
-	idxReaders  []*recsplit.IndexReader
+	dataReaders []*seg.Reader
+	btReaders   []*BtIndex
+	mapReaders  []*recsplit.IndexReader
 
 	comBuf []byte
 
@@ -726,9 +718,8 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
-	g := dt.reader(i)
 	if dt.d.Accessors.Has(AccessorBTree) {
-		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
+		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, dt.reusableReader(i))
 		if err != nil || !ok {
 			return nil, false, 0, err
 		}
@@ -744,6 +735,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if !ok {
 			return nil, false, 0, nil
 		}
+		g := dt.reusableReader(i)
 		g.Reset(offset)
 
 		k, _ := g.Next(nil)
@@ -1651,47 +1643,40 @@ func (dt *DomainRoTx) Close() {
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
-// statelessFileIndex figures out ordinal of file within required range
-func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int {
-	for fi, f := range dt.files {
-		if f.startTxNum == txFrom && f.endTxNum == txTo {
-			return fi
-		}
+// reusableReader - for short read-and-forget operations. Must Reset this reader before use
+func (dt *DomainRoTx) reusableReader(i int) *seg.Reader {
+	if dt.dataReaders == nil {
+		dt.dataReaders = make([]*seg.Reader, len(dt.files))
 	}
-	return -1
+	if dt.dataReaders[i] == nil {
+		dt.dataReaders[i] = dt.dataReader(i)
+	}
+	return dt.dataReaders[i]
 }
 
-func (dt *DomainRoTx) reader(i int) *seg.Reader {
-	// readers are not stateless - getters contain the current data pointer
+// dataReader - creating new dataReader
+func (dt *DomainRoTx) dataReader(i int) *seg.Reader {
 	return seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.Compression)
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
-	if dt.idxReaders == nil {
-		dt.idxReaders = make([]*recsplit.IndexReader, len(dt.files))
+	if dt.mapReaders == nil {
+		dt.mapReaders = make([]*recsplit.IndexReader, len(dt.files))
 	}
-	r := dt.idxReaders[i]
-	if r == nil {
-		r = dt.files[i].src.index.GetReaderFromPool()
-		dt.idxReaders[i] = r
+	if dt.mapReaders[i] == nil {
+		dt.mapReaders[i] = dt.files[i].src.index.GetReaderFromPool()
 	}
-	return r
+	return dt.mapReaders[i]
 }
 
 func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
-	if dt.readers == nil {
-		dt.readers = make([]*BtIndex, len(dt.files))
+	if dt.btReaders == nil {
+		dt.btReaders = make([]*BtIndex, len(dt.files))
 	}
-	r := dt.readers[i]
-	if r == nil {
-		r = dt.files[i].src.bindex
-		dt.readers[i] = r
+	if dt.btReaders[i] == nil {
+		dt.btReaders[i] = dt.files[i].src.bindex
 	}
-	return r
+	return dt.btReaders[i]
 }
 
 func (dt *DomainRoTx) closeValsCursor() {
@@ -1743,9 +1728,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	if dt == nil {
 		return nil, 0, false, nil
 	}
-
-	var v []byte
-	var foundStep uint64
 
 	valsC, err := dt.valsCursor(roTx)
 

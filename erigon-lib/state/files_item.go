@@ -270,7 +270,7 @@ type visibleFile struct {
 	src *filesItem
 }
 
-func (i visibleFile) Filename() string {
+func (i visibleFile) Fullpath() string {
 	return i.src.decompressor.FilePath()
 }
 

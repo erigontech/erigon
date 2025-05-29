@@ -40,7 +40,7 @@ func E3EfFiles(ctx context.Context, db kv.TemporalRwDB, failFast bool, fromStep 
 			}
 			defer tx.Rollback()
 
-			err = tx.(interface{ AggTx() *state.AggregatorRoTx }).AggTx().IntegrityInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
+			err = state.AggTx(tx).IntegrityInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
 			if err != nil {
 				return err
 			}

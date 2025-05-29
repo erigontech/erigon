@@ -45,7 +45,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		toBlock-- // [fromBlock,toBlock)
 	}
 
-	ac := tx.AggTx().(*state.AggregatorRoTx)
+	ac := state.AggTx(tx)
 	//toTxNum := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
 	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
