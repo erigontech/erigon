@@ -139,7 +139,6 @@ var PrecompiledContractsBhilai = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
 	libcommon.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
 	libcommon.BytesToAddress([]byte{0x09}):       &blake2F{},
-	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 	libcommon.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
 	libcommon.BytesToAddress([]byte{0x0c}):       &bls12381G1MultiExp{},
 	libcommon.BytesToAddress([]byte{0x0d}):       &bls12381G2Add{},
@@ -147,6 +146,7 @@ var PrecompiledContractsBhilai = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
 	libcommon.BytesToAddress([]byte{0x10}):       &bls12381MapFpToG1{},
 	libcommon.BytesToAddress([]byte{0x11}):       &bls12381MapFp2ToG2{},
+	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
 var PrecompiledContractsPrague = map[libcommon.Address]PrecompiledContract{
