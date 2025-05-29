@@ -301,9 +301,6 @@ func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *libstate.Shar
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := sd.Unwind(ctx, tx, blockUnwindTo, txUnwindTo, changeset); err != nil {
-		return err
-	}
 
 	//sd.logger.Info("aggregator unwind", "txUnwindTo", txUnwindTo)
 	//sf := time.Now()
