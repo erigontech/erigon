@@ -307,6 +307,13 @@ func (a *Aggregator) openFolder() error {
 	return nil
 }
 
+func (a *Aggregator) ReloadFiles() error {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.closeDirtyFiles()
+	return a.openFolder()
+}
+
 func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	return a.OpenFolder()
 }
@@ -386,7 +393,7 @@ func (at *AggregatorRoTx) StepSize() uint64                    { return at.a.Ste
 func (a *Aggregator) Files() []string {
 	ac := a.BeginFilesRo()
 	defer ac.Close()
-	return ac.AllFiles().Names()
+	return ac.AllFiles().Fullpaths()
 }
 func (a *Aggregator) LS() {
 	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {
