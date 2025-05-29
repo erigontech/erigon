@@ -353,7 +353,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 // Dummy way to rebuild commitment. Dummy because works for small state only.
 // To rebuild commitment correctly for any state size - use RebuildCommitmentFiles.
 func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context, blockNum, txNum uint64) ([]byte, error) {
-	it, err := sdc.mainTtx.tx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
+	it, err := sdc.mainTtx.roTtx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +366,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 		sdc.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
-	it, err = sdc.mainTtx.tx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
+	it, err = sdc.mainTtx.roTtx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +404,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
 	// Keep dereferenced version inside sd commitmentDomain map ready to read again
 	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
-		branch, _, err := sdc.tx.GetAsOf(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
+		branch, _, err := sdc.roTtx.GetAsOf(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
 		if sdc.trace {
 			fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, branch, commitment.BranchData(branch).String())
 		}
@@ -416,7 +416,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
 	// Dereferenced branch is kept inside sharedDomains commitment domain map (but not written into buffer so not flushed into db, unless updated)
-	v, step, err := sdc.sd.AsGetter(sdc.tx).GetLatest(kv.CommitmentDomain, pref)
+	v, step, err := sdc.getter.GetLatest(kv.CommitmentDomain, pref)
 	if err != nil {
 		return nil, 0, fmt.Errorf("branch failed: %w", err)
 	}
@@ -453,15 +453,15 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, er
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.domainsOnly {
 			var ok bool
-			enc, ok, _, _, err = sdc.tx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
+			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 			if !ok {
 				enc = nil
 			}
 		} else {
-			enc, _, err = sdc.tx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
 		}
 	} else {
-		enc, _, err = sdc.sd.AsGetter(sdc.tx).GetLatest(d, plainKey)
+		enc, _, err = sdc.getter.GetLatest(d, plainKey)
 	}
 
 	if err != nil {

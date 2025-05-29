@@ -177,7 +177,7 @@ func (rw *Worker) Resume() {
 
 func (rw *Worker) LogLRUStats() { rw.evm.Config().JumpDestCache.LogStats() }
 
-func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateReader state.ResettableStateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
+func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateReader state.StateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
@@ -282,7 +282,9 @@ func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
 // like compute gas used for block and then to set state reader to continue processing on latest data.
 func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
-	rw.stateReader.SetTx(rw.Tx())
+	if resettable, ok := reader.(interface{SetTx(kv.Tx)}); ok {
+		resettable.SetTx(rw.Tx())
+	}
 	rw.ibs = state.New(rw.stateReader)
 
 	switch reader.(type) {
@@ -348,7 +350,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 }
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.RoDB,
-	rs *state.StateV3Buffered, stateReader state.ResettableStateReader, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
+	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine consensus.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
@@ -363,7 +365,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			reader := stateReader
 
 			if reader == nil {
-				reader = state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(nil), nil))
+				reader = state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(nil)))
 			}
 
 			reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator)

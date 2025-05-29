@@ -1020,7 +1020,7 @@ func ExecV3(ctx context.Context,
 								if !dbg.BatchCommitments {
 									commitment.Captured = []string{}
 								}
-								rh, err := pe.doms.ComputeCommitment(ctx, true, applyResult.BlockNum, pe.logPrefix)
+								rh, err := pe.doms.ComputeCommitment(ctx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix)
 								pe.doms.SetTrace(false)
 								captured := commitment.Captured
 								commitment.Captured = nil
