@@ -1150,20 +1150,20 @@ func (p *TxPool) isShanghai() bool {
 	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
 }
 
-func (p *TxPool) isAgra() bool {
+func (p *TxPool) isBlockNumBasedForkActivated(isPostFlag *atomic.Bool, forkBlockNum *uint64) bool {
 	// once this flag has been set for the first time we no longer need to check the block
-	set := p.isPostAgra.Load()
+	set := isPostFlag.Load()
 	if set {
 		return true
 	}
-	if p.agraBlock == nil {
+	if forkBlockNum == nil {
 		return false
 	}
-	agraBlock := *p.agraBlock
+	forkBlock := *forkBlockNum
 
-	// a zero here means Agra is always active
-	if agraBlock == 0 {
-		p.isPostAgra.Swap(true)
+	// a zero here means the fork is always active
+	if forkBlock == 0 {
+		isPostFlag.Swap(true)
 		return true
 	}
 
@@ -1177,49 +1177,21 @@ func (p *TxPool) isAgra() bool {
 	if headBlock == nil || err != nil {
 		return false
 	}
-	// A new block is built on top of the head block, so when the head is agraBlock-1,
-	// the new block should use the Agra rules.
-	activated := (*headBlock + 1) >= agraBlock
+	// A new block is built on top of the head block, so when the head is forkBlock-1,
+	// the new block should use the new fork rules.
+	activated := (*headBlock + 1) >= forkBlock
 	if activated {
-		p.isPostAgra.Swap(true)
+		isPostFlag.Swap(true)
 	}
 	return activated
 }
 
+func (p *TxPool) isAgra() bool {
+	return p.isBlockNumBasedForkActivated(&p.isPostAgra, p.agraBlock)
+}
+
 func (p *TxPool) isBhilai() bool {
-	// once this flag has been set for the first time we no longer need to check the block
-	set := p.isPostBhilai.Load()
-	if set {
-		return true
-	}
-	if p.bhilaiBlock == nil {
-		return false
-	}
-	bhilaiBlock := *p.bhilaiBlock
-
-	// a zero here means Bhilai is always active
-	if bhilaiBlock == 0 {
-		p.isPostBhilai.Swap(true)
-		return true
-	}
-
-	tx, err := p._chainDB.BeginRo(context.Background())
-	if err != nil {
-		return false
-	}
-	defer tx.Rollback()
-
-	headBlock, err := chain.CurrentBlockNumber(tx)
-	if headBlock == nil || err != nil {
-		return false
-	}
-	// A new block is built on top of the head block, so when the head is bhilaiBlock-1,
-	// the new block should use the Bhilai rules.
-	activated := (*headBlock + 1) >= bhilaiBlock
-	if activated {
-		p.isPostBhilai.Swap(true)
-	}
-	return activated
+	return p.isBlockNumBasedForkActivated(&p.isPostBhilai, p.bhilaiBlock)
 }
 
 func (p *TxPool) isCancun() bool {
