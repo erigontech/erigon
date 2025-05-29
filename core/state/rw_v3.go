@@ -24,6 +24,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -61,7 +62,7 @@ func NewStateV3(domains *state.SharedDomains, syncCfg ethconfig.Sync, logger log
 	}
 }
 
-func (rs *StateV3) applyState(roTx kv.Tx, writeLists map[string]*state.KvList, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
+func (rs *StateV3) applyState(roTx kv.Tx, txNum uint64, writeLists map[string]*state.KvList, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
 	var acc accounts.Account
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
@@ -74,11 +75,11 @@ func (rs *StateV3) applyState(roTx kv.Tx, writeLists map[string]*state.KvList, b
 
 			for i, key := range list.Keys {
 				if list.Vals[i] == nil {
-					if err := domains.DomainDel(domain, rs.tx, []byte(key), txTask.TxNum, nil, 0); err != nil {
+					if err := domains.DomainDel(domain, roTx, []byte(key), txNum, nil, 0); err != nil {
 						return err
 					}
 				} else {
-					if err := domains.DomainPut(domain, rs.tx, []byte(key), list.Vals[i], txTask.TxNum, nil, 0); err != nil {
+					if err := domains.DomainPut(domain, roTx, []byte(key), list.Vals[i], txNum, nil, 0); err != nil {
 						return err
 					}
 				}
@@ -102,12 +103,12 @@ func (rs *StateV3) applyState(roTx kv.Tx, writeLists map[string]*state.KvList, b
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
 		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			if err := domains.DomainDel(kv.AccountsDomain, rs.tx, addrBytes, txTask.TxNum, enc0, step0); err != nil {
+			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrBytes, txNum, enc0, step0); err != nil {
 				return err
 			}
 		} else {
 			enc1 := accounts.SerialiseV3(&acc)
-			if err := domains.DomainPut(kv.AccountsDomain, rs.tx, addrBytes, enc1, txTask.TxNum, enc0, step0); err != nil {
+			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrBytes, enc1, txNum, enc0, step0); err != nil {
 				return err
 			}
 		}
@@ -142,12 +143,12 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	if err := rs.applyState(roTx, writeLists, balanceIncreases, rs.domains, rules); err != nil {
+	if err := rs.applyState(roTx, txNum, writeLists, balanceIncreases, rs.domains, rules); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
 	writeLists.Return()
 
-	if err := rs.ApplyLogsAndTraces4(roTx, receipts, logs, traceFroms, traceTos, rs.domains); err != nil {
+	if err := rs.ApplyLogsAndTraces4(roTx, txNum, receipts, logs, traceFroms, traceTos, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
@@ -155,7 +156,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, true, txTask.BlockNum, txTask.TxNum, fmt.Sprintf("applying step %d", txTask.TxNum/rs.domains.StepSize()))
+		_, err := rs.domains.ComputeCommitment(ctx, true, blockNum, txNum, fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()))
 		if err != nil {
 			return fmt.Errorf("ParallelExecutionState.ComputeCommitment: %w", err)
 		}
@@ -164,25 +165,25 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(tx kv.Tx, receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains) error {
+func (rs *StateV3) ApplyLogsAndTraces4(tx kv.Tx, txNum uint64, receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains) error {
 	for addr := range traceFroms {
-		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
+		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:], txNum); err != nil {
 			return err
 		}
 	}
 
 	for addr := range traceTos {
-		if err := domains.IndexAdd(kv.TracesToIdx, addr[:]); err != nil {
+		if err := domains.IndexAdd(kv.TracesToIdx, addr[:], txNum); err != nil {
 			return err
 		}
 	}
 
 	for _, lg := range logs {
-		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
+		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txNum); err != nil {
 			return err
 		}
 		for _, topic := range lg.Topics {
-			if err := domains.IndexAdd(kv.LogTopicIdx, topic[:], txTask.TxNum); err != nil {
+			if err := domains.IndexAdd(kv.LogTopicIdx, topic[:], txNum); err != nil {
 				return err
 			}
 		}
@@ -190,7 +191,7 @@ func (rs *StateV3) ApplyLogsAndTraces4(tx kv.Tx, receipts []*types.Receipt, logs
 
 	if rs.syncCfg.PersistReceiptsCacheV2 {
 		for _, receipt := range receipts {
-			if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt); err != nil {
+			if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
 				return err
 			}
 		}
@@ -607,9 +608,6 @@ func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 
 func (r *ReaderV3) DiscardReadList()      {}
 func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
-func (r *ReaderV3) SetTx(tx kv.Tx) {
-	r.tx = tx
-}
 
 func (r *ReaderV3) SetTrace(trace bool) { r.trace = trace }
 
@@ -619,7 +617,7 @@ func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, e
 }
 
 func (r *ReaderV3) readAccountData(address common.Address) ([]byte, *accounts.Account, error) {
-	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, r.tx, address[:])
+	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, address[:])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -648,7 +646,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (
 	var composite [20 + 32]byte
 	copy(composite[0:20], address[0:20])
 	copy(composite[20:], key[:])
-	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.tx, composite[:])
+	enc, _, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -665,7 +663,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
-	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:])
+	enc, _, err := r.getter.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -676,7 +674,7 @@ func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address common.Address) (int, error) {
-	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:])
+	enc, _, err := r.getter.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return 0, err
 	}
@@ -692,16 +690,16 @@ func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error
 }
 
 type bufferedReader struct {
-	reader        ResettableStateReader
+	reader        *ReaderV3
 	bufferedState *StateV3Buffered
 }
 
-func NewBufferedReader(bufferedState *StateV3Buffered, reader ResettableStateReader) ResettableStateReader {
+func NewBufferedReader(bufferedState *StateV3Buffered, reader *ReaderV3) StateReader {
 	return &bufferedReader{reader: reader, bufferedState: bufferedState}
 }
 
 func (r *bufferedReader) SetTrace(trace bool) {
-	r.reader.(*ReaderV3).trace = trace
+	r.reader.trace = trace
 }
 
 func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
@@ -714,8 +712,8 @@ func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Acco
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if data != nil {
-		if reader, ok := r.reader.(*ReaderV3); ok && reader.trace {
-			fmt.Printf("ReadAccountData (buf) [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, data.Nonce, &data.Balance, data.CodeHash, reader.txNum)
+		if r.reader.trace {
+			fmt.Printf("ReadAccountData (buf) [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, data.Nonce, &data.Balance, data.CodeHash, r.reader.txNum)
 		}
 
 		result := *data
@@ -809,8 +807,8 @@ func (r *bufferedReader) ReadAccountIncarnation(address common.Address) (uint64,
 	return r.reader.ReadAccountIncarnation(address)
 }
 
-func (r *bufferedReader) SetTx(tx kv.Tx) {
-	r.reader.SetTx(tx)
+func (r *bufferedReader) SetGetter(getter kv.TemporalGetter) {
+	r.reader.getter = getter
 }
 
 func (r *bufferedReader) DiscardReadList() {

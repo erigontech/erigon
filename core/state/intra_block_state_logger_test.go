@@ -43,8 +43,8 @@ func TestStateLogger(t *testing.T) {
 		{
 			name: "multiple add balance",
 			run: func(state *IntraBlockState) {
-				state.AddBalance(common.Address{}, uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.AddBalance(common.Address{}, uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+				state.AddBalance(common.Address{}, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
+				state.AddBalance(common.Address{}, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
 				bi, ok := stateDB.balanceInc[common.Address{}]
@@ -95,8 +95,8 @@ func TestStateLogger(t *testing.T) {
 		{
 			name: "sub balance",
 			run: func(state *IntraBlockState) {
-				state.AddBalance(common.Address{}, uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.SubBalance(common.Address{}, uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+				state.AddBalance(common.Address{}, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
+				state.SubBalance(common.Address{}, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
 				so, err := stateDB.GetOrNewStateObject(common.Address{})

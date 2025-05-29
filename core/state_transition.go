@@ -241,8 +241,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if have, want := balance, balanceCheck; have.Cmp(want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), &have, want)
 		}
-		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
-		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
+		st.state.SubBalance(st.msg.From(), *gasVal, tracing.BalanceDecreaseGasBuy)
+		st.state.SubBalance(st.msg.From(), *blobGasVal, tracing.BalanceDecreaseGasBuy)
 	}
 
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
@@ -565,7 +565,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	tipAmount.Mul(tipAmount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		if err := st.state.AddBalance(coinbase, *tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 	}
@@ -584,7 +584,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			}
 
 			if !st.noFeeBurnAndTip {
-				st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
+				st.state.AddBalance(*burntContractAddress, *burnAmount, tracing.BalanceChangeUnspecified)
 			}
 		}
 	}
@@ -710,7 +710,7 @@ func (st *StateTransition) refundGas() {
 		fmt.Printf("(%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining)
 	}
 
-	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+	st.state.AddBalance(st.msg.From(), *remaining, tracing.BalanceIncreaseGasReturn)
 
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.

@@ -721,16 +721,13 @@ func ExecV3(ctx context.Context,
 				// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
 				// where during initial sync we can expect bogus blocks to be imported.
 				if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
-					aggTx := libstate.AggTx(applyTx)
-					aggTx.RestrictSubsetFileDeletions(true)
 					start := time.Now()
 					executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 					// First compute and commit the progress done so far
-					if _, err := executor.domains().ComputeCommitment(ctx, applyTx, true, blockNum, execStage.LogPrefix()); err != nil {
+					if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix()); err != nil {
 						return err
 					}
 					ts += time.Since(start)
-					aggTx.RestrictSubsetFileDeletions(false)
 					shouldGenerateChangesets = true // now we can generate changesets for the safety net
 				}
 				changeset := &libstate.StateChangeSet{}
@@ -819,13 +816,11 @@ func ExecV3(ctx context.Context,
 				}
 
 				if shouldGenerateChangesets {
-					aggTx := libstate.AggTx(applyTx)
-					aggTx.RestrictSubsetFileDeletions(true)
 					start := time.Now()
 					if traceBlock(blockNum) {
 						se.doms.SetTrace(true)
 					}
-					rh, err := executor.domains().ComputeCommitment(ctx, applyTx, true, blockNum, execStage.LogPrefix())
+					rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
 					se.doms.SetTrace(false)
 					if err != nil {
 						return err
@@ -836,7 +831,6 @@ func ExecV3(ctx context.Context,
 					}
 
 					ts += time.Since(start)
-					aggTx.RestrictSubsetFileDeletions(false)
 					executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 					if !inMemExec {
 						if err := libstate.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
@@ -1026,7 +1020,7 @@ func ExecV3(ctx context.Context,
 								if !dbg.BatchCommitments {
 									commitment.Captured = []string{}
 								}
-								rh, err := pe.doms.ComputeCommitment(ctx, applyTx, true, applyResult.BlockNum, pe.logPrefix)
+								rh, err := pe.doms.ComputeCommitment(ctx, true, applyResult.BlockNum, pe.logPrefix)
 								pe.doms.SetTrace(false)
 								captured := commitment.Captured
 								commitment.Captured = nil
@@ -1295,7 +1289,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, errors.New("tx is not a temporal tx")
 	}
 
-	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), e.LogPrefix())
+	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}

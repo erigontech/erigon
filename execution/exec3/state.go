@@ -100,7 +100,7 @@ type Worker struct {
 	in          *exec.QueueWithRetry
 	rs          *state.StateV3Buffered
 	stateWriter state.StateWriter
-	stateReader state.ResettableStateReader
+	stateReader state.StateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
 
@@ -193,12 +193,11 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		rw.stateWriter = state.NewWriter(rs.Domains().AsPutDel(rw.chainTx), accumulator)
+		rw.stateWriter = state.NewWriter(rs.Domains().AsPutDel(rw.chainTx), accumulator, 0)
 	}
 }
 
-func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
-func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
+func (rw *Worker) Tx() kv.Tx { return rw.chainTx }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
@@ -214,15 +213,15 @@ func (rw *Worker) resetTx(chainTx kv.Tx) {
 
 	if rw.chainTx != nil {
 		type resettable interface {
-			SetTx(kv.Tx)
+			SetGetter(kv.TemporalGetter)
 		}
 
 		if resettable, ok := rw.stateReader.(resettable); ok {
-			resettable.SetTx(rw.chainTx)
+			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
 		}
 
 		if resettable, ok := rw.stateWriter.(resettable); ok {
-			resettable.SetTx(rw.chainTx)
+			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
 		}
 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
@@ -281,7 +280,7 @@ func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
 // like compute gas used for block and then to set state reader to continue processing on latest data.
-func (rw *Worker) SetReader(reader state.ResettableStateReader) {
+func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
 	rw.stateReader.SetTx(rw.Tx())
 	rw.ibs = state.New(rw.stateReader)
@@ -364,7 +363,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			reader := stateReader
 
 			if reader == nil {
-				reader = state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains(), nil))
+				reader = state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(nil), nil))
 			}
 
 			reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator)

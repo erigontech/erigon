@@ -883,7 +883,7 @@ func (ms *MockSentry) NewStateReader(tx kv.TemporalTx) state.StateReader {
 	if err != nil {
 		return nil
 	}
-	return state.NewReaderV3(domains, tx)
+	return state.NewReaderV3(domains.AsGetter(tx))
 }
 
 func (ms *MockSentry) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {

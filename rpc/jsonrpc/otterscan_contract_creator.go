@@ -46,7 +46,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	if err != nil {
 		return nil, err
 	}
-	latestState := rpchelper.NewLatestStateReader(domains, tx)
+	latestState := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
 	plainStateAcc, err := latestState.ReadAccountData(addr)
 	if err != nil {
 		return nil, err

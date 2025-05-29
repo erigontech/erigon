@@ -595,7 +595,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		return nil
 	}
 
-	update := new(uint256.Int).Add(&prev, amount)
+	update := new(uint256.Int).Add(&prev, &amount)
 	stateObject.SetBalance(*update, reason)
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
 	return nil
@@ -603,7 +603,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
+func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace || traceAccount(addr) {
 		prev, _ := sdb.GetBalance(addr)
 		defer func() {
@@ -626,7 +626,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int,
 		return err
 	}
 
-	update := new(uint256.Int).Sub(&prev, amount)
+	update := new(uint256.Int).Sub(&prev, &amount)
 	stateObject.SetBalance(*update, reason)
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
 

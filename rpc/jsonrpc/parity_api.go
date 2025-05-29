@@ -73,7 +73,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, err
 	}
 
-	a, err := rpchelper.NewLatestStateReader(domains, tx).ReadAccountData(account)
+	a, err := rpchelper.NewLatestStateReader(domains.AsGetter(tx)).ReadAccountData(account)
 	if err != nil {
 		return nil, err
 	} else if a == nil {

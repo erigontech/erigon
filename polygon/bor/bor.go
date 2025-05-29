@@ -1732,12 +1732,12 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 	}
 	input2 = input2
 	if !bailout {
-		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
 		if err != nil {
 			return err
 		}
 	}
-	err = db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	err = db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
 	if err != nil {
 		return err
 	}

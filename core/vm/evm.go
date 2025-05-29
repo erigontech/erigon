@@ -244,7 +244,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 		// but is the correct thing to do and matters on other networks, in tests, and potential
 		// future scenarios
-		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
+		evm.intraBlockState.AddBalance(addr, *u256.Num0, tracing.BalanceChangeTouchAccount)
 	}
 
 	// It is allowed to call precompiles, even via delegatecall
