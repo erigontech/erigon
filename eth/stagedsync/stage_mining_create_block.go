@@ -72,7 +72,7 @@ func NewMiningState(cfg *params.MiningConfig) MiningState {
 type MiningCreateBlockCfg struct {
 	db                     kv.RwDB
 	miner                  MiningState
-	chainConfig            chain.Config
+	chainConfig            *chain.Config
 	engine                 consensus.Engine
 	tmpdir                 string
 	blockBuilderParameters *core.BlockBuilderParameters
@@ -82,7 +82,7 @@ type MiningCreateBlockCfg struct {
 func StageMiningCreateBlockCfg(
 	db kv.RwDB,
 	miner MiningState,
-	chainConfig chain.Config,
+	chainConfig *chain.Config,
 	engine consensus.Engine,
 	blockBuilderParameters *core.BlockBuilderParameters,
 	tmpdir string,
@@ -177,13 +177,13 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		uncles    mapset.Set[common.Hash] // uncle set
 	}
 	env := &envT{
-		signer:    types.MakeSigner(&cfg.chainConfig, blockNum, timestamp),
+		signer:    types.MakeSigner(cfg.chainConfig, blockNum, timestamp),
 		ancestors: mapset.NewSet[common.Hash](),
 		family:    mapset.NewSet[common.Hash](),
 		uncles:    mapset.NewSet[common.Hash](),
 	}
 
-	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, cfg.miner.MiningConfig.GasLimit)
+	header := core.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.miner.MiningConfig.GasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
