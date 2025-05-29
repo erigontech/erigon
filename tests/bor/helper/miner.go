@@ -134,7 +134,7 @@ func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *
 		GPO:       ethconfig.Defaults.GPO,
 		Miner: params.MiningConfig{
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
-			GasLimit:   genesis.GasLimit,
+			GasLimit:   &genesis.GasLimit,
 			GasPrice:   big.NewInt(1),
 			Recommit:   125 * time.Second,
 			SigKey:     privKey,
