@@ -91,7 +91,8 @@ type Downloader struct {
 
 	lock sync.RWMutex
 	// Pieces having extra verification due to file size mismatches.
-	piecesBeingVerified map[*torrent.Piece]struct{}
+	piecesBeingVerified   map[*torrent.Piece]struct{}
+	verificationOccurring chansync.Flag
 	// Torrents that block completion. They were requested specifically. Torrents added from disk
 	// that aren't subsequently requested are not required to satisfy the sync stage.
 	requiredTorrents map[*torrent.Torrent]struct{}
@@ -120,6 +121,9 @@ type AggStats struct {
 
 	TorrentsCompleted int
 
+	// BytesCompleted is calculated from Torrent.BytesCompleted which counts dirty bytes which can
+	// be failed and so go back down... We're not just using download speed because there are other
+	// bottlenecks like hashing.
 	BytesCompleted, BytesTotal uint64
 	CompletionRate             uint64
 
@@ -542,11 +546,13 @@ func (d *Downloader) verifyPieces(f *torrent.File) {
 		}
 		g.MakeMapIfNil(&d.piecesBeingVerified)
 		if !g.MapInsert(d.piecesBeingVerified, p, struct{}{}).Ok {
+			d.updateVerificationOccurring()
 			d.spawn(func() {
 				err := p.VerifyDataContext(d.ctx)
 				d.lock.Lock()
 				defer d.lock.Unlock()
 				g.MustDelete(d.piecesBeingVerified, p)
+				d.updateVerificationOccurring()
 				if d.ctx.Err() != nil {
 					return
 				}
@@ -1148,52 +1154,68 @@ func (d *Downloader) shouldAddTorrent(
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) afterAddNewTorrent(metainfoOnDisk bool, t *torrent.Torrent) {
-	// The following is a bit elaborate with avoiding goroutines. Maybe it's overkill.
-
 	// TODO: If the metainfo was on disk already, do we want to ensure Info exists?
-
-	onGotInfo := func() {
-		t.DownloadAll()
-		// The info bytes weren't already on disk. Save them.
-		if !metainfoOnDisk {
-			if t.Complete().Bool() {
-				d.saveNewlyCompletedMetainfo(t)
-			} else {
-				d.spawn(func() { d.saveMetainfoWhenComplete(t) })
-			}
+	d.spawn(func() {
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-t.GotInfo():
 		}
-	}
-
-	// Aggressively minimize goroutines.
-	if t.Info() != nil {
-		onGotInfo()
-	} else {
-		d.spawn(func() {
-			select {
-			case <-d.ctx.Done():
-				return
-			case <-t.GotInfo():
-			}
-			onGotInfo()
-		})
-	}
+		// Always download, even if we think we're complete already. Failure to validate, or things
+		// changing can result in us needing to be in the download state to repair. It costs nothing
+		// if the torrent is already complete.
+		t.DownloadAll()
+		if !metainfoOnDisk {
+			d.saveMetainfoWhenComplete(t)
+		}
+	})
 }
 
 func (d *Downloader) saveMetainfoWhenComplete(t *torrent.Torrent) {
-	select {
-	case <-d.ctx.Done():
-	case <-t.Complete().On():
-		d.saveNewlyCompletedMetainfo(t)
+	for {
+		select {
+		case <-d.ctx.Done():
+		case <-t.Complete().On():
+		}
+		select {
+		case <-d.ctx.Done():
+			// This could be filtered to only pieces we care about...
+		case <-d.verificationOccurring.Off():
+		}
+		if func() (done bool) {
+			d.lock.Lock()
+			defer d.lock.Unlock()
+			if !t.Complete().Bool() || len(d.piecesBeingVerified) != 0 {
+				return
+			}
+			err := d.saveMetainfoPrecheck(t)
+			if err != nil {
+				d.logger.Warn("torrent failed metainfo commit precheck", "err", err, "name", t.Name())
+				return
+			}
+			err = d.saveMetainfo(t)
+			if err != nil {
+				// This is unrecoverable. We have to give up.
+				d.logger.Error("failed to save torrent metainfo", "err", err, "name", t.Name())
+			}
+			return true
+		}() {
+			break
+		}
 	}
 }
 
-func (d *Downloader) saveNewlyCompletedMetainfoErr(t *torrent.Torrent) error {
+func (d *Downloader) saveMetainfoPrecheck(t *torrent.Torrent) error {
 	if !t.Complete().Bool() {
 		return errors.New("torrent is not complete")
 	}
 	if !d.validateCompletedSnapshot(t) {
 		return errors.New("completed torrent failed validation")
 	}
+	return nil
+}
+
+func (d *Downloader) saveMetainfo(t *torrent.Torrent) error {
 	mi := t.Metainfo()
 	// This checks for existence last I checked, which isn't really what we want.
 	created, err := d.torrentFS.CreateWithMetaInfo(t.Info(), &mi)
@@ -1204,13 +1226,6 @@ func (d *Downloader) saveNewlyCompletedMetainfoErr(t *torrent.Torrent) error {
 		return fmt.Errorf("error creating metainfo file: %w", err)
 	}
 	return nil
-}
-
-func (d *Downloader) saveNewlyCompletedMetainfo(t *torrent.Torrent) {
-	err := d.saveNewlyCompletedMetainfoErr(t)
-	if err != nil {
-		d.logger.Error("error saving metainfo for complete torrent", "err", err, "name", t.Name())
-	}
 }
 
 func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, error) {
@@ -1446,4 +1461,8 @@ func (d *Downloader) spawn(f func()) {
 		defer d.wg.Done()
 		f()
 	}()
+}
+
+func (d *Downloader) updateVerificationOccurring() {
+	d.verificationOccurring.SetBool(len(d.piecesBeingVerified) != 0)
 }
