@@ -189,9 +189,9 @@ func New(
 	// Check torrent slogger levels and how they route through to erigon log, and anywhere else.
 	for _, level := range []slog.Level{
 		slog.LevelDebug,
-		slog.LevelInfo,
-		slog.LevelWarn,
-		slog.LevelError,
+		//slog.LevelInfo,
+		//slog.LevelWarn,
+		//slog.LevelError,
 	} {
 		err = torrentConfig.Slogger.Handler().Handle(ctx, slog.NewRecord(time.Now(), level, "test torrent config slogger level", 0))
 		if err != nil {
