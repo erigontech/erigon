@@ -420,10 +420,6 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, haveRamUpdates boo
 					ci1.key = common.Copy(k)
 					step := ^binary.BigEndian.Uint64(v[:8])
 					endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-					//if haveRamUpdates && endTxNum >= txNum {
-					//	ci1.cDup.Close()
-					//	return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", txNum, endTxNum)
-					//}
 					ci1.endTxNum = endTxNum
 					ci1.val = common.Copy(v[8:])
 					ci1.step = step
