@@ -517,7 +517,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			//if valuesIn != nil && valuesIn.decompressor != nil {
 			//fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
 			//}
-			d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
 			d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
@@ -565,7 +565,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 		require.NoError(t, err)
 
-		d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
 		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 		dc.Close()
 	}
@@ -1083,14 +1083,9 @@ func TestScanStaticFilesD(t *testing.T) {
 		"v1.0-accounts.4-5.kv",
 	}
 	d.scanDirtyFiles(files)
-	var found []string
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
-		}
-		return true
-	})
-	require.Len(t, found, 6)
+	require.Equal(t, 6, d.dirtyFiles.Len())
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	require.Equal(t, 0, len(d._visible.files))
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
@@ -1273,7 +1268,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		dv, di, dh, err := dc.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
 		require.NoError(t, err)
 
-		d.integrateMergedDirtyFiles(vl, il, hl, dv, di, dh)
+		d.integrateMergedDirtyFiles(dv, di, dh)
 		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 		logEvery.Stop()

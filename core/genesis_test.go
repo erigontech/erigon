@@ -73,9 +73,9 @@ func TestGenesisBlockHashes(t *testing.T) {
 func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
-	var err error
 
-	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err := core.GenesisToBlock(core.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	require.NoError(err)
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}

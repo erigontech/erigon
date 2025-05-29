@@ -473,8 +473,11 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 		defer sd.Close()
 
+		blockNum := uint64(0)
+		txNum := uint64(1) //2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
+
 		//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
-		r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
+		r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 		statedb = state.New(r)
 		statedb.SetTrace(false)
 
@@ -522,7 +525,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			return err
 		}
 
-		rh, err := sd.ComputeCommitment(context.Background(), tx, true, 0, "genesis")
+		rh, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "genesis")
 		if err != nil {
 			return err
 		}
