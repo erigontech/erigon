@@ -108,10 +108,12 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 	}
 
 	acc, err := reader.ReadAccountData(address)
+	log.Warn("[dbg] ", "acc", acc, "err", err)
 	if acc == nil || err != nil {
 		return hexutility.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(address, acc.Incarnation)
+	res, err := reader.ReadAccountCode(address, acc.Incarnation)
+	log.Warn("[dbg] ", "res", res, "err", err)
 	if res == nil {
 		return hexutility.Bytes(""), nil
 	}
