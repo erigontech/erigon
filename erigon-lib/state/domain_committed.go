@@ -105,7 +105,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint
 		return v, step, nil
 	}
 
-	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v, sd.txNum)
+	//sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v, sd.txNum)
 	return v, step, nil
 }
 
