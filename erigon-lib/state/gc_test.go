@@ -91,7 +91,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			hc.Close()
 		})
 
-		t.Run("read after: remove when no readers", func(t *testing.T) {
+		t.Run("read after: remove when no btReaders", func(t *testing.T) {
 			tx, err := db.BeginRo(ctx)
 			require.NoError(err)
 			defer tx.Rollback()
@@ -180,7 +180,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			hc.Close()
 		})
 
-		t.Run("read after: remove when no readers", func(t *testing.T) {
+		t.Run("read after: remove when no btReaders", func(t *testing.T) {
 			tx, err := db.BeginRo(ctx)
 			require.NoError(err)
 			defer tx.Rollback()

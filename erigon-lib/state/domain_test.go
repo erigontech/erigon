@@ -78,7 +78,6 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	cfg := Schema.AccountsDomain
-	cfg.crossDomainIntegrity = nil //no other domains
 	cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
@@ -1049,7 +1048,6 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 func emptyTestDomain(aggStep uint64) *Domain {
 	cfg := Schema.AccountsDomain
-	cfg.crossDomainIntegrity = nil
 
 	salt := uint32(1)
 	if cfg.hist.iiCfg.salt == nil {
@@ -1082,14 +1080,9 @@ func TestScanStaticFilesD(t *testing.T) {
 		"v1.0-accounts.4-5.kv",
 	}
 	d.scanDirtyFiles(files)
-	var found []string
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
-		}
-		return true
-	})
-	require.Len(t, found, 6)
+	require.Equal(t, 6, d.dirtyFiles.Len())
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	require.Equal(t, 0, len(d._visible.files))
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {

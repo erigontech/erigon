@@ -93,8 +93,6 @@ type iiCfg struct {
 	Compression   seg.FileCompression // compression type for inverted index keys and values
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
-	// external checker for integrity of inverted index ranges
-	integrity rangeIntegrityChecker
 	Accessors Accessors
 }
 
@@ -166,7 +164,7 @@ func filesFromDir(dir string) ([]string, error) {
 	}
 	filtered := make([]string, 0, len(allFiles))
 	for _, f := range allFiles {
-		if f.IsDir() || !f.Type().IsRegular() {
+		if f.IsDir() || (!f.Type().IsRegular() && f.Type()&os.ModeSymlink == 0) {
 			continue
 		}
 		if strings.HasPrefix(f.Name(), ".") { // hidden files
@@ -220,11 +218,6 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 		panic("assert: empty `aggregationStep`")
 	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, ii.aggregationStep, ii.filenameBase, "ef", ii.logger) {
-		startStep, endStep := dirtyFile.startTxNum/ii.aggregationStep, dirtyFile.endTxNum/ii.aggregationStep
-		if ii.integrity != nil && !ii.integrity(startStep, endStep) {
-			ii.logger.Debug("[agg] skip garbage file", "name", ii.filenameBase, "startStep", startStep, "endStep", endStep)
-			continue
-		}
 		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {
 			ii.dirtyFiles.Set(dirtyFile)
 		}

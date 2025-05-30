@@ -72,7 +72,7 @@ import (
 
 type SnapshotsCfg struct {
 	db          kv.TemporalRwDB
-	chainConfig chain.Config
+	chainConfig *chain.Config
 	dirs        datadir.Dirs
 
 	blockRetire        services.BlockRetire
@@ -90,7 +90,7 @@ type SnapshotsCfg struct {
 }
 
 func StageSnapshotsCfg(db kv.TemporalRwDB,
-	chainConfig chain.Config,
+	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
@@ -282,7 +282,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
-		&cfg.chainConfig,
+		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
@@ -308,7 +308,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
-		&cfg.chainConfig,
+		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
@@ -380,7 +380,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
-		aggtx := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
+		aggtx := state.AggTx(tx)
 		stats.LogStats(aggtx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 			_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err

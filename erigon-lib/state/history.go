@@ -35,8 +35,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
@@ -74,9 +72,6 @@ type History struct {
 	_visibleFiles []visibleFile
 }
 
-type rangeDomainIntegrityChecker func(d kv.Domain, dirs datadir.Dirs, fromStep, toStep uint64) bool
-type rangeIntegrityChecker func(fromStep, toStep uint64) bool
-
 type histCfg struct {
 	iiCfg iiCfg
 
@@ -106,9 +101,6 @@ type histCfg struct {
 	Compression   seg.FileCompression // defines type of Compression for history files
 	historyIdx    kv.InvertedIdx
 
-	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
-	integrity rangeIntegrityChecker
-
 	version HistVersionTypes
 }
 
@@ -129,14 +121,6 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 		histCfg:       cfg,
 		dirtyFiles:    btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visibleFiles: []visibleFile{},
-	}
-
-	cfg.iiCfg.integrity = func(fromStep, toStep uint64) bool {
-		exists, err := dir.FileExist(h.vFilePath(fromStep, toStep))
-		if err != nil {
-			panic(err)
-		}
-		return exists
 	}
 
 	var err error
@@ -208,11 +192,6 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 		panic("assert: empty `aggregationStep`")
 	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, h.aggregationStep, h.filenameBase, "v", h.logger) {
-		startStep, endStep := dirtyFile.startTxNum/h.aggregationStep, dirtyFile.endTxNum/h.aggregationStep
-		if h.integrity != nil && !h.integrity(startStep, endStep) {
-			h.logger.Debug("[agg] skip garbage file", "name", h.filenameBase, "startStep", startStep, "endStep", endStep)
-			continue
-		}
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
 			h.dirtyFiles.Set(dirtyFile)
 		}

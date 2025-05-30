@@ -60,7 +60,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 	newTestDomain := func() (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
-		d.History.InvertedIndex.integrity = nil
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History
@@ -546,7 +545,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 
 	newTestDomain := func(dom kv.Domain) *Domain {
 		cfg := Schema.GetDomainCfg(dom)
-		cfg.crossDomainIntegrity = nil
 
 		salt := uint32(1)
 		if cfg.hist.iiCfg.salt == nil {
@@ -562,7 +560,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			panic(err)
 		}
 
-		d.History.InvertedIndex.integrity = nil
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		d.Accessors = 0

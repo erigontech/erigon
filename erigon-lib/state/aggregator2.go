@@ -77,7 +77,6 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
-	InitAccountSchemaIntegrity()
 }
 
 type SchemaGen struct {
@@ -163,8 +162,7 @@ var Schema = SchemaGen{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
-		Accessors:            AccessorBTree | AccessorExistence,
-		crossDomainIntegrity: domainIntegrityCheck,
+		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblAccountHistoryVals,

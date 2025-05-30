@@ -176,7 +176,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.PolygonSyncFlag,
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
-	&utils.OverridePragueFlag,
+	&utils.OverrideOsakaFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,

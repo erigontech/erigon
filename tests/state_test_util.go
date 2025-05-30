@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/testutil"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -139,8 +140,8 @@ func GetChainConfig(forkString string) (baseConfig *chain.Config, eips []int, er
 		ok                    bool
 		baseName, eipsStrings = splitForks[0], splitForks[1:]
 	)
-	if baseConfig, ok = Forks[baseName]; !ok {
-		return nil, nil, UnsupportedForkError{baseName}
+	if baseConfig, ok = testutil.Forks[baseName]; !ok {
+		return nil, nil, testutil.UnsupportedForkError{Name: baseName}
 	}
 	for _, eip := range eipsStrings {
 		if eipNum, err := strconv.Atoi(eip); err != nil {
@@ -188,12 +189,12 @@ func (t *StateTest) Run(tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Co
 func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, testutil.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
 	block, _, err := core.GenesisToBlock(t.genesis(config), dirs, log.Root())
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, testutil.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	readBlockNr := block.NumberU64()
@@ -201,18 +202,19 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 
 	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, testutil.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	txc := wrap.NewTxContainer(tx, nil)
 	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, testutil.UnsupportedForkError{Name: subtest.Fork}
 	}
 	defer domains.Close()
-	txc.Doms = domains
+	blockNum, txNum := readBlockNr, uint64(1)
+
 	r := rpchelper.NewLatestStateReader(txc.Ttx)
-	w := rpchelper.NewLatestStateWriter(txc, nil, writeBlockNr)
+	w := rpchelper.NewLatestStateWriter(tx, domains, nil, writeBlockNr)
 	statedb := state.New(r)
 
 	var baseFee *big.Int
@@ -243,6 +245,8 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
 	header := block.HeaderNoCopy()
+	//blockNum, txNum := header.Number.Uint64(), 1
+
 	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
@@ -288,7 +292,7 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 	}
 
 	var root common.Hash
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, header.Number.Uint64(), "")
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), true, blockNum, txNum, "")
 	if err != nil {
 		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 	}
@@ -324,22 +328,22 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.Genesis
 		}
 	}
 
-	txc := wrap.NewTxContainer(tx, nil)
-	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
+	domains, err := state2.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, err
 	}
 	defer domains.Close()
-	defer domains.Flush(context2.Background(), tx)
-	txc.Doms = domains
 
-	w := rpchelper.NewLatestStateWriter(txc, nil, blockNr-1)
+	w := rpchelper.NewLatestStateWriter(tx, domains, nil, blockNr-1)
 
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
 	}
 	if err := statedb.CommitBlock(rules, w); err != nil {
+		return nil, err
+	}
+	if err := domains.Flush(context2.Background(), tx); err != nil {
 		return nil, err
 	}
 	return statedb, nil
