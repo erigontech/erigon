@@ -78,11 +78,7 @@ func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot common.Has
 	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, e := cfg.blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h, err
+		return cfg.blockReader.Header(ctx, tx, hash, number)
 	}
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 

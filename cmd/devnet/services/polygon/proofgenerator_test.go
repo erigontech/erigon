@@ -166,11 +166,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 	noopWriter := state.NewNoopWriter()
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, e := reader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h, e
+		return reader.Header(ctx, tx, hash, number)
 	}
 
 	header := block.Header()

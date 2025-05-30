@@ -113,11 +113,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		if execCfg.blockReader == nil {
 			return rawdb.ReadHeader(txc.Tx, hash, number), nil
 		}
-		header, err := execCfg.blockReader.Header(ctx, txc.Tx, hash, number)
-		if err != nil {
-			return nil, err
-		}
-		return header, nil
+		return execCfg.blockReader.Header(ctx, txc.Tx, hash, number)
 	}
 
 	mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)

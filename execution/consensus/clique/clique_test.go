@@ -72,7 +72,6 @@ func TestReimportMirroredState(t *testing.T) {
 			h, err = m.BlockReader.Header(m.Ctx, tx, hash, number)
 			return err
 		})
-
 		return h, err
 	}
 

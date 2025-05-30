@@ -88,11 +88,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h, e
+		return api._blockReader.Header(ctx, dbtx, hash, number)
 	}
 	engine := api.engine()
 

@@ -173,8 +173,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
-
-		return hash, nil
+		return hash, err
 	}
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
@@ -458,7 +457,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		if !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
-		return hash, nil
+		return hash, err
 	}
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)

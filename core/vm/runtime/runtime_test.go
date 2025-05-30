@@ -256,8 +256,6 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	require.NoError(b, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
@@ -528,8 +526,6 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 	require.NoError(b, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 

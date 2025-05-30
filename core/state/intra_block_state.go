@@ -23,6 +23,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -204,8 +205,10 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.nilAccounts = map[common.Address]struct{}{}
 	sdb.stateObjects = map[common.Address]*stateObject{}
 	sdb.stateObjectsDirty = map[common.Address]struct{}{}
-	clear(sdb.logs) // free pointers
-	sdb.logs = sdb.logs[:0]
+	for i := range sdb.logs {
+		clear(sdb.logs[i]) // free p¬ointers
+		sdb.logs[i] = sdb.logs[i][:0]
+	}
 	sdb.balanceInc = map[common.Address]*BalanceIncrease{}
 	sdb.journal.Reset()
 	sdb.nextRevisionId = 0
@@ -245,7 +248,7 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 		l.BlockNumber = blockNumber
 		l.BlockHash = blockHash
 	}
-	return logs
+	return slices.Clone(logs)
 }
 
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
@@ -254,7 +257,7 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	if txIndex >= len(sdb.logs) {
 		return nil
 	}
-	return sdb.logs[txIndex]
+	return slices.Clone(sdb.logs[txIndex])
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {

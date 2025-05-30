@@ -284,17 +284,15 @@ func Main(ctx *cli.Context) error {
 	}
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
-	var hashError error
 	getHash := func(num uint64) (common.Hash, error) {
 		if prestate.Env.BlockHashes == nil {
-			hashError = fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
-			return common.Hash{}, hashError
+			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
 		}
 		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
 		if !ok {
-			hashError = fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
+			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
 		}
-		return h, hashError
+		return h, nil
 	}
 
 	db := temporaltest.NewTestDB(nil, datadir.New(""))
@@ -327,9 +325,6 @@ func Main(ctx *cli.Context) error {
 	t8logger := log.New("t8ntool")
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
-	if hashError != nil {
-		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
-	}
 
 	if err != nil {
 		return fmt.Errorf("error on EBE: %w", err)

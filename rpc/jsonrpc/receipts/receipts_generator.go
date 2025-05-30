@@ -118,7 +118,11 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 	noopWriter := state.NewNoopWriter()
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-		return g.blockReader.Header(ctx, tx, hash, number)
+		h, e := g.blockReader.Header(ctx, tx, hash, number)
+		if e != nil {
+			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
+		}
+		return h, e
 	}
 	return &ReceiptEnv{
 		ibs:         ibs,

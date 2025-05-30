@@ -187,7 +187,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -197,9 +197,18 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 		break
 	}
 
-	// End of block transaction in a block
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false, hooks)
+		// End of block transaction in a block
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false, hooks, *rw.vmCfg)
+			if err != nil {
+				return nil, err
+			}
+			txTask.Logs = append(txTask.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
+			return ret, err
+		}
+
+		skipPostEvaluaion := false // `true` only inMining
+		_, _, _, err := rw.execArgs.Engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
 		if err != nil {
 			return nil, err
 		}
@@ -263,7 +272,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 
-			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx().Hash(), txTask.BlockNumber(), txTask.BlockHash())
+			result.Logs = ibs.GetRawLogs(txTask.TxIndex)
 			result.TraceFroms = txTask.Tracer.Froms()
 			result.TraceTos = txTask.Tracer.Tos()
 
@@ -568,20 +577,17 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header, err error) {
 		if tx != nil && WorkerCount == 1 {
 			h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
-			if err != nil {
-				return nil, err
-			}
 		} else {
-			err = cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
+			cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
 				h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
-				return err
+				return nil
 			})
 
 			if err != nil {
 				return nil, err
 			}
 		}
-		return h, nil
+		return h, err
 	}
 
 	outTxNum := &atomic.Uint64{}
