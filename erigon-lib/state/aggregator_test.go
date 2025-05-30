@@ -155,20 +155,16 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check the history
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey1, roTx)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
 	require.NoError(t, err)
-	require.Truef(t, ex, "key %x not found", commKey1)
-
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-	v, _, ex, err = AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey2, roTx)
+	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 	require.NoError(t, err)
-	require.Truef(t, ex, "key %x not found", commKey2)
-
 	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
@@ -526,10 +522,8 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, someKey, roTx)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, someKey)
 	require.NoError(t, err)
-	require.True(t, ex)
-
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
@@ -997,9 +991,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.Equal(t, i+1, int(acc.Nonce))
 
-		storedV, _, found, err := AggTx(tx).GetLatest(kv.StorageDomain, key, tx)
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
 		require.NoError(t, err)
-		require.True(t, found)
 		require.NotEmpty(t, storedV)
 		_ = key[0]
 		_ = storedV[0]
