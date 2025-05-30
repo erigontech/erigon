@@ -776,7 +776,7 @@ func (st *StateTransition) refundGas() {
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 
 	// Arbitrum: record the gas refund
-	if tracer := st.evm.Config().Tracer; tracer != nil {
+	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil {
 		from := st.msg.From()
 		tracer.CaptureArbitrumTransfer(nil, &from, remaining, false, "gasRefund")
 	}
