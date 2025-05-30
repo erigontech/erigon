@@ -331,12 +331,13 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	oldTip := ccb.Tip()
 	newConnectedHeaders, err := ccb.Connect(ctx, headerChain)
 	if err != nil {
+		// IMPORTANT: we just log the error and do not return
+		// to process the possibility of a partially connected header chain
 		s.logger.Debug(
-			syncLogPrefix("applyNewBlockOnTip: couldn't connect a header to the local chain tip, ignoring"),
+			syncLogPrefix("applyNewBlockOnTip: couldn't connect header chain to the local chain tip"),
+			"partiallyConnected", len(newConnectedHeaders),
 			"err", err,
 		)
-
-		return nil
 	}
 	if len(newConnectedHeaders) == 0 {
 		return nil
