@@ -257,8 +257,6 @@ func TestSnapshot2(t *testing.T) {
 	defer domains.Close()
 
 	txNum := uint64(1)
-	//domains.SetTxNum(txNum)
-	//domains.SetBlockNum(2)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
