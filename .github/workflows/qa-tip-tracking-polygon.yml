@@ -4,8 +4,8 @@ on:
   push:
     branches:
       - 'release/3.*'
-  #schedule:
-  #  - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
+  schedule:
+    - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
   workflow_dispatch:      # Run manually
 
 concurrency:
