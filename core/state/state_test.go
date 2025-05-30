@@ -146,8 +146,8 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	defer domains.Close()
 
 	txNum := uint64(1)
-	domains.SetTxNum(txNum)
-	domains.SetBlockNum(1)
+	//domains.SetTxNum(txNum)
+	//domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		panic(err)
