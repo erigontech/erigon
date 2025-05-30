@@ -61,3 +61,16 @@ tasks:
     privateKey: "eoaPrivateKey"
     targetAddress: "testContractAddr"
     authorizations: "| [ { codeAddress: .delegateContractAddr, signerPrivkey: .eoaPrivateKey } ]"
+
+- name: generate_transaction
+  title: "Remove delegation from EOA1"
+  config:
+    feeCap: 5000000000 # 5 gwei
+    gasLimit: 1000000
+    callData: ""
+    setCodeTxType: true
+    awaitReceipt: true
+  configVars:
+    privateKey: "eoaPrivateKey"
+    targetAddress: "testContractAddr"
+    authorizations: "| [ { codeAddress: '0x0000000000000000000000000000000000000000', signerPrivkey: .eoaPrivateKey } ]"
