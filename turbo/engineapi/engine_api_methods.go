@@ -24,6 +24,7 @@ var ourCapabilities = []string{
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
 	"engine_getPayloadV4",
+	"engine_getPayloadV5",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",
 	"engine_getClientVersionV1",
@@ -72,6 +73,14 @@ func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV4", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.ElectraVersion)
+}
+
+// Same as [GetPayloadV4], but returning BlobsBundleV2 instead of BlobsBundleV1
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#engine_getpayloadv5
+func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	e.logger.Info("Received GetPayloadV5", "payloadId", decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.FuluVersion)
 }
 
 // Updates the forkchoice state after validating the headBlockHash
