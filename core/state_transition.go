@@ -648,7 +648,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		}
 	}
 	// Arbitrum: record the tip
-	if tracer := st.evm.Config().Tracer; tracer != nil && !st.evm.ProcessingHook.DropTip() {
+	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil && !st.evm.ProcessingHook.DropTip() {
 		if tracingTipAmount, overlflow := uint256.FromBig(tipAmount); tracingTipAmount != nil && !overlflow {
 			tracer.CaptureArbitrumTransfer(nil, &tipReceipient, tracingTipAmount, false, "tip")
 		}
