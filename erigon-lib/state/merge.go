@@ -592,6 +592,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		return nil, ctx.Err()
 	}
 	fromStep, toStep := startTxNum/iit.ii.aggregationStep, endTxNum/iit.ii.aggregationStep
+	if fromStep <= toStep {
+		iit.ii.logger.Warn("mergeFiles skipping: startTxNum <= endTxNum", "startTxNum", startTxNum, "endTxNum", endTxNum, "aggStep", iit.ii.aggregationStep)
+		return nil, nil
+	}
 
 	datPath := iit.ii.efFilePath(fromStep, toStep)
 	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, iit.ii.CompressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
