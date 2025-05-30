@@ -171,13 +171,13 @@ var purifyDomains = &cobra.Command{
 		}
 		defer chainDb.Close()
 
-		ttx, err := chainDb.BeginTemporalRo(ctx)
+		tx, err := chainDb.BeginTemporalRo(ctx)
 		if err != nil {
 			logger.Error("Opening temporal DB", "error", err)
 			return
 		}
-
-		defer ttx.Rollback()
+		defer tx.Rollback()
+		defer statelib.AggTx(tx).MadvNormal().DisableReadAhead()
 
 		// Iterate over all the files in  dirs.SnapDomain and print them
 		domainDir := dirs.SnapDomain
@@ -201,7 +201,7 @@ var purifyDomains = &cobra.Command{
 		}
 
 		for _, domain := range purificationDomains {
-			filesToProcess := ttx.Debug().DomainFiles(domain).Fullpaths()
+			filesToProcess := tx.Debug().DomainFiles(domain).Fullpaths()
 			if err := makePurifiableIndexDB(purifyDB, filesToProcess, dirs, log.New(), domain); err != nil {
 				logger.Error("Error making purifiable index DB", "error", err)
 				return
@@ -209,7 +209,7 @@ var purifyDomains = &cobra.Command{
 		}
 		somethingPurified := false
 		for _, domain := range purificationDomains {
-			filesToProcess := ttx.Debug().DomainFiles(domain).Fullpaths()
+			filesToProcess := tx.Debug().DomainFiles(domain).Fullpaths()
 			something, err := makePurifiedDomains(purifyDB, filesToProcess, dirs, log.New(), domain)
 			if err != nil {
 				logger.Error("Error making purifiable index DB", "error", err)
