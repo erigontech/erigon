@@ -17,7 +17,6 @@
 package downloader
 
 import (
-	"bytes"
 	"context"
 	//nolint:gosec
 	"errors"
@@ -29,10 +28,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
@@ -40,17 +40,15 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+// TODO: Update this list, or pull from common location (central manifest or canonical multi-file torrent).
 // udpOrHttpTrackers - torrent library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 8
 var udpOrHttpTrackers = []string{
 	"udp://tracker.opentrackr.org:1337/announce",
-	"udp://tracker.openbittorrent.com:6969/announce",
-	"udp://opentracker.i2p.rocks:6969/announce",
 	"udp://tracker.torrent.eu.org:451/announce",
 	"udp://open.stealth.si:80/announce",
 }
@@ -243,6 +241,7 @@ func CreateMetaInfo(info *metainfo.Info, mi *metainfo.MetaInfo) (*metainfo.MetaI
 		}
 		mi = &metainfo.MetaInfo{
 			CreationDate: time.Now().Unix(),
+			// TODO: Differentiate direct web source vs generated locally.
 			CreatedBy:    "erigon",
 			InfoBytes:    infoBytes,
 			AnnounceList: Trackers,
@@ -303,7 +302,8 @@ func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *AtomicTorrentFS) (res []*t
 	return res, nil
 }
 
-// if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
+// if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots. TODO: This does not belong here.
+// Downloader should be stupid.
 func IsSnapNameAllowed(name string) bool {
 	if dbg.DownloaderOnlyBlocks {
 		for _, p := range []string{"domain", "history", "idx", "accessor"} {
@@ -315,133 +315,33 @@ func IsSnapNameAllowed(name string) bool {
 	return true
 }
 
-// addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
+// addTorrentSpec - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
 // added first time - pieces verification process will start (disk IO heavy) - Progress
-// kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
+// kept in `piece completion storage` (surviving reboot). Once it's done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, db kv.RwDB, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
+func (d *Downloader) addTorrentSpec(
+	ts *torrent.TorrentSpec,
+) (t *torrent.Torrent, new bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
-	ts.DisallowDataDownload = true
-	//ts.DisableInitialPieceCheck = true
-	//re-try on panic, with 0 ChunkSize (lib doesn't allow change this field for existing torrents)
-	defer func() {
-		rec := recover()
-		if rec != nil {
-			ts.ChunkSize = 0
-			t, ok, err = _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
-		}
-	}()
-
-	t, ok, err = _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
-
+	ts.Trackers = Trackers
+	ts.Webseeds = nil
+	// I wonder how this should be handled for AddNewSeedableFile. What if there's bad piece
+	// completion data? We might want to clobber any piece completion and force the client to accept
+	// what we provide, assuming we trust our own metainfo generation more.
+	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
+	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
+	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
+	t, new, err = d.torrentClient.AddTorrentSpec(ts)
 	if err != nil {
-		ts.ChunkSize = 0
-		return _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
+		return
 	}
-	return t, ok, err
-}
-
-func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, db kv.RwDB, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
-	select {
-	case <-ctx.Done():
-		return nil, false, ctx.Err()
-	default:
-	}
-	if !IsSnapNameAllowed(ts.DisplayName) {
-		return nil, false, nil
-	}
-	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)
-	var have bool
-	t, have = torrentClient.Torrent(ts.InfoHash)
-
-	if !have {
-		t, _, err := torrentClient.AddTorrentSpec(ts)
-		if err != nil {
-			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
-		}
-
-		if t.Complete.Bool() {
-			if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, nil)); err != nil {
-				return nil, false, fmt.Errorf("addTorrentFile %s: update failed: %w", ts.DisplayName, err)
-			}
-		} else {
-			t.AddWebSeeds(ts.Webseeds)
-			if err := db.Update(ctx, torrentInfoReset(ts.DisplayName, ts.InfoHash.Bytes(), 0)); err != nil {
-				return nil, false, fmt.Errorf("addTorrentFile %s: reset failed: %w", ts.DisplayName, err)
-			}
-		}
-
-		return t, true, nil
-	}
-
-	if t.Info() != nil {
-		t.AddWebSeeds(ts.Webseeds)
-		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info().Length, nil)); err != nil {
-			return nil, false, fmt.Errorf("update torrent info %s: %w", ts.DisplayName, err)
-		}
-	} else {
-		t, _, err = torrentClient.AddTorrentSpec(ts)
-		if err != nil {
-			return t, true, fmt.Errorf("add torrent file %s: %w", ts.DisplayName, err)
-		}
-
-		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, nil))
-	}
-
-	return t, true, nil
-}
-
-func torrentInfoUpdater(fileName string, infoHash []byte, length int64, completionTime *time.Time) func(tx kv.RwTx) error {
-	return func(tx kv.RwTx) error {
-		info, err := downloaderrawdb.ReadTorrentInfo(tx, fileName)
-		if err != nil {
-			return err
-		}
-
-		changed := false
-
-		if err != nil || (len(infoHash) > 0 && !bytes.Equal(info.Hash, infoHash)) { //nolint
-			now := time.Now()
-			info.Name = fileName
-			info.Hash = infoHash
-			info.Created = &now
-			info.Completed = nil
-			changed = true
-		}
-
-		if length > 0 && (info.Length == nil || *info.Length != length) {
-			info.Length = &length
-			changed = true
-		}
-
-		if completionTime != nil {
-			info.Completed = completionTime
-			changed = true
-		}
-
-		if !changed {
-			return nil
-		}
-
-		return downloaderrawdb.WriteTorrentInfo(tx, info)
-	}
-}
-
-func torrentInfoReset(fileName string, infoHash []byte, length int64) func(tx kv.RwTx) error {
-	return func(tx kv.RwTx) error {
-		now := time.Now()
-
-		info := downloaderrawdb.TorrentInfo{
-			Name:    fileName,
-			Hash:    infoHash,
-			Created: &now,
-		}
-
-		if length > 0 {
-			info.Length = &length
-		}
-		return downloaderrawdb.WriteTorrentInfo(tx, &info)
-	}
+	t.AddWebSeeds(
+		d.cfg.WebSeedUrls,
+		// TODO: We add a truly massive number of torrents, this is a workaround until goroutine
+		// counts are managed more effectively for them.
+		//torrent.WebSeedTorrentMaxRequests(1),
+	)
+	return
 }
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
@@ -464,55 +364,36 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 	return peerID, nil
 }
 
-func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
-	ctx, cancel := context.WithCancel(ctx)
-	wg, wgctx := errgroup.WithContext(ctx)
-	wg.SetLimit(16)
-
-	// piece changes happen asynchronously - we need to wait from them to complete
-	pieceChanges := t.SubscribePieceStateChanges()
-	inprogress := map[int]struct{}{}
-
-	for i := 0; i < t.NumPieces(); i++ {
-		inprogress[i] = struct{}{}
-
-		i := i
-		wg.Go(func() error {
-			t.Piece(i).VerifyData()
-			return nil
+// Trigger all pieces to be verified with the given concurrency primitives. It's
+// an error for a piece to not be complete or have an unknown state after
+// verification.
+func scheduleVerifyFile(ctx context.Context, eg *errgroup.Group, t *torrent.Torrent, piecesChecked *atomic.Uint64) {
+	for i := range t.NumPieces() {
+		// I think if a check fails, this will still power through and force the
+		// rest of the pieces to get verified but ignore the result. Check
+		// ctx.Err to avoid that.
+		eg.Go(func() (err error) {
+			defer piecesChecked.Add(1)
+			piece := t.Piece(i)
+			err = piece.VerifyDataContext(ctx)
+			if err != nil {
+				return
+			}
+			// I wonder if we want the storage completion (derived from a piece
+			// completion DB in most cases), or if we want the torrent lib's
+			// cached version (since we did just verify data). That would be in
+			// piece.State().Completion.
+			completion := piece.Storage().Completion()
+			if !completion.Ok {
+				err = errors.New("storage state unknown")
+			}
+			if completion.Err != nil {
+				err = fmt.Errorf("storage completion state error: %w", completion.Err)
+			}
+			if err != nil {
+				err = fmt.Errorf("piece %s:%d verify failed: %w", t.Name(), i, err)
+			}
+			return
 		})
-	}
-
-	for {
-		select {
-		case <-wgctx.Done():
-			cancel()
-			return wg.Wait()
-		case change := <-pieceChanges.Values:
-			if !change.Ok {
-				var err error
-
-				if change.Err != nil {
-					err = change.Err
-				} else {
-					err = errors.New("unexpected piece change error")
-				}
-
-				cancel()
-				return fmt.Errorf("piece %s:%d verify failed: %w", t.Name(), change.Index, err)
-			}
-
-			if !(change.Checking || change.Hashing || change.QueuedForHash || change.Marking) {
-				if change.Complete {
-					completePieces.Add(1)
-				}
-				delete(inprogress, change.Index)
-			}
-
-			if len(inprogress) == 0 {
-				cancel()
-				return wg.Wait()
-			}
-		}
 	}
 }
