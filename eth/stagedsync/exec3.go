@@ -240,10 +240,12 @@ func ExecV3(ctx context.Context,
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if !inMemExec && !isMining {
 		if initialCycle {
-			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+			agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+			agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
 			agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		} else {
 			agg.SetCompressWorkers(1)
+			agg.SetMergeWorkers(1)
 			agg.SetCollateAndBuildWorkers(1)
 		}
 	}
@@ -762,6 +764,15 @@ Loop:
 				t3 = time.Since(tt)
 
 				t2, err := executor.(*serialExecutor).commit(ctx, inputTxNum, outputBlockNum.GetValueUint64(), useExternalTx)
+				if err != nil {
+					return err
+				}
+
+				if _, err := executor.tx().(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+					return err
+				}
+
+				_, err = executor.(*serialExecutor).commit(ctx, inputTxNum, outputBlockNum.GetValueUint64(), useExternalTx)
 				if err != nil {
 					return err
 				}
