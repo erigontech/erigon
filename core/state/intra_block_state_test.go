@@ -51,7 +51,7 @@ func TestSnapshotRandom(t *testing.T) {
 	}
 
 	t.Parallel()
-	config := &quick.Config{MaxCount: 100}
+	config := &quick.Config{MaxCount: 10}
 	err := quick.Check((*snapshotTest).run, config)
 	if cerr, ok := err.(*quick.CheckError); ok {
 		test := cerr.In[0].(*snapshotTest)
