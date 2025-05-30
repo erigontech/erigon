@@ -32,11 +32,11 @@ var (
 	ArchiveMode = Mode{
 		Initialised: true,
 		History:     Distance(math.MaxUint64),
-		Blocks:      Distance(KeepAllBlocksPruneMode),
+		Blocks:      KeepAllBlocksPruneMode,
 	}
 	FullMode = Mode{
 		Initialised: true,
-		Blocks:      Distance(DefaultBlocksPruneMode),
+		Blocks:      DefaultBlocksPruneMode,
 		History:     Distance(config3.DefaultPruneDistance),
 	}
 	MinimalMode = Mode{
