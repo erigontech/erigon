@@ -538,6 +538,11 @@ func (db *DB) ReloadFiles() error { return db.agg.ReloadFiles() }
 func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
 	return db.agg.BuildMissedAccessors(ctx, workers)
 }
+func (db *DB) MadvNormal() kv.TemporalDebugDB {
+	db.agg.MadvNormal()
+	return db
+}
+func (db *DB) DisableReadAhead() { db.agg.DisableReadAhead() }
 
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
