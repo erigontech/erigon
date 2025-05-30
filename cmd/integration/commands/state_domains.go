@@ -300,7 +300,7 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 			}
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
-			if count%1_000_000 == 0 {
+			if count%10_000_000 == 0 {
 				logger.Info(fmt.Sprintf("[purify] Indexed %dM keys in file %s", count/1_000_000, baseFileName))
 			}
 			// skip values
