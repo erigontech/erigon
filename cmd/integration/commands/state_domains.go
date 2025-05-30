@@ -199,7 +199,7 @@ var purifyDomains = &cobra.Command{
 
 		for _, domain := range purificationDomains {
 			filesToProcess := tx.Debug().DomainFiles(domain).Fullpaths()
-			if err := makePurifiableIndexDB(purifyDB, filesToProcess, dirs, log.New(), domain); err != nil {
+			if err := makePurifiableIndexDB(ctx, purifyDB, filesToProcess, dirs, log.New(), domain); err != nil {
 				logger.Error("Error making purifiable index DB", "error", err)
 				return
 			}
@@ -207,7 +207,7 @@ var purifyDomains = &cobra.Command{
 		somethingPurified := false
 		for _, domain := range purificationDomains {
 			filesToProcess := tx.Debug().DomainFiles(domain).Fullpaths()
-			something, err := makePurifiedDomains(purifyDB, filesToProcess, dirs, log.New(), domain)
+			something, err := makePurifiedDomains(ctx, purifyDB, filesToProcess, dirs, log.New(), domain)
 			if err != nil {
 				logger.Error("Error making purifiable index DB", "error", err)
 				return
@@ -232,7 +232,7 @@ var purifyDomains = &cobra.Command{
 	},
 }
 
-func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) error {
+func makePurifiableIndexDB(ctx context.Context, db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) error {
 	var tbl string
 	switch domain {
 	case kv.AccountsDomain:
@@ -270,7 +270,7 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 	collector.LogLvl(log.LvlDebug)
 	collector.SortAndFlushInBackground(true)
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
@@ -311,14 +311,14 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 		logger.Info(fmt.Sprintf("Indexed %dM keys in file %s", count/1_000_000, baseFileName))
 	}
 	logger.Info("Loading the keys to DB")
-	if err := collector.Load(tx, tbl, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+	if err := collector.Load(tx, tbl, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return fmt.Errorf("failed to load: %w", err)
 	}
 
 	return tx.Commit()
 }
 
-func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) (somethingPurified bool, err error) {
+func makePurifiedDomains(ctx context.Context, db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) (somethingPurified bool, err error) {
 	compressionType := statelib.Schema.GetDomainCfg(domain).Compression
 	compressCfg := statelib.Schema.GetDomainCfg(domain).CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
@@ -356,7 +356,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 		return fileInfos[i].CompareTo(fileInfos[j]) <= 0
 	})
 
-	tx, err := db.BeginRo(context.Background())
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return false, fmt.Errorf("failed to start transaction: %w", err)
 	}
@@ -377,7 +377,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 		defer dec.Close()
 		getter := dec.MakeGetter()
 
-		valuesComp, err := seg.NewCompressor(context.Background(), "Purification", outputFilePath, dirs.Tmp, compressCfg, log.LvlTrace, log.New())
+		valuesComp, err := seg.NewCompressor(ctx, "Purification", outputFilePath, dirs.Tmp, compressCfg, log.LvlTrace, log.New())
 		if err != nil {
 			return false, fmt.Errorf("create %s values compressor: %w", outputFilePath, err)
 		}
