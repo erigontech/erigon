@@ -43,6 +43,7 @@ type BorConfig struct {
 	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already on Agra)
 	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
 	AhmedabadBlock             *big.Int          `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
+	BhilaiBlock                *big.Int          `json:"bhilaiBlock"`                // Bhilai switch block (nil = no fork, 0 = already on Ahmedabad)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 
 	sprints sprints
@@ -166,6 +167,14 @@ func (c *BorConfig) IsAhmedabad(number uint64) bool {
 
 func (c *BorConfig) GetAhmedabadBlock() *big.Int {
 	return c.AhmedabadBlock
+}
+
+func (c *BorConfig) IsBhilai(number uint64) bool {
+	return isForked(c.BhilaiBlock, number)
+}
+
+func (c *BorConfig) GetBhilaiBlock() *big.Int {
+	return c.BhilaiBlock
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {

@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -139,6 +140,8 @@ type TxPool struct {
 	isPostShanghai          atomic.Bool
 	agraBlock               *uint64
 	isPostAgra              atomic.Bool
+	bhilaiBlock             *uint64
+	isPostBhilai            atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
@@ -171,6 +174,7 @@ func New(
 	chainID uint256.Int,
 	shanghaiTime *big.Int,
 	agraBlock *big.Int,
+	bhilaiBlock *big.Int,
 	cancunTime *big.Int,
 	pragueTime *big.Int,
 	blobSchedule *chain.BlobSchedule,
@@ -251,6 +255,13 @@ func New(
 		}
 		agraBlockU64 := agraBlock.Uint64()
 		res.agraBlock = &agraBlockU64
+	}
+	if bhilaiBlock != nil {
+		if !bhilaiBlock.IsUint64() {
+			return nil, errors.New("bhilaiBlock overflow")
+		}
+		bhilaiBlockU64 := bhilaiBlock.Uint64()
+		res.bhilaiBlock = &bhilaiBlockU64
 	}
 	if cancunTime != nil {
 		if !cancunTime.IsUint64() {
@@ -694,8 +705,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 	best := p.pending.best
 
-	isShanghai := p.isShanghai() || p.isAgra()
-	isPrague := p.isPrague()
+	isEIP3860 := p.isShanghai() || p.isAgra()
+	isEIP7623 := p.isPrague() || p.isBhilai()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -749,8 +760,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
 		authorizationLen := uint64(len(mt.TxnSlot.Authorities))
-		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague)
-		if isPrague && floorGas > intrinsicGas {
+		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isEIP3860, isEIP7623)
+		if isEIP7623 && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
 		}
 		if intrinsicGas > availableGas {
@@ -854,8 +865,9 @@ func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
-	isShanghai := p.isShanghai() || p.isAgra()
-	if isShanghai && txn.Creation && txn.DataLen > fixedgas.MaxInitCodeSize {
+	isEIP3860 := p.isShanghai() || p.isAgra()
+	isPrague := p.isPrague() || p.isBhilai()
+	if isEIP3860 && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
 		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
 	if txn.Type == BlobTxnType {
@@ -909,7 +921,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 
 	authorizationLen := len(txn.Authorities)
 	if txn.Type == SetCodeTxnType {
-		if !p.isPrague() {
+		if !isPrague {
 			return txpoolcfg.TypeNotActivated
 		}
 		if txn.Creation {
@@ -928,15 +940,15 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.UnderPriced
 	}
 
-	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isShanghai, p.isPrague())
-	if p.isPrague() && floorGas > gas {
+	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isEIP3860, isPrague)
+	if isPrague && floorGas > gas {
 		gas = floorGas
 	}
 
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
-	if overflow != false {
+	if overflow {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed due to overflow idHash=%x", txn.IDHash))
 		}
@@ -1042,20 +1054,20 @@ func (p *TxPool) isShanghai() bool {
 	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
 }
 
-func (p *TxPool) isAgra() bool {
+func (p *TxPool) isBlockNumBasedForkActivated(isPostFlag *atomic.Bool, forkBlockNum *uint64) bool {
 	// once this flag has been set for the first time we no longer need to check the block
-	set := p.isPostAgra.Load()
+	set := isPostFlag.Load()
 	if set {
 		return true
 	}
-	if p.agraBlock == nil {
+	if forkBlockNum == nil {
 		return false
 	}
-	agraBlock := *p.agraBlock
+	forkBlock := *forkBlockNum
 
-	// a zero here means Agra is always active
-	if agraBlock == 0 {
-		p.isPostAgra.Swap(true)
+	// a zero here means the fork is always active
+	if forkBlock == 0 {
+		isPostFlag.Swap(true)
 		return true
 	}
 
@@ -1069,13 +1081,21 @@ func (p *TxPool) isAgra() bool {
 	if headBlock == nil || err != nil {
 		return false
 	}
-	// A new block is built on top of the head block, so when the head is agraBlock-1,
-	// the new block should use the Agra rules.
-	activated := (*headBlock + 1) >= agraBlock
+	// A new block is built on top of the head block, so when the head is forkBlock-1,
+	// the new block should use the new fork rules.
+	activated := (*headBlock + 1) >= forkBlock
 	if activated {
-		p.isPostAgra.Swap(true)
+		isPostFlag.Swap(true)
 	}
 	return activated
+}
+
+func (p *TxPool) isAgra() bool {
+	return p.isBlockNumBasedForkActivated(&p.isPostAgra, p.agraBlock)
+}
+
+func (p *TxPool) isBhilai() bool {
+	return p.isBlockNumBasedForkActivated(&p.isPostBhilai, p.bhilaiBlock)
 }
 
 func (p *TxPool) isCancun() bool {
