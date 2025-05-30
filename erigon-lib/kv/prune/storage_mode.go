@@ -32,11 +32,11 @@ var (
 	ArchiveMode = Mode{
 		Initialised: true,
 		History:     Distance(math.MaxUint64),
-		Blocks:      Distance(math.MaxUint64),
+		Blocks:      Distance(KeepAllBlocksPruneMode),
 	}
 	FullMode = Mode{
 		Initialised: true,
-		Blocks:      Distance(math.MaxUint64),
+		Blocks:      Distance(DefaultBlocksPruneMode),
 		History:     Distance(config3.DefaultPruneDistance),
 	}
 	MinimalMode = Mode{
@@ -173,7 +173,7 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 }
 
 // EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
-func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
+func EnsureNotChanged(tx kv.GetPut, pruneMode Mode, chaindata string) (Mode, error) {
 	if err := setIfNotExist(tx, pruneMode); err != nil {
 		return pruneMode, err
 	}
@@ -184,6 +184,10 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
+		// Little initial design flaw: we used maxUint64 as default value for prune distance so history expiry was not accounted for.
+		if pm.History == DefaultBlocksPruneMode && pruneMode.History == DefaultBlocksPruneMode {
+			return pm, errors.New("history expiry upgrade requires to delete chaindata, rm -rf " + chaindata + " and restart with --prune.mode=archive --prune.distance=0")
+		}
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
 			return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())

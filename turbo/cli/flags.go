@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -82,8 +81,8 @@ var (
 		Name: "prune.mode",
 		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
 				Full: Keep only necessary blocks and latest state,
-				Blocks: Keep all blocks and latest state,
-				Archive: Keep the entire indexed database, aka. no pruning,
+				Blocks: Keep all blocks and latest state but not the state history,
+				Archive: Keep the entire state history and all blocks,
 				Minimal: Keep only latest state`,
 		Value: "full",
 	}
@@ -277,21 +276,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 
-	switch ctx.String(PruneModeFlag.Name) {
-	case "archive":
-	case "full":
-		mode.Blocks = prune.DefaultBlocksPruneMode
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	case "blocks":
-		mode.Blocks = prune.KeepAllBlocksPruneMode
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	case "minimal":
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	default:
-		utils.Fatalf("error: --prune.mode must be one of archive, full, blocks, minimal")
-	}
-
 	if ctx.IsSet(PruneBlocksDistanceFlag.Name) {
 		mode.Blocks = prune.Distance(blockDistance)
 	}
@@ -404,20 +388,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	mode, err := prune.FromCli(*pruneMode, distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
-	switch *pruneMode {
-	case "archive":
-	case "full":
-		mode.Blocks = prune.DefaultBlocksPruneMode
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	case "blocks":
-		mode.Blocks = prune.KeepAllBlocksPruneMode
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	case "minimal":
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	default:
-		utils.Fatalf("error: --prune.mode must be one of archive, full, blocks, minimal")
 	}
 
 	if pruneBlockDistance != nil {
