@@ -1371,9 +1371,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	require.NoError(t, err)
 	//t.Logf("stateRoot %x", rh1)
 
-	sd.SetTxNum(2)
-	sd.SetBlockNum(1)
-
 	trieCode, tcErr := r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
