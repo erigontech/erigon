@@ -265,7 +265,7 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 		return fileInfos[i].CompareTo(fileInfos[j]) <= 0
 	})
 
-	collector := etl.NewCollector("Purification", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	collector := etl.NewCollectorWithAllocator("Purification", dirs.Tmp, etl.LargeSortableBuffers, logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 	collector.SortAndFlushInBackground(true)
