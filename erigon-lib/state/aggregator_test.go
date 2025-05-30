@@ -1290,6 +1290,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	roots := make([][]byte, 0, 10)
 	var pruneFrom uint64 = 5
 
+	blockNum := uint64(0)
 	for i = 0; i < len(vals); i++ {
 		txNum := uint64(i)
 		domains.SetTxNum(txNum)
@@ -1315,7 +1316,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
-		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
