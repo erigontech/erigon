@@ -486,7 +486,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	logger.Info("seek commitment", "block", domains.BlockNum(), "tx", latestTx)
 
 	switch readDomain {
-	case "account":
+	case kv.AccountsDomain.String():
 		for _, addr := range addrs {
 
 			acc, err := r.ReadAccountData(common.BytesToAddress(addr))
@@ -496,7 +496,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 			}
 			logger.Info(fmt.Sprintf("%x: nonce=%d balance=%d code=%x root=%x", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root))
 		}
-	case "storage":
+	case kv.StorageDomain.String():
 		for _, addr := range addrs {
 			a, s := common.BytesToAddress(addr[:length.Addr]), common.BytesToHash(addr[length.Addr:])
 			st, err := r.ReadAccountStorage(a, s)
@@ -506,7 +506,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 			}
 			logger.Info(fmt.Sprintf("%s %s -> %x", a.String(), s.String(), st))
 		}
-	case "code":
+	case kv.CodeDomain.String():
 		for _, addr := range addrs {
 			code, err := r.ReadAccountCode(common.BytesToAddress(addr))
 			if err != nil {
@@ -514,16 +514,6 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 				continue
 			}
 			logger.Info(fmt.Sprintf("%s: %x", addr, code))
-		}
-	}
-	return nil
-}
-
-func removeMany(filePaths ...string) error {
-	for _, filePath := range filePaths {
-		if err := os.Remove(filePath); err != nil {
-			_, fileName := filepath.Split(filePath)
-			return fmt.Errorf("failed to remove the file: %s, %w", fileName, err)
 		}
 	}
 	return nil
