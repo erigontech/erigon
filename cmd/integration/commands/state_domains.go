@@ -301,12 +301,12 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
 			if count%1_000_000 == 0 {
-				logger.Info(fmt.Sprintf("Indexed %d keys in file %s", count, baseFileName))
+				logger.Info(fmt.Sprintf("[purify] Indexed %dM keys in file %s", count/1_000_000, baseFileName))
 			}
 			// skip values
 			getter.Skip()
 		}
-		logger.Info(fmt.Sprintf("Indexed %d keys in file %s", count, baseFileName))
+		logger.Info(fmt.Sprintf("Indexed %dM keys in file %s", count/1_000_000, baseFileName))
 	}
 	logger.Info("Loading the keys to DB")
 	if err := collector.Load(tx, tbl, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
@@ -415,7 +415,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 			count++
 			if count%10_000_000 == 0 {
 				skipRatio := float64(skipped) / float64(count)
-				logger.Info(fmt.Sprintf("Indexed %d keys, skipped %d, in file %s. skip ratio: %.2f", count, skipped, baseFileName, skipRatio))
+				logger.Info(fmt.Sprintf("Indexed %dM keys, skipped %d, in file %s. skip ratio: %.2f", count/1_000_000, skipped, baseFileName, skipRatio))
 			}
 		}
 
@@ -424,7 +424,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 			logger.Info(fmt.Sprintf("Skip ratio %.2f is less than min-skip-ratio %.2f, skipping %s", skipRatio, minSkipRatio, baseFileName))
 			continue
 		}
-		logger.Info(fmt.Sprintf("Loaded %d keys in file %s. now compressing...", count, baseFileName))
+		logger.Info(fmt.Sprintf("Loaded %dM keys in file %s. now compressing...", count/1_000_000, baseFileName))
 		if err := comp.Compress(); err != nil {
 			return false, fmt.Errorf("failed to compress: %w", err)
 		}
