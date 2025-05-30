@@ -417,7 +417,7 @@ func makePurifiedDomains(ctx context.Context, db kv.RwDB, files []string, dirs d
 			count++
 			if count%10_000_000 == 0 {
 				skipRatio := float64(skipped) / float64(count)
-				logger.Info(fmt.Sprintf("Indexed %dM keys, skipped %d, in file %s. skip ratio: %.2f", count/1_000_000, skipped, baseFileName, skipRatio))
+				logger.Info(fmt.Sprintf("Indexed %dM keys, skipped %dk, in file %s. skip ratio: %.2f", count/1_000_000, skipped/1_000, baseFileName, skipRatio))
 			}
 		}
 
@@ -430,7 +430,7 @@ func makePurifiedDomains(ctx context.Context, db kv.RwDB, files []string, dirs d
 		if err := comp.Compress(); err != nil {
 			return false, fmt.Errorf("failed to compress: %w", err)
 		}
-		logger.Info(fmt.Sprintf("Compressed %d keys in file %s", count, baseFileName))
+		logger.Info(fmt.Sprintf("Compressed %dM keys in file %s", count/1_000_000, baseFileName))
 		comp.Close()
 		if replaceInDatadir {
 			logger.Info(fmt.Sprintf("Replacing the file %s in datadir", baseFileName))
