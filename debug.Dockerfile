@@ -1,5 +1,5 @@
 # syntax = docker/dockerfile:1.2
-FROM docker.io/library/golang:1.23-alpine AS builder
+FROM docker.io/library/golang:1.24-alpine AS builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 
@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache \
     make all
 
 
-FROM docker.io/library/golang:1.23-alpine AS tools-builder
+FROM docker.io/library/golang:1.24-alpine AS tools-builder
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 WORKDIR /app
 

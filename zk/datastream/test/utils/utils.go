@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -66,7 +67,7 @@ func GetBlockByHash(blockHash string) (Result, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return Result{}, fmt.Errorf(string(body))
+		return Result{}, errors.New(string(body))
 	}
 
 	var httpResp HTTPResponse

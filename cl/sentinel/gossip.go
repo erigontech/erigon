@@ -198,10 +198,15 @@ func (s *Sentinel) forkWatcher() {
 				return
 			}
 			if prevDigest != digest {
+				expectPathPrefix := fmt.Sprintf("/eth2/%x", digest)
 				// unsubscribe and resubscribe to all topics
 				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
+					path := key.(string)
+					if strings.HasPrefix(path, expectPathPrefix) {
+						return true
+					}
 					sub := value.(*GossipSubscription)
-					s.subManager.unsubscribe(key.(string))
+					s.subManager.unsubscribe(path)
 					newSub, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
 					if err != nil {
 						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)

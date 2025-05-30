@@ -65,8 +65,8 @@ default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 21 ]; then \
-		echo "minimum required Golang version is 1.21"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 24 ]; then \
+		echo "minimum required Golang version is 1.24"; \
 		exit 1 ;\
 	fi
 
@@ -366,7 +366,7 @@ install:
 	@ls -al "$(DIST)"
 
 PACKAGE_NAME          := github.com/0xPolygonHermez/cdk-erigon
-GOLANG_CROSS_VERSION  ?= v1.21.6
+GOLANG_CROSS_VERSION  ?= v1.24
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
