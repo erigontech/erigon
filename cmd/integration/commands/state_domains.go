@@ -64,7 +64,7 @@ func init() {
 	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "only-commitment", true, "purify only commitment domain")
 	purifyDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the purified domains directly in datadir (will remove .kvei and .bt too)")
 	purifyDomains.Flags().BoolVar(&doIndexBuild, "build-idx", false, "build index for purified domains")
-	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "minimum ratio of keys to skip in L0")
+	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "deprecated: minimum ratio of keys to skip in L0")
 	purifyDomains.Flags().Float64Var(&minSkipRatio, "min-skip-ratio", 0.1, "minimum ratio of keys to skip - otherwise keep file unchanged")
 	purifyDomains.Flags().Uint64Var(&fromStepPurification, "from", 0, "step from which domains would be purified")
 	purifyDomains.Flags().Uint64Var(&toStepPurification, "to", 1e18, "step to which domains would be purified")
@@ -153,9 +153,6 @@ var purifyDomains = &cobra.Command{
 		ctx, _ := common.RootContext()
 		dirs := datadir.New(datadirCli)
 		logger := debug.SetupCobra(cmd, "integration")
-		if minSkipRatioL0 <= 0.0 {
-			panic("--min-skip-ratio-l0 must be > 0")
-		}
 		if minSkipRatio <= 0.0 {
 			panic("--min-skip-ratio must be > 0")
 		}
@@ -423,12 +420,8 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 		}
 
 		skipRatio := float64(skipped) / float64(count)
-		if skipRatio < minSkipRatioL0 && currentLayer == 0 {
-			logger.Info(fmt.Sprintf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping domain %s", skipRatio, minSkipRatioL0, domain))
-			return somethingPurified, nil
-		}
 		if skipRatio < minSkipRatio {
-			logger.Info(fmt.Sprintf("Skip ratio %.2f is less than min-skip-ratio %.2f, skipping %s", skipRatio, minSkipRatioL0, baseFileName))
+			logger.Info(fmt.Sprintf("Skip ratio %.2f is less than min-skip-ratio %.2f, skipping %s", skipRatio, minSkipRatio, baseFileName))
 			continue
 		}
 		logger.Info(fmt.Sprintf("Loaded %d keys in file %s. now compressing...", count, baseFileName))
