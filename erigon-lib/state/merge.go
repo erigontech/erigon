@@ -921,8 +921,9 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	dchecker := dt.d.checker
 	dname := dt.d.name
 	if dchecker != nil {
+		ue := FromDomain(dname)
 		checker = func(startTxNum, endTxNum uint64) bool {
-			return dchecker.CheckDependentPresent(dname, Any, startTxNum, endTxNum)
+			return dchecker.CheckDependentPresent(ue, Any, startTxNum, endTxNum)
 		}
 	}
 	return garbage(dt.d.dirtyFiles, dt.files, merged, checker)
@@ -934,7 +935,16 @@ func (ht *HistoryRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 }
 
 func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
-	return garbage(iit.ii.dirtyFiles, iit.files, merged, nil)
+	var checker func(startTxNum, endTxNum uint64) bool
+	dchecker := iit.ii.checker
+
+	if dchecker != nil {
+		ue := FromII(iit.ii.name)
+		checker = func(startTxNum, endTxNum uint64) bool {
+			return dchecker.CheckDependentPresent(ue, Any, startTxNum, endTxNum)
+		}
+	}
+	return garbage(iit.ii.dirtyFiles, iit.files, merged, checker)
 }
 
 func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, merged *filesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*filesItem) {

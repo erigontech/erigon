@@ -570,14 +570,14 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		account, storage, commitment = newTestDomain(0), newTestDomain(1), newTestDomain(3)
 		checker := NewDependencyIntegrityChecker(account.hist.iiCfg.dirs, log.New())
 		info := &DependentInfo{
-			domain: commitment.name,
+			entity: FromDomain(commitment.name),
 			filesGetter: func() *btree2.BTreeG[*filesItem] {
 				return commitment.dirtyFiles
 			},
 			accessors: commitment.Accessors,
 		}
-		checker.AddDependency(account.name, info)
-		checker.AddDependency(storage.name, info)
+		checker.AddDependency(FromDomain(account.name), info)
+		checker.AddDependency(FromDomain(storage.name), info)
 		account.SetDependency(checker)
 		storage.SetDependency(checker)
 		return
