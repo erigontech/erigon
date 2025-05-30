@@ -379,8 +379,9 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		}
 	}
 
-	// len(newConnectedHeaders) is always <= len(blockChain)
-	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	newBlocksStartIdx := firstNewConnectedHeader.Number.Uint64() - blockChain[0].NumberU64()
+	newBlocksEndIdx := newBlocksStartIdx + uint64(len(newConnectedHeaders))
+	newConnectedBlocks := blockChain[newBlocksStartIdx:newBlocksEndIdx]
 	if len(newConnectedBlocks) > 1 {
 		s.logger.Info(
 			syncLogPrefix("inserting multiple connected blocks"),
