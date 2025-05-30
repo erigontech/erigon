@@ -19,7 +19,12 @@ ADD . .
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon
+    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm rpcdaemon
+
+RUN --mount=type=cache,target=/root/.cache \
+    --mount=type=cache,target=/tmp/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon
 
 FROM docker.io/library/alpine:3.20
 
@@ -39,9 +44,8 @@ USER erigon
 RUN mkdir -p ~/.local/share/erigon
 
 ## then give each binary its own layer
-COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
-COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
 COPY --from=builder /app/build/bin/rpcdaemon /usr/local/bin/rpcdaemon
+COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
 
 EXPOSE 8545 \
        8551 \
