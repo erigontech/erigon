@@ -76,6 +76,8 @@ type InvertedIndex struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *iiVisible
 	logger   log.Logger
+
+	enableReadAhead atomic.Bool
 }
 
 type iiCfg struct {
@@ -344,6 +346,10 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						// don't interrupt on error. other files may be good
 					}
 				}
+			}
+
+			if ii.enableReadAhead.Load() {
+				item.MadvNormal()
 			}
 		}
 
@@ -1275,6 +1281,9 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence
+	if ii.enableReadAhead.Load() {
+		fi.MadvNormal()
+	}
 	ii.dirtyFiles.Set(fi)
 }
 

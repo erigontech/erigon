@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/version"
@@ -87,7 +88,8 @@ type Domain struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *domainVisible
 
-	checker *DependencyIntegrityChecker
+	checker         *DependencyIntegrityChecker
+	enableReadAhead atomic.Bool
 }
 
 type domainCfg struct {
@@ -453,6 +455,10 @@ func (d *Domain) openDirtyFiles() (err error) {
 						// don't interrupt on error. other files may be good
 					}
 				}
+			}
+
+			if d.enableReadAhead.Load() {
+				item.MadvNormal()
 			}
 		}
 		return true
@@ -1409,6 +1415,9 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.bloom
+	if d.enableReadAhead.Load() {
+		fi.MadvNormal()
+	}
 	d.dirtyFiles.Set(fi)
 }
 

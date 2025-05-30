@@ -93,7 +93,8 @@ type Aggregator struct {
 
 	produce bool
 
-	checker *DependencyIntegrityChecker
+	checker         *DependencyIntegrityChecker
+	enableReadAhead atomic.Bool
 }
 
 const AggregatorSqueezeCommitmentValues = true
@@ -1760,7 +1761,11 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 func (at *Aggregator) MadvNormal() *Aggregator {
 	at.dirtyFilesLock.Lock()
 	defer at.dirtyFilesLock.Unlock()
+	at.enableReadAhead.Store(true)
 	for _, d := range at.d {
+		d.enableReadAhead.Store(true)
+		d.History.enableReadAhead.Store(true)
+		d.History.InvertedIndex.enableReadAhead.Store(true)
 		for _, f := range d.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
@@ -1772,6 +1777,7 @@ func (at *Aggregator) MadvNormal() *Aggregator {
 		}
 	}
 	for _, ii := range at.iis {
+		ii.enableReadAhead.Store(true)
 		for _, f := range ii.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
@@ -1781,7 +1787,11 @@ func (at *Aggregator) MadvNormal() *Aggregator {
 func (at *Aggregator) DisableReadAhead() {
 	at.dirtyFilesLock.Lock()
 	defer at.dirtyFilesLock.Unlock()
+	at.enableReadAhead.Store(false)
 	for _, d := range at.d {
+		d.enableReadAhead.Store(false)
+		d.History.enableReadAhead.Store(false)
+		d.History.InvertedIndex.enableReadAhead.Store(false)
 		for _, f := range d.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}
@@ -1793,6 +1803,7 @@ func (at *Aggregator) DisableReadAhead() {
 		}
 	}
 	for _, ii := range at.iis {
+		ii.enableReadAhead.Store(false)
 		for _, f := range ii.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}
