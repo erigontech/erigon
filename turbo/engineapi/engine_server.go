@@ -946,9 +946,10 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		proofIdx := 0
 		for i := range res.Blobs {
 			if res.Blobs[i] == nil {
-				// We append nil for both blob and proof
-				proofIdx++
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+				// We return a "null" response
+				ret = nil
+				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil, returning nil")
+				break
 			} else if len(res.Proofs)-proofIdx >= int(params.CellsPerExtBlob) {
 				// Proofs for this blob must have all the cellproofs
 				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
