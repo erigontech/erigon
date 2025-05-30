@@ -10,6 +10,8 @@ ADD erigon-lib/go.mod erigon-lib/go.mod
 ADD erigon-lib/go.sum erigon-lib/go.sum
 ADD erigon-db/go.mod erigon-db/go.mod
 ADD erigon-db/go.sum erigon-db/go.sum
+ADD p2p/go.mod p2p/go.mod
+ADD p2p/go.sum p2p/go.sum
 
 RUN go mod download
 ADD . .
