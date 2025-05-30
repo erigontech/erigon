@@ -933,8 +933,6 @@ func TestReproduceCrash(t *testing.T) {
 	txNum := uint64(1)
 	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	tsr := state.NewReaderV3(sd.AsGetter(tx))
-	sd.SetTxNum(txNum)
-	sd.SetBlockNum(txNum)
 
 	intraBlockState := state.New(tsr)
 	// Start the 1st transaction
