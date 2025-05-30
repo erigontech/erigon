@@ -179,6 +179,10 @@ func (ms *MockSentry) SetPeerLatestBlock(context.Context, *proto_sentry.SetPeerL
 	return nil, nil
 }
 
+func (ms *MockSentry) SetPeerBlockRange(context.Context, *proto_sentry.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
+	return nil, nil
+}
+
 func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
 	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH69}, nil
 }

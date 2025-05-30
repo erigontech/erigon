@@ -116,6 +116,21 @@ func (m *sentryMultiplexer) SetPeerMinimumBlock(ctx context.Context, in *sentryp
 	return &emptypb.Empty{}, g.Wait()
 }
 
+func (m *sentryMultiplexer) SetPeerBlockRange(ctx context.Context, in *sentryproto.SetPeerBlockRangeRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	g, gctx := errgroup.WithContext(ctx)
+
+	for _, client := range m.clients {
+		client := client
+
+		g.Go(func() error {
+			_, err := client.SetPeerBlockRange(gctx, in, opts...)
+			return err
+		})
+	}
+
+	return &emptypb.Empty{}, g.Wait()
+}
+
 // Handshake is not performed on the multi-client level
 func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
 	g, gctx := errgroup.WithContext(ctx)

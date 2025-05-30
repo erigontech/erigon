@@ -742,22 +742,16 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, inreq *proto_sentry
 func (cs *MultiClient) blockRange69(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
 	var query eth.BlockRangeUpdatePacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
 	}
 
-	if _, err1 := sentryClient.SetPeerLatestBlock(ctx, &proto_sentry.SetPeerLatestBlockRequest{
+	if _, err1 := sentryClient.SetPeerBlockRange(ctx, &proto_sentry.SetPeerBlockRangeRequest{
 		PeerId:            inreq.PeerId,
 		LatestBlockHeight: query.Latest,
+		MinBlockHeight:    query.Earliest,
 	}, &grpc.EmptyCallOption{}); err1 != nil {
-		cs.logger.Error("Could not send latest block for peer", "err", err1)
+		cs.logger.Error("Could not send latest block range for peer", "err", err1)
 	}
-
-	if _, err1 := sentryClient.SetPeerMinimumBlock(ctx, &proto_sentry.SetPeerMinimumBlockRequest{
-		PeerId:         inreq.PeerId,
-		MinBlockHeight: query.Earliest,
-	}, &grpc.EmptyCallOption{}); err1 != nil {
-		cs.logger.Error("Could not send min block for peer", "err", err1)
-	} // TODO: do these in one GRPC request
 
 	return nil
 }

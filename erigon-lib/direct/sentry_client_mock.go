@@ -728,6 +728,50 @@ func (c *MockSentryClientSendMessageToRandomPeersCall) DoAndReturn(f func(contex
 	return c
 }
 
+// SetPeerBlockRange mocks base method.
+func (m *MockSentryClient) SetPeerBlockRange(ctx context.Context, in *sentryproto.SetPeerBlockRangeRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "SetPeerBlockRange", varargs...)
+	ret0, _ := ret[0].(*emptypb.Empty)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetPeerBlockRange indicates an expected call of SetPeerBlockRange.
+func (mr *MockSentryClientMockRecorder) SetPeerBlockRange(ctx, in any, opts ...any) *MockSentryClientSetPeerBlockRangeCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPeerBlockRange", reflect.TypeOf((*MockSentryClient)(nil).SetPeerBlockRange), varargs...)
+	return &MockSentryClientSetPeerBlockRangeCall{Call: call}
+}
+
+// MockSentryClientSetPeerBlockRangeCall wrap *gomock.Call
+type MockSentryClientSetPeerBlockRangeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryClientSetPeerBlockRangeCall) Return(arg0 *emptypb.Empty, arg1 error) *MockSentryClientSetPeerBlockRangeCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryClientSetPeerBlockRangeCall) Do(f func(context.Context, *sentryproto.SetPeerBlockRangeRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientSetPeerBlockRangeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryClientSetPeerBlockRangeCall) DoAndReturn(f func(context.Context, *sentryproto.SetPeerBlockRangeRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientSetPeerBlockRangeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetPeerLatestBlock mocks base method.
 func (m *MockSentryClient) SetPeerLatestBlock(ctx context.Context, in *sentryproto.SetPeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()

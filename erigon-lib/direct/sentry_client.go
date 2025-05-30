@@ -142,6 +142,10 @@ func (c *SentryClientDirect) SetPeerLatestBlock(ctx context.Context, in *sentryp
 	return c.server.SetPeerLatestBlock(ctx, in)
 }
 
+func (c *SentryClientDirect) SetPeerBlockRange(ctx context.Context, in *sentryproto.SetPeerBlockRangeRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.SetPeerBlockRange(ctx, in)
+}
+
 func (c *SentryClientDirect) SetPeerMinimumBlock(ctx context.Context, in *sentryproto.SetPeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.SetPeerMinimumBlock(ctx, in)
 }

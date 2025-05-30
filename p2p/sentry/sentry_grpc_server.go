@@ -918,6 +918,15 @@ func (ss *GrpcServer) SetPeerMinimumBlock(_ context.Context, req *proto_sentry.S
 	return &emptypb.Empty{}, nil
 }
 
+func (ss *GrpcServer) SetPeerBlockRange(_ context.Context, req *proto_sentry.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
+	peerID := ConvertH512ToPeerID(req.PeerId)
+	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
+		peerInfo.SetNewMinBlock(req.MinBlockHeight)
+		peerInfo.SetIncreasedHeight(req.LatestBlockHeight)
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 	// Choose peer(s) that we can send this request to, with maximum number of permits
 	now := time.Now()
