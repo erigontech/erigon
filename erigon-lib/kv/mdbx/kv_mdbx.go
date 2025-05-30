@@ -373,7 +373,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 				continue
 			}
 			cnfCopy := db.buckets[name]
-			dbi, createErr := tx.OpenDBI(name, mdbx.DBAccede, nil, nil)
+			dbi, createErr := tx.OpenDBISimple(name, mdbx.DBAccede)
 			if createErr != nil {
 				if mdbx.IsNotFound(createErr) {
 					cnfCopy.DBI = NonExistingDBI
@@ -776,7 +776,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err err
 
 func (tx *MdbxTx) CreateBucket(name string) error {
 	cnfCopy := tx.db.buckets[name]
-	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, nil)
+	dbi, err := tx.tx.OpenDBISimple(name, mdbx.DBAccede)
 	if err != nil && !mdbx.IsNotFound(err) {
 		return fmt.Errorf("create table: %s, %w", name, err)
 	}
@@ -809,10 +809,10 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return errors.New("some not supported flag provided for bucket")
 	}
 
-	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
+	dbi, err = tx.tx.OpenDBISimple(name, nativeFlags)
 
 	if err != nil {
-		return fmt.Errorf("db-talbe doesn't exists: %s, lable: %s, %w. Tip: try run `integration run_migrations` to create non-existing tables", name, tx.db.opts.label, err)
+		return fmt.Errorf("db-table doesn't exists: %s, label: %s, %w. Tip: try run `integration run_migrations` to create non-existing tables", name, tx.db.opts.label, err)
 	}
 	cnfCopy.DBI = kv.DBI(dbi)
 
@@ -825,7 +825,7 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	// if bucket was not open on db start, then it's may be deprecated
 	// try to open it now without `Create` flag, and if fail then nothing to drop
 	if dbi == NonExistingDBI {
-		nativeDBI, err := tx.tx.OpenDBI(name, 0, nil, nil)
+		nativeDBI, err := tx.tx.OpenDBISimple(name, 0)
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil // DBI doesn't exists means no drop needed
