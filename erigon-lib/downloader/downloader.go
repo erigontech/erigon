@@ -1175,12 +1175,14 @@ func (d *Downloader) saveMetainfoWhenComplete(t *torrent.Torrent) {
 	for {
 		select {
 		case <-d.ctx.Done():
+			return
 		case <-t.Complete().On():
 		}
 		select {
 		case <-d.ctx.Done():
-			// This could be filtered to only pieces we care about...
+			return
 		case <-d.verificationOccurring.Off():
+			// This could be filtered to only pieces we care about...
 		}
 		if func() (done bool) {
 			d.lock.Lock()
