@@ -308,7 +308,7 @@ func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *libstate.Shar
 	sd.ClearRam(true)
 	sd.SetTxNum(txUnwindTo)
 	sd.SetBlockNum(blockUnwindTo)
-	return sd.Flush(ctx, tx)
+	return nil
 }
 
 func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
