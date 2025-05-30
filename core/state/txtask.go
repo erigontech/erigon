@@ -64,7 +64,7 @@ type TxTask struct {
 	Final           bool
 	Failed          bool
 	Tx              types.Transaction
-	GetHashFn       func(n uint64) common.Hash
+	GetHashFn       func(n uint64) (common.Hash, error)
 	TxAsMessage     *types.Message
 	EvmBlockContext evmtypes.BlockContext
 
