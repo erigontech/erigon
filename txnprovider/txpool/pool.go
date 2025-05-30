@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -139,8 +140,8 @@ type TxPool struct {
 	isPostShanghai          atomic.Bool
 	agraBlock               *uint64
 	isPostAgra              atomic.Bool
-	bhilaiBlock               *uint64
-	isPostBhilai              atomic.Bool
+	bhilaiBlock             *uint64
+	isPostBhilai            atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
@@ -758,7 +759,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
+		authorizationLen := uint64(len(mt.TxnSlot.Authorities))
 		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isEIP3860, isEIP7623)
 		if isEIP7623 && floorGas > intrinsicGas {
 			intrinsicGas = floorGas

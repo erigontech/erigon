@@ -341,7 +341,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() {
 			isEoaCodeAllowed := false
-			if config.IsPrague(header.Time) ||  config.IsBhilai(header.Number.Uint64()) {
+			if config.IsPrague(header.Time) || config.IsBhilai(header.Number.Uint64()) {
 				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation)
 				if err != nil {
 					return nil, err

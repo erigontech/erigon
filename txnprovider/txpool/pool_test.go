@@ -1042,7 +1042,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	chainID := *maxUint256
 	cache := kvcache.NewDummy()
 	logger := log.New()
-	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */ nil, /* bhiliaBlock */
+	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil /* agraBlock */, nil, /* bhiliaBlock */
 		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 	assert.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
