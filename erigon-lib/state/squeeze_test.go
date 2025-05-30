@@ -47,7 +47,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	keys, vals := generateInputData(tb, length.Addr, 5, txCount)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
-	var txNum uint64
+	var txNum, blockNum uint64
 	for i := 0; i < len(vals); i++ {
 		txNum = uint64(i)
 		domains.SetTxNum(txNum)
