@@ -1730,7 +1730,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer clean()
 
 	defer br.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -1797,10 +1796,11 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
-	db, err = temporal.New(db, agg)
+	temporalDb, err := temporal.New(db, agg)
 	if err != nil {
 		return err
 	}
+	defer temporalDb.MadvNormal().DisableReadAhead()
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
@@ -1810,7 +1810,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 	var lastTxNum uint64
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
+	if err := temporalDb.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
 		lastTxNum, err = txNumsReader.Max(tx, execProgress)
 		if err != nil {
@@ -1827,13 +1827,13 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	logger.Info("Prune state history")
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
+	if err := temporalDb.Update(ctx, func(tx kv.RwTx) error {
 		return tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain)
 	}); err != nil {
 		return err
 	}
 	for hasMoreToPrune := true; hasMoreToPrune; {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := temporalDb.Update(ctx, func(tx kv.RwTx) error {
 			hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
 			return err
 		}); err != nil {
