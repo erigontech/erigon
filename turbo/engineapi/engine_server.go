@@ -954,7 +954,13 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 			return ret, nil
 		}
 		for i := range res.Blobs {
-			if res.Blobs[i] != nil && len(res.Proofs) == int(params.CellsPerExtBlob) {
+			if res.Blobs[i] == nil {
+				// We return a "null" response
+				ret = nil
+				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil, returning nil")
+				break
+			} else if len(res.Proofs)-proofIdx >= int(params.CellsPerExtBlob) {
+				// Proofs for this blob must have all the cellproofs
 				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := 0; c < int(params.CellsPerExtBlob); c++ {
 					ret[i].CellProofs[c] = res.Proofs[i*int(params.CellsPerExtBlob)+c]
