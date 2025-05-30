@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/direct"
@@ -125,9 +126,24 @@ func (cs *MultiClient) RecvMessageLoop(
 }
 
 func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
+	frequency := 384 * time.Second // one epoch
+
+	headerInDB := func() bool {
+		var done bool
+		_ = cs.db.View(ctx, func(tx kv.Tx) error {
+			header := rawdb.ReadCurrentHeaderHavingBody(tx)
+			done = header != nil
+			return nil
+		})
+		return done
+	}
+
+	if err := cs.waitForPrerequisites(ctx, frequency, headerInDB); err != nil {
+		return
+	}
+
 	sentries := cs.Sentries()
-	//broadcastEvery := time.NewTicker(384 * time.Second) // 1 epoch
-	broadcastEvery := time.NewTicker(10 * time.Second)
+	broadcastEvery := time.NewTicker(frequency)
 	defer broadcastEvery.Stop()
 
 	for {
@@ -163,6 +179,35 @@ func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
 			}
 		case <-ctx.Done():
 			return
+		}
+	}
+}
+
+// waitForPrerequisites handles waiting for the blockReader to be ready and for a header to be available.
+func (cs *MultiClient) waitForPrerequisites(ctx context.Context, pollFrequency time.Duration, isHeaderAvailable func() bool) error {
+	cs.logger.Info("Waiting for blockreader to be ready")
+	if err := <-cs.blockReader.Ready(ctx); err != nil {
+		return err
+	}
+	cs.logger.Info("Blockreader ready")
+
+	if isHeaderAvailable() {
+		cs.logger.Info("Header already available.")
+		return nil
+	}
+
+	timer := time.NewTicker(pollFrequency)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			cs.logger.Info("Context cancelled while waiting for header.")
+			return ctx.Err()
+		case <-timer.C:
+			if isHeaderAvailable() {
+				return nil
+			}
 		}
 	}
 }
