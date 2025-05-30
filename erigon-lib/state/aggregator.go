@@ -770,7 +770,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		a.cleanAfterMerge(nil)
-		// TODO: add files notification here too.
 		return false, nil
 	}
 
