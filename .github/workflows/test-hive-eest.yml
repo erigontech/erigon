@@ -14,7 +14,7 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v4
         with:
-          repository: ethereum/hive
+          repository: erigontech/hive
           # ref: prague-devnet-4
           path: hive
 
@@ -54,7 +54,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=4 --client erigon --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.4.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=4 --client erigon --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
