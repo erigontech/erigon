@@ -283,11 +283,7 @@ func (vr versionedStateReader) ReadAccountStorage(address common.Address, key co
 	}
 
 	if vr.stateReader != nil {
-		val, err := vr.stateReader.ReadAccountStorage(address, key)
-		if err != nil {
-			return uint256.Int{}, false, err
-		}
-		return *(&uint256.Int{}).SetBytes(val), true, nil
+		return vr.stateReader.ReadAccountStorage(address, key)
 	}
 
 	return uint256.Int{}, false, nil
