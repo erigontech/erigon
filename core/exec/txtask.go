@@ -349,6 +349,15 @@ func (t *TxTask) BlockGasLimit() uint64 {
 	return t.Header.GasLimit
 }
 
+func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
+	t.TxNum = txNum
+	t.TxIndex = txIndex
+	t.sender = nil
+	t.message = nil
+	t.signer = nil
+	t.dependencies = nil
+}
+
 func (t *TxTask) GasPool() *core.GasPool {
 	return t.gasPool
 }
@@ -458,7 +467,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config().Tracer, evm.Config())
+			ret, err := core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config().Tracer, evm.Config())
 			return ret, err
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)

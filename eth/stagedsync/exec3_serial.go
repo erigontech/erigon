@@ -133,11 +133,11 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					ret, logs, err := core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, se.hooks, vm.Config{})
+					ret, err := core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, se.hooks, vm.Config{})
 					if err != nil {
 						return nil, err
 					}
-					result.Logs = append(result.Logs, logs...)
+					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 					return ret, err
 				}
 
@@ -241,25 +241,22 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				// get last receipt and store the last log index + 1
 				lastReceipt := blockReceipts[txTask.TxIndex-1]
 				if lastReceipt == nil {
-					if se.skipPostEvaluation {
+					if startTxIndex > 0 {
 						// if we're in the startup block and the last tx has been skilled we'll
 						// need to run it as a historic tx to recover its logs
 						prevTask := *txTask
-						prevTask.TxNum = txTask.TxNum - 1
-						prevTask.TxIndex = txTask.TxIndex - 1
-						prevTask.Tx = prevTask.Txs[prevTask.TxIndex]
-						signer := *types.MakeSigner(se.cfg.chainConfig, prevTask.BlockNum, prevTask.Header.Time)
-						prevTask.TxAsMessage, err = prevTask.Tx.AsMessage(signer, prevTask.Header.BaseFee, txTask.Rules)
+						prevTask.HistoryExecution = true
+						prevTask.ResetTx( txTask.TxNum - 1, txTask.TxIndex - 1)
+						result := se.worker.RunTxTaskNoLock(&prevTask)
+						if result.Err != nil {
+							return false, result.Err
+						}
+						lastReceipt, err = result.CreateReceipt(nil)
 						if err != nil {
 							return false, err
 						}
-						prevTask.Final = false
-						prevTask.HistoryExecution = true
-						se.applyWorker.RunTxTaskNoLock(&prevTask, se.isMining, se.skipPostEvaluation)
-						prevTask.CreateReceipt(se.applyTx.(kv.TemporalTx))
-						lastReceipt = txTask.BlockReceipts[txTask.TxIndex-1]
 					} else {
-						return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+						return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 					}
 				}
 				if len(lastReceipt.Logs) > 0 {

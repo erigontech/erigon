@@ -502,8 +502,8 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 				ibs := state.New(state.NewHistoryReaderV3())
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					ret, logs, err := core.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, hooks, vm.Config{})
-					result.Logs = append(result.Logs, logs...)
+					ret, err := core.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, hooks, vm.Config{})
+					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 					return ret, err
 				}
 

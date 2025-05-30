@@ -1315,11 +1315,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
 					syscall := func(contract common.Address, data []byte) ([]byte, error) {
-						ret, logs, err := core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, pe.hooks, vm.Config{})
+						ret, err := core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, pe.hooks, vm.Config{})
 						if err != nil {
 							return nil, err
 						}
-						result.Logs = append(result.Logs, logs...)
+						result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 						return ret, err
 					}
 
