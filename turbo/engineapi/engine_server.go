@@ -628,8 +628,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	var resp *execution.AssembleBlockResponse
-
-	execBusy, err := waitForStuff(500*time.Millisecond, func() (bool, error) {
+	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
+	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
+	execBusy, err := waitForStuff(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
 		resp, err = s.executionService.AssembleBlock(ctx, req)
 		if err != nil {
 			return false, err
