@@ -82,6 +82,7 @@ func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 type DomainRanges struct {
 	name    kv.Domain
 	values  MergeRange
+	future  *filesItem
 	history HistoryRanges
 	aggStep uint64
 }
@@ -128,7 +129,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		history: hr,
 		aggStep: dt.d.aggregationStep,
 	}
-	for _, item := range dt.files {
+	for i, item := range dt.files {
 		if item.endTxNum > maxEndTxNum {
 			break
 		}
@@ -142,6 +143,14 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		}
 		if r.values.needMerge && fromTxNum < r.values.from { //skip small files inside `span`
 			continue
+		}
+
+		// Just-In-Time-Compation: start merge `0-64.kv` when `64-65.kv` available, and skip all keys which exist in `64-65.kv`
+		if len(dt.files) <= i+1 {
+			continue
+		}
+		if dt.name == kv.CommitmentDomain {
+			r.future = dt.files[i+1].src
 		}
 
 		r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
@@ -446,6 +455,16 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	p := ps.AddNew("merge "+path.Base(kvFilePath), 1)
 	defer ps.Delete(p)
 
+	var futureKey []byte
+	var future *seg.Reader
+	if r.future != nil {
+		future = seg.NewReader(r.future.decompressor.MakeGetter(), dt.d.Compression)
+		if future.HasNext() {
+			futureKey, _ = future.Next(futureKey[:0])
+			future.Skip()
+		}
+	}
+
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
@@ -465,6 +484,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			})
 		}
 	}
+
 	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
 	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
 	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
@@ -489,16 +509,37 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 		// For the rest of types, empty value means deletion
 		deleted := r.values.from == 0 && len(lastVal) == 0
-		if !deleted {
-			if keyBuf != nil {
-				if vt != nil {
-					if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
-						valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
-						if err != nil {
-							return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
-						}
+		if deleted {
+			continue
+		}
+		if keyBuf != nil {
+			if vt != nil {
+				if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
+					valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+					if err != nil {
+						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
 				}
+			}
+
+			cmp := -1
+			if futureKey != nil {
+				cmp = bytes.Compare(keyBuf, futureKey)
+				for cmp == 1 {
+					if !future.HasNext() {
+						futureKey = nil
+						cmp = -1
+						break
+					}
+					futureKey, _ = future.Next(futureKey[:0])
+					future.Skip()
+					cmp = bytes.Compare(keyBuf, futureKey)
+				}
+			}
+
+			// skip keys from the future
+			skip := cmp == 0
+			if !skip {
 				if _, err = kvWriter.Write(keyBuf); err != nil {
 					return nil, nil, nil, err
 				}
@@ -506,10 +547,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 					return nil, nil, nil, err
 				}
 			}
-			keyBuf = append(keyBuf[:0], lastKey...)
-			valBuf = append(valBuf[:0], lastVal...)
-			keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
 		}
+		keyBuf = append(keyBuf[:0], lastKey...)
+		valBuf = append(valBuf[:0], lastVal...)
+		keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
 	}
 	if keyBuf != nil {
 		if vt != nil {
