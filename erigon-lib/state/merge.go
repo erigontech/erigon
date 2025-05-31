@@ -139,11 +139,15 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := spanStep * dt.d.aggregationStep
 		fromTxNum := item.endTxNum - span
-		if fromTxNum < item.startTxNum {
-			if !r.values.needMerge || fromTxNum < r.values.from {
-				r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
-			}
+		if fromTxNum >= item.startTxNum {
+			continue
 		}
+		//make merge determenistic across nodes: even if Node has much small fils - do small merges first
+		if r.values.needMerge && fromTxNum < r.values.from {
+			continue
+		}
+
+		r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 	}
 	return r
 }
@@ -165,11 +169,15 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
 		if foundSuperSet {
 			r.history = MergeRange{from: startTxNum, to: item.endTxNum}
-		} else if startTxNum < item.startTxNum {
-			if !r.history.needMerge || startTxNum < r.history.from {
-				r.history = MergeRange{"", true, startTxNum, item.endTxNum}
-			}
+			continue
 		}
+		if startTxNum >= item.startTxNum {
+			continue
+		}
+		if r.history.needMerge && startTxNum >= r.history.from {
+			continue
+		}
+		r.history = MergeRange{"", true, startTxNum, item.endTxNum}
 	}
 
 	if r.history.needMerge && r.index.needMerge {
@@ -212,13 +220,17 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 			minFound = false
 			startTxNum = start
 			endTxNum = item.endTxNum
-		} else if start < item.startTxNum {
-			if !minFound || start < startTxNum {
-				minFound = true
-				startTxNum = start
-				endTxNum = item.endTxNum
-			}
+			continue
 		}
+		if start >= item.startTxNum {
+			continue
+		}
+		if minFound && start >= startTxNum {
+			continue
+		}
+		minFound = true
+		startTxNum = start
+		endTxNum = item.endTxNum
 	}
 	return &MergeRange{iit.name.String(), minFound, startTxNum, endTxNum}
 }

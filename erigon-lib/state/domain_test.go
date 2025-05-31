@@ -1242,7 +1242,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		txFrom := step * d.aggregationStep
 		txTo := (step + 1) * d.aggregationStep
 
-		fmt.Printf("Step %d [%d,%d)\n", step, txFrom, txTo)
+		//fmt.Printf("Step %d [%d,%d)\n", step, txFrom, txTo)
 
 		collation, err := d.collate(ctx, step, txFrom, txTo, tx)
 		require.NoError(t, err)
