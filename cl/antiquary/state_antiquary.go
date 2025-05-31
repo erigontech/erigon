@@ -250,11 +250,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	var prevValSet []byte
 	events := state_accessors.NewStateEvents()
-	slashingOccured := false
+	slashingOccurred := false
 	// setup the events handler for historical states replay.
 	s.currentState.SetEvents(raw.Events{
 		OnNewSlashingSegment: func(index int, segment uint64) error {
-			slashingOccured = true
+			slashingOccurred = true
 			return nil
 		},
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -350,7 +350,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	startLoop := time.Now()
 
 	for ; slot < to && startLoop.Add(timeBeforeCommit).After(time.Now()); slot++ {
-		slashingOccured = false // Set this to false at the beginning of each slot.
+		slashingOccurred = false // Set this to false at the beginning of each slot.
 
 		isDumpSlot := slot%clparams.SlotsPerDump == 0
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
@@ -412,7 +412,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		first = false
 
 		// dump the whole slashings vector, if the slashing actually occured.
-		if slashingOccured {
+		if slashingOccurred {
 			if err := stateAntiquaryCollector.collectSlashings(slot, s.currentState.RawSlashings()); err != nil {
 				return err
 			}
