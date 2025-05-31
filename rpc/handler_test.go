@@ -103,7 +103,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			stream := jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+			stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 
 			h := handler{}
 			h.runMethod(context.Background(), &msg, cb, args, stream)
