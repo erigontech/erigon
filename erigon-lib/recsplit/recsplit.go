@@ -283,7 +283,7 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if rs.offsetCollector != nil {
 		rs.offsetCollector.Close()
-		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
+		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
 		rs.offsetCollector.SortAndFlushInBackground(true)
 		rs.bucketCollector.LogLvl(log.LvlDebug)
 	}
