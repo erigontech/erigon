@@ -95,12 +95,10 @@ func TestAccessList(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	state := New(NewReaderV3(domains))
+	state := New(NewReaderV3(domains.AsGetter(tx)))
 
 	state.accessList = newAccessList()
 

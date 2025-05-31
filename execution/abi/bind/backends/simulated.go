@@ -42,12 +42,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -72,7 +72,7 @@ var (
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
 	m         *mock.MockSentry
-	getHeader func(hash common.Hash, number uint64) *types.Header
+	getHeader func(hash common.Hash, number uint64) (*types.Header, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -100,15 +100,12 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
-		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
-			var err error
-			if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		getHeader: func(hash common.Hash, number uint64) (h *types.Header, err error) {
+			err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
 				return nil
-			}); err != nil {
-				panic(err)
-			}
-			return h
+			})
+			return h, err
 		},
 	}
 	backend.emptyPendingBlock()
@@ -729,7 +726,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	if err != nil {
 		return nil, err
 	}
-	from.SetBalance(uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
+	from.SetBalance(*uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 

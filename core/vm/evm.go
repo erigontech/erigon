@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -31,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
@@ -43,6 +44,8 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	switch {
 	case evm.chainRules.IsOsaka:
 		precompiles = PrecompiledContractsOsaka
+	case evm.chainRules.IsBhilai:
+		precompiles = PrecompiledContractsBhilai
 	case evm.chainRules.IsPrague:
 		precompiles = PrecompiledContractsPrague
 	case evm.chainRules.IsNapoli:
@@ -76,7 +79,7 @@ type EVM struct {
 	Context evmtypes.BlockContext
 	evmtypes.TxContext
 	// IntraBlockState gives access to the underlying state
-	intraBlockState evmtypes.IntraBlockState
+	intraBlockState *state.IntraBlockState
 
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
@@ -94,13 +97,11 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
-
-	JumpDestCache *JumpDestCache
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
-func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
+func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
@@ -109,11 +110,13 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
-		intraBlockState: state,
+		intraBlockState: ibs,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
-		JumpDestCache:   NewJumpDestCache(),
+	}
+	if evm.config.JumpDestCache == nil {
+		evm.config.JumpDestCache = NewJumpDestCache(JumpDestCacheLimit)
 	}
 
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
@@ -123,7 +126,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 
 // Reset resets the EVM with a new transaction context.Reset
 // This is not threadsafe and should only be done very cautiously.
-func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
+func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
 
@@ -131,7 +134,7 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.abort.Store(false)
 }
 
-func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
+func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
@@ -140,6 +143,9 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
+	if vmConfig.JumpDestCache == nil && evm.config.JumpDestCache != nil {
+		vmConfig.JumpDestCache = evm.config.JumpDestCache
+	}
 	evm.config = vmConfig
 	evm.chainRules = chainRules
 
@@ -264,11 +270,11 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		}
 		var contract *Contract
 		if typ == CALLCODE {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
 		} else if typ == DELEGATECALL {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache).AsDelegate()
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache).AsDelegate()
 		} else {
-			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
+			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
@@ -404,7 +410,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if err != nil {
 		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != trie.EmptyCodeHash) {
+	if nonce != 0 ||
+		(contractHash != (common.Hash{}) && contractHash != empty.CodeHash) { // non-empty storage
 		err = ErrContractAddressCollision
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining, 0, tracing.GasChangeCallFailedExecution)
@@ -421,7 +428,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.JumpDestCache)
+	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.config.JumpDestCache)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if evm.config.NoRecursion && depth > 0 {
@@ -521,7 +528,7 @@ func (evm *EVM) ChainRules() *chain.Rules {
 }
 
 // IntraBlockState returns the EVM's IntraBlockState
-func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
+func (evm *EVM) IntraBlockState() *state.IntraBlockState {
 	return evm.intraBlockState
 }
 

@@ -26,8 +26,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
-	stateLib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/tracing"
 )
 
@@ -115,19 +113,13 @@ func TestStateLogger(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, tx, _ := NewTestTemporalDb(t)
 
-			domains, err := stateLib.NewSharedDomains(tx, log.New())
-			require.NoError(t, err)
-			defer domains.Close()
-
-			domains.SetTxNum(1)
-			domains.SetBlockNum(1)
-			err = rawdbv3.TxNums.Append(tx, 1, 1)
+			err := rawdbv3.TxNums.Append(tx, 1, 1)
 			require.NoError(t, err)
 
 			mockCtl := gomock.NewController(t)
 			defer mockCtl.Finish()
 			mt := mockTracer{}
-			state := New(NewReaderV3(domains))
+			state := New(NewReaderV3(tx))
 			state.SetHooks(mt.Hooks())
 
 			tt.run(state)
@@ -143,11 +135,11 @@ type mockTracer struct {
 
 func (mt *mockTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnBalanceChange: func(addr common.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+		OnBalanceChange: func(addr common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 			mt.balanceChangeTraces = append(mt.balanceChangeTraces, balanceChangeTrace{
 				addr:   addr,
-				prev:   *prev,
-				new:    *new,
+				prev:   prev,
+				new:    new,
 				reason: reason,
 			})
 		},

@@ -115,7 +115,7 @@ func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 // further limitations on the content of transactions that can be
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
-func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
+func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine consensus.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
@@ -131,7 +131,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	b.receipts = append(b.receipts, receipt)
 }
 
-func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine consensus.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
@@ -332,15 +332,14 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		return nil, err
 	}
 	defer domains.Close()
-	stateReader := state.NewReaderV3(domains)
-	stateWriter := state.NewWriter(domains, nil)
+
+	stateReader := state.NewReaderV3(domains.AsGetter(tx))
+	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
 	txNum := -1
-	setBlockNum := func(blockNum uint64) {
-		domains.SetBlockNum(blockNum)
-	}
 	txNumIncrement := func() {
 		txNum++
+		stateWriter.SetTxNum(uint64(txNum))
 		domains.SetTxNum(uint64(txNum))
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
@@ -387,7 +386,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			//	return nil, nil, err
 			//}
 			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), "")
+			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), uint64(txNum), "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
@@ -404,7 +403,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 
 	for i := 0; i < n; i++ {
-		setBlockNum(uint64(i))
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {

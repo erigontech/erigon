@@ -18,9 +18,14 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -72,6 +77,155 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func (sd *SharedDomains) GetCommitmentContext() *SharedDomainsCommitmentContext {
+	return sd.sdCtx
+}
+
+// SeekCommitment lookups latest available commitment and sets it as current
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
+	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// LatestCommitment returns latest value for given prefix from CommitmentDomain.
+// Requires separate function because commitment values have references inside and we need to properly dereference them using
+// replaceShortenedKeysInBranch method on each read. Data stored in DB is not referenced (so as in history).
+// Values from domain files with ranges > 2 steps are referenced.
+func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint64, error) {
+	v, step, fromRam, err := sd.latestCommitment(prefix, tx)
+	if err != nil {
+		return v, step, err
+	}
+	if fromRam {
+		return v, step, nil
+	}
+
+	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v, sd.txNum)
+	return v, step, nil
+}
+
+func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, step uint64, fromRam bool, err error) {
+	aggTx := AggTx(tx)
+	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
+		// sd cache values as is (without transformation) so safe to return
+		return v, prevStep, true, nil
+	}
+	v, step, found, err := tx.(kv.TemporalTx).Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+	}
+	if found {
+		// db store values as is (without transformation) so safe to return
+		return v, step, true, nil
+	}
+
+	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
+	// of file where the value is stored (not exact step when kv has been set)
+	v, _, startTx, endTx, err := tx.(kv.TemporalTx).Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+	}
+
+	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
+		return v, endTx / sd.StepSize(), false, nil
+	}
+
+	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
+	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx, aggTx)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	return rv, endTx / sd.StepSize(), false, nil
+}
+
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix)
+	return
+}
+
+// replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
+func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64, aggTx *AggregatorRoTx) (commitment.BranchData, error) {
+	logger := sd.logger
+
+	if !aggTx.d[kv.CommitmentDomain].d.replaceKeysInValues && aggTx.a.commitmentValuesTransform {
+		panic("domain.replaceKeysInValues is disabled, but agg.commitmentValuesTransform is enabled")
+	}
+
+	if !aggTx.a.commitmentValuesTransform ||
+		len(branch) == 0 ||
+		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 ||
+		bytes.Equal(prefix, keyCommitmentState) ||
+		((fEndTxNum-fStartTxNum)/sd.stepSize)%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
+
+		return branch, nil // do not transform, return as is
+	}
+
+	sto := aggTx.d[kv.StorageDomain]
+	acc := aggTx.d[kv.AccountsDomain]
+	storageItem, err := sto.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
+	}
+	accountItem, err := acc.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
+	}
+	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.Compression)
+	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.Compression)
+	metricI := 0
+	for i, f := range aggTx.d[kv.CommitmentDomain].files {
+		if i > 5 {
+			metricI = 5
+			break
+		}
+		if f.startTxNum == fStartTxNum && f.endTxNum == fEndTxNum {
+			metricI = i
+		}
+	}
+
+	aux := make([]byte, 0, 256)
+	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			if len(key) == length.Addr+length.Hash {
+				return nil, nil // save storage key as is
+			}
+			if dbg.KVReadLevelledMetrics {
+				defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
+			}
+			// Optimised key referencing a state file record (file number and offset within the file)
+			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
+			if !found {
+				s0, s1 := fStartTxNum/sd.stepSize, fEndTxNum/sd.stepSize
+				logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
+					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
+				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
+			}
+			return storagePlainKey, nil
+		}
+
+		if len(key) == length.Addr {
+			return nil, nil // save account key as is
+		}
+
+		if dbg.KVReadLevelledMetrics {
+			defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
+		}
+		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
+		if !found {
+			s0, s1 := fStartTxNum/sd.stepSize, fEndTxNum/sd.stepSize
+			logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
+				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
+			return nil, fmt.Errorf("replace back lost account full key: %x", key)
+		}
+		return apkBuf, nil
+	})
 }
 
 func decodeShorterKey(from []byte) uint64 {
@@ -232,7 +386,9 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) (valueTransformer, error) {
+	var keyBuf [60]byte // 52b key and 8b for inverted step
 	var err error
+
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
 		if mergedStorage, err = storage.rawLookupFileByRange(rng.from, rng.to); err != nil {
@@ -304,7 +460,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
 			var found bool
-			auxBuf := dt.keyBuf[:0]
+			auxBuf := keyBuf[:0]
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
 					// Non-optimised key originating from a database record

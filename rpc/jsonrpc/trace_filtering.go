@@ -20,13 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -256,7 +256,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			allBlocks = stream.Union[uint64](allBlocks, it, order.Asc, -1)
+			allBlocks = stream.Union[uint64](allBlocks, it, order.Asc, kv.Unlim)
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
@@ -267,18 +267,18 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			blocksTo = stream.Union[uint64](blocksTo, it, order.Asc, -1)
+			blocksTo = stream.Union[uint64](blocksTo, it, order.Asc, kv.Unlim)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
 
 	switch req.Mode {
 	case TraceFilterModeIntersection:
-		allBlocks = stream.Intersect[uint64](allBlocks, blocksTo, -1)
+		allBlocks = stream.Intersect[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
 	case TraceFilterModeUnion:
 		fallthrough
 	default:
-		allBlocks = stream.Union[uint64](allBlocks, blocksTo, order.Asc, -1)
+		allBlocks = stream.Union[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
 	}
 
 	// Special case - if no addresses specified, take all traces
@@ -295,7 +295,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream jsonstream.Stream) error {
 	if gasBailOut == nil {
 		//nolint
 		gasBailOut = new(bool) // false by default
@@ -330,7 +330,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
 }
 
-func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
+func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 
@@ -621,7 +621,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 		}
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
@@ -820,7 +820,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		ret, _, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks)
+		ret, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks, vm.Config{})
 		return ret, err
 	}
 

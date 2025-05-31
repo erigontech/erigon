@@ -40,10 +40,20 @@ func opAdd(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 	return nil, nil
 }
 
+func stAdd(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", ADD, &x, &y)
+}
+
 func opSub(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	y.Sub(&x, y)
 	return nil, nil
+}
+
+func stSub(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", SUB, &x, &y)
 }
 
 func opMul(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -52,10 +62,20 @@ func opMul(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 	return nil, nil
 }
 
+func stMul(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", MUL, &x, &y)
+}
+
 func opDiv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	y.Div(&x, y)
 	return nil, nil
+}
+
+func stDiv(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", DIV, &x, &y)
 }
 
 func opSdiv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -64,16 +84,31 @@ func opSdiv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	return nil, nil
 }
 
+func stSdiv(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", SDIV, &x, &y)
+}
+
 func opMod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	y.Mod(&x, y)
 	return nil, nil
 }
 
+func stMod(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", MOD, &x, &y)
+}
+
 func opSmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	y.SMod(&x, y)
 	return nil, nil
+}
+
+func stSmod(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", SMOD, &x, &y)
 }
 
 func opExp(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -117,6 +152,11 @@ func opNot(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 	return nil, nil
 }
 
+func stNot(_ uint64, scope *ScopeContext) string {
+	x := scope.Stack.peek()
+	return fmt.Sprintf("%s %d", NOT.String(), x)
+}
+
 func opLt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	if x.Lt(y) {
@@ -125,6 +165,11 @@ func opLt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte,
 		y.Clear()
 	}
 	return nil, nil
+}
+
+func stLt(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", LT, &x, &y)
 }
 
 func opGt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -137,6 +182,11 @@ func opGt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte,
 	return nil, nil
 }
 
+func stGt(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", GT, &x, &y)
+}
+
 func opSlt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	if x.Slt(y) {
@@ -145,6 +195,11 @@ func opSlt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 		y.Clear()
 	}
 	return nil, nil
+}
+
+func stSlt(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", SLT, &x, &y)
 }
 
 func opSgt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -157,6 +212,11 @@ func opSgt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 	return nil, nil
 }
 
+func stSgt(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", SLT, &x, &y)
+}
+
 func opEq(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	if x.Eq(y) {
@@ -165,6 +225,11 @@ func opEq(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte,
 		y.Clear()
 	}
 	return nil, nil
+}
+
+func stEq(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", EQ, &x, &y)
 }
 
 func opIszero(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -177,10 +242,20 @@ func opIszero(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	return nil, nil
 }
 
+func stIsZero(_ uint64, scope *ScopeContext) string {
+	x := scope.Stack.data[len(scope.Stack.data)-1]
+	return fmt.Sprintf("%s %d", ISZERO, &x)
+}
+
 func opAnd(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	y.And(&x, y)
 	return nil, nil
+}
+
+func stAnd(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", AND, &x, &y)
 }
 
 func opOr(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -189,10 +264,20 @@ func opOr(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte,
 	return nil, nil
 }
 
+func stOr(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", OR, &x, &y)
+}
+
 func opXor(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	y.Xor(&x, y)
 	return nil, nil
+}
+
+func stXor(_ uint64, scope *ScopeContext) string {
+	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", XOR, &x, &y)
 }
 
 func opByte(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -207,10 +292,20 @@ func opAddmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	return nil, nil
 }
 
+func stAddmod(_ uint64, scope *ScopeContext) string {
+	x, y, z := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2], scope.Stack.data[len(scope.Stack.data)-3]
+	return fmt.Sprintf("%s %d %d %d", ADDMOD, &x, &y, &z)
+}
+
 func opMulmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y, z := scope.Stack.pop(), scope.Stack.pop(), scope.Stack.peek()
 	z.MulMod(&x, &y, z)
 	return nil, nil
+}
+
+func stMulmod(_ uint64, scope *ScopeContext) string {
+	x, y, z := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2], scope.Stack.data[len(scope.Stack.data)-3]
+	return fmt.Sprintf("%s %d %d %d", MULMOD, &x, &y, &z)
 }
 
 // opSHL implements Shift Left
@@ -294,11 +389,12 @@ func opBalance(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 }
 
 func opOrigin(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.push(new(uint256.Int).SetBytes(interpreter.evm.Origin.Bytes()))
+	scope.Stack.push(new(uint256.Int).SetBytes(interpreter.evm.Origin[:]))
 	return nil, nil
 }
 func opCaller(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.push(new(uint256.Int).SetBytes(scope.Contract.Caller().Bytes()))
+	caller := scope.Contract.Caller()
+	scope.Stack.push(new(uint256.Int).SetBytes(caller[:]))
 	return nil, nil
 }
 
@@ -318,9 +414,23 @@ func opCallDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	return nil, nil
 }
 
+func stCallDataLoad(_ uint64, scope *ScopeContext) string {
+	x := *scope.Stack.peek()
+	var data []byte
+	if offset, overflow := x.Uint64WithOverflow(); !overflow {
+		data = getData(scope.Contract.Input, offset, 32)
+	}
+
+	return fmt.Sprintf("%s %d (%x)", CALLDATALOAD, &x, data)
+}
+
 func opCallDataSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	scope.Stack.push(new(uint256.Int).SetUint64(uint64(len(scope.Contract.Input))))
 	return nil, nil
+}
+
+func stCallDataSize(_ uint64, scope *ScopeContext) string {
+	return fmt.Sprintf("%s (%d)", CALLDATASIZE, new(uint256.Int).SetUint64(uint64(len(scope.Contract.Input))))
 }
 
 func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -338,6 +448,19 @@ func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	length64 := length.Uint64()
 	scope.Memory.Set(memOffset64, length64, getData(scope.Contract.Input, dataOffset64, length64))
 	return nil, nil
+}
+
+func stCallDataCopy(_ uint64, scope *ScopeContext) string {
+	var (
+		memOffset  = scope.Stack.data[len(scope.Stack.data)-1]
+		dataOffset = scope.Stack.data[len(scope.Stack.data)-2]
+		length     = scope.Stack.data[len(scope.Stack.data)-3]
+	)
+	dataOffset64, overflow := dataOffset.Uint64WithOverflow()
+	if overflow {
+		dataOffset64 = math.MaxUint64
+	}
+	return fmt.Sprintf("%s %d %d %d (%x)", CALLDATACOPY, memOffset.Uint64(), dataOffset64, length.Uint64(), getData(scope.Contract.Input, dataOffset64, length.Uint64()))
 }
 
 func opReturnDataSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -369,6 +492,33 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 	}
 	scope.Memory.Set(memOffset.Uint64(), length.Uint64(), interpreter.returnData[offset64:end64])
 	return nil, nil
+}
+
+func stReturnDataCopy(_ uint64, scope *ScopeContext) string {
+	var (
+		memOffset  = scope.Stack.data[len(scope.Stack.data)-1]
+		dataOffset = scope.Stack.data[len(scope.Stack.data)-2]
+		length     = scope.Stack.data[len(scope.Stack.data)-3]
+	)
+
+	offset64, overflow := dataOffset.Uint64WithOverflow()
+	if overflow {
+		return fmt.Sprintf("%s %d %d %d (%s)", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64(), ErrReturnDataOutOfBounds)
+	}
+	// we can reuse dataOffset now (aliasing it for clarity)
+	end := dataOffset
+	_, overflow = end.AddOverflow(&dataOffset, &length)
+	if overflow {
+		return fmt.Sprintf("%s %d %d %d (%s)", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64(), ErrReturnDataOutOfBounds)
+	}
+
+	//end64, overflow := end.Uint64WithOverflow()
+	//if overflow || uint64(len(interpreter.returnData)) < end64 {
+	//	return fmt.Sprintf("%s %d %d %d (%s)", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64(), ErrReturnDataOutOfBounds)
+	//}
+
+	// return fmt.Sprintf("%s %d %d %d (%x)", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64(), interpreter.returnData[offset64:end64])
+	return fmt.Sprintf("%s %d %d %d", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64())
 }
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -504,11 +654,22 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		lower = upper - params.BlockHashOldWindow
 	}
 	if arg64 >= lower && arg64 < upper {
-		arg.SetBytes(interpreter.evm.Context.GetHash(arg64).Bytes())
+		hash, err := interpreter.evm.Context.GetHash(arg64)
+		if err != nil {
+			arg.Clear()
+			return nil, err
+		}
+		arg.SetBytes(hash.Bytes())
 	} else {
 		arg.Clear()
 	}
+
 	return nil, nil
+}
+
+func stBlockhash(_ uint64, scope *ScopeContext) string {
+	x := *scope.Stack.peek()
+	return fmt.Sprintf("%s %d", BLOCKHASH, &x)
 }
 
 func opCoinbase(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -565,10 +726,21 @@ func opMload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	return nil, nil
 }
 
+func stMload(_ uint64, scope *ScopeContext) string {
+	v := scope.Stack.peek()
+	offset := v.Uint64()
+	return fmt.Sprintf("%s %d (%d)", MLOAD, offset, (&uint256.Int{}).SetBytes(scope.Memory.GetPtr(offset, 32)))
+}
+
 func opMstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	mStart, val := scope.Stack.pop(), scope.Stack.pop()
 	scope.Memory.Set32(mStart.Uint64(), &val)
 	return nil, nil
+}
+
+func stMstore(_ uint64, scope *ScopeContext) string {
+	mStart, val := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", MSTORE, mStart.Uint64(), &val)
 }
 
 func opMstore8(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -579,8 +751,13 @@ func opMstore8(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	loc := scope.Stack.peek()
-	interpreter.hasherBuf = loc.Bytes32()
-	return nil, interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), interpreter.hasherBuf, loc)
+	err := interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), loc.Bytes32(), loc)
+	return nil, err
+}
+
+func stSload(_ uint64, scope *ScopeContext) string {
+	loc := scope.Stack.peek()
+	return fmt.Sprintf("%s %d", SLOAD, loc)
 }
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -589,8 +766,12 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	}
 	loc := scope.Stack.pop()
 	val := scope.Stack.pop()
-	interpreter.hasherBuf = loc.Bytes32()
-	return nil, interpreter.evm.IntraBlockState().SetState(scope.Contract.Address(), interpreter.hasherBuf, val)
+	return nil, interpreter.evm.IntraBlockState().SetState(scope.Contract.Address(), loc.Bytes32(), val)
+}
+
+func stSstore(_ uint64, scope *ScopeContext) string {
+	loc, val := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %d %d", SSTORE, &loc, &val)
 }
 
 func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -613,6 +794,11 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	}
 	*pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
 	return nil, nil
+}
+
+func stJump(_ uint64, scope *ScopeContext) string {
+	pos := scope.Stack.peek()
+	return fmt.Sprintf("%s %d", JUMP, pos)
 }
 
 func opJumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -639,6 +825,11 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	return nil, nil
 }
 
+func stJumpi(_ uint64, scope *ScopeContext) string {
+	pos, cond := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
+	return fmt.Sprintf("%s %v %d", JUMPI, !cond.IsZero(), &pos)
+}
+
 func opJumpdest(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	return nil, nil
 }
@@ -646,6 +837,10 @@ func opJumpdest(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 func opPc(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	scope.Stack.push(new(uint256.Int).SetUint64(*pc))
 	return nil, nil
+}
+
+func stPc(pc uint64, scope *ScopeContext) string {
+	return fmt.Sprintf("%s %d", PC, pc)
 }
 
 func opMsize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -846,6 +1041,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	}
 	stack.push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -853,6 +1049,16 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 
 	interpreter.returnData = ret
 	return ret, nil
+}
+
+func stCall(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	addr, _, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4], stack.data[len(stack.data)-5]
+	toAddr := common.Address(addr.Bytes20())
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+
+	return fmt.Sprintf("%s %x %x", CALL.String(), toAddr, args)
 }
 
 func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -879,6 +1085,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	}
 	stack.push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -886,6 +1093,16 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 
 	interpreter.returnData = ret
 	return ret, nil
+}
+
+func stCallCode(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	addr, _, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4], stack.data[len(stack.data)-5]
+	toAddr := common.Address(addr.Bytes20())
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+
+	return fmt.Sprintf("%s %x %x", CALLCODE.String(), toAddr, args)
 }
 
 func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -908,6 +1125,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	}
 	stack.push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -915,6 +1133,16 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 
 	interpreter.returnData = ret
 	return ret, nil
+}
+
+func stDelegateCall(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	addr, _, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4], stack.data[len(stack.data)-5]
+	toAddr := common.Address(addr.Bytes20())
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+
+	return fmt.Sprintf("%s %x %x", DELEGATECALL.String(), toAddr, args)
 }
 
 func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -937,6 +1165,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	}
 	stack.push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -944,6 +1173,16 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 
 	interpreter.returnData = ret
 	return ret, nil
+}
+
+func stStaticCall(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	addr, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4]
+	toAddr := common.Address(addr.Bytes20())
+	// Get arguments from the memory.
+	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+
+	return fmt.Sprintf("%s %x %x", STATICCALL.String(), toAddr, args)
 }
 
 func opReturn(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -998,16 +1237,16 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	beneficiary := scope.Stack.pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := common.Address(beneficiary.Bytes20())
-	pbalance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
+	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	if err != nil {
 		return nil, err
 	}
-	balance := *pbalance
-	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance, tracing.BalanceDecreaseSelfdestruct)
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance, tracing.BalanceIncreaseSelfdestruct)
+	balanceVal := *balance
+	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balanceVal, tracing.BalanceDecreaseSelfdestruct)
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balanceVal, tracing.BalanceIncreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
 	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
-		interpreter.cfg.Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiary.Bytes20(), false, []byte{}, 0, &balance, nil)
+		interpreter.cfg.Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiary.Bytes20(), false, []byte{}, 0, &balanceVal, nil)
 	}
 	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnExit != nil {
 		interpreter.cfg.Tracer.OnExit(interpreter.depth, []byte{}, 0, nil, false)
@@ -1060,12 +1299,26 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	return nil, nil
 }
 
+func stPush1(pc uint64, scope *ScopeContext) string {
+	var (
+		codeLen = uint64(len(scope.Contract.Code))
+		integer = new(uint256.Int)
+	)
+	pc++
+	if pc < codeLen {
+		return fmt.Sprintf("%s %d", PUSH1.String(), integer.SetUint64(uint64(scope.Contract.Code[pc])))
+	}
+
+	return fmt.Sprintf("%s %d", PUSH1.String(), integer.Clear())
+}
+
 // opPush2 is a specialized version of pushN
 func opPush2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
 		codeLen = uint64(len(scope.Contract.Code))
 		integer = new(uint256.Int)
 	)
+
 	if *pc+2 < codeLen {
 		scope.Stack.push(integer.SetBytes2(scope.Contract.Code[*pc+1 : *pc+3]))
 	} else if *pc+1 < codeLen {
@@ -1101,10 +1354,41 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 	}
 }
 
+func makePushStringer(size uint64, pushByteSize int) stringer {
+	return func(pc uint64, scope *ScopeContext) string {
+		codeLen := len(scope.Contract.Code)
+
+		startMin := int(pc + 1)
+		if startMin >= codeLen {
+			startMin = codeLen
+		}
+		endMin := startMin + pushByteSize
+		if startMin+pushByteSize >= codeLen {
+			endMin = codeLen
+		}
+
+		integer := new(uint256.Int)
+		integer.SetBytes(common.RightPadBytes(scope.Contract.Code[startMin:endMin], pushByteSize))
+		return fmt.Sprintf("%s%d %d", "PUSH", size, integer)
+	}
+}
+
 // make dup instruction function
 func makeDup(size int64) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 		scope.Stack.dup(int(size))
 		return nil, nil
+	}
+}
+
+func makeDupStringer(n int) stringer {
+	return func(pc uint64, scope *ScopeContext) string {
+		return fmt.Sprintf("DUP%d (%d)", n, &scope.Stack.data[len(scope.Stack.data)-n])
+	}
+}
+
+func makeSwapStringer(n int) stringer {
+	return func(pc uint64, scope *ScopeContext) string {
+		return fmt.Sprintf("SWAP%d (%d %d)", n, &scope.Stack.data[len(scope.Stack.data)-1], &scope.Stack.data[len(scope.Stack.data)-(n+1)])
 	}
 }

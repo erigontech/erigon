@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -37,6 +38,7 @@ import (
 // Config are the configuration options for the Interpreter
 type Config struct {
 	Tracer        *tracing.Hooks
+	JumpDestCache *JumpDestCache
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 	SkipAnalysis  bool // Whether we can skip jumpdest analysis based on the checked history
@@ -166,6 +168,8 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.ChainRules().IsBhilai:
+		jt = &bhilaiInstructionSet
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
@@ -351,6 +355,19 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				logged = true
 			}
 		}
+
+		// TODO - move this to a trace & set in the worker
+		if dbg.TraceInstructions && in.evm.intraBlockState.Trace() {
+			var str string
+			if operation.string != nil {
+				str = operation.string(*pc, callContext)
+			} else {
+				str = op.String()
+			}
+
+			fmt.Printf("(%d.%d) %5d %5d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, cost, str)
+		}
+
 		if memorySize > 0 {
 			mem.Resize(memorySize)
 		}

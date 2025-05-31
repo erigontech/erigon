@@ -38,6 +38,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -55,7 +56,6 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/rawdbreset"
@@ -71,7 +71,7 @@ import (
 
 type SnapshotsCfg struct {
 	db          kv.TemporalRwDB
-	chainConfig chain.Config
+	chainConfig *chain.Config
 	dirs        datadir.Dirs
 
 	blockRetire        services.BlockRetire
@@ -89,7 +89,7 @@ type SnapshotsCfg struct {
 }
 
 func StageSnapshotsCfg(db kv.TemporalRwDB,
-	chainConfig chain.Config,
+	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
@@ -264,7 +264,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state2.Aggregator)
 	// Download only the snapshots that are for the header chain.
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
 		return err
 	}
 
@@ -273,7 +273,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
 		return err
 	}
 
@@ -292,7 +292,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if temporal, ok := tx.(*temporal.Tx); ok {
+	if temporal, ok := tx.(*temporal.RwTx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
@@ -326,14 +326,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
-	if temporal, ok := tx.(*temporal.Tx); ok {
+	if temporal, ok := tx.(*temporal.RwTx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
-		aggtx := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
+		aggtx := state.AggTx(tx)
 		stats.LogStats(aggtx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 			_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err

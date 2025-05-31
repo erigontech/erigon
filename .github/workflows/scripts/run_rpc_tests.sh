@@ -32,13 +32,12 @@ disabled_tests=(
     eth_submitWork/test_1.json
     net_peerCount/test_1.json
     net_version/test_1.json
-    parity_listStorageKeys/test_07.json
     txpool_status/test_1.json
     web3_clientVersion/test_1.json)
 
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
-python3 ./run_tests.py --port 8545 --engine-port 8545 --continue -f --json-diff --serial -x "$disabled_test_list" 
+python3 ./run_tests.py --port 8545 --engine-port 8545 --continue -f --json-diff -x "$disabled_test_list" 
 
 exit $?

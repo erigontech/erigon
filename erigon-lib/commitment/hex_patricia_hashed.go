@@ -36,7 +36,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -182,9 +182,7 @@ const (
 )
 
 var (
-	EmptyRootHash      = hexutil.MustDecodeHex("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-	EmptyCodeHash      = hexutil.MustDecodeHex("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")
-	EmptyCodeHashArray = *(*[length.Hash]byte)(EmptyCodeHash)
+	emptyRootHashBytes = empty.RootHash.Bytes()
 )
 
 func (cell *cell) hashAccKey(keccak keccakState, depth int) error {
@@ -223,7 +221,7 @@ func (cell *cell) FullString() string {
 		b.WriteString(fmt.Sprintf("addr=%x ", cell.accountAddr[:cell.accountAddrLen]))
 		b.WriteString(fmt.Sprintf("balance=%s ", cell.Balance.String()))
 		b.WriteString(fmt.Sprintf("nonce=%d ", cell.Nonce))
-		if cell.CodeHash != EmptyCodeHashArray {
+		if cell.CodeHash != empty.CodeHash {
 			b.WriteString(fmt.Sprintf("codeHash=%x ", cell.CodeHash[:]))
 		} else {
 			b.WriteString("codeHash=EMPTY ")
@@ -287,7 +285,7 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int) {
 			copy(cell.accountAddr[:], upCell.accountAddr[:cell.accountAddrLen])
 			cell.Balance.Set(&upCell.Balance)
 			cell.Nonce = upCell.Nonce
-			copy(cell.CodeHash[:], upCell.CodeHash[:])
+			cell.CodeHash = upCell.CodeHash
 			cell.extLen = upCell.extLen
 			if upCell.extLen > 0 {
 				copy(cell.extension[:], upCell.extension[:upCell.extLen])
@@ -320,7 +318,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int, preExtension []
 		copy(cell.accountAddr[:], lowCell.accountAddr[:cell.accountAddrLen])
 		cell.Balance.Set(&lowCell.Balance)
 		cell.Nonce = lowCell.Nonce
-		copy(cell.CodeHash[:], lowCell.CodeHash[:])
+		cell.CodeHash = lowCell.CodeHash
 	}
 	cell.storageAddrLen = lowCell.storageAddrLen
 	if lowCell.storageAddrLen > 0 {
@@ -446,7 +444,7 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (in
 	}
 
 	if fieldBits&fieldAccountAddr != 0 {
-		copy(cell.CodeHash[:], EmptyCodeHash)
+		cell.CodeHash = empty.CodeHash
 	}
 	return pos, nil
 }
@@ -825,7 +823,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				storageRootHash = cell.hash
 				storageRootHashIsSet = true
 			} else {
-				storageRootHash = *(*[length.Hash]byte)(EmptyRootHash)
+				storageRootHash = empty.RootHash
 			}
 		}
 		if !cell.loaded.account() {
@@ -887,7 +885,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = len(storageRootHash)
 	} else {
-		buf = append(buf, EmptyRootHash...)
+		buf = append(buf, emptyRootHashBytes...)
 	}
 	return buf, storageRootHashIsSet, storageRootHash[:], nil
 }
@@ -977,7 +975,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			} else if cell.hashLen > 0 {
 				storageRootHash = cell.hash
 			} else {
-				storageRootHash = *(*[length.Hash]byte)(EmptyRootHash)
+				storageRootHash = empty.RootHash
 			}
 		}
 		if !cell.loaded.account() {
@@ -1033,7 +1031,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = len(storageRootHash)
 	} else {
-		buf = append(buf, EmptyRootHash...)
+		buf = append(buf, emptyRootHashBytes...)
 	}
 	return buf, nil
 }
@@ -1201,7 +1199,7 @@ func (hph *HexPatriciaHashed) nCellsInRow(row int) int { //nolint:unused
 	return count
 }
 
-// Traverse the grid following `hashedKey` and produce the witness `trie.Trie` for that key
+// Traverse the grid following `hashedKey` and produce the witness `triedeprecated.Trie` for that key
 func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
@@ -1888,7 +1886,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		cell.accountAddrLen = len(plainKey)
 		copy(cell.accountAddr[:], plainKey)
 
-		copy(cell.CodeHash[:], EmptyCodeHash) // todo check
+		cell.CodeHash = empty.CodeHash
 	} else { // set storage key
 		cell.storageAddrLen = len(plainKey)
 		copy(cell.storageAddr[:], plainKey)
@@ -2000,7 +1998,7 @@ func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, error) {
 }
 
 // Generate the block witness. This works by loading each key from the list of updates (they are not really updates since we won't modify the trie,
-// but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `trie.Trie`.
+// but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `triedeprecated.Trie`.
 // All the individual tries are combined to create the final witness trie.
 // Because the grid is lacking information about the code in smart contract accounts which is also part of the witness, we need to provide that as an input parameter to this function (`codeReads`)
 func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[common.Hash]witnesstypes.CodeWithHash, expectedRootHash []byte, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {

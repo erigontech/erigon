@@ -27,6 +27,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
@@ -171,9 +172,9 @@ func TestBlockStorage(t *testing.T) {
 	block := types.NewBlockWithHeader(&types.Header{
 		Number:      big.NewInt(1),
 		Extra:       []byte("test block"),
-		UncleHash:   types.EmptyUncleHash,
-		TxHash:      types.EmptyRootHash,
-		ReceiptHash: types.EmptyRootHash,
+		UncleHash:   empty.UncleHash,
+		TxHash:      empty.RootHash,
+		ReceiptHash: empty.RootHash,
 	})
 	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
@@ -286,9 +287,9 @@ func TestPartialBlockStorage(t *testing.T) {
 
 	block := types.NewBlockWithHeader(&types.Header{
 		Extra:       []byte("test block"),
-		UncleHash:   types.EmptyUncleHash,
-		TxHash:      types.EmptyRootHash,
-		ReceiptHash: types.EmptyRootHash,
+		UncleHash:   empty.UncleHash,
+		TxHash:      empty.RootHash,
+		ReceiptHash: empty.RootHash,
 	})
 	header := block.Header() // Not identical to struct literal above, due to other fields
 
@@ -536,13 +537,13 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		sd.SetTxNum(base)
-		require.NoError(rawdb.WriteReceiptCacheV2(sd, nil))
+		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
 		for i, r := range receipts {
 			sd.SetTxNum(base + 1 + uint64(i))
-			require.NoError(rawdb.WriteReceiptCacheV2(sd, r))
+			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, base+1+uint64(i)))
 		}
 		sd.SetTxNum(base + uint64(len(receipts)) + 1)
-		require.NoError(rawdb.WriteReceiptCacheV2(sd, nil))
+		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+uint64(len(receipts))+1))
 		require.NoError(sd.Flush(ctx, tx))
 	}
 
@@ -601,9 +602,9 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	block := types.NewBlockWithHeader(&types.Header{
 		Number:      big.NewInt(1),
 		Extra:       []byte("test block"),
-		UncleHash:   types.EmptyUncleHash,
-		TxHash:      types.EmptyRootHash,
-		ReceiptHash: types.EmptyRootHash,
+		UncleHash:   empty.UncleHash,
+		TxHash:      empty.RootHash,
+		ReceiptHash: empty.RootHash,
 	})
 	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)

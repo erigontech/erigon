@@ -158,7 +158,7 @@ func TestCall(t *testing.T) {
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	state := state.New(state.NewReaderV3(domains))
+	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	address := common.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -232,9 +232,9 @@ func BenchmarkCall(b *testing.B) {
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
-	cfg.r = state.NewReaderV3(sd)
-	cfg.w = state.NewWriter(sd, nil)
-	cfg.State = state.New(cfg.r)
+	//cfg.w = state.NewWriter(sd, nil)
+	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
 	b.ResetTimer()
@@ -256,13 +256,11 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	require.NoError(b, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
 	var (
-		statedb  = state.New(state.NewReaderV3(domains))
+		statedb  = state.New(state.NewReaderV3(domains.AsGetter(tx)))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)
@@ -285,7 +283,9 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 			TangerineWhistleBlock: new(big.Int),
 			SpuriousDragonBlock:   new(big.Int),
 		},
-		EVMConfig: vm.Config{},
+		EVMConfig: vm.Config{
+			JumpDestCache: vm.NewJumpDestCache(128),
+		},
 	}
 	// Warm up the intpools and stuff
 	b.ResetTimer()
@@ -332,7 +332,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	require.NoError(b, err)
 	defer domains.Close()
 
-	statedb := state.New(state.NewReaderV3(domains))
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 
 	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
@@ -420,7 +420,7 @@ func (d *dummyChain) Engine() consensus.Engine {
 }
 
 // GetHeader returns the hash corresponding to their hash.
-func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header {
+func (d *dummyChain) GetHeader(h common.Hash, n uint64) (*types.Header, error) {
 	d.counter++
 	parentHash := common.Hash{}
 	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
@@ -428,7 +428,7 @@ func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header {
 
 	//parentHash := common.Hash{byte(n - 1)}
 	//fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
-	return fakeHeader(n, parentHash)
+	return fakeHeader(n, parentHash), nil
 }
 
 // TestBlockhash tests the blockhash operation. It's a bit special, since it internally
@@ -525,12 +525,10 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 	require.NoError(b, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
-	cfg.State = state.New(state.NewReaderV3(domains))
+	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	cfg.GasLimit = gas
 	//if len(tracerCode) > 0 {
 	//	tracer, err := tracers.DefaultDirectory.New(tracerCode, new(tracers.Context), nil, cfg.ChainConfig)
@@ -660,11 +658,12 @@ func TestEip2929Cases(t *testing.T) {
 			}
 		}
 		ops := strings.Join(instrs, ", ")
-		fmt.Printf("### Case %d\n\n", id)
+		//fmt.Printf("### Case %d\n\n", id)
+		//fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
+		//	comment,
+		//	code, ops)
+		_ = ops
 		id++
-		fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
-			comment,
-			code, ops)
 		cfg := &Config{
 			EVMConfig: vm.Config{
 				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout).Hooks(),
@@ -774,7 +773,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
-	state := state.New(state.NewReaderV3(domains))
+	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 
 	b.Run("10k", func(b *testing.B) {

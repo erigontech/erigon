@@ -701,6 +701,14 @@ func (m *MemoryMutation) Cursor(bucket string) (kv.Cursor, error) {
 	return m.makeCursor(bucket)
 }
 
+func (m *MemoryMutation) Apply(_ context.Context, f func(tx kv.Tx) error) error {
+	return f(m)
+}
+
+func (m *MemoryMutation) ApplyRw(_ context.Context, f func(tx kv.RwTx) error) error {
+	return f(m)
+}
+
 func (m *MemoryMutation) ViewID() uint64 {
 	panic("ViewID Not implemented")
 }
@@ -727,7 +735,7 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 	return m.db.(kv.TemporalTx).GetAsOf(name, k, ts)
 }
 
-func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return m.db.(kv.TemporalTx).HasPrefix(name, prefix)
 }
 
