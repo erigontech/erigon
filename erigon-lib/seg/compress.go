@@ -188,6 +188,8 @@ func (c *Compressor) ReadFrom(g *Getter) error {
 	return nil
 }
 
+var superStringsPool = sync.Pool{New: func() any { return make([]byte, 0, superstringLimit) }}
+
 func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
 	if c.wordsCount%1024 == 0 {
@@ -204,7 +206,7 @@ func (c *Compressor) AddWord(word []byte) error {
 			c.superstrings <- c.superstring
 		}
 		c.superstringCount++
-		c.superstring = make([]byte, 0, superstringLimit)
+		c.superstring = superStringsPool.Get().([]byte)[:0]
 	}
 
 	if c.superstringCount%c.SamplingFactor == 0 {

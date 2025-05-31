@@ -910,6 +910,8 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				break
 			}
 		}
+
+		superStringsPool.Put(superstring)
 	}
 }
 
