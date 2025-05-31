@@ -718,9 +718,6 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				if e = copyN(r, cw, uncoveredCount, copyNBuf); e != nil {
 					return e
 				}
-				//if _, e = io.CopyN(cw, r, int64(uncoveredCount)); e != nil {
-				//	return e
-				//}
 			}
 		}
 		wc++
@@ -744,6 +741,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	return nil
 }
 
+// copyN - is alloc-free analog of io.CopyN func
 func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
 	// Replace the io.CopyN call with manual copy using the buffer
 	if uncoveredCount > 0 {
