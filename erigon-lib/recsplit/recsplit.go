@@ -127,15 +127,14 @@ type RecSplitArgs struct {
 	Enums              bool
 	LessFalsePositives bool
 
-	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
-	TmpDir      string
-	StartSeed   []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
-	KeyCount    int
-	BucketSize  int
-	BaseDataID  uint64
-	EtlBufLimit datasize.ByteSize
-	Salt        *uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
-	LeafSize    uint16
+	IndexFile  string // File name where the index and the minimal perfect hash function will be written to
+	TmpDir     string
+	StartSeed  []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
+	KeyCount   int
+	BucketSize int
+	BaseDataID uint64
+	Salt       *uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
+	LeafSize   uint16
 
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
 }
@@ -185,19 +184,13 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	} else {
 		rs.salt = *args.Salt
 	}
-	rs.etlBufLimit = args.EtlBufLimit
-	if rs.etlBufLimit == 0 {
-		// reduce ram pressure, because:
-		//   - indexing done in background or in many workers (building many indices in-parallel)
-		//   - `recsplit` has 2 etl collectors
-		//   - `rescplit` building is cpu-intencive and bottleneck is not in etl loading
-		rs.etlBufLimit = etl.BufferOptimalSize / 4
-	}
-	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
+	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
+	rs.bucketCollector.SortAndFlushInBackground(true)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	rs.enums = args.Enums
 	if args.Enums {
-		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
+		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
+		rs.bucketCollector.SortAndFlushInBackground(true)
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.lessFalsePositives = args.LessFalsePositives
@@ -285,10 +278,14 @@ func (rs *RecSplit) ResetNextSalt() {
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
-	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), rs.logger)
+	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
+	rs.bucketCollector.SortAndFlushInBackground(true)
+	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if rs.offsetCollector != nil {
 		rs.offsetCollector.Close()
-		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), rs.logger)
+		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
+		rs.offsetCollector.SortAndFlushInBackground(true)
+		rs.bucketCollector.LogLvl(log.LvlDebug)
 	}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
