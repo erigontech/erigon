@@ -54,7 +54,7 @@ type BlockGetter interface {
 func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, cfg *chain.Config,
 	headerReader interfaces.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, header.Number.Uint64(), txIndex, cfg.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, header.Number.Uint64(), txIndex, txNumsReader)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 	}

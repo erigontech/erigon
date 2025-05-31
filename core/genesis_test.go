@@ -156,7 +156,7 @@ func TestAllocConstructor(t *testing.T) {
 	defer tx.Rollback()
 
 	//TODO: support historyV3
-	reader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, genSpec.Config.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
 	balance, err := state.GetBalance(address)
