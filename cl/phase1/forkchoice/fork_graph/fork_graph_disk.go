@@ -70,7 +70,7 @@ func (r ChainSegmentInsertionResult) String() string {
 	case BelowAnchor:
 		return "block below anchor slot"
 	case LogisticError:
-		return "error occured"
+		return "error occurred"
 	case PreValidated:
 		return "already validated"
 	default:
