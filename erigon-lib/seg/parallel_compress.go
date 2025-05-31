@@ -313,6 +313,10 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
+			case <-logEvery.C:
+				if lvl < log.LvlTrace {
+					logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "queue", compressionQueue.Len(), "workers", cfg.Workers)
+				}
 			default:
 			}
 		}
@@ -402,13 +406,6 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			emptyWordsCount++
 		}
 
-		select {
-		case <-logEvery.C:
-			if lvl < log.LvlTrace {
-				logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "queue", compressionQueue.Len(), "workers", cfg.Workers)
-			}
-		default:
-		}
 		return nil
 	}); err != nil {
 		return err
