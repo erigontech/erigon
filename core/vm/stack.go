@@ -48,14 +48,17 @@ func New() *Stack {
 	return stack
 }
 
+//go:inline
 func (st *Stack) push(d *uint256.Int) {
 	// NOTE push limit (1024) is checked in baseCheck
 	st.data = append(st.data, *d)
 }
 
+//go:inline
 func (st *Stack) pop() (ret uint256.Int) {
-	ret = st.data[len(st.data)-1]
-	st.data = st.data[:len(st.data)-1]
+	n := len(st.data)
+	ret = st.data[n-1]
+	st.data = st.data[:n-1]
 	return
 }
 
@@ -63,72 +66,157 @@ func (st *Stack) Cap() int {
 	return cap(st.data)
 }
 
+//go:inline
 func (st *Stack) swap1() {
-	st.data[st.len()-2], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-2]
+	n := len(st.data)
+	// Eliminate bounds checks
+	_ = st.data[n-2] // BCE hint
+	st.data[n-2], st.data[n-1] = st.data[n-1], st.data[n-2]
 }
+
+//go:inline
 func (st *Stack) swap2() {
-	st.data[st.len()-3], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-3]
+	n := len(st.data)
+	_ = st.data[n-3] // BCE hint
+	st.data[n-3], st.data[n-1] = st.data[n-1], st.data[n-3]
 }
+
+//go:inline
 func (st *Stack) swap3() {
-	st.data[st.len()-4], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-4]
+	n := len(st.data)
+	_ = st.data[n-4] // BCE hint
+	st.data[n-4], st.data[n-1] = st.data[n-1], st.data[n-4]
 }
+
+//go:inline
 func (st *Stack) swap4() {
-	st.data[st.len()-5], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-5]
+	n := len(st.data)
+	_ = st.data[n-5] // BCE hint
+	st.data[n-5], st.data[n-1] = st.data[n-1], st.data[n-5]
 }
+
+//go:inline
 func (st *Stack) swap5() {
-	st.data[st.len()-6], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-6]
+	n := len(st.data)
+	_ = st.data[n-6] // BCE hint
+	st.data[n-6], st.data[n-1] = st.data[n-1], st.data[n-6]
 }
+
+//go:inline
 func (st *Stack) swap6() {
-	st.data[st.len()-7], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-7]
+	n := len(st.data)
+	_ = st.data[n-7] // BCE hint
+	st.data[n-7], st.data[n-1] = st.data[n-1], st.data[n-7]
 }
+
+//go:inline
 func (st *Stack) swap7() {
-	st.data[st.len()-8], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-8]
+	n := len(st.data)
+	_ = st.data[n-8] // BCE hint
+	st.data[n-8], st.data[n-1] = st.data[n-1], st.data[n-8]
 }
+
+//go:inline
 func (st *Stack) swap8() {
-	st.data[st.len()-9], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-9]
+	n := len(st.data)
+	_ = st.data[n-9] // BCE hint
+	st.data[n-9], st.data[n-1] = st.data[n-1], st.data[n-9]
 }
+
+//go:inline
 func (st *Stack) swap9() {
-	st.data[st.len()-10], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-10]
+	n := len(st.data)
+	_ = st.data[n-10] // BCE hint
+	st.data[n-10], st.data[n-1] = st.data[n-1], st.data[n-10]
 }
+
+//go:inline
 func (st *Stack) swap10() {
-	st.data[st.len()-11], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-11]
+	n := len(st.data)
+	_ = st.data[n-11] // BCE hint
+	st.data[n-11], st.data[n-1] = st.data[n-1], st.data[n-11]
 }
+
+//go:inline
 func (st *Stack) swap11() {
-	st.data[st.len()-12], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-12]
+	n := len(st.data)
+	_ = st.data[n-12] // BCE hint
+	st.data[n-12], st.data[n-1] = st.data[n-1], st.data[n-12]
 }
+
+//go:inline
 func (st *Stack) swap12() {
-	st.data[st.len()-13], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-13]
+	n := len(st.data)
+	_ = st.data[n-13] // BCE hint
+	st.data[n-13], st.data[n-1] = st.data[n-1], st.data[n-13]
 }
+
+//go:inline
 func (st *Stack) swap13() {
-	st.data[st.len()-14], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-14]
+	n := len(st.data)
+	_ = st.data[n-14] // BCE hint
+	st.data[n-14], st.data[n-1] = st.data[n-1], st.data[n-14]
 }
+
+//go:inline
 func (st *Stack) swap14() {
-	st.data[st.len()-15], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-15]
+	n := len(st.data)
+	_ = st.data[n-15] // BCE hint
+	st.data[n-15], st.data[n-1] = st.data[n-1], st.data[n-15]
 }
+
+//go:inline
 func (st *Stack) swap15() {
-	st.data[st.len()-16], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-16]
+	n := len(st.data)
+	_ = st.data[n-16] // BCE hint
+	st.data[n-16], st.data[n-1] = st.data[n-1], st.data[n-16]
 }
+
+//go:inline
 func (st *Stack) swap16() {
-	st.data[st.len()-17], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-17]
+	n := len(st.data)
+	_ = st.data[n-17] // BCE hint
+	st.data[n-17], st.data[n-1] = st.data[n-1], st.data[n-17]
 }
 
+//go:inline
 func (st *Stack) dup(n int) {
-	st.data = append(st.data, st.data[len(st.data)-n])
+	length := len(st.data)
+	// Fast path for common cases with bounds check elimination
+	switch n {
+	case 1:
+		_ = st.data[length-1] // BCE hint
+		st.data = append(st.data, st.data[length-1])
+	case 2:
+		_ = st.data[length-2] // BCE hint
+		st.data = append(st.data, st.data[length-2])
+	default:
+		st.data = append(st.data, st.data[length-n])
+	}
 }
 
+//go:inline
 func (st *Stack) peek() *uint256.Int {
-	return &st.data[len(st.data)-1]
+	n := len(st.data)
+	_ = st.data[n-1] // BCE hint
+	return &st.data[n-1]
 }
 
 // Back returns the n'th item in stack
+//
+//go:inline
 func (st *Stack) Back(n int) *uint256.Int {
-	return &st.data[len(st.data)-n-1]
+	length := len(st.data)
+	idx := length - n - 1
+	_ = st.data[idx] // BCE hint
+	return &st.data[idx]
 }
 
 func (st *Stack) Reset() {
 	st.data = st.data[:0]
 }
 
+//go:inline
 func (st *Stack) len() int {
 	return len(st.data)
 }
