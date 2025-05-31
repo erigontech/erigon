@@ -32,3 +32,10 @@ func New(out io.Writer) Stream {
 	}
 	return NewJsoniterStream(stream)
 }
+
+func Wrap(stream *jsoniter.Stream) Stream {
+	if AutoCloseOnError {
+		return NewStackStream(stream)
+	}
+	return NewJsoniterStream(stream)
+}
