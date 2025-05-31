@@ -380,6 +380,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
 	}
 
+	var keyCmpBuf []byte
 	var cmp int
 	var m uint64
 	for l < r {
@@ -403,7 +404,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			return v, true, offset, nil
 		}
 
-		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
+		cmp, keyCmpBuf, err = b.keyCmpFunc(key, m, g, keyCmpBuf[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}
@@ -424,7 +425,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	cmp, _, err = b.keyCmpFunc(key, l, g, v[:0])
+	cmp, keyCmpBuf, err = b.keyCmpFunc(key, l, g, keyCmpBuf[:0])
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
