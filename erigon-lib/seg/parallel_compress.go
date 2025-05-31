@@ -744,21 +744,22 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 // copyN - is alloc-free analog of io.CopyN func
 func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
 	// Replace the io.CopyN call with manual copy using the buffer
-	if uncoveredCount > 0 {
-		remaining := int64(uncoveredCount)
-		for remaining > 0 {
-			bufLen := len(buf)
-			if remaining < int64(bufLen) {
-				bufLen = int(remaining)
-			}
-			if _, e := io.ReadFull(r, buf[:bufLen]); e != nil {
-				return e
-			}
-			if _, e := w.Write(buf[:bufLen]); e != nil {
-				return e
-			}
-			remaining -= int64(bufLen)
+	if uncoveredCount <= 0 {
+		return nil
+	}
+	remaining := int64(uncoveredCount)
+	for remaining > 0 {
+		bufLen := len(buf)
+		if remaining < int64(bufLen) {
+			bufLen = int(remaining)
 		}
+		if _, e := io.ReadFull(r, buf[:bufLen]); e != nil {
+			return e
+		}
+		if _, e := w.Write(buf[:bufLen]); e != nil {
+			return e
+		}
+		remaining -= int64(bufLen)
 	}
 	return nil
 }
