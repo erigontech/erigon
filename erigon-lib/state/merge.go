@@ -440,7 +440,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		cnt += item.decompressor.Count()
 	}
 
-	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt))
+	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt)*2) // *2 because after adding words - will happen compression (which also slow)
 	defer ps.Delete(p)
 
 	var cp CursorHeap
