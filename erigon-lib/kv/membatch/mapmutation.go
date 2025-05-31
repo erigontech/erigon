@@ -305,9 +305,10 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 
 	keyCount, total := 0, m.count
 	for table, bucket := range m.puts {
-		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
+		collector := etl.NewCollectorWithAllocator("", m.tmpdir, etl.LargeSortableBuffers, m.logger)
 		defer collector.Close()
 		collector.SortAndFlushInBackground(true)
+		collector.LogLvl(log.LvlDebug)
 		for key, value := range bucket {
 			if err := collector.Collect([]byte(key), value); err != nil {
 				return err
