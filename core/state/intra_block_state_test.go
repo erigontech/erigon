@@ -916,6 +916,9 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx3 read
+	// we need to flush the local state objects as we're not 
+	// resetting the state - which is artificial for the test
+	states[3].stateObjects = map[common.Address]*stateObject{}
 	states[3].GetState(addr, key1, &v)
 	assert.Equal(t, *uint256.NewInt(0), v)
 	states[3].GetState(addr, key2, &v)
