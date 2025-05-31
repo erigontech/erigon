@@ -24,8 +24,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	jsoniter "github.com/json-iterator/go"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
