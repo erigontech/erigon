@@ -21,17 +21,19 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 type BlockOverrides struct {
-	Number        *hexutil.Big    `json:"number"`
-	PrevRanDao    *common.Hash    `json:"prevRandao"`
-	Time          *hexutil.Uint64 `json:"time"`
-	GasLimit      *hexutil.Uint64 `json:"gasLimit"`
-	FeeRecipient  *common.Address `json:"feeRecipient"`
-	BaseFeePerGas *hexutil.Big    `json:"baseFee"`
-	BlobBaseFee   *hexutil.Big    `json:"blobBaseFee"`
+	Number        *hexutil.Big        `json:"number"`
+	PrevRanDao    *common.Hash        `json:"prevRandao"`
+	Time          *hexutil.Uint64     `json:"time"`
+	GasLimit      *hexutil.Uint64     `json:"gasLimit"`
+	FeeRecipient  *common.Address     `json:"feeRecipient"`
+	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas"`
+	BlobBaseFee   *hexutil.Big        `json:"blobBaseFee"`
+	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
 }
 
 func (overrides *BlockOverrides) Override(context evmtypes.BlockContext) error {
@@ -68,6 +70,10 @@ func (overrides *BlockOverrides) Override(context evmtypes.BlockContext) error {
 		if overflow {
 			return errors.New("BlockOverrides.BlobBaseFee uint256 overflow")
 		}
+	}
+
+	if overrides.Withdrawals != nil {
+		return errors.New("BlockOverrides.Withdrawals not supported")
 	}
 	return nil
 }
