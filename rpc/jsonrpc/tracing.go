@@ -416,15 +416,14 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 
 	if config != nil && config.BlockOverrides != nil {
-		if config.BlockOverrides.BaseFee != nil {
-			overflow := baseFee.SetFromBig(config.BlockOverrides.BaseFee.ToInt())
+		if config.BlockOverrides.BaseFeePerGas != nil {
+			overflow := baseFee.SetFromBig(config.BlockOverrides.BaseFeePerGas.ToInt())
 			if overflow {
 				return errors.New("BlockOverrides.BaseFee uint256 overflow")
 			}
 		}
 
 		if config.BlockOverrides.BlobBaseFee != nil {
-			fmt.Println("SetBlobGas: ", config.BlockOverrides.BlobBaseFee)
 			args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
 		}
 	}

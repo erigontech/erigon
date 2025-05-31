@@ -25,19 +25,19 @@ import (
 )
 
 type BlockOverrides struct {
-	Number       *hexutil.Big    `json:"number"`
-	PrevRanDao   *common.Hash    `json:"prevRandao"`
-	Time         *hexutil.Big    `json:"time"`
-	GasLimit     *hexutil.Big    `json:"gasLimit"`
-	FeeRecipient *common.Address `json:"feeRecipient"`
-	BaseFee      *hexutil.Big    `json:"baseFee"`
-	BlobBaseFee  *hexutil.Big    `json:"blobBaseFee"`
+	Number        *hexutil.Big    `json:"number"`
+	PrevRanDao    *common.Hash    `json:"prevRandao"`
+	Time          *hexutil.Uint64 `json:"time"`
+	GasLimit      *hexutil.Uint64 `json:"gasLimit"`
+	FeeRecipient  *common.Address `json:"feeRecipient"`
+	BaseFeePerGas *hexutil.Big    `json:"baseFee"`
+	BlobBaseFee   *hexutil.Big    `json:"blobBaseFee"`
 }
 
 func (overrides *BlockOverrides) Override(context evmtypes.BlockContext) error {
 
 	if overrides.Number != nil {
-		context.BlockNumber = overrides.BaseFee.Uint64()
+		context.BlockNumber = overrides.Number.Uint64()
 	}
 
 	if overrides.PrevRanDao != nil {
@@ -56,8 +56,8 @@ func (overrides *BlockOverrides) Override(context evmtypes.BlockContext) error {
 		context.Coinbase = common.Address(overrides.FeeRecipient.Bytes())
 	}
 
-	if overrides.BaseFee != nil {
-		overflow := context.BaseFee.SetFromBig(overrides.BaseFee.ToInt())
+	if overrides.BaseFeePerGas != nil {
+		overflow := context.BaseFee.SetFromBig(overrides.BaseFeePerGas.ToInt())
 		if overflow {
 			return errors.New("BlockOverrides.BaseFee uint256 overflow")
 		}
