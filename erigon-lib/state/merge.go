@@ -115,9 +115,6 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
 }
 
 // findMergeRange
-// assumes that all fTypes in d.files have items at least as far as maxEndTxNum
-// That is why only Values type is inspected
-//
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
@@ -136,14 +133,14 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 			break
 		}
 		endStep := item.endTxNum / dt.d.aggregationStep
+		//make merge determenistic across nodes: even if Node has much small files - do recent merges first
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := spanStep * dt.d.aggregationStep
 		fromTxNum := item.endTxNum - span
 		if fromTxNum >= item.startTxNum {
 			continue
 		}
-		//make merge determenistic across nodes: even if Node has much small fils - do small merges first
-		if r.values.needMerge && fromTxNum < r.values.from {
+		if r.values.needMerge && fromTxNum < r.values.from { //skip small files inside `span`
 			continue
 		}
 
