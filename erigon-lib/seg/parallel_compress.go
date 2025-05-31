@@ -649,6 +649,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var hc BitWriter
 	hc.w = cw
 	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
+	copyNBuf := make([]byte, 32*1024)
+
 	var l uint64
 	var e error
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
@@ -711,7 +713,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 			// Copy uncovered characters
 			if uncoveredCount > 0 {
-				if _, e = io.CopyN(cw, r, int64(uncoveredCount)); e != nil {
+				if e = copyN(r, cw, uncoveredCount, copyNBuf); e != nil {
 					return e
 				}
 			}
@@ -733,6 +735,29 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	}
 	if err = cw.Flush(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// copyN - is alloc-free analog of io.CopyN func
+func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
+	// Replace the io.CopyN call with manual copy using the buffer
+	if uncoveredCount <= 0 {
+		return nil
+	}
+	remaining := int64(uncoveredCount)
+	for remaining > 0 {
+		bufLen := len(buf)
+		if remaining < int64(bufLen) {
+			bufLen = int(remaining)
+		}
+		if _, e := io.ReadFull(r, buf[:bufLen]); e != nil {
+			return e
+		}
+		if _, e := w.Write(buf[:bufLen]); e != nil {
+			return e
+		}
+		remaining -= int64(bufLen)
 	}
 	return nil
 }
