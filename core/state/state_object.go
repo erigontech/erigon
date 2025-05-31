@@ -202,10 +202,12 @@ func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) erro
 	}
 	if ok {
 		*out = res
-		so.originStorage[key] = res
-		so.blockOriginStorage[key] = res
+	} else {
+		out.Clear()
 	}
-	return nil
+
+	so.originStorage[key] = *out
+	so.blockOriginStorage[key] = *out
 }
 
 // SetState updates a value in account storage.
