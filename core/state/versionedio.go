@@ -1,10 +1,8 @@
 package state
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -176,13 +174,13 @@ func valueString(path AccountPath, value any) string {
 		num := value.(uint256.Int)
 		return fmt.Sprintf("%x", &num)
 	case NoncePath:
-		return strconv.FormatUint(value.(uint64), 10)
+		return fmt.Sprintf("%d", value.(uint64))
 	case CodePath:
 		l := len(value.([]byte))
 		if l > 40 {
 			l = 40
 		}
-		return hex.EncodeToString(value.([]byte)[0:l])
+		return fmt.Sprintf("%x", value.([]byte)[0:l])
 	}
 
 	return fmt.Sprint(value)
@@ -367,9 +365,14 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		if err != nil || readStorage == nil {
 			return defaultV, StorageRead, err
 		}
-
 		val, err := readStorage(so)
 		return val, StorageRead, err
+	}
+
+	if so, ok := s.stateObjects[addr]; ok && so.deleted {
+		return defaultV, StorageRead, nil
+	} else if dres := s.versionMap.Read(addr, SelfDestructPath, common.Hash{}, s.txIndex); dres.Status() == MVReadResultDone {
+		return defaultV, MapRead, nil
 	}
 
 	if !commited {
@@ -389,7 +392,6 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 	var vr = VersionedRead{
 		Address: addr,
 		Path:    path,
-		Key:     key,
 		Version: Version{
 			TxIndex:     res.DepIdx(),
 			Incarnation: res.Incarnation(),
@@ -398,7 +400,6 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 	switch res.Status() {
 	case MVReadResultDone:
-
 		vr.Source = MapRead
 
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {

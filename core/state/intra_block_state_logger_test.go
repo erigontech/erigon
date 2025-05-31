@@ -45,34 +45,22 @@ func TestStateLogger(t *testing.T) {
 				state.AddBalance(common.Address{}, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
-				bi, ok := stateDB.balanceInc[common.Address{}]
-				if !ok {
-					t.Errorf("%s isn't present in balanceInc", common.Address{})
-				}
-
-				if !reflect.DeepEqual(&bi.increase, uint256.NewInt(3)) {
-					t.Errorf("Incorrect BalanceInc for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(3), &bi.increase)
-				}
-
-				if bi.count != 2 {
-					t.Errorf("Incorrect BalanceInc count for %s expected: %d, got:%d", common.Address{}, 2, bi.count)
-				}
-
-				if len(stateDB.journal.entries) != 2 {
-					t.Errorf("Incorrect number of jounal entries expectedBalance: %d, got:%d", 2, len(stateDB.journal.entries))
+				if len(stateDB.journal.entries) != 3 {
+					t.Errorf("Incorrect number of jounal entries expectedBalance: %d, got:%d", 3, len(stateDB.journal.entries))
 				}
 				for i := range stateDB.journal.entries {
 					switch balanceInc := stateDB.journal.entries[i].(type) {
-					case balanceIncrease:
-						var expectedInc *uint256.Int
-						if i == 0 {
-							expectedInc = uint256.NewInt(2)
+					case balanceChange:
+						var expectedPrev *uint256.Int
+						if i == 1 {
+							expectedPrev = uint256.NewInt(0)
 						} else {
-							expectedInc = uint256.NewInt(1)
+							expectedPrev = uint256.NewInt(2)
 						}
-						if !reflect.DeepEqual(&balanceInc.increase, expectedInc) {
-							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", common.Address{}, expectedInc, &balanceInc.increase)
+						if !reflect.DeepEqual(&balanceInc.prev, expectedPrev) {
+							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", common.Address{}, expectedPrev, &balanceInc.prev)
 						}
+					case createObjectChange:
 					default:
 						t.Errorf("Invalid journal entry found:  %s", reflect.TypeOf(stateDB.journal.entries[i]))
 					}
@@ -80,8 +68,8 @@ func TestStateLogger(t *testing.T) {
 
 				so, err := stateDB.GetOrNewStateObject(common.Address{})
 				require.NoError(t, err)
-				if !reflect.DeepEqual(so.Balance(), uint256.NewInt(3)) {
-					balance := so.Balance()
+				balance := so.Balance()
+				if !reflect.DeepEqual(&balance, uint256.NewInt(3)) {
 					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(3), &balance)
 				}
 			},
@@ -99,7 +87,7 @@ func TestStateLogger(t *testing.T) {
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
 				so, err := stateDB.GetOrNewStateObject(common.Address{})
 				require.NoError(t, err)
-				if !reflect.DeepEqual(so.Balance(), uint256.NewInt(1)) {
+				if !reflect.DeepEqual(so.Balance(), *uint256.NewInt(1)) {
 					balance := so.Balance()
 					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(1), &balance)
 				}
