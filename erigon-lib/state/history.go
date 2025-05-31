@@ -418,7 +418,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
 
-	seq := multiencseq.ReadMultiEncSeq(0, nil)
+	seq := &multiencseq.SequenceReader{}
 
 	i := 0
 	for {
