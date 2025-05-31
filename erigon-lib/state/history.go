@@ -418,6 +418,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
 
+	seq := multiencseq.ReadMultiEncSeq(0, nil)
+
 	i := 0
 	for {
 		histReader.Reset(0)
@@ -431,7 +433,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
-			seq := multiencseq.ReadMultiEncSeq(efBaseTxNum, valBuf)
+			seq.Reset(efBaseTxNum, valBuf)
 			it := seq.Iterator(0)
 			for it.HasNext() {
 				txNum, err := it.Next()
