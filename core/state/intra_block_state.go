@@ -911,6 +911,17 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 			if readAccount == nil || err != nil {
 				return nil, err
 			}
+
+			destructed, _, err := versionedRead[bool](sdb, addr, SelfDestructPath, common.Hash{}, false, false, nil, nil)
+
+			if destructed || err != nil {
+				sdb.setStateObject(addr, &stateObject{
+					db:      sdb,
+					address: addr,
+					deleted: true,
+				})
+				return nil, err
+			}
 		} else {
 			sdb.nilAccounts[addr] = struct{}{}
 			if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
@@ -1209,6 +1220,9 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		}
 		so.newlyCreated = false
 		sdb.stateObjectsDirty[addr] = struct{}{}
+		if so.deleted {
+			delete(sdb.versionedReads, addr)
+		}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
