@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -412,6 +413,21 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 			return errors.New("header.BaseFee uint256 overflow")
 		}
 	}
+
+	if config != nil && config.BlockOverrides != nil {
+		if config.BlockOverrides.BaseFee != nil {
+			overflow := baseFee.SetFromBig(config.BlockOverrides.BaseFee.ToInt())
+			if overflow {
+				return errors.New("BlockOverrides.BaseFee uint256 overflow")
+			}
+		}
+
+		if config.BlockOverrides.BlobBaseFee != nil {
+			fmt.Println("SetBlobGas: ", config.BlockOverrides.BlobBaseFee)
+			args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
+		}
+	}
+
 	msg, err := args.ToMessage(api.GasCap, baseFee)
 	if err != nil {
 		return fmt.Errorf("convert args to msg: %v", err)
@@ -422,6 +438,12 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	if config != nil && config.BlockOverrides != nil {
+		err := config.BlockOverrides.Override(blockCtx)
+		if err != nil {
+			return err
+		}
+	}
 	txCtx := core.NewEVMTxContext(msg)
 	// Trace the transaction and return
 	_, err = transactions.TraceTx(ctx, engine, transaction, msg, blockCtx, txCtx, hash, 0, ibs, config, chainConfig, stream, api.evmCallTimeout)
