@@ -81,7 +81,8 @@ func TestStateLogger(t *testing.T) {
 				so, err := stateDB.GetOrNewStateObject(common.Address{})
 				require.NoError(t, err)
 				if !reflect.DeepEqual(so.Balance(), uint256.NewInt(3)) {
-					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(3), so.Balance())
+					balance := so.Balance()
+					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(3), &balance)
 				}
 			},
 			wantBalanceChangeTraces: []balanceChangeTrace{
@@ -99,7 +100,8 @@ func TestStateLogger(t *testing.T) {
 				so, err := stateDB.GetOrNewStateObject(common.Address{})
 				require.NoError(t, err)
 				if !reflect.DeepEqual(so.Balance(), uint256.NewInt(1)) {
-					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(1), so.Balance())
+					balance := so.Balance()
+					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(1), &balance)
 				}
 			},
 			wantBalanceChangeTraces: []balanceChangeTrace{

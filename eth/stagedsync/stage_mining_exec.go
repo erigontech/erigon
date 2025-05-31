@@ -442,7 +442,7 @@ func addTransactionsToMiningBlock(
 	noop := state.NewNoopWriter()
 
 	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
-		ibs.SetTxContext(current.Header.Number.Uint64(),txnIdx)
+		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.Snapshot()
