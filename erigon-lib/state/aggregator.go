@@ -79,8 +79,9 @@ type Aggregator struct {
 	mergingFiles  atomic.Bool
 
 	//warmupWorking          atomic.Bool
-	ctx       context.Context
-	ctxCancel context.CancelFunc
+	userCtx      context.Context
+	aggCtx       context.Context
+	aggCtxCancel context.CancelFunc
 
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
@@ -127,10 +128,11 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 }
 
 func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	ctx, ctxCancel := context.WithCancel(ctx)
+	aggCtx, aggCtxCancel := context.WithCancel(ctx)
 	return &Aggregator{
-		ctx:                    ctx,
-		ctxCancel:              ctxCancel,
+		userCtx:                ctx,
+		aggCtx:                 aggCtx,
+		aggCtxCancel:           aggCtxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
 		tmpdir:                 dirs.Tmp,
@@ -280,8 +282,10 @@ func (a *Aggregator) openFolder() error {
 		d := d
 		eg.Go(func() error {
 			select {
-			case <-a.ctx.Done():
-				return a.ctx.Err()
+			case <-a.userCtx.Done():
+				return a.userCtx.Err()
+			case <-a.aggCtx.Done():
+				return a.aggCtx.Err()
 			default:
 			}
 			return d.openFolder()
@@ -305,21 +309,20 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 func (a *Aggregator) WaitForFiles() {
 	for {
 		select {
-		case <-a.WaitForBuildAndMerge():
+		case <-a.WaitForBuildAndMerge(a.userCtx):
 			return
 		}
 	}
 }
 
 func (a *Aggregator) Close() {
-	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
+	a.WaitForFiles()
+	if a.aggCtxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	a.ctxCancel()
-	a.ctxCancel = nil
+	a.aggCtxCancel()
+	a.aggCtxCancel = nil
 	a.wg.Wait()
-
-	a.WaitForFiles()
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -415,7 +418,7 @@ func (a *Aggregator) LS() {
 	}
 }
 
-func (a *Aggregator) WaitForBuildAndMerge() chan struct{} {
+func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 	res := make(chan struct{})
 	go func() {
 		defer close(res)
@@ -424,7 +427,12 @@ func (a *Aggregator) WaitForBuildAndMerge() chan struct{} {
 		defer chkEvery.Stop()
 		for a.buildingFiles.Load() || a.mergingFiles.Load() {
 			select {
-			case <-chkEvery.C: //TODO: more reliable notification
+			case <-ctx.Done():
+				return
+			case <-chkEvery.C:
+				a.logger.Trace("[agg] waiting for files",
+					"building files", a.buildingFiles.Load(),
+					"merging files", a.mergingFiles.Load())
 			}
 		}
 	}()
@@ -673,8 +681,10 @@ func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
 Loop:
 	for {
 		select {
-		case <-a.ctx.Done():
-			return a.ctx.Err()
+		case <-a.userCtx.Done():
+			return a.userCtx.Err()
+		case <-a.aggCtx.Done():
+			return a.aggCtx.Err()
 		case <-finished:
 			break Loop
 		case <-logEvery.C:
@@ -1475,7 +1485,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 
 		if a.snapshotBuildSema != nil {
 			//we are inside own goroutine - it's fine to block here
-			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
+			if err := a.snapshotBuildSema.Acquire(a.aggCtx, 1); err != nil { //TODO: not sure if this ctx is correct
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				close(fin)
 				return //nolint
@@ -1503,7 +1513,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, step); err != nil {
+			if err := a.buildFiles(a.aggCtx, step); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					close(fin)
 					return
@@ -1516,7 +1526,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		go func() {
 			defer close(fin)
 
-			if err := a.MergeLoop(a.ctx); err != nil {
+			if err := a.MergeLoop(a.userCtx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					return
 				}
