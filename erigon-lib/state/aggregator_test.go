@@ -257,16 +257,9 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 			expectedLen = 0
 		}
 
-		names := func() (r []string) {
-			for _, f := range dirtyFiles {
-				r = append(r, f.decompressor.FileName())
-			}
-			return r
-		}
-
 		require.Len(t, dirtyFiles, expectedLen, name)
 		for _, f := range dirtyFiles {
-			require.Equal(t, int32(expectedRefCnt), f.refcount.Load(), name, names())
+			require.Equal(t, int32(expectedRefCnt), f.refcount.Load(), name)
 		}
 	}
 
