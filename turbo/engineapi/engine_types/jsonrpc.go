@@ -96,7 +96,7 @@ type PayloadStatus struct {
 	Status          EngineStatus      `json:"status" gencodec:"required"`
 	ValidationError *StringifiedError `json:"validationError"`
 	LatestValidHash *common.Hash      `json:"latestValidHash"`
-	CriticalError   error
+	CriticalError   error             `json:"-"`
 }
 
 type ForkChoiceUpdatedResponse struct {
