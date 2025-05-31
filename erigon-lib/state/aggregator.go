@@ -94,7 +94,8 @@ type Aggregator struct {
 
 	produce bool
 
-	checker *DependencyIntegrityChecker
+	checker         *DependencyIntegrityChecker
+	enableReadAhead atomic.Bool
 }
 
 const AggregatorSqueezeCommitmentValues = true
@@ -184,6 +185,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	if err != nil {
 		return err
 	}
+	a.AddDependencyBtwnHistoryII(name)
 	return nil
 }
 
@@ -238,7 +240,7 @@ func (a *Aggregator) ReloadSalt() error {
 	return nil
 }
 
-func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
+func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
 	// "hard alignment":
 	// only corresponding files should be included. e.g. commitment + account -
 	// cannot have merged account visibleFile, and unmerged commitment visibleFile for same step range.
@@ -246,12 +248,38 @@ func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
 		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
 	}
 
-	a.checker.AddDependency(dependency, &DependentInfo{
-		domain:      dependent,
-		filesGetter: func() *btree.BTreeG[*filesItem] { return a.d[dependent].dirtyFiles },
-		accessors:   a.d[dependent].Accessors,
+	dd := a.d[dependent]
+	ue := FromDomain(dependent)
+	a.checker.AddDependency(ue, &DependentInfo{
+		entity:      ue,
+		filesGetter: func() *btree.BTreeG[*filesItem] { return dd.dirtyFiles },
+		accessors:   dd.Accessors,
 	})
-	a.d[dependency].SetDependency(a.checker)
+	dd.SetChecker(a.checker)
+}
+
+func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
+	// ii has checker on history dirtyFiles (same domain)
+	dd := a.d[domain]
+	if dd.histCfg.snapshotsDisabled || dd.histCfg.historyDisabled || dd.disable {
+		a.logger.Info("history or ii disabled, can't register dependency", "domain", domain.String())
+		return
+	}
+
+	if a.checker == nil {
+		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+	}
+
+	h := dd.History
+	ue := FromII(dd.InvertedIndex.iiCfg.name)
+	a.checker.AddDependency(ue, &DependentInfo{
+		entity: ue,
+		filesGetter: func() *btree.BTreeG[*filesItem] {
+			return h.dirtyFiles
+		},
+		accessors: h.Accessors,
+	})
+	h.InvertedIndex.SetChecker(a.checker)
 }
 
 func (a *Aggregator) EnableAllDependencies() {
@@ -1719,7 +1747,11 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 func (at *Aggregator) MadvNormal() *Aggregator {
 	at.dirtyFilesLock.Lock()
 	defer at.dirtyFilesLock.Unlock()
+	at.enableReadAhead.Store(true)
 	for _, d := range at.d {
+		d.enableReadAhead.Store(true)
+		d.History.enableReadAhead.Store(true)
+		d.History.InvertedIndex.enableReadAhead.Store(true)
 		for _, f := range d.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
@@ -1731,6 +1763,7 @@ func (at *Aggregator) MadvNormal() *Aggregator {
 		}
 	}
 	for _, ii := range at.iis {
+		ii.enableReadAhead.Store(true)
 		for _, f := range ii.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
@@ -1740,7 +1773,11 @@ func (at *Aggregator) MadvNormal() *Aggregator {
 func (at *Aggregator) DisableReadAhead() {
 	at.dirtyFilesLock.Lock()
 	defer at.dirtyFilesLock.Unlock()
+	at.enableReadAhead.Store(false)
 	for _, d := range at.d {
+		d.enableReadAhead.Store(false)
+		d.History.enableReadAhead.Store(false)
+		d.History.InvertedIndex.enableReadAhead.Store(false)
 		for _, f := range d.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}
@@ -1752,6 +1789,7 @@ func (at *Aggregator) DisableReadAhead() {
 		}
 	}
 	for _, ii := range at.iis {
+		ii.enableReadAhead.Store(false)
 		for _, f := range ii.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}

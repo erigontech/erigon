@@ -596,6 +596,9 @@ type TemporalDebugDB interface {
 	ReloadSalt() error
 	BuildMissedAccessors(ctx context.Context, workers int) error
 	ReloadFiles() error
+
+	MadvNormal() TemporalDebugDB
+	DisableReadAhead()
 }
 
 type WithFreezeInfo interface {

@@ -190,6 +190,8 @@ func (db *DB) ReloadSalt() error                                   { panic("not 
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
 func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
 func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
+func (db *DB) MadvNormal() kv.TemporalDebugDB                      { panic("not implemented") }
+func (db *DB) DisableReadAhead()                                   { panic("not implemented") }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic

@@ -76,6 +76,9 @@ type InvertedIndex struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *iiVisible
 	logger   log.Logger
+
+	checker         *DependencyIntegrityChecker
+	enableReadAhead atomic.Bool
 }
 
 type iiCfg struct {
@@ -224,6 +227,10 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 }
 
+func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
+	ii.checker = checker
+}
+
 type Accessors = ee.Accessors
 
 const (
@@ -233,7 +240,15 @@ const (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, nil, false, toTxNum))
+	var checker func(startTxNum, endTxNum uint64) bool
+	c := ii.checker
+	if c != nil {
+		ue := FromII(ii.name)
+		checker = func(startTxNum, endTxNum uint64) bool {
+			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+		}
+	}
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
@@ -344,6 +359,10 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						// don't interrupt on error. other files may be good
 					}
 				}
+			}
+
+			if ii.enableReadAhead.Load() {
+				item.MadvNormal()
 			}
 		}
 
@@ -1275,6 +1294,9 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence
+	if ii.enableReadAhead.Load() {
+		fi.MadvNormal()
+	}
 	ii.dirtyFiles.Set(fi)
 }
 

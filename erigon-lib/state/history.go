@@ -26,6 +26,7 @@ import (
 	"math"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/version"
@@ -69,7 +70,8 @@ type History struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []visibleFile
+	_visibleFiles   []visibleFile
+	enableReadAhead atomic.Bool
 }
 
 type histCfg struct {
@@ -135,6 +137,7 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 	if h.version.AccessorVI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
 	}
+	h.InvertedIndex.name = h.name
 
 	return &h, nil
 }
@@ -282,6 +285,10 @@ func (h *History) openDirtyFiles() error {
 						// don't interrupt on error. other files may be good
 					}
 				}
+			}
+
+			if h.enableReadAhead.Load() {
+				item.MadvNormal()
 			}
 		}
 		return true
@@ -963,6 +970,9 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	fi := newFilesItem(txNumFrom, txNumTo, h.aggregationStep)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
+	if h.enableReadAhead.Load() {
+		fi.MadvNormal()
+	}
 	h.dirtyFiles.Set(fi)
 }
 

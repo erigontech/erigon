@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/version"
@@ -87,7 +88,8 @@ type Domain struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *domainVisible
 
-	checker *DependencyIntegrityChecker
+	checker         *DependencyIntegrityChecker
+	enableReadAhead atomic.Bool
 }
 
 type domainCfg struct {
@@ -454,6 +456,10 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
+
+			if d.enableReadAhead.Load() {
+				item.MadvNormal()
+			}
 		}
 		return true
 	})
@@ -492,8 +498,9 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	if d.checker != nil {
+		ue := FromDomain(d.name)
 		checker = func(startTxNum, endTxNum uint64) bool {
-			return d.checker.CheckDependentPresent(d.name, All, startTxNum, endTxNum)
+			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
 	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
@@ -1409,6 +1416,9 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.bloom
+	if d.enableReadAhead.Load() {
+		fi.MadvNormal()
+	}
 	d.dirtyFiles.Set(fi)
 }
 
