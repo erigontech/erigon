@@ -239,6 +239,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prev {
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})
+			s.versionMap.Delete(*ch.account, BalancePath, common.Hash{}, s.txIndex, false)
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
@@ -334,6 +335,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: StatePath, Key: ch.key})
+			s.versionMap.Delete(*ch.account, StatePath, ch.key, s.txIndex, false)
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
 				v.Val = ch.prevalue
