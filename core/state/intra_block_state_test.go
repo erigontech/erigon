@@ -526,7 +526,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
 	states[3].GetState(addr, key, &v)
 	assert.Equal(t, *uint256.NewInt(0), v)
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(true), true, "")
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(false), true, "")
 
 	// Tx4 read
 	states[4].GetState(addr, key, &v)
@@ -652,7 +652,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	addr := common.HexToAddress("0x01")
 	key := common.HexToHash("0x01")
 	val := *uint256.NewInt(1)
-	balance := uint256.NewInt(100)
+	balance := *uint256.NewInt(100)
 
 	var v uint256.Int
 
@@ -669,7 +669,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	// Tx1 write
 	states[1].GetOrNewStateObject(addr)
 	states[1].SetState(addr, key, val)
-	states[1].SetBalance(addr, *balance, tracing.BalanceChangeUnspecified)
+	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx2 read
@@ -677,7 +677,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	b, err := states[2].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
-	assert.Equal(t, *balance, b)
+	assert.Equal(t, balance, b)
 
 	// Tx1 mark estimate
 	for _, v := range states[1].VersionedWrites(true) {
@@ -740,21 +740,21 @@ func TestVersionMapOverwrite(t *testing.T) {
 	addr := common.HexToAddress("0x01")
 	key := common.HexToHash("0x01")
 	val1 := *uint256.NewInt(1)
-	balance1 := uint256.NewInt(100)
+	balance1 := *uint256.NewInt(100)
 	val2 := *uint256.NewInt(2)
-	balance2 := uint256.NewInt(200)
+	balance2 := *uint256.NewInt(200)
 
 	var v uint256.Int
 
 	// Tx0 write
 	states[0].GetOrNewStateObject(addr)
 	states[0].SetState(addr, key, val1)
-	states[0].SetBalance(addr, *balance1, tracing.BalanceChangeUnspecified)
+	states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
 
 	// Tx1 write
 	states[1].SetState(addr, key, val2)
-	states[1].SetBalance(addr, *balance2, tracing.BalanceChangeUnspecified)
+	states[1].SetBalance(addr, balance2, tracing.BalanceChangeUnspecified)
 	states[1].GetState(addr, key, &v)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
@@ -793,7 +793,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 	// Tx0 delete
 	states[0].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
+		mvhm.Delete(v.Address, v.Path, v.Key, 0, true)
 		return true
 	})
 	states[0].versionedWrites = nil
@@ -803,7 +803,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(0), v)
-	assert.Equal(t, uint256.NewInt(0), b)
+	assert.Equal(t, *uint256.NewInt(0), b)
 }
 
 func TestVersionMapWriteNoConflict(t *testing.T) {
@@ -896,7 +896,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	// Tx2 delete
 	states[2].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
+		mvhm.Delete(v.Address, v.Path, v.Key, 2, true)
 		return true
 	})
 	states[2].versionedWrites = nil
@@ -916,6 +916,9 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx3 read
+	// we need to flush the local state objects as we're not
+	// resetting the state - which is artificial for the test
+	states[3].stateObjects = map[common.Address]*stateObject{}
 	states[3].GetState(addr, key1, &v)
 	assert.Equal(t, *uint256.NewInt(0), v)
 	states[3].GetState(addr, key2, &v)
