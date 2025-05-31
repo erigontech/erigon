@@ -674,7 +674,7 @@ func (s *RoSnapshots) HasType(in snaptype.Type) bool {
 type ready struct {
 	mu     sync.Mutex
 	on     chan struct{}
-	state  atomic.Bool
+	state  bool
 	inited bool
 }
 
@@ -697,21 +697,15 @@ func (r *ready) set() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.init()
-	if r.state.Load() {
+	if r.state {
 		return
 	}
-	if r.state.CompareAndSwap(false, true) {
-		close(r.on)
-	}
+	r.state = true
+	close(r.on)
 }
 
 func (s *RoSnapshots) Ready(ctx context.Context) <-chan error {
 	errc := make(chan error)
-
-	if s.ready.state.Load() {
-		close(errc)
-		return errc
-	}
 
 	go func() {
 		select {
