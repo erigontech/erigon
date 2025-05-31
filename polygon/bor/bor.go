@@ -1770,19 +1770,19 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 	if err != nil {
 		return err
 	}
-	input1 = input1.Clone()
+	input1 = *input1.Clone()
 	input2, err := db.GetBalance(recipient)
 	if err != nil {
 		return err
 	}
-	input2 = input2.Clone()
+	input2 = *input2.Clone()
 	if !bailout {
-		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
 		if err != nil {
 			return err
 		}
 	}
-	err = db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	err = db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
 	if err != nil {
 		return err
 	}
@@ -1791,14 +1791,14 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 	if err != nil {
 		return err
 	}
-	output1 = output1.Clone()
+	output1 = *output1.Clone()
 	output2, err := db.GetBalance(recipient)
 	if err != nil {
 		return err
 	}
-	output2 = output2.Clone()
+	output2 = *output2.Clone()
 	// add transfer log into state
-	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
+	addTransferLog(db, transferLogSig, sender, recipient, amount, &input1, &input2, &output1, &output2)
 	return nil
 }
 
@@ -1816,11 +1816,11 @@ func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender common.Address, coin
 		transferFeeLogSig,
 		sender,
 		coinbase,
-		result.FeeTipped,
-		result.SenderInitBalance,
-		result.CoinbaseInitBalance,
-		output1.Sub(output1, result.FeeTipped),
-		output2.Add(output2, result.FeeTipped),
+		&result.FeeTipped,
+		&result.SenderInitBalance,
+		&result.CoinbaseInitBalance,
+		output1.Sub(output1, &result.FeeTipped),
+		output2.Add(output2, &result.FeeTipped),
 	)
 
 }

@@ -105,7 +105,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 			return false, nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(idx)
+		ibs.SetTxContext(blockNum, idx)
 
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 
