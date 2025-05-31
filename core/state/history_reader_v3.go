@@ -55,17 +55,11 @@ func (hr *HistoryReaderV3) SetTrace(trace bool)    { hr.trace = trace }
 // For non-archive node old history files get deleted, so this number will vary
 // but the goal is to know where the historical data begins.
 func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
-	var earliestTxNum uint64 = 0
-	// get the first txnum where  accounts, storage , and code are all available in history files
-	// This is max(HistoryStart(Accounts), HistoryStart(Storage), HistoryStart(Code))
-	stateDomainNames := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
-	for _, domainName := range stateDomainNames {
-		domainStartingTxNum := hr.ttx.HistoryStartFrom(domainName)
-		if domainStartingTxNum > earliestTxNum {
-			earliestTxNum = domainStartingTxNum
-		}
-	}
-	return earliestTxNum
+	return min(
+		hr.ttx.HistoryStartFrom(kv.AccountsDomain),
+		hr.ttx.HistoryStartFrom(kv.StorageDomain),
+		hr.ttx.HistoryStartFrom(kv.CodeDomain),
+	)
 }
 
 func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
