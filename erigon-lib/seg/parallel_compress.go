@@ -306,12 +306,17 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var numBuf [binary.MaxVarintLen64]byte
 	totalWords := uncompressedFile.count
 
+	ii := 0
 	if err = uncompressedFile.ForEach(func(v []byte, compression bool) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		ii++
+		if ii%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
+
 		if cfg.Workers > 1 {
 			// take processed words in non-blocking way and push them to the queue
 		outer:
