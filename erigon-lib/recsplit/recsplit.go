@@ -29,7 +29,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -103,7 +102,6 @@ type RecSplit struct {
 	currentBucketIdx   uint64 // Current bucket being accumulated
 	baseDataID         uint64 // Minimal app-specific ID of entries of this index - helps app understand what data stored in given shard - persistent field
 	bucketCount        uint64 // Number of buckets
-	etlBufLimit        datasize.ByteSize
 	salt               uint32 // Murmur3 hash used for converting keys to 64-bit values and assigning to buckets
 	leafSize           uint16 // Leaf size for recursive split algorithm
 	secondaryAggrBound uint16 // The lower bound for secondary key aggregation (computed from leadSize)
