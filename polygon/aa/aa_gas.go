@@ -39,7 +39,7 @@ func chargeGas(
 		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", core.ErrInsufficientFunds, chargeFrom.Hex(), balance, preCharge)
 	}
 
-	if err := ibs.SubBalance(*chargeFrom, preCharge, 0); err != nil {
+	if err := ibs.SubBalance(*chargeFrom, *preCharge, 0); err != nil {
 		return err
 	}
 
@@ -68,7 +68,7 @@ func refundGas(
 
 	chargeFrom := tx.GasPayer()
 
-	if err := ibs.AddBalance(*chargeFrom, refund, tracing.BalanceIncreaseGasReturn); err != nil {
+	if err := ibs.AddBalance(*chargeFrom, *refund, tracing.BalanceIncreaseGasReturn); err != nil {
 		return err
 	}
 
@@ -91,5 +91,5 @@ func payCoinbase(
 
 	amount := new(uint256.Int).SetUint64(gasUsed)
 	amount.Mul(amount, effectiveTip)
-	return ibs.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee)
+	return ibs.AddBalance(coinbase, *amount, tracing.BalanceIncreaseRewardTransactionFee)
 }
