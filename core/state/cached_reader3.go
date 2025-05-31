@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
@@ -69,16 +70,18 @@ func (r *CachedReader3) ReadAccountDataForDebug(address common.Address) (*accoun
 	return &a, nil
 }
 
-func (r *CachedReader3) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (r *CachedReader3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	compositeKey := append(address[:], key[:]...)
 	enc, err := r.cache.Get(compositeKey)
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 	if len(enc) == 0 {
-		return nil, nil
+		return uint256.Int{}, false, err
 	}
-	return enc, nil
+	var v uint256.Int
+	(&v).SetBytes(enc)
+	return v, true, nil
 }
 
 func (r *CachedReader3) ReadAccountCode(address common.Address) ([]byte, error) {

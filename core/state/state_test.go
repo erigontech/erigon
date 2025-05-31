@@ -146,8 +146,8 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	defer domains.Close()
 
 	txNum := uint64(1)
-	domains.SetTxNum(txNum)
-	domains.SetBlockNum(1)
+	//domains.SetTxNum(txNum)
+	//domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		panic(err)
@@ -257,8 +257,6 @@ func TestSnapshot2(t *testing.T) {
 	defer domains.Close()
 
 	txNum := uint64(1)
-	domains.SetTxNum(txNum)
-	domains.SetBlockNum(2)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
@@ -426,8 +424,6 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 

@@ -64,7 +64,7 @@ func init() {
 	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "only-commitment", true, "purify only commitment domain")
 	purifyDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the purified domains directly in datadir (will remove .kvei and .bt too)")
 	purifyDomains.Flags().BoolVar(&doIndexBuild, "build-idx", false, "build index for purified domains")
-	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "minimum ratio of keys to skip in L0")
+	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "deprecated: minimum ratio of keys to skip in L0")
 	purifyDomains.Flags().Float64Var(&minSkipRatio, "min-skip-ratio", 0.1, "minimum ratio of keys to skip - otherwise keep file unchanged")
 	purifyDomains.Flags().Uint64Var(&fromStepPurification, "from", 0, "step from which domains would be purified")
 	purifyDomains.Flags().Uint64Var(&toStepPurification, "to", 1e18, "step to which domains would be purified")
@@ -153,9 +153,6 @@ var purifyDomains = &cobra.Command{
 		ctx, _ := common.RootContext()
 		dirs := datadir.New(datadirCli)
 		logger := debug.SetupCobra(cmd, "integration")
-		if minSkipRatioL0 <= 0.0 {
-			panic("--min-skip-ratio-l0 must be > 0")
-		}
 		if minSkipRatio <= 0.0 {
 			panic("--min-skip-ratio must be > 0")
 		}
@@ -171,13 +168,13 @@ var purifyDomains = &cobra.Command{
 		}
 		defer chainDb.Close()
 
-		ttx, err := chainDb.BeginTemporalRo(ctx)
+		tx, err := chainDb.BeginTemporalRo(ctx)
 		if err != nil {
 			logger.Error("Opening temporal DB", "error", err)
 			return
 		}
-
-		defer ttx.Rollback()
+		defer tx.Rollback()
+		defer statelib.AggTx(tx).MadvNormal().DisableReadAhead()
 
 		// Iterate over all the files in  dirs.SnapDomain and print them
 		domainDir := dirs.SnapDomain
@@ -201,16 +198,16 @@ var purifyDomains = &cobra.Command{
 		}
 
 		for _, domain := range purificationDomains {
-			filesToProcess := ttx.Debug().DomainFiles(domain).Fullpaths()
-			if err := makePurifiableIndexDB(purifyDB, filesToProcess, dirs, log.New(), domain); err != nil {
+			filesToProcess := tx.Debug().DomainFiles(domain).Fullpaths()
+			if err := makePurifiableIndexDB(ctx, purifyDB, filesToProcess, dirs, log.New(), domain); err != nil {
 				logger.Error("Error making purifiable index DB", "error", err)
 				return
 			}
 		}
 		somethingPurified := false
 		for _, domain := range purificationDomains {
-			filesToProcess := ttx.Debug().DomainFiles(domain).Fullpaths()
-			something, err := makePurifiedDomains(purifyDB, filesToProcess, dirs, log.New(), domain)
+			filesToProcess := tx.Debug().DomainFiles(domain).Fullpaths()
+			something, err := makePurifiedDomains(ctx, purifyDB, filesToProcess, dirs, log.New(), domain)
 			if err != nil {
 				logger.Error("Error making purifiable index DB", "error", err)
 				return
@@ -235,7 +232,7 @@ var purifyDomains = &cobra.Command{
 	},
 }
 
-func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) error {
+func makePurifiableIndexDB(ctx context.Context, db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) error {
 	var tbl string
 	switch domain {
 	case kv.AccountsDomain:
@@ -268,10 +265,12 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 		return fileInfos[i].CompareTo(fileInfos[j]) <= 0
 	})
 
-	collector := etl.NewCollector("Purification", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	collector := etl.NewCollectorWithAllocator("Purification", dirs.Tmp, etl.LargeSortableBuffers, logger)
 	defer collector.Close()
+	collector.LogLvl(log.LvlDebug)
+	collector.SortAndFlushInBackground(true)
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
@@ -303,23 +302,23 @@ func makePurifiableIndexDB(db kv.RwDB, files []string, dirs datadir.Dirs, logger
 			}
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
-			if count%1_000_000 == 0 {
-				logger.Info(fmt.Sprintf("Indexed %d keys in file %s", count, baseFileName))
+			if count%10_000_000 == 0 {
+				logger.Info(fmt.Sprintf("[purify] Indexed %dM keys in file %s", count/1_000_000, baseFileName))
 			}
 			// skip values
 			getter.Skip()
 		}
-		logger.Info(fmt.Sprintf("Indexed %d keys in file %s", count, baseFileName))
+		logger.Info(fmt.Sprintf("Indexed %dM keys in file %s", count/1_000_000, baseFileName))
 	}
 	logger.Info("Loading the keys to DB")
-	if err := collector.Load(tx, tbl, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+	if err := collector.Load(tx, tbl, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return fmt.Errorf("failed to load: %w", err)
 	}
 
 	return tx.Commit()
 }
 
-func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) (somethingPurified bool, err error) {
+func makePurifiedDomains(ctx context.Context, db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) (somethingPurified bool, err error) {
 	compressionType := statelib.Schema.GetDomainCfg(domain).Compression
 	compressCfg := statelib.Schema.GetDomainCfg(domain).CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
@@ -357,7 +356,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 		return fileInfos[i].CompareTo(fileInfos[j]) <= 0
 	})
 
-	tx, err := db.BeginRo(context.Background())
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return false, fmt.Errorf("failed to start transaction: %w", err)
 	}
@@ -378,7 +377,7 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 		defer dec.Close()
 		getter := dec.MakeGetter()
 
-		valuesComp, err := seg.NewCompressor(context.Background(), "Purification", outputFilePath, dirs.Tmp, compressCfg, log.LvlTrace, log.New())
+		valuesComp, err := seg.NewCompressor(ctx, "Purification", outputFilePath, dirs.Tmp, compressCfg, log.LvlTrace, log.New())
 		if err != nil {
 			return false, fmt.Errorf("create %s values compressor: %w", outputFilePath, err)
 		}
@@ -418,24 +417,20 @@ func makePurifiedDomains(db kv.RwDB, files []string, dirs datadir.Dirs, logger l
 			count++
 			if count%10_000_000 == 0 {
 				skipRatio := float64(skipped) / float64(count)
-				logger.Info(fmt.Sprintf("Indexed %d keys, skipped %d, in file %s. skip ratio: %.2f", count, skipped, baseFileName, skipRatio))
+				logger.Info(fmt.Sprintf("Indexed %dM keys, skipped %dk, in file %s. skip ratio: %.2f", count/1_000_000, skipped/1_000, baseFileName, skipRatio))
 			}
 		}
 
 		skipRatio := float64(skipped) / float64(count)
-		if skipRatio < minSkipRatioL0 && currentLayer == 0 {
-			logger.Info(fmt.Sprintf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping domain %s", skipRatio, minSkipRatioL0, domain))
-			return somethingPurified, nil
-		}
 		if skipRatio < minSkipRatio {
-			logger.Info(fmt.Sprintf("Skip ratio %.2f is less than min-skip-ratio %.2f, skipping %s", skipRatio, minSkipRatioL0, baseFileName))
+			logger.Info(fmt.Sprintf("Skip ratio %.2f is less than min-skip-ratio %.2f, skipping %s", skipRatio, minSkipRatio, baseFileName))
 			continue
 		}
-		logger.Info(fmt.Sprintf("Loaded %d keys in file %s. now compressing...", count, baseFileName))
+		logger.Info(fmt.Sprintf("Loaded %dM keys in file %s. now compressing...", count/1_000_000, baseFileName))
 		if err := comp.Compress(); err != nil {
 			return false, fmt.Errorf("failed to compress: %w", err)
 		}
-		logger.Info(fmt.Sprintf("Compressed %d keys in file %s", count, baseFileName))
+		logger.Info(fmt.Sprintf("Compressed %dM keys in file %s", count/1_000_000, baseFileName))
 		comp.Close()
 		if replaceInDatadir {
 			logger.Info(fmt.Sprintf("Replacing the file %s in datadir", baseFileName))
@@ -486,7 +481,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	logger.Info("seek commitment", "block", domains.BlockNum(), "tx", latestTx)
 
 	switch readDomain {
-	case "account":
+	case kv.AccountsDomain.String():
 		for _, addr := range addrs {
 
 			acc, err := r.ReadAccountData(common.BytesToAddress(addr))
@@ -496,17 +491,17 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 			}
 			logger.Info(fmt.Sprintf("%x: nonce=%d balance=%d code=%x root=%x", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root))
 		}
-	case "storage":
+	case kv.StorageDomain.String():
 		for _, addr := range addrs {
 			a, s := common.BytesToAddress(addr[:length.Addr]), common.BytesToHash(addr[length.Addr:])
-			st, err := r.ReadAccountStorage(a, s)
+			st, _, err := r.ReadAccountStorage(a, s)
 			if err != nil {
 				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
 				continue
 			}
 			logger.Info(fmt.Sprintf("%s %s -> %x", a.String(), s.String(), st))
 		}
-	case "code":
+	case kv.CodeDomain.String():
 		for _, addr := range addrs {
 			code, err := r.ReadAccountCode(common.BytesToAddress(addr))
 			if err != nil {
@@ -514,16 +509,6 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 				continue
 			}
 			logger.Info(fmt.Sprintf("%s: %x", addr, code))
-		}
-	}
-	return nil
-}
-
-func removeMany(filePaths ...string) error {
-	for _, filePath := range filePaths {
-		if err := os.Remove(filePath); err != nil {
-			_, fileName := filepath.Split(filePath)
-			return fmt.Errorf("failed to remove the file: %s, %w", fileName, err)
 		}
 	}
 	return nil

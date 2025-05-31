@@ -110,7 +110,7 @@ type (
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
-	GetHashFunc func(uint64) common.Hash
+	GetHashFunc func(uint64) (common.Hash, error)
 
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
 	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
