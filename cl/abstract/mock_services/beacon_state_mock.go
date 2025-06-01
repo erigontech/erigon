@@ -5371,6 +5371,44 @@ func (c *MockBeaconStateUpgradeToElectraCall) DoAndReturn(f func() error) *MockB
 	return c
 }
 
+// UpgradeToFulu mocks base method.
+func (m *MockBeaconState) UpgradeToFulu() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpgradeToFulu")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpgradeToFulu indicates an expected call of UpgradeToFulu.
+func (mr *MockBeaconStateMockRecorder) UpgradeToFulu() *MockBeaconStateUpgradeToFuluCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpgradeToFulu", reflect.TypeOf((*MockBeaconState)(nil).UpgradeToFulu))
+	return &MockBeaconStateUpgradeToFuluCall{Call: call}
+}
+
+// MockBeaconStateUpgradeToFuluCall wrap *gomock.Call
+type MockBeaconStateUpgradeToFuluCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateUpgradeToFuluCall) Return(arg0 error) *MockBeaconStateUpgradeToFuluCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateUpgradeToFuluCall) Do(f func() error) *MockBeaconStateUpgradeToFuluCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateUpgradeToFuluCall) DoAndReturn(f func() error) *MockBeaconStateUpgradeToFuluCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // ValidatorBalance mocks base method.
 func (m *MockBeaconState) ValidatorBalance(index int) (uint64, error) {
 	m.ctrl.T.Helper()
