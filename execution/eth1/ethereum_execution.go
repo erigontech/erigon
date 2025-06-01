@@ -378,7 +378,7 @@ func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (
 	defer cancel()
 
 	if err := <-e.blockReader.Ready(ctxWithTimeout); err != nil {
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.DeadlineExceeded) {
 			e.logger.Trace("ethereumExecutionModule.Ready: context canceled")
 			return &execution.ReadyResponse{Ready: false}, nil
 		}
