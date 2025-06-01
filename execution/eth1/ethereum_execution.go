@@ -374,7 +374,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*execution.ReadyResponse, error) {
 
 	// setup a timeout for the context to avoid waiting indefinitely
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
 	if err := <-e.blockReader.Ready(ctxWithTimeout); err != nil {
