@@ -699,6 +699,7 @@ func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleE
 	fvs[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = VersionScheduleEntry{b.CapellaForkEpoch, CapellaVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.FuluForkVersion))] = VersionScheduleEntry{b.FuluForkEpoch, FuluVersion}
 	return fvs
 }
 
@@ -1321,6 +1322,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.DenebForkVersion)
 	case ElectraVersion:
 		return uint32(b.ElectraForkVersion)
+	case FuluVersion:
+		return uint32(b.FuluForkVersion)
 	}
 	panic("invalid version")
 }
