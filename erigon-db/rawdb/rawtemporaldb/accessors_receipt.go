@@ -3,7 +3,6 @@ package rawtemporaldb
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
 )
@@ -13,51 +12,6 @@ var (
 	CumulativeBlobGasUsedInBlockKey = []byte{0x1}
 	FirstLogIndexKey                = []byte{0x2}
 )
-
-// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (*types.Receipt, error) {
-	cumulativeGasUsedBeforeTxn, cumulativeBlobGasUsed, firstLogIndexWithinBlock, err := ReceiptAsOf(tx, txNum+1)
-	if err != nil {
-		return nil, err
-	}
-	//if txnIdx == 0 {
-	//logIndex always 0
-	//}
-
-	r := &types.Receipt{
-		Logs:                     rawLogs,
-		CumulativeGasUsed:        cumulativeGasUsedBeforeTxn,
-		FirstLogIndexWithinBlock: firstLogIndexWithinBlock,
-	}
-	_ = cumulativeBlobGasUsed
-
-	if err := r.DeriveFieldsV3ForSingleReceipt(txnIdx, blockHash, blockNum, txn, cumulativeGasUsedBeforeTxn); err != nil {
-		return nil, err
-	}
-	return r, nil
-}
-
-func PopulateLogsIndices(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (types.Logs, error) {
-	_, _, firstLogIndexWithinBlock, err := ReceiptAsOf(tx, txNum+1)
-	if err != nil {
-		return nil, err
-	}
-
-	if rawLogs == nil {
-		return types.Logs{}, nil
-	}
-
-	logIndex := firstLogIndexWithinBlock
-	for j := 0; j < len(rawLogs); j++ {
-		rawLogs[j].BlockNumber = blockNum
-		rawLogs[j].BlockHash = blockHash
-		rawLogs[j].TxHash = txn.Hash()
-		rawLogs[j].TxIndex = uint(txnIdx)
-		rawLogs[j].Index = uint(logIndex)
-		logIndex++
-	}
-	return rawLogs, nil
-}
 
 func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasused uint64, firstLogIndexWithinBlock uint32, err error) {
 	var v []byte
