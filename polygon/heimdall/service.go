@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
@@ -328,12 +329,12 @@ func (s *Service) Run(ctx context.Context) error {
 	})
 
 	milestoneObserver := s.RegisterMilestoneObserver(func(milestone *Milestone) {
-		UpdateObservedWaypointMilestoneLength(milestone.Length())
+		poshttp.UpdateObservedWaypointMilestoneLength(milestone.Length())
 	})
 	defer milestoneObserver()
 
 	checkpointObserver := s.RegisterCheckpointObserver(func(checkpoint *Checkpoint) {
-		UpdateObservedWaypointCheckpointLength(checkpoint.Length())
+		poshttp.UpdateObservedWaypointCheckpointLength(checkpoint.Length())
 	}, WithEventsLimit(5))
 	defer checkpointObserver()
 

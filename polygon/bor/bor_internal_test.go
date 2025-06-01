@@ -27,6 +27,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/params"
@@ -38,20 +39,20 @@ import (
 func TestUseBridgeReader(t *testing.T) {
 	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
 	var br *mockBridgeReader
-	bor := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, br, nil)
 	require.False(t, bor.useBridgeReader)
 	br = &mockBridgeReader{}
-	bor = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, br, nil)
 	require.True(t, bor.useBridgeReader)
 }
 
 func TestUseSpanReader(t *testing.T) {
 	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
 	var sr *mockSpanReader
-	b := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
+	b := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, nil, sr)
 	require.False(t, b.useSpanReader)
 	sr = &mockSpanReader{}
-	b = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
+	b = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, nil, sr)
 	require.True(t, b.useSpanReader)
 }
 
@@ -68,6 +69,14 @@ func (m mockBridgeReader) EventsWithinTime(context.Context, time.Time, time.Time
 }
 
 func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
+	panic("mock")
+}
+
+func (m mockBridgeReader) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
+	panic("mock")
+}
+
+func (m mockBridgeReader) BorStartEventId(ctx context.Context, hash common.Hash, blockNum uint64) (uint64, error) {
 	panic("mock")
 }
 
@@ -88,7 +97,7 @@ func TestCommitStatesIndore(t *testing.T) {
 	cr := consensus.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
-	bor := New(params.BorDevnetChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor := New(params.BorDevnetChainConfig, nil, nil, nil, nil, nil, nil, nil, br, nil)
 
 	header := &types.Header{
 		Number: big.NewInt(112),

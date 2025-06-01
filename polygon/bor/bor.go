@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
@@ -262,6 +263,8 @@ type bridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
 	EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
+	EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
+	BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error)
 }
 
 func ValidateHeaderTime(
@@ -346,6 +349,7 @@ type Bor struct {
 	spanner         Spanner
 	stateReceiver   StateReceiver
 	HeimdallClient  heimdall.Client
+	bridgeClient    bridge.Client
 	useSpanReader   bool
 	spanReader      spanReader
 	useBridgeReader bool
@@ -375,6 +379,7 @@ func New(
 	blockReader services.FullBlockReader,
 	spanner Spanner,
 	heimdallClient heimdall.Client,
+	bridgeClient bridge.Client,
 	genesisContracts StateReceiver,
 	logger log.Logger,
 	bridgeReader bridgeReader,
@@ -402,6 +407,7 @@ func New(
 		spanner:         spanner,
 		stateReceiver:   genesisContracts,
 		HeimdallClient:  heimdallClient,
+		bridgeClient:    bridgeClient,
 		execCtx:         context.Background(),
 		logger:          logger,
 		closeCh:         make(chan struct{}),
@@ -1674,7 +1680,10 @@ func (c *Bor) CommitStates(
 		return nil
 	}
 
-	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
+	events, err := c.bridgeReader.EventsByBlock(context.Background(), header.Hash(), blockNum)
+	if err != nil {
+		return err
+	}
 
 	// set this true to check the current stored events vs the current heimdall contents
 	// it should be false for non debug becuase it causes an additional call to the
@@ -1682,10 +1691,14 @@ func (c *Bor) CommitStates(
 	const checkEvents = false
 
 	if checkEvents {
-		if err := heimdall.RemoteEventCheckForBlock(
+		startId, err := c.bridgeReader.BorStartEventId(context.Background(), header.Hash(), blockNum)
+		if err != nil {
+			return err
+		}
+		if err := bridge.RemoteEventCheckForBlock(
 			header, chain.Chain.GetHeaderByNumber(blockNum-c.config.CalculateSprintLength(blockNum)),
-			c.chainConfig.ChainID.String(), chain.Chain.BorStartEventId(header.Hash(), blockNum),
-			events, c.HeimdallClient, c.config, logger); err != nil {
+			c.chainConfig.ChainID.String(), startId,
+			events, c.bridgeClient, c.config, logger); err != nil {
 			return err
 		}
 	}

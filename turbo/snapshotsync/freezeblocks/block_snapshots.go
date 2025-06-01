@@ -362,14 +362,8 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, e
 
 			deletedBorBlocks, err := func() (deleted int, err error) {
 				defer mxPruneTookBor.ObserveDuration(time.Now())
-
-				pruneTx := tx
-				if br.config.PolygonSync {
-					pruneTx = nil
-				}
-
 				return bordb.PruneHeimdall(context.Background(),
-					br.heimdallStore, br.bridgeStore, pruneTx, canDeleteTo, limit)
+					br.heimdallStore, br.bridgeStore, nil, canDeleteTo, limit)
 			}()
 			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit, "deleted", deleted, "err", err)
 			if err != nil {

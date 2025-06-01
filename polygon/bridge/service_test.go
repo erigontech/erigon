@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 var defaultBorConfig = borcfg.BorConfig{
@@ -42,18 +41,18 @@ var defaultBorConfig = borcfg.BorConfig{
 	StateSyncConfirmationDelay: map[string]uint64{"0": 1},
 }
 
-func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockClient, *Service) {
+func setup(t *testing.T, borConfig borcfg.BorConfig) (*MockClient, *Service) {
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlDebug)
-	heimdallClient := heimdall.NewMockClient(ctrl)
+	bridgeClient := NewMockClient(ctrl)
 	b := NewService(ServiceConfig{
 		Store:        NewMdbxStore(t.TempDir(), logger, false, 1),
 		Logger:       logger,
 		BorConfig:    &borConfig,
-		EventFetcher: heimdallClient,
+		EventFetcher: bridgeClient,
 	})
 	t.Cleanup(b.Close)
-	return heimdallClient, b
+	return bridgeClient, b
 }
 
 func getBlocks(t *testing.T, numBlocks int) []*types.Block {
@@ -87,8 +86,8 @@ func TestService(t *testing.T) {
 	t.Cleanup(cancel)
 
 	heimdallClient, b := setup(t, defaultBorConfig)
-	event1 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event1 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      1,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
@@ -98,8 +97,8 @@ func TestService(t *testing.T) {
 	}
 	event1Data, err := event1.MarshallBytes()
 	require.NoError(t, err)
-	event2 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event2 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      2,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
@@ -109,8 +108,8 @@ func TestService(t *testing.T) {
 	}
 	event2Data, err := event2.MarshallBytes()
 	require.NoError(t, err)
-	event3 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event3 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      3,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
@@ -120,8 +119,8 @@ func TestService(t *testing.T) {
 	}
 	event3Data, err := event3.MarshallBytes()
 	require.NoError(t, err)
-	event4 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event4 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      4,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x04"),
@@ -132,10 +131,10 @@ func TestService(t *testing.T) {
 	event4Data, err := event4.MarshallBytes()
 	require.NoError(t, err)
 
-	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4}
+	events := []*EventRecordWithTime{event1, event2, event3, event4}
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
-	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*EventRecordWithTime{}, nil).AnyTimes()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -212,8 +211,8 @@ func TestService_Unwind(t *testing.T) {
 	t.Cleanup(cancel)
 
 	heimdallClient, b := setup(t, defaultBorConfig)
-	event1 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event1 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      1,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
@@ -221,8 +220,8 @@ func TestService_Unwind(t *testing.T) {
 		// pre-indore: block0Time=1,block2Time=100,block4Time=200 => event1 falls in block4 (toTime=preSprintBlockTime=100)
 		Time: time.Unix(50, 0),
 	}
-	event2 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event2 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      2,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
@@ -230,8 +229,8 @@ func TestService_Unwind(t *testing.T) {
 		// pre-indore: block0Time=1,block2Time=100,block4Time=200 => event2 falls in block4 (toTime=preSprintBlockTime=100)
 		Time: time.Unix(99, 0), // block 2
 	}
-	event3 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event3 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      3,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
@@ -239,8 +238,8 @@ func TestService_Unwind(t *testing.T) {
 		// pre-indore: block4Time=200,block6Time=300 => event3 falls in block6 (toTime=preSprintBlockTime=200)
 		Time: time.Unix(199, 0),
 	}
-	event4 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event4 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      4,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x04"),
@@ -249,10 +248,10 @@ func TestService_Unwind(t *testing.T) {
 		Time: time.Unix(498, 0),
 	}
 
-	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4}
+	events := []*EventRecordWithTime{event1, event2, event3, event4}
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
-	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*EventRecordWithTime{}, nil).AnyTimes()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -310,8 +309,8 @@ func TestService_Unwind(t *testing.T) {
 
 func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorConfig, wg *sync.WaitGroup) *Service {
 	heimdallClient, b := setup(t, borConfig)
-	event1 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event1 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      1,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
@@ -319,8 +318,8 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 		// pre-indore: block0Time=1,block2Time=100,block4Time=200 => event1 falls in block4 (toTime=preSprintBlockTime=100)
 		Time: time.Unix(50, 0),
 	}
-	event2 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event2 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      2,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
@@ -328,8 +327,8 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 		// pre-indore: block0Time=1,block2Time=100,block4Time=200 => event2 should fall in block4 but skipped and put in block6 (toTime=preSprintBlockTime=100)
 		Time: time.Unix(99, 0), // block 2
 	}
-	event3 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event3 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      3,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
@@ -337,8 +336,8 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 		// pre-indore: block4Time=200,block6Time=300 => event3 falls in block6 (toTime=preSprintBlockTime=200)
 		Time: time.Unix(199, 0),
 	}
-	event4 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event4 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      4,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x04"),
@@ -347,10 +346,10 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 		Time: time.Unix(498, 0),
 	}
 
-	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4}
+	events := []*EventRecordWithTime{event1, event2, event3, event4}
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
-	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*EventRecordWithTime{}, nil).AnyTimes()
 	wg.Add(1)
 
 	go func(bridge *Service) {
@@ -440,8 +439,8 @@ func TestReaderEventsWithinTime(t *testing.T) {
 	t.Cleanup(cancel)
 
 	heimdallClient, b := setup(t, defaultBorConfig)
-	event1 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event1 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      1,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
@@ -450,8 +449,8 @@ func TestReaderEventsWithinTime(t *testing.T) {
 	}
 	event1Data, err := event1.MarshallBytes()
 	require.NoError(t, err)
-	event2 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event2 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      2,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
@@ -460,8 +459,8 @@ func TestReaderEventsWithinTime(t *testing.T) {
 	}
 	event2Data, err := event2.MarshallBytes()
 	require.NoError(t, err)
-	event3 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event3 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      3,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
@@ -470,8 +469,8 @@ func TestReaderEventsWithinTime(t *testing.T) {
 	}
 	event3Data, err := event3.MarshallBytes()
 	require.NoError(t, err)
-	event4 := &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
+	event4 := &EventRecordWithTime{
+		EventRecord: EventRecord{
 			ID:      4,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x04"),
@@ -479,10 +478,10 @@ func TestReaderEventsWithinTime(t *testing.T) {
 		Time: time.Unix(498, 0),
 	}
 
-	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4}
+	events := []*EventRecordWithTime{event1, event2, event3, event4}
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
-	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*EventRecordWithTime{}, nil).AnyTimes()
 
 	var wg sync.WaitGroup
 	wg.Add(1)

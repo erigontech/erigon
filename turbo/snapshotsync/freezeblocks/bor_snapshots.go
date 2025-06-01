@@ -73,7 +73,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 			if snap.Enum() == heimdall.Events.Enum() {
 				firstKeyGetter = func(ctx context.Context) uint64 {
-					return blockReader.LastFrozenEventId() + 1
+					return br.bridgeStore.LastFrozenEventId() + 1
 				}
 			}
 
