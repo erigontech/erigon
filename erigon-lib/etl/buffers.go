@@ -23,8 +23,10 @@ import (
 	"io"
 	"sort"
 	"strconv"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/common"
 )
@@ -42,7 +44,21 @@ const (
 	BufIOSize = 128 * 4096
 )
 
-var BufferOptimalSize = 256 * datasize.MB /*  var because we want to sometimes change it from tests or command-line flags */
+var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
+
+// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
+var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
+var SmallSortableBuffers = NewAllocator(&sync.Pool{
+	New: func() interface{} {
+		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
+	},
+})
+var etlLargeBufRAM = BufferOptimalSize
+var LargeSortableBuffers = NewAllocator(&sync.Pool{
+	New: func() interface{} {
+		return NewSortableBuffer(etlLargeBufRAM).Prealloc(1_024, int(etlLargeBufRAM/32))
+	},
+})
 
 type Buffer interface {
 	// Put does copy `k` and `v`
