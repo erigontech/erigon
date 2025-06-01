@@ -992,7 +992,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			return true, nil
 		case <-logEvery.C:
 			if furiousPrune {
-				at.a.logger.Info("[snapshots] pruning state",
+				at.a.logger.Info("[prune] state",
 					//"until commit", time.Until(started.Add(timeout)).String(),
 					//"pruneLimit", pruneLimit,
 					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
@@ -1000,7 +1000,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 					//"pruned", fullStat.String(),
 				)
 			} else {
-				at.a.logger.Info("[snapshots] pruning state",
+				at.a.logger.Info("[prune] state",
 					"until commit", time.Until(started.Add(timeout)).String(),
 					//"pruneLimit", pruneLimit,
 					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
