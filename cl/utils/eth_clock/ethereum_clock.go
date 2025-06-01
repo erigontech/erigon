@@ -71,14 +71,25 @@ type ethereumClockImpl struct {
 	genesisTime           uint64
 	genesisValidatorsRoot common.Hash
 	beaconCfg             *clparams.BeaconChainConfig
+	forkDigestToVersion   map[common.Bytes4]clparams.StateVersion
 }
 
 func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, beaconCfg *clparams.BeaconChainConfig) EthereumClock {
-	return &ethereumClockImpl{
+	impl := &ethereumClockImpl{
 		genesisTime:           genesisTime,
 		beaconCfg:             beaconCfg,
 		genesisValidatorsRoot: genesisValidatorsRoot,
+		forkDigestToVersion:   make(map[common.Bytes4]clparams.StateVersion),
 	}
+
+	for _, fork := range forkList(beaconCfg.ForkVersionSchedule) {
+		digest, err := impl.ComputeForkDigestForVersion(fork.version)
+		if err != nil {
+			panic(err)
+		}
+		impl.forkDigestToVersion[digest] = fork.stateVersion
+	}
+	return impl
 }
 
 func (t *ethereumClockImpl) GetSlotTime(slot uint64) time.Time {
@@ -202,55 +213,7 @@ func (t *ethereumClockImpl) StateVersionByEpoch(epoch uint64) clparams.StateVers
 }
 
 func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clparams.StateVersion, error) {
-	var (
-		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest, denebForkDigest, electraForkDigest common.Bytes4
-		err                                                                                                            error
-	)
-	phase0ForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion)))
-	if err != nil {
-		return 0, err
-	}
-
-	altairForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.AltairForkVersion)))
-	if err != nil {
-		return 0, err
-	}
-
-	bellatrixForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.BellatrixForkVersion)))
-	if err != nil {
-		return 0, err
-	}
-
-	capellaForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.CapellaForkVersion)))
-	if err != nil {
-		return 0, err
-	}
-
-	denebForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.DenebForkVersion)))
-	if err != nil {
-		return 0, err
-	}
-
-	electraForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.ElectraForkVersion)))
-	if err != nil {
-		return 0, err
-	}
-
-	switch digest {
-	case phase0ForkDigest:
-		return clparams.Phase0Version, nil
-	case altairForkDigest:
-		return clparams.AltairVersion, nil
-	case bellatrixForkDigest:
-		return clparams.BellatrixVersion, nil
-	case capellaForkDigest:
-		return clparams.CapellaVersion, nil
-	case denebForkDigest:
-		return clparams.DenebVersion, nil
-	case electraForkDigest:
-		return clparams.ElectraVersion, nil
-	}
-	return 0, nil
+	return t.forkDigestToVersion[digest], nil
 }
 
 func (t *ethereumClockImpl) ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error) {
