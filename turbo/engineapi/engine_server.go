@@ -446,14 +446,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return parent == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
-			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
+			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return header == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
-			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
+			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
@@ -759,8 +759,8 @@ func (e *EngineServer) HandleNewPayload(
 
 		if currentHeadNumber != nil {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
-			// so that we will perform full validation.
-			if stillSyncing, _ := waitForStuff(500*time.Millisecond, func() (bool, error) {
+			// so that we will perform full validation. Wait 3 seconds because it is a humane time.
+			if stillSyncing, _ := waitForStuff(3*time.Second, func() (bool, error) {
 				return e.blockDownloader.Status() != headerdownload.Synced, nil
 			}); stillSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
