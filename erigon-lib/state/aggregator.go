@@ -286,6 +286,10 @@ func (a *Aggregator) OpenFolder() error {
 func (a *Aggregator) openFolder() error {
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
+		if d.disable {
+			continue
+		}
+
 		d := d
 		eg.Go(func() error {
 			select {
@@ -297,6 +301,9 @@ func (a *Aggregator) openFolder() error {
 		})
 	}
 	for _, ii := range a.iis {
+		if ii.disable {
+			continue
+		}
 		ii := ii
 		eg.Go(func() error { return ii.openFolder() })
 	}
@@ -1407,10 +1414,16 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
+		if d.disable {
+			continue
+		}
 		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
 	for id, ii := range a.iis {
+		if ii.disable {
+			continue
+		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
 
@@ -1425,6 +1438,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range at.d {
+		if d.d.disable {
+			continue
+		}
 		if in == nil {
 			d.cleanAfterMerge(nil, nil, nil)
 		} else {
@@ -1432,6 +1448,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 		}
 	}
 	for id, ii := range at.iis {
+		if ii.ii.disable {
+			continue
+		}
 		if in == nil {
 			ii.cleanAfterMerge(nil)
 		} else {
