@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -372,9 +373,18 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 
 func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*execution.ReadyResponse, error) {
 
-	if err := <-e.blockReader.Ready(ctx); err != nil {
+	// setup a timeout for the context to avoid waiting indefinitely
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+
+	if err := <-e.blockReader.Ready(ctxWithTimeout); err != nil {
+		if errors.Is(err, context.Canceled) {
+			e.logger.Trace("ethereumExecutionModule.Ready: context canceled")
+			return &execution.ReadyResponse{Ready: false}, nil
+		}
 		return &execution.ReadyResponse{Ready: false}, err
 	}
+	// Give up after 50ms if the semaphore is the channel is not ready.
 
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
