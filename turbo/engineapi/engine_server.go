@@ -758,9 +758,11 @@ func (e *EngineServer) HandleNewPayload(
 		}
 
 		if currentHeadNumber != nil {
+			// wait for the slot duration for full download. we cannot expect the process to finish in 0.5s.
+			waitTime := time.Duration(e.config.SecondsPerSlot()) * time.Second
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
-			// so that we will perform full validation. Wait 3 seconds because it is a humane time.
-			if stillSyncing, _ := waitForStuff(12*time.Second, func() (bool, error) {
+			// so that we will perform full validation.
+			if stillSyncing, _ := waitForStuff(waitTime, func() (bool, error) {
 				return e.blockDownloader.Status() != headerdownload.Synced, nil
 			}); stillSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
