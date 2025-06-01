@@ -991,13 +991,24 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		case <-localTimeout.C: //must be first to improve responsivness
 			return true, nil
 		case <-logEvery.C:
-			at.a.logger.Info("[snapshots] pruning state",
-				"until commit", time.Until(started.Add(timeout)).String(),
-				//"pruneLimit", pruneLimit,
-				"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
-				"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
-				//"pruned", fullStat.String(),
-			)
+			if furiousPrune {
+				at.a.logger.Info("[snapshots] pruning state",
+					//"until commit", time.Until(started.Add(timeout)).String(),
+					//"pruneLimit", pruneLimit,
+					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
+					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
+					//"pruned", fullStat.String(),
+				)
+			} else {
+				at.a.logger.Info("[snapshots] pruning state",
+					"until commit", time.Until(started.Add(timeout)).String(),
+					//"pruneLimit", pruneLimit,
+					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
+					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
+					//"pruned", fullStat.String(),
+				)
+			}
+
 		case <-ctx.Done():
 			return false, ctx.Err()
 		default:
