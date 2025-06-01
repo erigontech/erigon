@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/holiman/uint256"
 )
 
 var PrunedError = errors.New("old data not available due to pruning")
@@ -96,13 +97,17 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*acc
 	return hr.ReadAccountData(address)
 }
 
-func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	hr.composite = append(append(hr.composite[:0], address[:]...), key[:]...)
-	enc, _, err := hr.ttx.GetAsOf(kv.StorageDomain, hr.composite, hr.txNum)
+	enc, ok, err := hr.ttx.GetAsOf(kv.StorageDomain, hr.composite, hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key, enc)
 	}
-	return enc, err
+	var res uint256.Int
+	if ok {
+		(&res).SetBytes(enc)
+	}
+	return res, ok, err
 }
 
 func (hr *HistoryReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {

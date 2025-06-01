@@ -25,7 +25,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1283,11 +1282,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		restorePrevRange := false
 		for k, dr := range &r.domain {
 			kd := kv.Domain(k)
-			if !slices.Contains(kv.StateDomains, kd) {
+			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
 			}
-
-			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
+			if !(kd == kv.AccountsDomain || kd == kv.StorageDomain || kd == kv.CommitmentDomain) {
 				continue
 			}
 			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
