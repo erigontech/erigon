@@ -1264,6 +1264,9 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		}
 	}
 	for id, d := range at.d {
+		if d.d.disable {
+			continue
+		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
@@ -1304,6 +1307,9 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 	}
 
 	for id, ii := range at.iis {
+		if ii.ii.disable {
+			continue
+		}
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
@@ -1333,6 +1339,9 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
+		if at.d[id].d.disable {
+			continue
+		}
 		if !r.domain[id].any() {
 			continue
 		}
@@ -1367,6 +1376,10 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	}
 
 	for id, rng := range r.invertedIndex {
+		if at.iis[id].ii.disable {
+			continue
+		}
+
 		if !rng.needMerge {
 			continue
 		}
