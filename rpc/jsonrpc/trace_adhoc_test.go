@@ -28,16 +28,15 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers/config"
@@ -84,7 +83,7 @@ func TestCoinbaseBalance(t *testing.T) {
 		t.Errorf("expected array with 2 elements, got %d elements", len(results))
 	}
 	// Expect balance increase of the coinbase (zero address)
-	if _, ok := results[1].StateDiff[libcommon.Address{}]; !ok {
+	if _, ok := results[1].StateDiff[common.Address{}]; !ok {
 		t.Errorf("expected balance increase for coinbase (zero address)")
 	}
 }
@@ -121,7 +120,7 @@ func TestSwapBalance(t *testing.T) {
 	}
 
 	// Checking state diff
-	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+	if res, ok := results[0].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -133,7 +132,7 @@ func TestSwapBalance(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+	if res, ok := results[0].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -145,7 +144,7 @@ func TestSwapBalance(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+	if res, ok := results[1].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in second tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -157,7 +156,7 @@ func TestSwapBalance(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+	if res, ok := results[1].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -204,14 +203,14 @@ func TestCorrectStateDiff(t *testing.T) {
 	}
 
 	// Checking state diff
-	if _, ok := results[0].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; ok {
+	if _, ok := results[0].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; ok {
 		t.Errorf("A shouldn't be in first sd")
 	}
-	if _, ok := results[0].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; ok {
+	if _, ok := results[0].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; ok {
 		t.Errorf("B shouldn't be in first sd")
 	}
 
-	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; !ok {
+	if res, ok := results[0].StateDiff[common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; !ok {
 		t.Errorf("don't found C in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -227,7 +226,7 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; !ok {
+	if res, ok := results[0].StateDiff[common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; !ok {
 		t.Errorf("don't found C in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -239,14 +238,14 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if _, ok := results[1].StateDiff[libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
+	if _, ok := results[1].StateDiff[common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
 		t.Errorf("C shouldn't be in second sd")
 	}
-	if _, ok := results[1].StateDiff[libcommon.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
+	if _, ok := results[1].StateDiff[common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
 		t.Errorf("D shouldn't be in second sd")
 	}
 
-	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+	if res, ok := results[1].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -258,7 +257,7 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+	if res, ok := results[1].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -270,14 +269,14 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if _, ok := results[2].StateDiff[libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
+	if _, ok := results[2].StateDiff[common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
 		t.Errorf("C shouldn't be in third sd")
 	}
-	if _, ok := results[2].StateDiff[libcommon.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
+	if _, ok := results[2].StateDiff[common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
 		t.Errorf("D shouldn't be in third sd")
 	}
 
-	if res, ok := results[2].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+	if res, ok := results[2].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in second tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -289,7 +288,7 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[2].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+	if res, ok := results[2].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -309,7 +308,7 @@ func TestCorrectStateDiff(t *testing.T) {
 func TestReplayTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
-	var txnHash libcommon.Hash
+	var txnHash common.Hash
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
 		if err != nil {
@@ -328,7 +327,7 @@ func TestReplayTransaction(t *testing.T) {
 	}
 	require.NotNil(t, results)
 	require.NotNil(t, results.StateDiff)
-	addrDiff := results.StateDiff[libcommon.HexToAddress("0x0000000000000006000000000000000000000000")]
+	addrDiff := results.StateDiff[common.HexToAddress("0x0000000000000006000000000000000000000000")]
 	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
@@ -345,7 +344,7 @@ func TestReplayBlockTransactions(t *testing.T) {
 	}
 	require.NotNil(t, results)
 	require.NotNil(t, results[0].StateDiff)
-	addrDiff := results[0].StateDiff[libcommon.HexToAddress("0x0000000000000001000000000000000000000000")]
+	addrDiff := results[0].StateDiff[common.HexToAddress("0x0000000000000001000000000000000000000000")]
 	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
@@ -353,13 +352,13 @@ func TestReplayBlockTransactions(t *testing.T) {
 func TestOeTracer(t *testing.T) {
 	type callContext struct {
 		Number              math.HexOrDecimal64   `json:"number"`
-		Hash                libcommon.Hash        `json:"hash"`
+		Hash                common.Hash           `json:"hash"`
 		Difficulty          *math.HexOrDecimal256 `json:"difficulty"`
 		Time                math.HexOrDecimal64   `json:"timestamp"`
 		GasLimit            math.HexOrDecimal64   `json:"gasLimit"`
 		BaseFee             *math.HexOrDecimal256 `json:"baseFeePerGas"`
-		Miner               libcommon.Address     `json:"miner"`
-		TransactionHash     libcommon.Hash        `json:"transactionHash"`
+		Miner               common.Address        `json:"miner"`
+		TransactionHash     common.Hash           `json:"transactionHash"`
 		TransactionPosition uint64                `json:"transactionPosition"`
 	}
 
@@ -387,7 +386,7 @@ func TestOeTracer(t *testing.T) {
 			require.NoError(t, err)
 			err = json.Unmarshal(blob, test)
 			require.NoError(t, err)
-			tx, err := types.UnmarshalTransactionFromBinary(libcommon.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			require.NoError(t, err)
 
 			// Configure a blockchain with the given prestate
@@ -407,7 +406,7 @@ func TestOeTracer(t *testing.T) {
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
+			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 

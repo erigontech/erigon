@@ -24,15 +24,15 @@ import (
 	"fmt"
 	"time"
 
-	jsoniter "github.com/json-iterator/go"
-
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -40,20 +40,19 @@ import (
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type BlockGetter interface {
 	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
-	GetBlockByHash(hash libcommon.Hash) (*types.Block, error)
+	GetBlockByHash(hash common.Hash) (*types.Block, error)
 	// GetBlock retrieves a block from the database by hash and number,
 	// caching it if found.
-	GetBlock(hash libcommon.Hash, number uint64) *types.Block
+	GetBlock(hash common.Hash, number uint64) *types.Block
 }
 
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, cfg *chain.Config,
-	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
+	headerReader interfaces.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, header.Number.Uint64(), txIndex, cfg.ChainName)
 	if err != nil {
@@ -63,9 +62,8 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	// Create the parent state database
 	statedb := state.New(reader)
 
-	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
-		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
-		return h
+	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
+		return headerReader.HeaderByNumber(ctx, dbtx, n)
 	}
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
@@ -96,14 +94,14 @@ func TraceTx(
 	message core.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	blockHash libcommon.Hash,
+	blockHash common.Hash,
 	txnIndex int,
-	ibs evmtypes.IntraBlockState,
+	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
-	stream *jsoniter.Stream,
+	stream jsonstream.Stream,
 	callTimeout time.Duration,
-) (usedGas uint64, err error) {
+) (gasUsed uint64, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
@@ -126,25 +124,25 @@ func TraceTx(
 			return result, err
 		} else {
 			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
+				tracer.OnTxEnd(&types.Receipt{GasUsed: result.GasUsed}, nil)
 			}
 		}
 
-		usedGas = result.UsedGas
+		gasUsed = result.GasUsed
 		return result, err
 	}
 
 	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
-	return usedGas, err
+	return gasUsed, err
 }
 
 func AssembleTracer(
 	ctx context.Context,
 	config *tracersConfig.TraceConfig,
-	txHash libcommon.Hash,
-	blockHash libcommon.Hash,
+	txHash common.Hash,
+	blockHash common.Hash,
 	txnIndex int,
-	stream *jsoniter.Stream,
+	stream jsonstream.Stream,
 	callTimeout time.Duration,
 ) (*tracers.Tracer, bool, context.CancelFunc, error) {
 	// Assemble the structured logger or the JavaScript tracer
@@ -188,17 +186,18 @@ func AssembleTracer(
 func ExecuteTraceTx(
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	ibs evmtypes.IntraBlockState,
+	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
-	stream *jsoniter.Stream,
+	stream jsonstream.Stream,
 	tracer *tracers.Tracer,
 	streaming bool,
 	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
 ) error {
+	// Set the tracer hooks to the intra-block state before execute, so the OnLog hook may be set correctly.
+	ibs.SetHooks(tracer.Hooks)
 	// Run the transaction with tracing enabled.
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: tracer.Hooks, NoBaseFee: true})
-
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
@@ -226,7 +225,7 @@ func ExecuteTraceTx(
 		stream.WriteArrayEnd()
 		stream.WriteMore()
 		stream.WriteObjectField("gas")
-		stream.WriteUint64(result.UsedGas)
+		stream.WriteUint64(result.GasUsed)
 		stream.WriteMore()
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 const (
@@ -46,12 +47,12 @@ const (
 
 type DecryptionKeysListener struct {
 	logger    log.Logger
-	config    Config
+	config    shuttercfg.Config
 	validator pubsub.ValidatorEx
 	observers *event.Observers[*proto.DecryptionKeys]
 }
 
-func NewDecryptionKeysListener(logger log.Logger, config Config, validator pubsub.ValidatorEx) *DecryptionKeysListener {
+func NewDecryptionKeysListener(logger log.Logger, config shuttercfg.Config, validator pubsub.ValidatorEx) *DecryptionKeysListener {
 	return &DecryptionKeysListener{
 		logger:    logger,
 		config:    config,

@@ -25,19 +25,20 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -54,7 +55,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *state.QueueWithRetry
 	rs          *state.ParallelExecutionState
-	stateWriter *state.StateWriterV3
+	stateWriter *state.Writer
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -65,7 +66,7 @@ type Worker struct {
 	resultCh *state.ResultsQueue
 	chain    consensus.ChainReader
 
-	callTracer  *CallTracer
+	callTracer  *calltracer.CallTracer
 	taskGasPool *core.GasPool
 	hooks       *tracing.Hooks
 
@@ -80,21 +81,23 @@ type Worker struct {
 
 func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
 	w := &Worker{
-		lock:        lock,
-		logger:      logger,
-		chainDb:     chainDb,
-		in:          in,
+		lock:    lock,
+		chainDb: chainDb,
+		in:      in,
+
+		logger: logger,
+		ctx:    ctx,
+
 		background:  background,
 		blockReader: blockReader,
-		chainConfig: chainConfig,
 
-		ctx:      ctx,
-		genesis:  genesis,
-		resultCh: results,
-		engine:   engine,
+		chainConfig: chainConfig,
+		genesis:     genesis,
+		resultCh:    results,
+		engine:      engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		callTracer:  NewCallTracer(hooks),
+		callTracer:  calltracer.NewCallTracer(hooks),
 		taskGasPool: new(core.GasPool),
 		hooks:       hooks,
 
@@ -108,16 +111,20 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 	return w
 }
 
-func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
+func (rw *Worker) LogLRUStats() { rw.evm.Config().JumpDestCache.LogStats() }
 
 func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shards.Accumulator) {
 	rw.rs = rs
 	if rw.background {
 		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
 	} else {
-		rw.SetReader(state.NewReaderV3(rs.Domains()))
+		rw.SetReader(state.NewReaderV3(rs.TemporalGetter()))
 	}
-	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+	rw.stateWriter = state.NewWriter(rs.TemporalPutDel(), accumulator, 0)
+}
+
+func (rw *Worker) SetGaspool(gp *core.GasPool) {
+	rw.taskGasPool = gp
 }
 
 func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
@@ -186,7 +193,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		if rw.background {
 			rw.SetReader(state.NewReaderParallelV3(rw.rs.Domains()))
 		} else {
-			rw.SetReader(state.NewReaderV3(rw.rs.Domains()))
+			rw.SetReader(state.NewReaderV3(rw.rs.TemporalGetter()))
 		}
 	}
 	if rw.background && rw.chainTx == nil {
@@ -200,19 +207,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
+	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.rs.Domains().SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 
 	rw.ibs.Reset()
-	ibs := rw.ibs
+	ibs, hooks, cc := rw.ibs, rw.hooks, rw.chainConfig
 	//ibs.SetTrace(true)
-	ibs.SetHooks(rw.hooks)
+	ibs.SetHooks(hooks)
 
-	rules := txTask.Rules
 	var err error
-	header := txTask.Header
-	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
+	rules, header := txTask.Rules, txTask.Header
 
 	switch {
 	case txTask.TxIndex == -1:
@@ -230,11 +236,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
+		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, constCall /* constCall */, hooks, rw.vmCfg)
 			return ret, err
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, rw.hooks)
+		rw.engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
@@ -242,78 +248,75 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 
 		// End of block transaction in a block
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
-			if err != nil {
-				return nil, err
-			}
-
-			txTask.Logs = append(txTask.Logs, logs...)
-
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, false /* constCall */, hooks, rw.vmCfg)
+			txTask.Logs = append(txTask.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 			return ret, err
 		}
 
 		if isMining {
-			_, txTask.Txs, txTask.BlockReceipts, _, err = rw.engine.FinalizeAndAssemble(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, nil, rw.logger)
+			_, txTask.Txs, txTask.BlockReceipts, _, err = rw.engine.FinalizeAndAssemble(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, nil, rw.logger)
 		} else {
-			_, _, _, err = rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
+			_, _, _, err = rw.engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
 		}
 		if err != nil {
 			txTask.Error = err
 		} else {
-			//incorrect unwind to block 2
-			//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
-			//	txTask.Error = err
-			//}
-			txTask.TraceTos = map[libcommon.Address]struct{}{}
+			txTask.TraceTos = map[common.Address]struct{}{}
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
-		tx := txTask.Tx
+		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
-			if !rw.chainConfig.AllowAA {
+			if !cc.AllowAA {
 				txTask.Error = errors.New("account abstraction transactions are not allowed")
 				break
 			}
 
+			msg, err := txn.AsMessage(types.Signer{}, nil, nil)
+			if err != nil {
+				txTask.Error = err
+				break
+			}
+
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 			rw.execAATxn(txTask)
+			break
 		}
 
 		msg := txTask.TxAsMessage
-
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
-		if rw.hooks != nil && rw.hooks.OnTxStart != nil {
-			rw.hooks.OnTxStart(rw.evm.GetVMContext(), tx, msg.From())
+		if hooks != nil && hooks.OnTxStart != nil {
+			hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
 		}
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.engine)
 		if err != nil {
 			txTask.Error = err
-			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
-				rw.hooks.OnTxEnd(nil, err)
+			if hooks != nil && hooks.OnTxEnd != nil {
+				hooks.OnTxEnd(nil, err)
 			}
 		} else {
 			txTask.Failed = applyRes.Failed()
-			txTask.UsedGas = applyRes.UsedGas
+			txTask.GasUsed = applyRes.GasUsed
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 
 			txTask.CreateReceipt(rw.Tx())
-			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
-				rw.hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+			if hooks != nil && hooks.OnTxEnd != nil {
+				hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
 			}
 		}
 
@@ -339,14 +342,15 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 		startIdx := uint64(txTask.TxIndex)
 		endIdx := startIdx + txTask.AAValidationBatchSize
 
-		validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize)
-		log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx-1)
+		validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize+1)
+		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
 
 		var outerErr error
-		for i := startIdx; i < endIdx; i++ {
+		for i := startIdx; i <= endIdx; i++ {
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(txTask.TxAsMessage), rw.ibs, rw.vmCfg, txTask.Rules)
 			// check if next n transactions are AA transactions and run validation
 			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-				aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
+				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
 				if !ok {
 					outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
 					break
@@ -372,7 +376,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 			txTask.Error = outerErr
 			return
 		}
-		log.Debug("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
 
 		txTask.ValidationResults = validationResults
 	}
@@ -385,6 +389,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	validationRes := txTask.ValidationResults[0]
 	txTask.ValidationResults = txTask.ValidationResults[1:]
 
+	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(txTask.TxAsMessage), rw.ibs, rw.vmCfg, txTask.Rules)
 	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, txTask.Header, rw.ibs)
 	if err != nil {
 		txTask.Error = err
@@ -392,14 +397,15 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	}
 
 	txTask.Failed = status != 0
-	txTask.UsedGas = gasUsed
+	txTask.GasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
 	txTask.TraceFroms = rw.callTracer.Froms()
 	txTask.TraceTos = rw.callTracer.Tos()
+	txTask.CreateReceipt(rw.Tx())
 
-	log.Debug("✅[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
+	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status, "gasUsed", gasUsed)
 }
 
 func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.ParallelExecutionState, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {

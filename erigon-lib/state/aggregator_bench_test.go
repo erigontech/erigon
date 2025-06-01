@@ -44,7 +44,9 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 	dirs := datadir.New(b.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
+	salt, err := GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(b, err)
+	agg, err := NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return db, agg
@@ -58,39 +60,32 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	vals := queueKeys(ctx, 53, length.Hash)
 
 	aggStep := uint64(100_00)
-	db, agg := testDbAndAggregatorBench(b, aggStep)
+	_db, agg := testDbAndAggregatorBench(b, aggStep)
+	db := wrapDbWithCtx(_db, agg)
 
-	tx, err := db.BeginRw(ctx)
+	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
 
-	require.NoError(b, err)
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
 	b.ReportAllocs()
 	b.ResetTimer()
-
+	var blockNum uint64
 	var prev []byte
 	for i := 0; i < b.N; i++ {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
 		domains.SetTxNum(txNum)
-		err := domains.DomainPut(kv.StorageDomain, key[:length.Addr], key[length.Addr:], val, prev, 0)
+		err := domains.DomainPut(kv.StorageDomain, tx, key, val, txNum, prev, 0)
 		prev = val
 		require.NoError(b, err)
 
 		if i%100000 == 0 {
-			_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			_, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 			require.NoError(b, err)
 		}
 	}
@@ -101,7 +96,7 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 	keys := make(chan []byte, 1)
 	go func() {
 		for {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil { //nolint:staticcheck
 				break
 			}
 			bb := make([]byte, ofSize)
@@ -112,17 +107,6 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 		close(keys)
 	}()
 	return keys
-}
-
-func Benchmark_BtreeIndex_Allocation(b *testing.B) {
-	rnd := newRnd(uint64(time.Now().UnixNano()))
-	for i := 0; i < b.N; i++ {
-		now := time.Now()
-		count := rnd.IntN(1000000000)
-		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
-		bt.traverseDfs()
-		fmt.Printf("alloc %v\n", time.Since(now))
-	}
 }
 
 func Benchmark_BtreeIndex_Search(b *testing.B) {
@@ -150,7 +134,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 		p := rnd.IntN(len(keys))
 		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
-		require.EqualValues(b, keys[p], cur.Key())
+		require.Equal(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
 		cur.Close()
 	}
@@ -192,7 +176,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.key)
+			require.Equal(b, keys[p], cur.key)
 			cur.Close()
 		}
 	})
@@ -204,7 +188,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.key)
+			require.Equal(b, keys[p], cur.key)
 
 			prevKey := common.Copy(keys[p])
 			ntimer := time.Duration(0)
@@ -275,7 +259,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		}
 
 		require.NoErrorf(b, err, "i=%d", i)
-		require.EqualValues(b, keys[p], key)
+		require.Equal(b, keys[p], key)
 	}
 }
 

@@ -20,21 +20,20 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
 // ChainReader implements consensus.ChainReader
 type ChainReader struct {
-	Cfg         chain.Config
+	Cfg         *chain.Config
 	Db          kv.Tx
 	BlockReader services.FullBlockReader
 	Logger      log.Logger
@@ -42,7 +41,7 @@ type ChainReader struct {
 
 // Config retrieves the blockchain's chain configuration.
 func (cr ChainReader) Config() *chain.Config {
-	return &cr.Cfg
+	return cr.Cfg
 }
 
 // CurrentHeader retrieves the current header from the local chain.
@@ -55,7 +54,7 @@ func (cr ChainReader) CurrentHeader() *types.Header {
 // CurrentFinalizedHeader retrieves the current finalized header from the local chain.
 func (cr ChainReader) CurrentFinalizedHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceFinalized(cr.Db)
-	if hash == (libcommon.Hash{}) {
+	if hash == (common.Hash{}) {
 		return nil
 	}
 
@@ -64,7 +63,7 @@ func (cr ChainReader) CurrentFinalizedHeader() *types.Header {
 
 func (cr ChainReader) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.Db)
-	if hash == (libcommon.Hash{}) {
+	if hash == (common.Hash{}) {
 		return nil
 	}
 
@@ -72,7 +71,7 @@ func (cr ChainReader) CurrentSafeHeader() *types.Header {
 }
 
 // GetHeader retrieves a block header from the database by hash and number.
-func (cr ChainReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
+func (cr ChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, number)
 	return h
 }
@@ -84,25 +83,25 @@ func (cr ChainReader) GetHeaderByNumber(number uint64) *types.Header {
 }
 
 // GetHeaderByHash retrieves a block header from the database by its hash.
-func (cr ChainReader) GetHeaderByHash(hash libcommon.Hash) *types.Header {
+func (cr ChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := cr.BlockReader.HeaderByHash(context.Background(), cr.Db, hash)
 	return h
 }
 
 // GetBlock retrieves a block from the database by hash and number.
-func (cr ChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	b, _, _ := cr.BlockReader.BlockWithSenders(context.Background(), cr.Db, hash, number)
 	return b
 }
 
 // HasBlock retrieves a block from the database by hash and number.
-func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
+func (cr ChainReader) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.BlockReader.BodyRlp(context.Background(), cr.Db, hash, number)
 	return b != nil
 }
 
 // GetTd retrieves the total difficulty from the database by hash and number.
-func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
+func (cr ChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.Db, hash, number)
 	if err != nil {
 		cr.Logger.Error("ReadTd failed", "err", err)
@@ -114,10 +113,10 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 func (cr ChainReader) FrozenBlocks() uint64    { return cr.BlockReader.FrozenBlocks() }
 func (cr ChainReader) FrozenBorBlocks() uint64 { return cr.BlockReader.FrozenBorBlocks() }
 
-func (cr ChainReader) BorStartEventId(_ libcommon.Hash, _ uint64) uint64 {
+func (cr ChainReader) BorStartEventId(_ common.Hash, _ uint64) uint64 {
 	panic("bor events by block not implemented")
 }
-func (cr ChainReader) BorEventsByBlock(_ libcommon.Hash, _ uint64) []rlp.RawValue {
+func (cr ChainReader) BorEventsByBlock(_ common.Hash, _ uint64) []rlp.RawValue {
 	panic("bor events by block not implemented")
 }
 

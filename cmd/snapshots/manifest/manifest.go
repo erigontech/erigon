@@ -33,17 +33,18 @@ import (
 
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var (
-	VersionFlag = cli.IntFlag{
+	VersionFlag = cli.StringFlag{
 		Name:     "version",
 		Usage:    `Manifest file versions`,
 		Required: false,
-		Value:    0,
+		Value:    "0.0",
 	}
 )
 
@@ -148,18 +149,18 @@ func manifest(cliCtx *cli.Context, command string) error {
 
 	logger.Debug("Starting manifest " + command)
 
-	var version *snaptype.Version
+	var versionStr *version.Version
 
-	if val := cliCtx.Int(VersionFlag.Name); val != 0 {
-		v := snaptype.Version(val)
-		version = &v
+	if val := cliCtx.String(VersionFlag.Name); val != "0.0" && val != "" {
+		v, _ := version.ParseVersion("v" + val)
+		versionStr = &v
 	}
 
 	switch command {
 	case "update":
-		return updateManifest(cliCtx.Context, tempDir, srcSession, version)
+		return updateManifest(cliCtx.Context, tempDir, srcSession, versionStr)
 	case "verify":
-		return verifyManifest(cliCtx.Context, srcSession, version, os.Stdout)
+		return verifyManifest(cliCtx.Context, srcSession, versionStr, os.Stdout)
 	default:
 		return listManifest(cliCtx.Context, srcSession, os.Stdout)
 	}
@@ -179,7 +180,7 @@ func listManifest(ctx context.Context, srcSession *downloader.RCloneSession, out
 	return nil
 }
 
-func updateManifest(ctx context.Context, tmpDir string, srcSession *downloader.RCloneSession, version *snaptype.Version) error {
+func updateManifest(ctx context.Context, tmpDir string, srcSession *downloader.RCloneSession, versionStr *version.Version) error {
 	entities, err := srcSession.ReadRemoteDir(ctx, true)
 
 	if err != nil {
@@ -207,7 +208,7 @@ func updateManifest(ctx context.Context, tmpDir string, srcSession *downloader.R
 		if !ok {
 			continue
 		}
-		if !isStateFile && version != nil && *version != info.Version {
+		if !isStateFile && versionStr != nil && *versionStr != info.Version {
 			continue
 		}
 

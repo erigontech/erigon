@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
@@ -32,7 +32,7 @@ import (
 )
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
-func (api *APIImpl) GetBalance(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
@@ -56,7 +56,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address libcommon.Address, b
 }
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
-func (api *APIImpl) GetTransactionCount(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
+func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
 	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
 		reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
 			Address: gointerfaces.ConvertAddressToH160(address),
@@ -87,7 +87,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address libcommon.A
 }
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
-func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
@@ -103,10 +103,10 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 	}
 
 	acc, err := reader.ReadAccountData(address)
-	if acc == nil || err != nil {
+	if acc == nil || err != nil || acc.IsEmptyCodeHash() {
 		return hexutil.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(address, acc.Incarnation)
+	res, _ := reader.ReadAccountCode(address)
 	if res == nil {
 		return hexutil.Bytes(""), nil
 	}
@@ -114,7 +114,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 }
 
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
-func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
+func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
 	if err := hexutil.IsValidQuantity(index); err != nil {
 		log.Debug("GetStorageAt: Skipped quantity validation error " + "unable to decode storage key: " + err.Error())
@@ -125,29 +125,26 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address,
 	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return hexutil.Encode(libcommon.LeftPadBytes(empty, 32)), err
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 	defer tx.Rollback()
 
 	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
 	if err != nil {
-		return hexutil.Encode(libcommon.LeftPadBytes(empty, 32)), err
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
-		return hexutil.Encode(libcommon.LeftPadBytes(empty, 32)), err
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 
-	location := libcommon.HexToHash(index)
-	res, err := reader.ReadAccountStorage(address, acc.Incarnation, &location)
-	if err != nil {
-		res = empty
-	}
-	return hexutil.Encode(libcommon.LeftPadBytes(res, 32)), err
+	location := common.HexToHash(index)
+	res, _, err := reader.ReadAccountStorage(address, location)
+	return hexutil.Encode(res.PaddedBytes(32)), err
 }
 
 // Exist returns whether an account for a given address exists in the database.
-func (api *APIImpl) Exist(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
+func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return false, err1

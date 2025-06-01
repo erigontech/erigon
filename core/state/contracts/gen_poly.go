@@ -10,11 +10,11 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const PolyABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"c
 var PolyBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260606000534360015360ff60025360036000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea264697066735822122032d356806c978fb0bf45bc0b927ecf2af1ebbc7036396fe43793a0d0a312cac164736f6c63430007020033"
 
 // DeployPoly deploys a new Ethereum contract, binding an instance of Poly to it.
-func DeployPoly(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Poly, error) {
+func DeployPoly(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Poly, error) {
 	parsed, err := abi.JSON(strings.NewReader(PolyABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(PolyBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(PolyBin), backend)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &Poly{PolyCaller: PolyCaller{contract: contract}, PolyTransactor: PolyTransactor{contract: contract}, PolyFilterer: PolyFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type PolyTransactorRaw struct {
 }
 
 // NewPoly creates a new instance of Poly, bound to a specific deployed contract.
-func NewPoly(address libcommon.Address, backend bind.ContractBackend) (*Poly, error) {
+func NewPoly(address common.Address, backend bind.ContractBackend) (*Poly, error) {
 	contract, err := bindPoly(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewPoly(address libcommon.Address, backend bind.ContractBackend) (*Poly, er
 }
 
 // NewPolyCaller creates a new read-only instance of Poly, bound to a specific deployed contract.
-func NewPolyCaller(address libcommon.Address, caller bind.ContractCaller) (*PolyCaller, error) {
+func NewPolyCaller(address common.Address, caller bind.ContractCaller) (*PolyCaller, error) {
 	contract, err := bindPoly(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewPolyCaller(address libcommon.Address, caller bind.ContractCaller) (*Poly
 }
 
 // NewPolyTransactor creates a new write-only instance of Poly, bound to a specific deployed contract.
-func NewPolyTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*PolyTransactor, error) {
+func NewPolyTransactor(address common.Address, transactor bind.ContractTransactor) (*PolyTransactor, error) {
 	contract, err := bindPoly(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewPolyTransactor(address libcommon.Address, transactor bind.ContractTransa
 }
 
 // NewPolyFilterer creates a new log filterer instance of Poly, bound to a specific deployed contract.
-func NewPolyFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*PolyFilterer, error) {
+func NewPolyFilterer(address common.Address, filterer bind.ContractFilterer) (*PolyFilterer, error) {
 	contract, err := bindPoly(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewPolyFilterer(address libcommon.Address, filterer bind.ContractFilterer) 
 }
 
 // bindPoly binds a generic wrapper to an already deployed contract.
-func bindPoly(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindPoly(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(PolyABI))
 	if err != nil {
 		return nil, err
@@ -319,12 +319,12 @@ func (it *PolyDeployEventIterator) Close() error {
 
 // PolyDeployEvent represents a DeployEvent event raised by the Poly contract.
 type PolyDeployEvent struct {
-	D   libcommon.Address
+	D   common.Address
 	Raw types.Log // Blockchain specific contextual infos
 }
 
-func (_Poly *PolyFilterer) DeployEventEventID() libcommon.Hash {
-	return libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")
+func (_Poly *PolyFilterer) DeployEventEventID() common.Hash {
+	return common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")
 }
 
 // FilterDeployEvent is a free log retrieval operation binding the contract event 0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb.

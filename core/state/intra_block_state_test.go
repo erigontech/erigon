@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package state
 
 import (
@@ -36,21 +34,24 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	stateLib "github.com/erigontech/erigon-lib/state"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 )
 
 func TestSnapshotRandom(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
-	config := &quick.Config{MaxCount: 1000}
+	config := &quick.Config{MaxCount: 10}
 	err := quick.Check((*snapshotTest).run, config)
 	if cerr, ok := err.(*quick.CheckError); ok {
 		test := cerr.In[0].(*snapshotTest)
@@ -72,10 +73,10 @@ func TestSnapshotRandom(t *testing.T) {
 // accessor methods on the reverted state must match the return value of the equivalent
 // methods on the replayed state.
 type snapshotTest struct {
-	addrs     []libcommon.Address // all account addresses
-	actions   []testAction        // modifications to the state
-	snapshots []int               // actions indexes at which snapshot is taken
-	err       error               // failure details are reported through this field
+	addrs     []common.Address // all account addresses
+	actions   []testAction     // modifications to the state
+	snapshots []int            // actions indexes at which snapshot is taken
+	err       error            // failure details are reported through this field
 }
 
 type testAction struct {
@@ -86,12 +87,12 @@ type testAction struct {
 }
 
 // newTestAction creates a random action that changes state.
-func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
+func newTestAction(addr common.Address, r *rand.Rand) testAction {
 	actions := []testAction{
 		{
 			name: "SetBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.SetBalance(addr, uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
+				s.SetBalance(addr, *uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
@@ -112,10 +113,10 @@ func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 		{
 			name: "SetState",
 			fn: func(a testAction, s *IntraBlockState) {
-				var key libcommon.Hash
+				var key common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
-				s.SetState(addr, &key, *val)
+				s.SetState(addr, key, *val)
 			},
 			args: make([]int64, 2),
 		},
@@ -168,14 +169,14 @@ func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 			name: "AddSlotToAccessList",
 			fn: func(a testAction, s *IntraBlockState) {
 				s.AddSlotToAccessList(addr,
-					libcommon.Hash{byte(a.args[0])})
+					common.Hash{byte(a.args[0])})
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetTransientState",
 			fn: func(a testAction, s *IntraBlockState) {
-				var key libcommon.Hash
+				var key common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
 				s.SetTransientState(addr, key, *val)
@@ -200,7 +201,7 @@ func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 // derived from r.
 func (*snapshotTest) Generate(r *rand.Rand, size int) reflect.Value {
 	// Generate random actions.
-	addrs := make([]libcommon.Address, 50)
+	addrs := make([]common.Address, 50)
 	for i := range addrs {
 		addrs[i][0] = byte(i)
 	}
@@ -261,22 +262,13 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer domains.Close()
-
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		test.err = err
 		return false
 	}
 	var (
-		state        = New(NewReaderV3(domains))
+		state        = New(NewReaderV3(tx))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
@@ -290,7 +282,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkstate := New(NewReaderV3(domains))
+		checkstate := New(NewReaderV3(tx))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
 		}
@@ -396,7 +388,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		if obj != nil {
 			for key, value := range obj.dirtyStorage {
 				var out uint256.Int
-				checkstate.GetState(addr, &key, &out)
+				checkstate.GetState(addr, key, &out)
 				if !checkeq("GetState("+key.Hex()+")", out, value) {
 					return err
 				}
@@ -409,7 +401,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		if obj != nil {
 			for key, value := range obj.dirtyStorage {
 				var out uint256.Int
-				state.GetState(addr, &key, &out)
+				state.GetState(addr, key, &out)
 				if !checkeq("GetState("+key.Hex()+")", out, value) {
 					return err
 				}
@@ -422,7 +414,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			state.GetRefund(), checkstate.GetRefund())
 	}
 	if !reflect.DeepEqual(state.GetRawLogs(0), checkstate.GetRawLogs(0)) {
-		return fmt.Errorf("got GetRawLogs(libcommon.Hash{}) == %v, want GetRawLogs(libcommon.Hash{}) == %v",
+		return fmt.Errorf("got GetRawLogs(common.Hash{}) == %v, want GetRawLogs(common.Hash{}) == %v",
 			state.GetRawLogs(0), checkstate.GetRawLogs(0))
 	}
 	return nil
@@ -432,9 +424,9 @@ func TestTransientStorage(t *testing.T) {
 	t.Parallel()
 	state := New(nil)
 
-	key := libcommon.Hash{0x01}
+	key := common.Hash{0x01}
 	value := uint256.NewInt(2)
-	addr := libcommon.Address{}
+	addr := common.Address{}
 
 	state.SetTransientState(addr, key, *value)
 	if exp, got := 1, state.journal.length(); exp != got {

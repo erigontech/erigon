@@ -34,6 +34,9 @@ import (
 )
 
 func TestFeeHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	overMaxQuery := make([]float64, 101)
 	for i := 0; i < 101; i++ {

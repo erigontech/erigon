@@ -24,7 +24,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -51,8 +51,8 @@ type BeaconSnapshotReader interface {
 	// ReadBlockBySlot reads the block at the given slot.
 	// If the block is not present, it returns nil.
 	ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
-	ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, error)
-	ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, error)
+	ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error)
+	ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, error)
 	ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error)
 
 	FrozenSlots() uint64
@@ -86,7 +86,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 		if err != nil {
 			return nil, err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if blockRoot == (common.Hash{}) {
 			return nil, nil
 		}
 		buf, err = tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, blockRoot))
@@ -115,8 +115,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 			return nil, nil
 		}
 
-		buf = buf[:0]
-		buf, _ = gg.Next(buf)
+		buf, _ = gg.Next(buf[:0])
 	}
 	if len(buf) == 0 {
 		return nil, nil
@@ -149,7 +148,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 		if err != nil {
 			return nil, err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if blockRoot == (common.Hash{}) {
 			return nil, nil
 		}
 		buf, err = tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, blockRoot))
@@ -178,8 +177,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 			return nil, nil
 		}
 
-		buf = buf[:0]
-		buf, _ = gg.Next(buf)
+		buf, _ = gg.Next(buf[:0])
 	}
 	if len(buf) == 0 {
 		return nil, nil
@@ -199,7 +197,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 	return snapshot_format.ReadBlindedBlockFromSnapshot(reader, r.cfg)
 }
 
-func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, root libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
+func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlock, error) {
 	if r.eth1Getter == nil {
 		return nil, nil
 	}
@@ -259,8 +257,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 			return nil, nil
 		}
 
-		buf = buf[:0]
-		buf, _ = gg.Next(buf)
+		buf, _ = gg.Next(buf[:0])
 	}
 
 	if len(buf) == 0 {
@@ -280,7 +277,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	return snapshot_format.ReadBlockFromSnapshot(reader, r.eth1Getter, r.cfg)
 }
 
-func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, root libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
+func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
 	view := r.sn.View()
 	defer view.Close()
 

@@ -25,17 +25,18 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus/clique"
-	"github.com/erigontech/erigon/params"
+	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -51,29 +52,27 @@ func TestReimportMirroredState(t *testing.T) {
 		cliqueDB = memdb.NewTestDB(t, kv.ConsensusDB)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
-		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB, log.New())
+		engine   = clique.New(params2.AllCliqueProtocolChanges, params2.CliqueSnapshot, cliqueDB, log.New())
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &types.Genesis{
 		ExtraData: make([]byte, clique.ExtraVanity+length.Addr+clique.ExtraSeal),
-		Alloc: map[libcommon.Address]types.GenesisAccount{
+		Alloc: map[common.Address]types.GenesisAccount{
 			addr: {Balance: big.NewInt(10000000000000000)},
 		},
-		Config: params.AllCliqueProtocolChanges,
+		Config: params2.AllCliqueProtocolChanges,
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
 	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot)
 
 	// Generate a batch of blocks, each properly signed
-	getHeader := func(hash libcommon.Hash, number uint64) (h *types.Header) {
-		if err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+	getHeader := func(hash common.Hash, number uint64) (h *types.Header, err error) {
+		err = m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
 			h, err = m.BlockReader.Header(m.Ctx, tx, hash, number)
 			return err
-		}); err != nil {
-			panic(err)
-		}
-		return h
+		})
+		return h, err
 	}
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
@@ -85,7 +84,7 @@ func TestReimportMirroredState(t *testing.T) {
 		// first one. The last is needs a state change again to force a reorg.
 		if i != 1 {
 			baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), libcommon.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}

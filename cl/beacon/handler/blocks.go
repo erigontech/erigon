@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"net/http"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -30,18 +30,18 @@ import (
 )
 
 type headerResponse struct {
-	Root      libcommon.Hash                   `json:"root"`
+	Root      common.Hash                      `json:"root"`
 	Canonical bool                             `json:"canonical"`
 	Header    *cltypes.SignedBeaconBlockHeader `json:"header"`
 }
 
-func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *beaconhttp.SegmentID) (root libcommon.Hash, err error) {
+func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *beaconhttp.SegmentID) (root common.Hash, err error) {
 	switch {
 	case blockId.Head():
 		var statusCode int
 		root, _, statusCode, err = a.getHead()
 		if err != nil {
-			return libcommon.Hash{}, beaconhttp.NewEndpointError(statusCode, err)
+			return common.Hash{}, beaconhttp.NewEndpointError(statusCode, err)
 		}
 	case blockId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().Root
@@ -50,24 +50,24 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *bea
 	case blockId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
-		if root == (libcommon.Hash{}) {
-			return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
+		if root == (common.Hash{}) {
+			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
 		}
 	case blockId.GetSlot() != nil:
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *blockId.GetSlot())
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
-		if root == (libcommon.Hash{}) {
-			return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %d", *blockId.GetSlot()))
+		if root == (common.Hash{}) {
+			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %d", *blockId.GetSlot()))
 		}
 	case blockId.GetRoot() != nil:
 		// first check if it exists
 		root = *blockId.GetRoot()
 	default:
-		return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("cannot parse block id"))
+		return common.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("cannot parse block id"))
 	}
 	return
 }
@@ -99,7 +99,7 @@ func (a *ApiHandler) GetEthV1BeaconBlock(w http.ResponseWriter, r *http.Request)
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
 	}
 	// Check if the block is canonical
-	var canonicalRoot libcommon.Hash
+	var canonicalRoot common.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
 	if err != nil {
 		return nil, err
@@ -134,7 +134,7 @@ func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
 	}
 	// Check if the block is canonical
-	var canonicalRoot libcommon.Hash
+	var canonicalRoot common.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
 	if err != nil {
 		return nil, err
@@ -207,12 +207,12 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
 	}
 	// Check if the block is canonical
-	var canonicalRoot libcommon.Hash
+	var canonicalRoot common.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
 	if err != nil {
 		return nil, err
 	}
 	return newBeaconResponse(struct {
-		Root libcommon.Hash `json:"root"`
+		Root common.Hash `json:"root"`
 	}{Root: root}).WithFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()).WithOptimistic(isOptimistic), nil
 }

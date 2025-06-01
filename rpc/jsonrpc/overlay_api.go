@@ -34,10 +34,9 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/filters"
@@ -162,15 +161,15 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, block.Hash())
 	}
 
-	getHash := func(i uint64) common.Hash {
+	getHash := func(i uint64) (common.Hash, error) {
 		if hash, ok := overrideBlockHash[i]; ok {
-			return hash
+			return hash, nil
 		}
 		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
 		if err != nil || !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
-		return hash
+		return hash, err
 	}
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
@@ -442,15 +441,15 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	getHash := func(i uint64) common.Hash {
+	getHash := func(i uint64) (common.Hash, error) {
 		if hash, ok := overrideBlockHash[i]; ok {
-			return hash
+			return hash, nil
 		}
 		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
 		if err != nil || !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
-		return hash
+		return hash, err
 	}
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)

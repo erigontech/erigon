@@ -21,10 +21,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
@@ -43,8 +41,7 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 		return false, err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	reader, err := rpchelper.CreateHistoryStateReader(tx, txNumsReader, blockNumber, 0, chainConfig.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(tx, api._txNumReader, blockNumber, 0, chainConfig.ChainName)
 	if err != nil {
 		return false, err
 	}

@@ -20,7 +20,7 @@ import (
 	"errors"
 	"sort"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -35,7 +35,7 @@ type fork struct {
 	version [4]byte
 }
 
-func forkList(schedule map[libcommon.Bytes4]uint64) (f []fork) {
+func forkList(schedule map[common.Bytes4]uint64) (f []fork) {
 	for version, epoch := range schedule {
 		f = append(f, fork{epoch: epoch, version: version})
 	}
@@ -50,7 +50,7 @@ func ComputeDomain(
 	currentVersion [4]byte,
 	genesisValidatorsRoot [32]byte,
 ) ([]byte, error) {
-	var currentVersion32 libcommon.Hash
+	var currentVersion32 common.Hash
 	copy(currentVersion32[:], currentVersion[:])
 	forkDataRoot := utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 	return append(domainType, forkDataRoot[:28]...), nil
@@ -67,7 +67,7 @@ func ComputeSigningRoot(
 	return utils.Sha256(objRoot[:], domain), nil
 }
 
-func Domain(fork *cltypes.Fork, epoch uint64, domainType [4]byte, genesisRoot libcommon.Hash) ([]byte, error) {
+func Domain(fork *cltypes.Fork, epoch uint64, domainType [4]byte, genesisRoot common.Hash) ([]byte, error) {
 	if fork == nil {
 		return []byte{}, errors.New("nil fork or domain type")
 	}

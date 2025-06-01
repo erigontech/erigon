@@ -24,15 +24,14 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 )
 
 // VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,
@@ -145,8 +144,13 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *big.Int {
 
 func getBaseFeeChangeDenominator(borConfig chain.BorConfig, number uint64) uint64 {
 	// If we're running bor based chain post delhi hardfork, return the new value
-	if borConfig, ok := borConfig.(*borcfg.BorConfig); ok && borConfig.IsDelhi(number) {
-		return params.BaseFeeChangeDenominatorPostDelhi
+	if borConfig, ok := borConfig.(*borcfg.BorConfig); ok {
+		switch {
+		case borConfig.IsBhilai(number):
+			return params.BaseFeeChangeDenominatorPostBhilai
+		case borConfig.IsDelhi(number):
+			return params.BaseFeeChangeDenominatorPostDelhi
+		}
 	}
 
 	// Return the original once for other chains and pre-fork cases

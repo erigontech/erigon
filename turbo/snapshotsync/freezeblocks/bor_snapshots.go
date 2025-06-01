@@ -99,15 +99,22 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		}
 	}
 
+	merged, err := br.MergeBorBlocks(ctx, lvl, seedNewSnapshots, onDelete)
+	return blocksRetired || merged, err
+}
+
+func (br *BlockRetire) MergeBorBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error) (mergedBlocks bool, err error) {
+	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
+	snapshots := br.borSnapshots()
+	chainConfig := fromdb.ChainConfig(br.db)
 	merger := snapshotsync.NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) > 0 {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", snapshotsync.Ranges(rangesToMerge))
 	}
 	if len(rangesToMerge) == 0 {
-		return blocksRetired, nil
+		return false, nil
 	}
-	blocksRetired = true // have something to merge
 	onMerge := func(r snapshotsync.Range) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
@@ -123,16 +130,14 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		}
 		return nil
 	}
-
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-	if err != nil {
-		return blocksRetired, err
+	if err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete); err != nil {
+		return false, err
 	}
 
 	{
 		files, _, err := snapshotsync.TypedSegments(br.borSnapshots().Dir(), br.borSnapshots().SegmentsMin(), heimdall.SnapshotTypes(), false)
 		if err != nil {
-			return blocksRetired, err
+			return true, err
 		}
 
 		// this is one off code to fix an issue in 2.49.x->2.52.x which missed
@@ -140,7 +145,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		removeBorOverlaps(br.borSnapshots().Dir(), files, br.borSnapshots().BlocksAvailable())
 	}
 
-	return blocksRetired, nil
+	return true, nil
 }
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed
@@ -199,8 +204,10 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 
 	for _, f := range toDel {
 		_ = os.Remove(f)
+		_ = os.Remove(f + ".torrent")
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
+		_ = os.Remove(withoutExt + ".idx.torrent")
 	}
 }

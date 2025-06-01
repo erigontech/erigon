@@ -22,23 +22,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon-lib/chain/networkid"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 )
 
 func TestMainnet(t *testing.T) {
-	state, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	state, err := initial_state.GetGenesisState(networkid.MainnetChainID)
 	require.NoError(t, err)
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
-	assert.Equal(t, libcommon.Hash(root), libcommon.HexToHash("7e76880eb67bbdc86250aa578958e9d0675e64e714337855204fb5abaaf82c2b"))
+	assert.Equal(t, common.Hash(root), common.HexToHash("7e76880eb67bbdc86250aa578958e9d0675e64e714337855204fb5abaaf82c2b"))
 }
 
 func TestSepolia(t *testing.T) {
-	state, err := initial_state.GetGenesisState(clparams.SepoliaNetwork)
+	state, err := initial_state.GetGenesisState(networkid.SepoliaChainID)
 	require.NoError(t, err)
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
-	assert.Equal(t, libcommon.Hash(root), libcommon.HexToHash("fb9afe32150fa39f4b346be2519a67e2a4f5efcd50a1dc192c3f6b3d013d2798"))
+	assert.Equal(t, common.Hash(root), common.HexToHash("fb9afe32150fa39f4b346be2519a67e2a4f5efcd50a1dc192c3f6b3d013d2798"))
 }

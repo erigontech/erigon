@@ -38,7 +38,6 @@ var (
 	mxPrunableHCode        = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
 	mxPrunableHComm        = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="commitment"}`)
 	mxUnwindTook           = metrics.GetOrCreateHistogram(`domain_unwind_took{type="domain"}`)
-	mxUnwindSharedTook     = metrics.GetOrCreateHistogram(`domain_unwind_took{type="shared"}`)
 	mxRunningUnwind        = metrics.GetOrCreateGauge("domain_running_unwind")
 	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
 	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
@@ -113,6 +112,14 @@ var (
 			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="receipt"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="receipt"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="receipt"}`),
+		},
+		kv.RCacheDomain: {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="rcache"}`),
 		},
 	}
 )

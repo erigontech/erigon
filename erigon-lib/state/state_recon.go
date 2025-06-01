@@ -25,7 +25,7 @@ import (
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g           *seg.Reader
+	g           seg.ReaderI
 	key         []byte
 	txNum       uint64
 	startTxNum  uint64

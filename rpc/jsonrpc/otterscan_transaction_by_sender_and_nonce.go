@@ -26,10 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error) {
@@ -83,19 +80,15 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		prevTxnID = txnID
 	}
 
-	// The sort.Search function finds the first block where the incarnation has
-	// changed to the desired one, so we get the previous block from the bitmap;
-	// however if the creationTxnID block is already the first one from the bitmap, it means
-	// the block we want is the max block from the previous shard.
-	var creationTxnID uint64
+	var nonceTxnID uint64
 	var searchErr error
 
 	if nextTxnID == 0 {
 		nextTxnID = prevTxnID + 1
 	}
-	// Binary search in [prevTxnID, nextTxnID] range; get first block where desired incarnation appears
-	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
-	idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
+	// Binary search in [prevTxnID, nextTxnID + 1] range; get first block where desired nonce appears
+	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID + 1])?
+	idx := sort.Search(int(nextTxnID-prevTxnID+1), func(i int) bool {
 		txnID := uint64(i) + prevTxnID
 		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
@@ -106,7 +99,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 			return false
 		}
 		if len(v) == 0 {
-			creationTxnID = max(creationTxnID, txnID)
+			nonceTxnID = max(nonceTxnID, txnID)
 			return false
 		}
 
@@ -120,31 +113,30 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		// previous history block contains the actual change; it may contain multiple
 		// nonce changes.
 		if acc.Nonce <= nonce {
-			creationTxnID = max(creationTxnID, txnID)
+			nonceTxnID = max(nonceTxnID, txnID)
 			return false
 		}
 		return true
 	})
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	if searchErr != nil {
 		return nil, searchErr
 	}
-	if creationTxnID == 0 {
+	if nonceTxnID == 0 {
 		return nil, nil
 	}
-	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
+	ok, bn, err := api._txNumReader.FindBlockNum(tx, nonceTxnID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("block not found by txnID=%d", creationTxnID)
+		return nil, fmt.Errorf("block not found by txnID=%d", nonceTxnID)
 	}
-	minTxNum, err := txNumsReader.Min(tx, bn)
+	minTxNum, err := api._txNumReader.Min(tx, bn)
 	if err != nil {
 		return nil, err
 	}
-	txIndex := int(creationTxnID) - int(minTxNum) - 1 /* system-tx */
+	txIndex := int(nonceTxnID) - int(minTxNum) - 1 /* system-tx */
 	if txIndex == -1 {
 		txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
 	}

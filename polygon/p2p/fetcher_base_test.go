@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
 func TestFetcherFetchHeaders(t *testing.T) {
@@ -134,6 +134,10 @@ func TestFetcherFetchHeadersWithChunking(t *testing.T) {
 }
 
 func TestFetcherFetchHeadersResponseTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -184,6 +188,10 @@ func TestFetcherFetchHeadersResponseTimeout(t *testing.T) {
 }
 
 func TestFetcherFetchHeadersResponseTimeoutRetrySuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -394,6 +402,10 @@ func TestFetcherFetchBodies(t *testing.T) {
 }
 
 func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -433,6 +445,10 @@ func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
 }
 
 func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)

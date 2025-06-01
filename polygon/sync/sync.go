@@ -25,9 +25,8 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
@@ -299,7 +298,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 			amount = 1024
 		}
 
-		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
+		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(5 * time.Second)}
 		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, newBlockHeaderHash, amount, event.PeerId, opts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
@@ -340,12 +339,13 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	oldTip := ccb.Tip()
 	newConnectedHeaders, err := ccb.Connect(ctx, headerChain)
 	if err != nil {
+		// IMPORTANT: we just log the error and do not return
+		// to process the possibility of a partially connected header chain
 		s.logger.Debug(
-			syncLogPrefix("applyNewBlockOnTip: couldn't connect a header to the local chain tip, ignoring"),
+			syncLogPrefix("applyNewBlockOnTip: couldn't connect header chain to the local chain tip"),
+			"partiallyConnected", len(newConnectedHeaders),
 			"err", err,
 		)
-
-		return nil
 	}
 	if len(newConnectedHeaders) == 0 {
 		return nil
@@ -379,8 +379,9 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		}
 	}
 
-	// len(newConnectedHeaders) is always <= len(blockChain)
-	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	newBlocksStartIdx := firstNewConnectedHeader.Number.Uint64() - blockChain[0].NumberU64()
+	newBlocksEndIdx := newBlocksStartIdx + uint64(len(newConnectedHeaders))
+	newConnectedBlocks := blockChain[newBlocksStartIdx:newBlocksEndIdx]
 	if len(newConnectedBlocks) > 1 {
 		s.logger.Info(
 			syncLogPrefix("inserting multiple connected blocks"),
@@ -681,7 +682,7 @@ func (s *Sync) Run(ctx context.Context) error {
 
 		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
 
-		if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
+		if err := common.Sleep(ctx, 30*time.Second); err != nil {
 			return err
 		}
 	}
@@ -870,6 +871,12 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 		finalisedTip = result
 	}
 
+	if finalisedTip.latestTip != nil {
+		if err := s.heimdallSync.SynchronizeSpans(ctx, finalisedTip.latestTip.Number.Uint64()); err != nil {
+			return syncToTipResult{}, err
+		}
+	}
+
 	return finalisedTip, nil
 }
 
@@ -929,10 +936,17 @@ func (s *Sync) sync(
 		}
 
 		if err := s.commitExecution(ctx, newTip, newTip); err != nil {
-			// note: if we face a failure during execution of finalized waypoints blocks, it means that
-			// we're wrong and the blocks are not considered as bad blocks, so we should terminate
-			err = s.handleWaypointExecutionErr(ctx, tip, err)
-			return syncToTipResult{}, false, err
+			if errors.Is(err, ErrUfcTooFarBehind) {
+				s.logger.Warn(
+					syncLogPrefix("ufc skipped during sync to tip - likely due to domain ahead of blocks"),
+					"err", err,
+				)
+			} else {
+				// note: if we face a failure during execution of finalized waypoints blocks, it means that
+				// we're wrong and the blocks are not considered as bad blocks, so we should terminate
+				err = s.handleWaypointExecutionErr(ctx, tip, err)
+				return syncToTipResult{}, false, err
+			}
 		}
 
 		tip = newTip

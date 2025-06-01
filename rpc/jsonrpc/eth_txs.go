@@ -22,19 +22,18 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/core/rawdb"
-	types2 "github.com/erigontech/erigon/core/types"
+	types2 "github.com/erigontech/erigon-lib/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	borrawdb "github.com/erigontech/erigon/polygon/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
@@ -55,8 +54,6 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return nil, err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-
 	// Private API returns 0 if transaction is not found.
 	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 	if isBorStateSyncTx {
@@ -71,7 +68,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 	}
 	if ok {
-		txNumMin, err := txNumsReader.Min(tx, blockNum)
+		txNumMin, err := api._txNumReader.Min(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -231,7 +228,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 				borTx = bortypes.NewBorTransaction()
 			}
 		} else {
-			borTx = rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
+			borTx = borrawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
 		}
 		if borTx == nil {
 			return nil, nil // not error
@@ -307,7 +304,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 				borTx = bortypes.NewBorTransaction()
 			}
 		} else {
-			borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
+			borTx = borrawdb.ReadBorTransactionForBlock(tx, blockNum)
 		}
 		if borTx == nil {
 			return nil, nil

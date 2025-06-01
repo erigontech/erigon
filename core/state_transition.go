@@ -27,22 +27,20 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 )
-
-var emptyCodeHash = crypto.Keccak256Hash(nil)
 
 /*
 The State Transitioning Model
@@ -76,7 +74,7 @@ type StateTransition struct {
 	initialGas   uint64
 	value        *uint256.Int
 	data         []byte
-	state        evmtypes.IntraBlockState
+	state        *state.IntraBlockState
 	evm          *vm.EVM
 
 	//some pre-allocated intermediate variables
@@ -86,8 +84,8 @@ type StateTransition struct {
 
 // Message represents a message sent to a contract.
 type Message interface {
-	From() libcommon.Address
-	To() *libcommon.Address
+	From() common.Address
+	To() *common.Address
 
 	GasPrice() *uint256.Int
 	FeeCap() *uint256.Int
@@ -101,7 +99,7 @@ type Message interface {
 	CheckNonce() bool
 	Data() []byte
 	AccessList() types.AccessList
-	BlobHashes() []libcommon.Hash
+	BlobHashes() []common.Hash
 	Authorizations() []types.Authorization
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
@@ -142,8 +140,8 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			ret, _, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */, nil)
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, nil, evm.Config())
 			return ret, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
@@ -151,41 +149,14 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
 
-type EntryPointCall struct {
-	OnEnterSuper tracing.EnterHook
-	Input        []byte
-	From         libcommon.Address
-	Error        error
-}
-
-func (epc *EntryPointCall) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if epc.OnEnterSuper != nil {
-		epc.OnEnterSuper(depth, typ, from, to, precompile, input, gas, value, code)
-	}
-
-	isRip7560EntryPoint := to.Cmp(types.AA_ENTRY_POINT) == 0
-	if !isRip7560EntryPoint {
-		return
-	}
-
-	if epc.Input != nil {
-		epc.Error = errors.New("illegal repeated call to the EntryPoint callback")
-		return
-	}
-
-	epc.Input = make([]byte, len(input))
-	copy(epc.Input, input)
-	epc.From = from
-}
-
-func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool, validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
-	return NewStateTransition(evm, msg, gp).ApplyFrame(validateFrame)
+func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResult, error) {
+	return NewStateTransition(evm, msg, gp).ApplyFrame()
 }
 
 // to returns the recipient of the message.
-func (st *StateTransition) to() libcommon.Address {
+func (st *StateTransition) to() common.Address {
 	if st.msg == nil || st.msg.To() == nil /* contract creation */ {
-		return libcommon.Address{}
+		return common.Address{}
 	}
 	return *st.msg.To()
 }
@@ -262,7 +233,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	return nil
 }
 
-func CheckEip1559TxGasFeeCap(from libcommon.Address, feeCap, tipCap, baseFee *uint256.Int, isFree bool) error {
+func CheckEip1559TxGasFeeCap(from common.Address, feeCap, tipCap, baseFee *uint256.Int, isFree bool) error {
 	if feeCap.Lt(tipCap) {
 		return fmt.Errorf("%w: address %v, tipCap: %s, feeCap: %s", ErrTipAboveFeeCap,
 			from.Hex(), tipCap, feeCap)
@@ -298,8 +269,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
-		if codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
-			// libcommon.Hash{} means that the sender is not in the state.
+		if codeHash != empty.CodeHash && codeHash != (common.Hash{}) {
+			// common.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
 
@@ -341,7 +312,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 }
 
 // ApplyFrame is similar to TransitionDb but without gas accounting, for use in RIP-7560 transactions
-func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
+func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -354,12 +325,9 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 	}
 	coinbaseInitBalance = coinbaseInitBalance.Clone()
 
-	epc := &EntryPointCall{}
-	st.state.SetHooks(&tracing.Hooks{
-		OnEnter: epc.OnEnter,
-	})
-
 	msg := st.msg
+	st.gasRemaining += st.msg.Gas()
+	st.initialGas = st.msg.Gas()
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
@@ -392,7 +360,7 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 
 	result := &evmtypes.ExecutionResult{
-		UsedGas:             st.gasUsed(),
+		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -402,12 +370,6 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 
 	if st.evm.Context.PostApplyMessage != nil {
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
-	}
-
-	if validateFrame != nil {
-		if err := validateFrame(st.state, epc); err != nil {
-			return nil, err
-		}
 	}
 
 	return result, nil
@@ -550,7 +512,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
 		if st.feeCap.Gt(st.evm.Context.BaseFee) {
-			effectiveTip = math.Min256(st.tipCap, new(uint256.Int).Sub(st.feeCap, st.evm.Context.BaseFee))
+			effectiveTip = math.U256Min(st.tipCap, new(uint256.Int).Sub(st.feeCap, st.evm.Context.BaseFee))
 		} else {
 			effectiveTip = u256.Num0
 		}
@@ -573,7 +535,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	result := &evmtypes.ExecutionResult{
-		UsedGas:             st.gasUsed(),
+		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
 		Reverted:            vmerr == vm.ErrExecutionReverted,
 		ReturnData:          ret,
@@ -590,8 +552,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	return result, nil
 }
 
-func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]libcommon.Address, error) {
-	verifiedAuthorities := make([]libcommon.Address, 0)
+func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]common.Address, error) {
+	verifiedAuthorities := make([]common.Address, 0)
 	if len(auths) > 0 {
 		if contractCreation {
 			return nil, errors.New("contract creation not allowed with type4 txs")
@@ -624,7 +586,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
-			if codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+			if codeHash != empty.CodeHash && codeHash != (common.Hash{}) {
 				// check for delegation
 				_, ok, err := st.state.GetDelegatedDesignation(authority)
 				if err != nil {
@@ -653,11 +615,11 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if exists {
-				st.state.AddRefund(fixedgas.PerEmptyAccountCost - fixedgas.PerAuthBaseCost)
+				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
 			}
 
 			// 7. set authority code
-			if auth.Address == (libcommon.Address{}) {
+			if auth.Address == (common.Address{}) {
 				if err := st.state.SetCode(authority, nil); err != nil {
 					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 				}
