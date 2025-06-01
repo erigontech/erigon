@@ -993,7 +993,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		case <-logEvery.C:
 			at.a.logger.Info("[snapshots] pruning state",
 				"until commit", time.Until(started.Add(timeout)).String(),
-				"pruneLimit", pruneLimit,
+				//"pruneLimit", pruneLimit,
 				"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
 				"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
 				//"pruned", fullStat.String(),
