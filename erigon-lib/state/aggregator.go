@@ -996,7 +996,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				"pruneLimit", pruneLimit,
 				"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
 				"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
-				"pruned", fullStat.String(),
+				//"pruned", fullStat.String(),
 			)
 		case <-ctx.Done():
 			return false, ctx.Err()
