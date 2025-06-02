@@ -181,6 +181,10 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	if err := api.genericTracer(tx, ctx, bn, creationTxnID, txIndex, chainConfig, tracer); err != nil {
 		return nil, err
 	}
+
+	if !tracer.found {
+		return nil, fmt.Errorf("contract address not found in txnID=%d", creationTxnID)
+	}
 	return &ContractCreatorData{
 		Tx:      tracer.Tx.Hash(),
 		Creator: tracer.Creator,
