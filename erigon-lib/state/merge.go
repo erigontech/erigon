@@ -452,7 +452,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}
-	p := ps.AddNew("merge "+path.Base(kvFilePath), 1)
+
+	cnt := 0
+	for _, item := range domainFiles {
+		cnt += item.decompressor.Count()
+	}
+
+	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt)*2) // *2 because after adding words - will happen compression (which also slow)
 	defer ps.Delete(p)
 
 	var futureKey []byte
@@ -493,12 +499,14 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	var keyFileStartTxNum, keyFileEndTxNum uint64
+	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
 		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
+			i++
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if ci1.idx.HasNext() {
 				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
@@ -551,6 +559,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		keyBuf = append(keyBuf[:0], lastKey...)
 		valBuf = append(valBuf[:0], lastVal...)
 		keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
+		p.Processed.Store(i)
 	}
 	if keyBuf != nil {
 		if vt != nil {

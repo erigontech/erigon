@@ -111,25 +111,27 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 
 // ReadAccountStorage is a part of the StateReader interface
 // This implementation attempts to look up the storage in the state trie, and fails if it is not found
-func (s *Stateless) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (s *Stateless) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	if s.trace {
-		fmt.Printf("Stateless: ReadAccountStorage(address=%x, key=%x)\n", address.Bytes(), key.Bytes())
+		fmt.Printf("Stateless: ReadAccountStorage(address=%x, key=%x)\n", address[:], key[:])
 	}
 	seckey, err := common.HashData(key[:])
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 
 	if enc, ok := s.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey)); ok {
-		return enc, nil
+		var res uint256.Int
+		(&res).SetBytes(enc)
+		return res, true, nil
 	}
 
-	return nil, nil
+	return uint256.Int{}, false, nil
 }
 
 // ReadAccountCode is a part of the StateReader interface
