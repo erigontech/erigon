@@ -65,7 +65,6 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
 	defer tx.Rollback()
-
 	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(account)
 	if err != nil {
 		return nil, err
