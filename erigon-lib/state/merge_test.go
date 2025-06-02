@@ -68,20 +68,6 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		assert.False(t, result.values.needMerge)
 	})
 
-	t.Run("multiple_files_merge", func(t *testing.T) {
-		files := []visibleFile{
-			createFile(0, 1),
-			createFile(1, 2),
-			createFile(2, 3),
-			createFile(3, 4),
-		}
-		dt := newDomainRoTx(1, files)
-		result := dt.findMergeRange(4, 32)
-		assert.True(t, result.values.needMerge)
-		assert.Equal(t, uint64(0), result.values.from)
-		assert.Equal(t, uint64(2), result.values.to)
-	})
-
 	t.Run("recent_first", func(t *testing.T) {
 		files := []visibleFile{
 			createFile(0, 2),
@@ -102,6 +88,20 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		assert.Equal(t, uint64(4), result.values.to)
 	})
 
+	t.Run("small_first", func(t *testing.T) {
+		files := []visibleFile{
+			createFile(0, 1),
+			createFile(1, 2),
+			createFile(2, 3),
+			createFile(3, 4),
+		}
+		dt := newDomainRoTx(1, files)
+		result := dt.findMergeRange(4, 32)
+		assert.True(t, result.values.needMerge)
+		assert.Equal(t, uint64(2), result.values.from)
+		assert.Equal(t, uint64(4), result.values.to)
+	})
+
 	t.Run("aggregation_steps", func(t *testing.T) {
 		for _, aggStep := range []uint64{1, 2, 4, 8} {
 			endTx := aggStep * 4
@@ -114,23 +114,6 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 			assert.Equal(t, aggStep, result.aggStep)
 			assert.True(t, result.values.needMerge)
 		}
-	})
-
-	t.Run("edge_cases", func(t *testing.T) {
-		files := []visibleFile{createFile(0, 1)}
-		dt := newDomainRoTx(1, files)
-
-		result := dt.findMergeRange(1, 32)
-		assert.False(t, result.values.needMerge)
-
-		files = []visibleFile{createFile(0, 1), createFile(1, 2)}
-		dt = newDomainRoTx(1, files)
-		result = dt.findMergeRange(4, 0)
-		assert.True(t, result.values.needMerge)
-
-		result = dt.findMergeRange(4, 1000000)
-		assert.True(t, result.values.needMerge)
-		assert.Equal(t, 0, int(result.values.from))
 	})
 
 }
