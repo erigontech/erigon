@@ -450,6 +450,9 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) (bool, err
 func (sdb *IntraBlockState) RemoveEscrowProtection(addr libcommon.Address) {
 	bi, ok := sdb.balanceInc[addr]
 	if ok {
+		if sdb.trace {
+			fmt.Printf("RemoveEscrowProtection %x, isEscrow=%v\n", addr, bi.isEscrow)
+		}
 		bi.isEscrow = false
 		sdb.balanceInc[addr] = bi
 	}
@@ -482,6 +485,13 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 				fmt.Printf("ESCROW protected %x\n", addr)
 			}
 			sdb.balanceInc[addr] = bi
+		} else {
+			bi.isEscrow = reason == tracing.BalanceIncreaseEscrow // arbitrum specific protection
+			sdb.balanceInc[addr] = bi
+			if sdb.trace && bi.isEscrow {
+				fmt.Printf("ESCROW 2protected %x\n", addr)
+			}
+
 		}
 
 		if !amount.IsZero() && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
@@ -1026,6 +1036,13 @@ type BalanceIncreaseEntry struct {
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[libcommon.Address]BalanceIncreaseEntry {
 	s := make(map[libcommon.Address]BalanceIncreaseEntry, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
+		if bi.isEscrow {
+			s[addr] = BalanceIncreaseEntry{
+				Amount:   uint256.Int{},
+				IsEscrow: bi.isEscrow,
+			}
+		}
+
 		if !bi.transferred {
 			s[addr] = BalanceIncreaseEntry{
 				Amount:   bi.increase,
