@@ -758,7 +758,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 
 		if currentHeadNumber != nil {
-			// wait for the slot duration for full download. we cannot expect the process to finish in 0.5s.
+			// wait for the slot duration for full download
 			waitTime := time.Duration(e.config.SecondsPerSlot()) * time.Second
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
