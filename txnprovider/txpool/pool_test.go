@@ -330,12 +330,6 @@ func TestMultipleAuthorizations(t *testing.T) {
 		},
 	}
 
-	chainID := uint64(7078815900)
-	privateKey, err := crypto.GenerateKey()
-	assert.NoError(t, err)
-	authAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
-	require.NoError(t, err)
-
 	acc := accounts3.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(10 * common.Ether),

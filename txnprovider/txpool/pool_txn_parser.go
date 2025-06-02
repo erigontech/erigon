@@ -667,6 +667,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 
 	return p, nil
 }
+
 type AuthAndNonce struct {
 	authority string
 	nonce     uint64
