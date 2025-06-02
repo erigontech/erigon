@@ -143,43 +143,47 @@ func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
 		return
 	}
 
-	sentries := cs.Sentries()
 	broadcastEvery := time.NewTicker(frequency)
 	defer broadcastEvery.Stop()
 
 	for {
 		select {
 		case <-broadcastEvery.C:
-			status, err := cs.statusDataProvider.GetStatusData(ctx)
-			if err != nil {
-				cs.logger.Error("blockRangeUpdate", "err", err)
-				break
-			}
-
-			request := eth.BlockRangeUpdatePacket{
-				Earliest:   status.EarliestBlockHeight,
-				Latest:     status.MaxBlockHeight,
-				LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
-			}
-
-			data, err := rlp.EncodeToBytes(&request)
-			if err != nil {
-				cs.logger.Error("blockRangeUpdate", "err", err)
-				break
-			}
-
-			for _, s := range sentries {
-				_, err := s.SendMessageToAll(ctx, &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69,
-					Data: data,
-				})
-				if err != nil {
-					cs.logger.Error("blockRangeUpdate", "err", err)
-					continue // continue sending message to other sentries
-				}
-			}
+			cs.doAnnounceBlockRange(ctx)
 		case <-ctx.Done():
 			return
+		}
+	}
+}
+
+func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
+	sentries := cs.Sentries()
+	status, err := cs.statusDataProvider.GetStatusData(ctx)
+	if err != nil {
+		cs.logger.Error("blockRangeUpdate", "err", err)
+		return
+	}
+
+	request := eth.BlockRangeUpdatePacket{
+		Earliest:   status.EarliestBlockHeight,
+		Latest:     status.MaxBlockHeight,
+		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
+	}
+
+	data, err := rlp.EncodeToBytes(&request)
+	if err != nil {
+		cs.logger.Error("blockRangeUpdate", "err", err)
+		return
+	}
+
+	for _, s := range sentries {
+		_, err := s.SendMessageToAll(ctx, &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69,
+			Data: data,
+		})
+		if err != nil {
+			cs.logger.Error("blockRangeUpdate", "err", err)
+			continue // continue sending message to other sentries
 		}
 	}
 }
