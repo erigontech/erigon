@@ -121,30 +121,35 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
-	domainName, err := kv.String2Domain(dt.d.filenameBase)
-	if err != nil {
-		panic(err)
-	}
 
 	r := DomainRanges{
-		name:    domainName,
+		name:    dt.d.name,
 		history: hr,
 		aggStep: dt.d.aggregationStep,
 	}
-	for _, item := range dt.files {
+	fmt.Printf("DEBUG: dt.files length: %d, maxEndTxNum: %d, maxSpan: %d, aggStep: %d\n", len(dt.files), maxEndTxNum, maxSpan, dt.d.aggregationStep)
+	for i, item := range dt.files {
+		fmt.Printf("DEBUG: file %d: startTxNum=%d, endTxNum=%d\n", i, item.startTxNum, item.endTxNum)
 		if item.endTxNum > maxEndTxNum {
+			fmt.Printf("DEBUG: breaking because item.endTxNum %d > maxEndTxNum %d\n", item.endTxNum, maxEndTxNum)
 			break
 		}
 		endStep := item.endTxNum / dt.d.aggregationStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := spanStep * dt.d.aggregationStep
 		fromTxNum := item.endTxNum - span
+		fmt.Printf("DEBUG: endStep=%d, spanStep=%d, span=%d, fromTxNum=%d\n", endStep, spanStep, span, fromTxNum)
 		if fromTxNum < item.startTxNum {
+			fmt.Printf("DEBUG: merge condition met: fromTxNum %d < item.startTxNum %d\n", fromTxNum, item.startTxNum)
 			if !r.values.needMerge || fromTxNum < r.values.from {
 				r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
+				fmt.Printf("DEBUG: setting merge range: from=%d, to=%d\n", fromTxNum, item.endTxNum)
 			}
+		} else {
+			fmt.Printf("DEBUG: merge condition NOT met: fromTxNum %d >= item.startTxNum %d\n", fromTxNum, item.startTxNum)
 		}
 	}
+	fmt.Printf("DEBUG: final result: needMerge=%v, from=%d, to=%d\n", r.values.needMerge, r.values.from, r.values.to)
 	return r
 }
 
