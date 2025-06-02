@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -66,26 +65,8 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockClient(ctrl)
 	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
-	bridgeStore := bridge.NewDbStore(m.DB)
-	heimdallStore := heimdall.NewDbStore(m.DB)
 
-	bhCfg := stagedsync.StageBorHeimdallCfg(
-		chainDataDB,
-		borConsensusDB,
-		miningState,
-		*cfg.ChainConfig,
-		heimdallClient,
-		heimdallStore,
-		bridgeStore,
-		blockReader,
-		nil, // headerDownloader
-		nil, // penalize
-		nil, // recent bor snapshots cached
-		nil, // signatures
-		false,
-		nil,
-	)
-	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, bhCfg, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
+	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
 	stateSync := stagedsync.New(
 		ethconfig.Defaults.Sync,
 		stateSyncStages,
@@ -97,7 +78,6 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	miningSyncStages := stagedsync.MiningStages(
 		ctx,
 		stagedsync.MiningCreateBlockCfg{},
-		bhCfg,
 		stagedsync.ExecuteBlockCfg{},
 		stagedsync.SendersCfg{},
 		stagedsync.MiningExecCfg{},
@@ -127,7 +107,6 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		miningSyncStages:          miningSyncStages,
 		miningSync:                miningSync,
 		miningState:               miningState,
-		bhCfg:                     bhCfg,
 		heimdallClient:            heimdallClient,
 		heimdallProducersOverride: cfg.GetOrCreateDefaultHeimdallProducersOverride(),
 		sealedHeaders:             make(map[uint64]*types.Header),
@@ -182,7 +161,6 @@ type Harness struct {
 	miningSyncStages           []*stagedsync.Stage
 	miningSync                 *stagedsync.Sync
 	miningState                stagedsync.MiningState
-	bhCfg                      stagedsync.BorHeimdallCfg
 	heimdallClient             *heimdall.MockClient
 	heimdallNextMockSpan       *heimdall.Span
 	heimdallLastEventID        uint64
@@ -289,8 +267,7 @@ func (h *Harness) SetMiningBlockEmptyHeader(ctx context.Context, t *testing.T, p
 	require.NotNil(t, parent)
 
 	timestamp := uint64(time.Now().Unix())
-	gasLimit := &h.miningState.MiningConfig.GasLimit
-	h.miningState.MiningBlock.Header = core.MakeEmptyHeader(parent, h.chainConfig, timestamp, gasLimit)
+	h.miningState.MiningBlock.Header = core.MakeEmptyHeader(parent, h.chainConfig, timestamp, h.miningState.MiningConfig.GasLimit)
 }
 
 func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, err error) {

@@ -148,7 +148,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -161,15 +161,15 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, block.Hash())
 	}
 
-	getHash := func(i uint64) common.Hash {
+	getHash := func(i uint64) (common.Hash, error) {
 		if hash, ok := overrideBlockHash[i]; ok {
-			return hash
+			return hash, nil
 		}
 		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
 		if err != nil || !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
-		return hash
+		return hash, err
 	}
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
@@ -311,7 +311,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				}
 
 				// try to recompute the state
-				stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber-1)), 0, api.filters, api.stateCache, chainConfig.ChainName)
+				stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber-1)), 0, api.filters, api.stateCache, api._txNumReader)
 				if err != nil {
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
@@ -441,15 +441,15 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	getHash := func(i uint64) common.Hash {
+	getHash := func(i uint64) (common.Hash, error) {
 		if hash, ok := overrideBlockHash[i]; ok {
-			return hash
+			return hash, nil
 		}
 		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
 		if err != nil || !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
-		return hash
+		return hash, err
 	}
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)

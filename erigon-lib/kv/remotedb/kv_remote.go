@@ -188,6 +188,8 @@ func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.T
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
 func (db *DB) ReloadSalt() error                                   { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
+func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
+func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
@@ -647,8 +649,11 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.las
 // Temporal Methods
 
 func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
-	// TODO: not yet implemented, return 0 for now
-	return 0
+	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remote.HistoryStartFromReq{Domain: uint32(name)})
+	if err != nil {
+		return 0
+	}
+	return reply.StartFrom
 }
 
 func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -667,9 +672,13 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err er
 	return reply.V, 0, nil
 }
 
-func (tx *tx) HasPrefix(domain kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
-	//TODO implement me
-	panic("implement me")
+func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	req := &remote.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
+	reply, err := tx.db.remoteKV.HasPrefix(tx.ctx, req)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return reply.FirstKey, reply.FirstVal, reply.HasPrefix, nil
 }
 
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {

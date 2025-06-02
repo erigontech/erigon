@@ -535,7 +535,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 					outs := ic.staticFilesInRange(startTxNum, endTxNum)
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
-					ii.integrateMergedDirtyFiles(outs, in)
+					ii.integrateMergedDirtyFiles(in)
 					ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 					return false
 				}(); stop {
@@ -703,12 +703,8 @@ func TestScanStaticFiles(t *testing.T) {
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
-
-	//integrity extension case
-	ii.dirtyFiles.Clear()
-	ii.integrity = func(fromStep, toStep uint64) bool { return false }
-	ii.scanDirtyFiles(files)
-	require.Equal(t, 0, ii.dirtyFiles.Len())
+	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+	require.Equal(t, 0, len(ii._visible.files))
 }
 
 func TestCtxFiles(t *testing.T) {
@@ -732,7 +728,7 @@ func TestCtxFiles(t *testing.T) {
 		return true
 	})
 
-	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false, ii.dirtyFilesEndTxNumMinimax())
+	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, nil, false, ii.dirtyFilesEndTxNumMinimax())
 	for i, item := range visibleFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)

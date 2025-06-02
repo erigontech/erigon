@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -174,7 +175,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -189,11 +190,11 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks, *rw.vmCfg)
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks, *rw.vmCfg)
 			if err != nil {
 				return nil, err
 			}
-			txTask.Logs = append(txTask.Logs, logs...)
+			txTask.Logs = append(txTask.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 			return ret, err
 		}
 
@@ -253,7 +254,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
 			txTask.TraceFroms = txTask.Tracer.Froms()
 			txTask.TraceTos = txTask.Tracer.Tos()
 		}
@@ -506,17 +507,24 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		WorkerCount = cfg.Workers
 	}
 
-	log.Info("[custom_trace] batch start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers, "toTxNum", toTxNum)
-	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
+	{
+		fromStep, toStep, err := BlkRangeToSteps(tx, fromBlock, toBlock, txNumsReader)
+		if err != nil {
+			return err
+		}
+		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%dk-%dk", fromBlock/1_000, toBlock/1_000), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
+	}
+
+	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header, err error) {
 		if tx != nil && WorkerCount == 1 {
-			h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
+			h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
 		} else {
 			cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
-				h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
+				h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
 				return nil
 			})
 		}
-		return h
+		return h, err
 	}
 
 	outTxNum := &atomic.Uint64{}
@@ -557,7 +565,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) common.Hash {
+		getHashFn := func(n uint64) (common.Hash, error) {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return f(n)
@@ -637,4 +645,26 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader int
 		return nil, nil
 	}
 	return b, err
+}
+func BlkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	if err != nil {
+		return 0, 0, err
+	}
+	toTxNum, err := txNumsReader.Min(tx, toBlock)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	stepSize := libstate.AggTx(tx).StepSize()
+	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
+}
+
+func BlkRangeToStepsOnDB(db kv.RoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+	return BlkRangeToSteps(tx, fromBlock, toBlock, txNumsReader)
 }

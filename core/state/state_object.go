@@ -179,17 +179,18 @@ func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) {
 		return
 	}
 	// Load from DB in case it is missing.
-	enc, err := so.db.stateReader.ReadAccountStorage(so.address, key)
+	res, ok, err := so.db.stateReader.ReadAccountStorage(so.address, key)
 	if err != nil {
 		so.setError(err)
 		out.Clear()
 		return
 	}
-	if enc != nil {
-		out.SetBytes(enc)
+	if ok {
+		*out = res
 	} else {
 		out.Clear()
 	}
+
 	so.originStorage[key] = *out
 	so.blockOriginStorage[key] = *out
 }

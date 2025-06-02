@@ -155,20 +155,16 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check the history
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey1, roTx)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
 	require.NoError(t, err)
-	require.Truef(t, ex, "key %x not found", commKey1)
-
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-	v, _, ex, err = AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey2, roTx)
+	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 	require.NoError(t, err)
-	require.Truef(t, ex, "key %x not found", commKey2)
-
 	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
@@ -351,7 +347,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, "")
+			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "")
 			require.NoError(t, err)
 		}
 
@@ -447,7 +443,9 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	// each key changes value on every txNum which is multiple of the key
 	var maxWrite uint64
 	addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
-	for txNum := uint64(1); txNum <= txs; txNum++ {
+	var txNum, blockNum uint64
+	for i := uint64(1); i <= txs; i++ {
+		txNum = i
 		domains.SetTxNum(txNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
@@ -476,7 +474,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
-	_, err = domains.ComputeCommitment(ctx, tx, true, domains.BlockNum(), "")
+	_, err = domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 	require.NoError(t, err)
 
 	err = domains.Flush(context.Background(), tx)
@@ -524,10 +522,8 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, someKey, roTx)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, someKey)
 	require.NoError(t, err)
-	require.True(t, ex)
-
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
@@ -757,7 +753,7 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, tx kv.Tx
 		}
 		if txNum%commitEvery == 0 {
 			// domains.SetTrace(true)
-			rh, err := domains.ComputeCommitment(context.Background(), tx, true, txNum/commitEvery, "")
+			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, txNum, "")
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			t.Logf("commitment %x txn=%d", rh, txNum)
 		}
@@ -785,7 +781,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, tx 
 		panic("unreachable")
 	}
 
-	const maxStorageKeys = 350
+	const maxStorageKeys = 10
 	usedKeys := make(map[string]struct{}, keysCount)
 
 	for j := uint64(0); j < keysCount; j++ {
@@ -995,9 +991,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.Equal(t, i+1, int(acc.Nonce))
 
-		storedV, _, found, err := AggTx(tx).GetLatest(kv.StorageDomain, key, tx)
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
 		require.NoError(t, err)
-		require.True(t, found)
 		require.NotEmpty(t, storedV)
 		_ = key[0]
 		_ = storedV[0]
@@ -1288,6 +1283,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	roots := make([][]byte, 0, 10)
 	var pruneFrom uint64 = 5
 
+	blockNum := uint64(0)
 	for i = 0; i < len(vals); i++ {
 		txNum := uint64(i)
 		domains.SetTxNum(txNum)
@@ -1313,7 +1309,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
-		rh, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
@@ -1335,7 +1331,9 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	for idx := range changesetAt5.Diffs {
 		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
 	}
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
+	err = rwTx.Unwind(ctx, pruneFrom, &diffs)
+	domains.SetTxNum(pruneFrom)
+	//err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	domains.SetChangesetAccumulator(changesetAt3)
@@ -1360,7 +1358,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
@@ -1384,7 +1382,8 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	for idx := range changesetAt3.Diffs {
 		diffs[idx] = changesetAt3.Diffs[idx].GetDiffSet()
 	}
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
+	err = rwTx.Unwind(context.Background(), pruneFrom, &diffs)
+	domains.SetTxNum(pruneFrom)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
@@ -1408,7 +1407,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)

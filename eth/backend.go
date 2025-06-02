@@ -378,7 +378,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverridePragueTime, dirs, logger)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -391,6 +391,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
+
+	setDefaultMinerGasLimit(chainConfig, config, logger)
 
 	setBorDefaultMinerGasPrice(chainConfig, config, logger)
 	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
@@ -696,7 +698,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := chainConfig.Bor != nil && (config.PolygonSync || config.PolygonSyncStage)
+	sentryMcDisableBlockDownload := chainConfig.Bor != nil && (config.PolygonSync)
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -852,22 +854,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	mining := stagedsync.New(
 		config.Sync,
 		stagedsync.MiningStages(backend.sentryCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, nil, tmpdir, backend.blockReader),
-			stagedsync.StageBorHeimdallCfg(
-				backend.chainDB,
-				snapDb,
-				miner,
-				*backend.chainConfig,
-				heimdallClient,
-				heimdallStore,
-				bridgeStore,
-				backend.blockReader,
-				nil,
-				nil,
-				recents,
-				signatures,
-				false,
-				nil),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, backend.chainConfig, backend.engine, nil, tmpdir, backend.blockReader),
 			stagedsync.StageExecuteBlocksCfg(
 				backend.chainDB,
 				config.Prune,
@@ -886,8 +873,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				stages2.SilkwormForExecutionStage(backend.silkworm, config),
 			),
 			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, txnProvider, blockReader),
-			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, txnProvider, blockReader),
+			stagedsync.StageMiningFinishCfg(backend.chainDB, backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 			astridEnabled,
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger, stages.ModeBlockProduction)
@@ -899,22 +886,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		proposingSync := stagedsync.New(
 			config.Sync,
 			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, param, tmpdir, backend.blockReader),
-				stagedsync.StageBorHeimdallCfg(
-					backend.chainDB,
-					snapDb,
-					miningStatePos,
-					*backend.chainConfig,
-					heimdallClient,
-					heimdallStore,
-					bridgeStore,
-					backend.blockReader,
-					nil,
-					nil,
-					recents,
-					signatures,
-					false,
-					nil),
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, backend.chainConfig, backend.engine, param, tmpdir, backend.blockReader),
 				stagedsync.StageExecuteBlocksCfg(
 					backend.chainDB,
 					config.Prune,
@@ -933,8 +905,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					stages2.SilkwormForExecutionStage(backend.silkworm, config),
 				),
 				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
+				stagedsync.StageMiningFinishCfg(backend.chainDB, backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 				astridEnabled,
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger, stages.ModeBlockProduction)
 		// We start the mining step
@@ -1024,39 +996,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	if config.PolygonSyncStage {
-		backend.syncStages = stages2.NewPolygonSyncStages(
-			backend.sentryCtx,
-			logger,
-			backend.chainDB,
-			config,
-			backend.chainConfig,
-			backend.engine,
-			backend.notifications,
-			backend.downloaderClient,
-			blockReader,
-			blockRetire,
-			backend.silkworm,
-			backend.forkValidator,
-			heimdallClient,
-			heimdallStore,
-			bridgeStore,
-			polygonSyncSentry(sentries),
-			p2pConfig.MaxPeers,
-			statusDataProvider,
-			backend.stopNode,
-			&engineAPISwitcher{backend: backend},
-			backend,
-			tracer,
-		)
-		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
-		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
-	} else {
-		backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-			blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, tracer)
-		backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
-		backend.syncPruneOrder = stagedsync.DefaultPruneOrder
-	}
+	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
+		blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, tracer)
+	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
+	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
@@ -1164,7 +1107,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
 			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
-				backend.chainDB, *backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
+				backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
 				blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
 			)), nil, nil, backend.logger, stages.ModeApplyingBlocks)
 
@@ -1339,20 +1282,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 			borcfg.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 			})
-
-			if !s.config.WithoutHeimdall {
-				err := stagedsync.FetchSpanZeroForMiningIfNeeded(
-					ctx,
-					s.chainDB,
-					s.blockReader,
-					borcfg.HeimdallClient,
-					heimdallStore,
-					logger,
-				)
-				if err != nil {
-					return err
-				}
-			}
 		} else if s.chainConfig.Consensus == chain.CliqueConsensus {
 			s.engine.(*clique.Clique).Authorize(eb, func(_ common.Address, _ string, msg []byte) ([]byte, error) {
 				return crypto.Sign(crypto.Keccak256(msg), miner.MiningConfig.SigKey)
@@ -1974,6 +1903,20 @@ func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Con
 	if chainConfig.Bor != nil && (config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0) {
 		logger.Warn("Sanitizing invalid bor miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.BorDefaultMinerGasPrice)
 		config.Miner.GasPrice = ethconfig.BorDefaultMinerGasPrice
+	}
+}
+
+func setDefaultMinerGasLimit(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
+	if chainConfig.Bor != nil {
+		if config.Miner.GasLimit == nil {
+			gasLimit := ethconfig.BorDefaultMinerGasLimit
+			config.Miner.GasLimit = &gasLimit
+		}
+	} else {
+		if config.Miner.GasLimit == nil {
+			gasLimit := ethconfig.DefaultMinerGasLimit
+			config.Miner.GasLimit = &gasLimit
+		}
 	}
 }
 

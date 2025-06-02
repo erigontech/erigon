@@ -43,7 +43,7 @@ import (
 // This is the range in which we sanity check and potentially fix the canonical chain if it is broken.
 // a broken canonical chain is very dangerous, as it can lead to a situation where the RPC and snapshots break down.
 // better to have an hack than to regenerate all chains.
-const fixCanonicalFailsafeRange = 512
+const fixCanonicalFailsafeRange = 16
 
 const startPruneFrom = 1024
 
@@ -202,12 +202,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 }
 
 func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
-	casted, ok := tx.(state.HasAggTx)
-	if !ok {
-		return 0, errors.New("tx does not support state.HasAggTx")
-	}
-	return casted.AggTx().(*state.AggregatorRoTx).CanUnwindToBlockNum(tx)
-
+	return state.AggTx(tx).CanUnwindToBlockNum(tx)
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
@@ -529,6 +524,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 		commitStart := time.Now()
+		txnum, err := rawdbv3.TxNums.Max(tx, fcuHeader.Number.Uint64())
+		if err != nil {
+			e.logger.Warn("Failed to get txnum", "err", err)
+		}
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
@@ -555,7 +554,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
-		logArgs := []interface{}{"hash", blockHash, "number", fcuHeader.Number.Uint64(), "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0))}
+		logArgs := []interface{}{"hash", blockHash, "number", fcuHeader.Number.Uint64(), "txnum", txnum, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0))}
 		if flushExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
 			if !e.syncCfg.ParallelStateFlushing {

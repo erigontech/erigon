@@ -99,9 +99,10 @@ var (
 		Value: ethconfig.Defaults.NetworkID,
 	}
 	PersistReceiptsV2Flag = cli.BoolFlag{
-		Name:  "experiment.persist.receipts.v2",
-		Usage: "To store receipts in chaindata db (only on chain-tip) - RPC for recent receipts/logs will be faster. Values: 1_000 good starting point. 10_000 receipts it's ~1Gb (not much IO increase). Please test before go over 100_000",
-		Value: ethconfig.Defaults.PersistReceiptsCacheV2,
+		Name:    "persist.receipts",
+		Aliases: []string{"experiment.persist.receipts.v2"},
+		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
+		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
 		Name:  "dev.period",
@@ -120,9 +121,9 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverridePragueFlag = flags.BigFlag{
-		Name:  "override.prague",
-		Usage: "Manually specify the Prague fork time, overriding the bundled setting",
+	OverrideOsakaFlag = flags.BigFlag{
+		Name:  "override.osaka",
+		Usage: "Manually specify the Osaka fork time, overriding the bundled setting",
 	}
 	TrustedSetupFile = cli.StringFlag{
 		Name:  "trusted-setup-file",
@@ -233,7 +234,6 @@ var (
 	MinerGasLimitFlag = cli.Uint64Flag{
 		Name:  "miner.gaslimit",
 		Usage: "Target gas limit for mined blocks",
-		Value: ethconfig.Defaults.Miner.GasLimit,
 	}
 	MinerGasPriceFlag = flags.BigFlag{
 		Name:  "miner.gasprice",
@@ -805,12 +805,6 @@ var (
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
 		Value: true,
-	}
-
-	// TODO - this is a depricated flag - should be removed
-	PolygonSyncStageFlag = cli.BoolFlag{
-		Name:  "polygon.sync.stage",
-		Usage: "Enabling syncing with a stage that uses the polygon sync component",
 	}
 
 	AAFlag = cli.BoolFlag{
@@ -1667,9 +1661,12 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params2.MiningConfig) {
 		panic(err)
 	}
 	cfg.ExtraData = []byte(extraDataStr)
-	cfg.GasLimit, err = flags.GetUint64(MinerGasLimitFlag.Name)
-	if err != nil {
-		panic(err)
+	if flags.Changed(MinerGasLimitFlag.Name) {
+		gasLimit, err := flags.GetUint64(MinerGasLimitFlag.Name)
+		if err != nil {
+			panic(err)
+		}
+		cfg.GasLimit = &gasLimit
 	}
 	price, err := flags.GetInt64(MinerGasPriceFlag.Name)
 	if err != nil {
@@ -1716,14 +1713,13 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
-	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
 
 	if cfg.PolygonSync {
 		cfg.WithHeimdallMilestones = false
 		cfg.WithHeimdallWaypointRecording = true
 	}
 
-	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync || cfg.PolygonSyncStage)
+	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync)
 
 	chainConfig := params2.ChainConfigByChainName(ctx.String(ChainFlag.Name))
 	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
@@ -1761,7 +1757,9 @@ func setMiner(ctx *cli.Context, cfg *params2.MiningConfig) {
 	}
 
 	if ctx.IsSet(MinerGasLimitFlag.Name) {
-		cfg.GasLimit = ctx.Uint64(MinerGasLimitFlag.Name)
+		if gasLimit := ctx.Uint64(MinerGasLimitFlag.Name); gasLimit != 0 {
+			cfg.GasLimit = &gasLimit
+		}
 	}
 	if ctx.IsSet(MinerGasPriceFlag.Name) {
 		cfg.GasPrice = flags.GlobalBig(ctx, MinerGasPriceFlag.Name)
@@ -2056,9 +2054,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 	}
 
-	if ctx.IsSet(OverridePragueFlag.Name) {
-		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
-		cfg.TxPool.OverridePragueTime = cfg.OverridePragueTime
+	if ctx.IsSet(OverrideOsakaFlag.Name) {
+		cfg.OverrideOsakaTime = flags.GlobalBig(ctx, OverrideOsakaFlag.Name)
 	}
 
 	if clparams.EmbeddedSupported(cfg.NetworkID) || cfg.CaplinConfig.IsDevnet() {

@@ -541,7 +541,7 @@ type (
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
-	HasPrefix(name Domain, prefix []byte) (firstKey []byte, ok bool, err error)
+	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 }
 type TemporalTx interface {
 	Tx
@@ -594,6 +594,8 @@ type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
 	ReloadSalt() error
+	BuildMissedAccessors(ctx context.Context, workers int) error
+	ReloadFiles() error
 }
 
 type WithFreezeInfo interface {

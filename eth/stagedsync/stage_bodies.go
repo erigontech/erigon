@@ -48,7 +48,7 @@ type BodiesCfg struct {
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
-	chanConfig      chain.Config
+	chanConfig      *chain.Config
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 }
@@ -56,7 +56,7 @@ type BodiesCfg struct {
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem),
 	blockPropagator adapter.BlockPropagator, timeout int,
-	chanConfig chain.Config,
+	chanConfig *chain.Config,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 ) BodiesCfg {
@@ -102,13 +102,6 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 	}
 	defer cfg.bd.ClearBodyCache()
 	var headerProgress, bodyProgress uint64
-
-	if cfg.chanConfig.Bor != nil {
-		headerProgress, err = stages.GetStageProgress(tx, stages.BorHeimdall)
-		if err != nil {
-			return err
-		}
-	}
 
 	if headerProgress == 0 {
 		headerProgress, err = stages.GetStageProgress(tx, stages.Headers)

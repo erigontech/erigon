@@ -18,19 +18,99 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sort"
 	"sync/atomic"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	btree2 "github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
+	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
+
+func TestDomainRoTx_findMergeRange(t *testing.T) {
+	t.Parallel()
+
+	newDomainRoTx := func(aggStep uint64, files []visibleFile) *DomainRoTx {
+		return &DomainRoTx{
+			name:    kv.AccountsDomain,
+			files:   files,
+			aggStep: aggStep,
+			ht:      &HistoryRoTx{iit: &InvertedIndexRoTx{}},
+		}
+	}
+
+	createFile := func(startTxNum, endTxNum uint64) visibleFile {
+		return visibleFile{
+			startTxNum: startTxNum,
+			endTxNum:   endTxNum,
+			src:        &filesItem{startTxNum: startTxNum, endTxNum: endTxNum},
+		}
+	}
+
+	t.Run("empty_and_single_file", func(t *testing.T) {
+		dt := newDomainRoTx(1, []visibleFile{})
+		result := dt.findMergeRange(100, 32)
+		assert.False(t, result.values.needMerge)
+		assert.Equal(t, uint64(1), result.aggStep)
+
+		dt = newDomainRoTx(1, []visibleFile{createFile(0, 2)})
+		result = dt.findMergeRange(4, 32)
+		assert.False(t, result.values.needMerge)
+	})
+
+	t.Run("earlier_first", func(t *testing.T) {
+		files := []visibleFile{
+			createFile(0, 2),
+			createFile(2, 4),
+			createFile(4, 5),
+			createFile(5, 6),
+		}
+		dt := newDomainRoTx(1, files)
+		result := dt.findMergeRange(16, 32)
+		assert.True(t, result.values.needMerge)
+		assert.Equal(t, uint64(0), result.values.from)
+		assert.Equal(t, uint64(4), result.values.to)
+	})
+
+	t.Run("small_first", func(t *testing.T) {
+		files := []visibleFile{
+			createFile(0, 1),
+			createFile(1, 2),
+			createFile(2, 3),
+			createFile(3, 4),
+		}
+		dt := newDomainRoTx(1, files)
+		result := dt.findMergeRange(4, 32)
+		assert.True(t, result.values.needMerge)
+		assert.Equal(t, uint64(0), result.values.from)
+		assert.Equal(t, uint64(2), result.values.to)
+	})
+
+	t.Run("aggregation_steps", func(t *testing.T) {
+		for _, aggStep := range []uint64{1, 2, 4, 8} {
+			endTx := aggStep * 4
+			files := []visibleFile{
+				createFile(0, aggStep),
+				createFile(aggStep, aggStep*2),
+			}
+			dt := newDomainRoTx(aggStep, files)
+			result := dt.findMergeRange(endTx, 32)
+			assert.Equal(t, aggStep, result.aggStep)
+			assert.True(t, result.values.needMerge)
+		}
+	})
+
+}
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
@@ -55,7 +135,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 	newTestDomain := func() (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
-		d.History.InvertedIndex.integrity = nil
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History
@@ -534,5 +613,259 @@ func TestMergeFiles(t *testing.T) {
 
 	dc = d.BeginFilesRo()
 	defer dc.Close()
+}
 
+func TestMergeFilesWithDependency(t *testing.T) {
+	t.Parallel()
+
+	newTestDomain := func(dom kv.Domain) *Domain {
+		cfg := Schema.GetDomainCfg(dom)
+
+		salt := uint32(1)
+		if cfg.hist.iiCfg.salt == nil {
+			cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
+		}
+		cfg.hist.iiCfg.salt.Store(&salt)
+		cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
+		cfg.hist.iiCfg.name = kv.InvertedIdx(0)
+		cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+
+		d, err := NewDomain(cfg, 1, log.New())
+		if err != nil {
+			panic(err)
+		}
+
+		d.History.InvertedIndex.Accessors = 0
+		d.History.Accessors = 0
+		d.Accessors = 0
+		return d
+	}
+
+	setup := func() (account, storage, commitment *Domain) {
+		account, storage, commitment = newTestDomain(0), newTestDomain(1), newTestDomain(3)
+		checker := NewDependencyIntegrityChecker(account.hist.iiCfg.dirs, log.New())
+		info := &DependentInfo{
+			domain: commitment.name,
+			filesGetter: func() *btree2.BTreeG[*filesItem] {
+				return commitment.dirtyFiles
+			},
+			accessors: commitment.Accessors,
+		}
+		checker.AddDependency(account.name, info)
+		checker.AddDependency(storage.name, info)
+		account.SetDependency(checker)
+		storage.SetDependency(checker)
+		return
+	}
+
+	setupFiles := func(d *Domain, mergedMissing bool) {
+		kvf := fmt.Sprintf("v1.0-%s", d.name.String()) + ".%d-%d.kv"
+		files := []string{fmt.Sprintf(kvf, 0, 1), fmt.Sprintf(kvf, 1, 2)}
+		if !mergedMissing {
+			files = append(files, fmt.Sprintf(kvf, 0, 2))
+		}
+		d.scanDirtyFiles(files)
+		d.dirtyFiles.Scan(func(item *filesItem) bool {
+			item.decompressor = &seg.Decompressor{}
+			return true
+		})
+	}
+
+	t.Run("all merged files present", func(t *testing.T) {
+		account, storage, commitment := setup()
+		setupFiles(account, false)
+		setupFiles(storage, false)
+		setupFiles(commitment, false)
+
+		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
+		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
+		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
+
+		checkFn := func(files visibleFiles) {
+			assert.Equal(t, 1, len(files))
+			assert.Equal(t, 0, int(files[0].startTxNum))
+			assert.Equal(t, 2, int(files[0].endTxNum))
+		}
+
+		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac.files)
+		checkFn(sc.files)
+		checkFn(cc.files)
+	})
+
+	t.Run("commitment merged missing", func(t *testing.T) {
+		account, storage, commitment := setup()
+		setupFiles(account, false)
+		setupFiles(storage, false)
+		setupFiles(commitment, true)
+
+		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
+		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
+		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
+
+		checkFn := func(files visibleFiles) {
+			assert.Equal(t, 2, len(files))
+			assert.Equal(t, 0, int(files[0].startTxNum))
+			assert.Equal(t, 1, int(files[0].endTxNum))
+			assert.Equal(t, 1, int(files[1].startTxNum))
+			assert.Equal(t, 2, int(files[1].endTxNum))
+		}
+
+		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac.files)
+		checkFn(sc.files)
+		checkFn(cc.files)
+	})
+
+	t.Run("check garbage in all merged", func(t *testing.T) {
+		account, storage, commitment := setup()
+		setupFiles(account, false)
+		setupFiles(storage, false)
+		setupFiles(commitment, false)
+
+		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
+		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
+		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
+
+		checkFn := func(dtx *DomainRoTx, garbageCount int) {
+			var mergedF *filesItem
+			items := dtx.d.dirtyFiles.Items()
+
+			if len(items) == 3 {
+				mergedF = items[2]
+			}
+			assert.Len(t, dtx.garbage(mergedF), garbageCount)
+		}
+
+		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac, 0) // should give 0 because corresponding commitment garbage is not deleted
+		checkFn(sc, 0)
+		checkFn(cc, 2)
+
+		// delete the smaller files
+		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 0, endTxNum: 1})
+		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 1, endTxNum: 2})
+
+		// refresh visible files
+		ac.Close()
+		sc.Close()
+		cc.Close()
+
+		ac, sc, cc = account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac, 2)
+		checkFn(sc, 2)
+		checkFn(cc, 0)
+	})
+
+	t.Run("check garbage in all merged (external gc)", func(t *testing.T) {
+		account, storage, commitment := setup()
+		setupFiles(account, false)
+		setupFiles(storage, false)
+		setupFiles(commitment, false)
+
+		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
+		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
+		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
+
+		checkFn := func(dtx *DomainRoTx, garbageCount int) {
+			assert.Len(t, dtx.garbage(nil), garbageCount)
+		}
+
+		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac, 2)
+		checkFn(sc, 2)
+		checkFn(cc, 2)
+
+		// delete the smaller files
+		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 0, endTxNum: 1})
+		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 1, endTxNum: 2})
+
+		// refresh visible files
+		ac.Close()
+		sc.Close()
+		cc.Close()
+
+		ac, sc, cc = account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac, 2)
+		checkFn(sc, 2)
+		checkFn(cc, 0)
+	})
+
+	t.Run("check garbage commitment not merged", func(t *testing.T) {
+		account, storage, commitment := setup()
+		setupFiles(account, false)
+		setupFiles(storage, false)
+		setupFiles(commitment, true)
+
+		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
+		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
+		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
+
+		checkFn := func(dtx *DomainRoTx) {
+			var mergedF *filesItem
+			items := dtx.d.dirtyFiles.Items()
+
+			if len(items) == 3 {
+				mergedF = items[2]
+			}
+			assert.Len(t, dtx.garbage(mergedF), 0)
+		}
+
+		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac)
+		checkFn(sc)
+		checkFn(cc)
+	})
+
+	t.Run("check garbage commitment not merged (external gc i.e. mergedFile=nil)", func(t *testing.T) {
+		account, storage, commitment := setup()
+		setupFiles(account, false)
+		setupFiles(storage, false)
+		setupFiles(commitment, true)
+
+		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
+		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
+		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
+
+		checkFn := func(dtx *DomainRoTx) {
+			assert.Len(t, dtx.garbage(nil), 0)
+		}
+
+		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac)
+		checkFn(sc)
+		checkFn(cc)
+	})
 }
