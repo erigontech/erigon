@@ -105,10 +105,10 @@ func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint
 	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
 }
 
-func (e *TraceWorker) ExecTxn(txNum uint64, blockNum uint64, txIndex int, txn types.Transaction, gasBailout bool) error {
+func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) error {
 	e.stateReader.SetTxNum(txNum)
 	e.ibs.Reset()
-	e.ibs.SetTxContext(blockNum, txIndex)
+	e.ibs.SetTxContext(e.blockNum, txIndex)
 
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if txn.Type() != types.AccountAbstractionTxType && err != nil {
