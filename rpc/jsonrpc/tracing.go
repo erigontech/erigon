@@ -154,7 +154,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			stream.WriteArrayEnd()
 			return ctx.Err()
 		}
-		ibs.SetTxContext(txnIndex)
+		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 
 		txCtx := evmtypes.TxContext{
@@ -589,7 +589,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState()
-			ibs.SetTxContext(txnIndex)
+			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
 			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, block.Hash(), txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
 				stream.WriteArrayEnd()

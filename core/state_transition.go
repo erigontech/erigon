@@ -215,8 +215,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if have, want := balance, balanceCheck; have.Cmp(want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
-		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
-		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
+		st.state.SubBalance(st.msg.From(), *gasVal, tracing.BalanceDecreaseGasBuy)
+		st.state.SubBalance(st.msg.From(), *blobGasVal, tracing.BalanceDecreaseGasBuy)
 	}
 
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
@@ -318,12 +318,10 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
-	senderInitBalance = senderInitBalance.Clone()
 	coinbaseInitBalance, err := st.state.GetBalance(coinbase)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
-	coinbaseInitBalance = coinbaseInitBalance.Clone()
 
 	msg := st.msg
 	st.gasRemaining += st.msg.Gas()
@@ -394,12 +392,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
-	senderInitBalance = senderInitBalance.Clone()
 	coinbaseInitBalance, err := st.state.GetBalance(coinbase)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
-	coinbaseInitBalance = coinbaseInitBalance.Clone()
 
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
@@ -519,17 +515,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+	if err := st.state.AddBalance(coinbase, *amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
 			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
-			st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
+			st.state.AddBalance(*burntContractAddress, *burnAmount, tracing.BalanceChangeUnspecified)
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				st.state.AddBalance(*burntContractAddress, st.evm.BlobFee, tracing.BalanceChangeUnspecified)
+				st.state.AddBalance(*burntContractAddress, *st.evm.BlobFee, tracing.BalanceChangeUnspecified)
 			}
 		}
 	}
@@ -541,7 +537,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		ReturnData:          ret,
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
-		FeeTipped:           amount,
+		FeeTipped:           *amount,
 		EvmRefund:           st.state.GetRefund(),
 	}
 
@@ -642,7 +638,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 func (st *StateTransition) refundGas() {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
-	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+	st.state.AddBalance(st.msg.From(), *remaining, tracing.BalanceIncreaseGasReturn)
 
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
