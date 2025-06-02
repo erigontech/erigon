@@ -106,7 +106,7 @@ func (r DomainRanges) String() string {
 
 func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
-func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.d.aggregationStep }
+func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.aggStep }
 func (ht *HistoryRoTx) FirstStepNotInFiles() uint64 {
 	return ht.files.EndTxNum() / ht.h.aggregationStep
 }
@@ -121,23 +121,19 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
-	domainName, err := kv.String2Domain(dt.d.filenameBase)
-	if err != nil {
-		panic(err)
-	}
 
 	r := DomainRanges{
-		name:    domainName,
+		name:    dt.name,
 		history: hr,
-		aggStep: dt.d.aggregationStep,
+		aggStep: dt.aggStep,
 	}
 	for _, item := range dt.files {
 		if item.endTxNum > maxEndTxNum {
 			break
 		}
-		endStep := item.endTxNum / dt.d.aggregationStep
+		endStep := item.endTxNum / dt.aggStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := spanStep * dt.d.aggregationStep
+		span := spanStep * dt.aggStep
 		fromTxNum := item.endTxNum - span
 		if fromTxNum < item.startTxNum {
 			if !r.values.needMerge || fromTxNum < r.values.from {
@@ -535,7 +531,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter = nil
 	ps.Delete(p)
 
-	valuesIn = newFilesItem(r.values.from, r.values.to, dt.d.aggregationStep)
+	valuesIn = newFilesItem(r.values.from, r.values.to, dt.aggStep)
 	valuesIn.frozen = false
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
@@ -929,7 +925,7 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
 func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	dchecker := dt.d.checker
-	dname := dt.d.name
+	dname := dt.name
 	if dchecker != nil {
 		checker = func(startTxNum, endTxNum uint64) bool {
 			return dchecker.CheckDependentPresent(dname, Any, startTxNum, endTxNum)
