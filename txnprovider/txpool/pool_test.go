@@ -1553,10 +1553,6 @@ func TestGetBlobsV1(t *testing.T) {
 	assert.Equal(blobTxn.BlobBundles[1].Proofs[0], proofs[1])
 }
 
-func TextGetBlobsV2(t *testing.T) {
-	//TODO
-}
-
 func TestGasLimitChanged(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
