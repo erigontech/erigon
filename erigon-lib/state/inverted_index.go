@@ -504,6 +504,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		ii:      ii,
 		visible: ii._visible,
 		files:   files,
+		aggStep: ii.aggregationStep,
 		name:    ii.name,
 		salt:    ii.salt.Load(),
 	}
@@ -574,7 +575,8 @@ type InvertedIndexRoTx struct {
 
 	// TODO: retrofit recent optimization in main and reenable the next line
 	// ef *multiencseq.SequenceBuilder // re-usable
-	salt *uint32
+	salt    *uint32
+	aggStep uint64
 }
 
 // hashKey - change of salt will require re-gen of indices
