@@ -98,10 +98,10 @@ func MakeV1WrappedBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
 		return nil, nil
 	}
 	proofs := make(KZGProofs, 0, 256)
-	for _, pp := range p1 {
+	for _, pp := range &p1 {
 		proofs = append(proofs, (KZGProof(pp)))
 	}
-	for _, pp := range p2 {
+	for _, pp := range &p2 {
 		proofs = append(proofs, (KZGProof(pp)))
 	}
 
@@ -129,7 +129,6 @@ func MakeV1WrappedBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
 		wrapperRlp = append(wrapperRlp, 0xb0)
 		wrapperRlp = append(wrapperRlp, p[:]...)
 	}
-
 	return wrapperRlp, []gokzg4844.KZGCommitment{commitment0, commitment1}
 }
 
@@ -212,12 +211,18 @@ func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 
 	ethKzgCtx := kzg.GoEthKzgCtx()
 	_, p1, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&wrappedTxn.Blobs[0]), 4)
+	if err != nil {
+		panic(err)
+	}
 	_, p2, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&wrappedTxn.Blobs[1]), 4)
+	if err != nil {
+		panic(err)
+	}
 
-	for _, pp := range p1 {
+	for _, pp := range &p1 {
 		wrappedTxn.Proofs = append(wrappedTxn.Proofs, (KZGProof(pp)))
 	}
-	for _, pp := range p2 {
+	for _, pp := range &p2 {
 		wrappedTxn.Proofs = append(wrappedTxn.Proofs, (KZGProof(pp)))
 	}
 

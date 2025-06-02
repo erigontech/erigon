@@ -94,5 +94,5 @@ func VerifyCellProofBatch(blobsBytes [][]byte, commitments []gokzg4844.KZGCommit
 			cellIndices = append(cellIndices, uint64(idx))
 		}
 	}
-	return goethkzgContext.VerifyCellKZGProofBatch(commitsExt, cellIndices, cells[:], proofs)
+	return goethkzgContext.VerifyCellKZGProofBatch(commitsExt, cellIndices, cells, proofs)
 }
