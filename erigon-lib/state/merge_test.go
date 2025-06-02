@@ -68,7 +68,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		assert.False(t, result.values.needMerge)
 	})
 
-	t.Run("recent_first", func(t *testing.T) {
+	t.Run("earlier_first", func(t *testing.T) {
 		files := []visibleFile{
 			createFile(0, 2),
 			createFile(2, 4),
@@ -77,12 +77,6 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		}
 		dt := newDomainRoTx(1, files)
 		result := dt.findMergeRange(16, 32)
-		assert.True(t, result.values.needMerge)
-		assert.Equal(t, uint64(4), result.values.from)
-		assert.Equal(t, uint64(6), result.values.to)
-
-		dt = newDomainRoTx(2, []visibleFile{createFile(0, 2), createFile(2, 4)})
-		result = dt.findMergeRange(8, 32)
 		assert.True(t, result.values.needMerge)
 		assert.Equal(t, uint64(0), result.values.from)
 		assert.Equal(t, uint64(4), result.values.to)
@@ -98,8 +92,8 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		dt := newDomainRoTx(1, files)
 		result := dt.findMergeRange(4, 32)
 		assert.True(t, result.values.needMerge)
-		assert.Equal(t, uint64(2), result.values.from)
-		assert.Equal(t, uint64(4), result.values.to)
+		assert.Equal(t, uint64(0), result.values.from)
+		assert.Equal(t, uint64(2), result.values.to)
 	})
 
 	t.Run("aggregation_steps", func(t *testing.T) {
