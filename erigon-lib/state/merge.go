@@ -136,7 +136,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		if fromTxNum >= item.startTxNum {
 			continue
 		}
-		if r.values.needMerge && fromTxNum < r.values.from { //skip small files inside `span`
+		if r.values.needMerge && fromTxNum >= r.values.from { //skip small files inside `span`
 			continue
 		}
 
