@@ -93,7 +93,7 @@ func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes
 }
 
 // Same as [GetPayloadV4], but returning BlobsBundleV2 instead of BlobsBundleV1
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv5
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#engine_getpayloadv5
 func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV5", "payloadId", decodedPayloadId)

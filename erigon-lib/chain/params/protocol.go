@@ -182,9 +182,9 @@ const (
 
 	// EIP-7594: PeerDAS - Peer Data Availability Sampling
 	// See https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/polynomial-commitments-sampling.md
-	FieldElementsPerExtBlob        = 2 * FieldElementsPerBlob                    // Number of field elements in a Reed-Solomon extended blob
-	FieldElementsPerCell    uint64 = 64                                          // Number of Field elements in a cell
-	BytesPerCell                   = FieldElementsPerCell * 32                   // The number of bytes in a cell
+	FieldElementsPerExtBlob        = 2 * FieldElementsPerBlob                       // Number of field elements in a Reed-Solomon extended blob
+	FieldElementsPerCell    uint64 = 64                                             // Number of Field elements in a cell
+	BytesPerCell                   = FieldElementsPerCell * 32                      // The number of bytes in a cell
 	CellsPerExtBlob                = FieldElementsPerExtBlob / FieldElementsPerCell // The number of cells in an extended blob
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
