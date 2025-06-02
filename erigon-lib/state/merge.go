@@ -317,7 +317,9 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			}
 
 			historyFiles = append(historyFiles, item.src)
+			ht.h.InvertedIndex.dirtyFilesLock.Lock()
 			idxFile, ok := ht.h.InvertedIndex.dirtyFiles.Get(item.src)
+			ht.h.InvertedIndex.dirtyFilesLock.Unlock()
 			if ok {
 				indexFiles = append(indexFiles, idxFile)
 			} else {

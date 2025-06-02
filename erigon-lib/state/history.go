@@ -64,7 +64,8 @@ type History struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visibleFiles in zero-copy way
-	dirtyFiles *btree2.BTreeG[*filesItem]
+	dirtyFiles     *btree2.BTreeG[*filesItem]
+	dirtyFilesLock sync.Mutex
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use

@@ -81,7 +81,8 @@ type Domain struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visible in zero-copy way
-	dirtyFiles *btree2.BTreeG[*filesItem]
+	dirtyFiles     *btree2.BTreeG[*filesItem]
+	dirtyFilesLock sync.Mutex
 
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -802,7 +803,8 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnF
 	if err != nil {
 		return err
 	}
-
+	d.dirtyFilesLock.Lock()
+	defer d.dirtyFilesLock.Unlock()
 	d.integrateDirtyFiles(static, txnFrom, txnTo)
 	// d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	return nil

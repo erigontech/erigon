@@ -324,17 +324,17 @@ func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*filesIt
 
 func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
 	var item *filesItem
-	if item == nil {
-		dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
-			for _, f := range files {
-				if f.startTxNum == txFrom && f.endTxNum == txTo {
-					item = f
-					return false
-				}
+	dt.d.dirtyFilesLock.Lock()
+	dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
+		for _, f := range files {
+			if f.startTxNum == txFrom && f.endTxNum == txTo {
+				item = f
+				return false
 			}
-			return true
-		})
-	}
+		}
+		return true
+	})
+	dt.d.dirtyFilesLock.Unlock()
 
 	if item == nil || item.bindex == nil {
 		fileStepsss := "" + dt.d.name.String() + ": "
