@@ -38,6 +38,7 @@ var (
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
 // Updated for EIP-7691: currentHeaderTime is used to determine the fork, and hence params
+// Also updated for EIP-7918: Blob base fee bounded by execution cost
 func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeaderTime uint64) uint64 {
 	var parentExcessBlobGas, parentBlobGasUsed uint64
 	if parent.ExcessBlobGas != nil {
