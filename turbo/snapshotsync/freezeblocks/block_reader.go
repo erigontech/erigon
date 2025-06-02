@@ -19,8 +19,10 @@ package freezeblocks
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -1538,6 +1540,7 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 }
 
 func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.ReadTxNumFunc {
+	cache := GetBlockNumber2MaxTxNumCache()
 	return func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
 		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(tx, c, blockNum)
 		if err != nil {
@@ -1546,6 +1549,13 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 		if ok || r == nil {
 			return
 		}
+
+		// check cache
+		_maxTxNum, found := cache.Load(blockNum)
+		if found {
+			return _maxTxNum.(uint64), true, nil
+		}
+
 		b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
 		if err != nil {
 			return 0, false, err
@@ -1554,7 +1564,17 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 			return 0, false, nil
 		}
 		ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
+		cache.Store(blockNum, ret)
 		return ret, true, nil
 	}
+}
 
+var globalBlockNum2MaxTxNumCache sync.Map
+
+func GetBlockNumber2MaxTxNumCache() *sync.Map {
+	if flag.Lookup("test.v") == nil {
+		return &globalBlockNum2MaxTxNumCache
+	} else {
+		return &sync.Map{}
+	}
 }
