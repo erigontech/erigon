@@ -26,8 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -68,12 +66,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	}
 	defer tx.Rollback()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
-	if err != nil {
-		return nil, err
-	}
-
-	a, err := rpchelper.NewLatestStateReader(domains.AsGetter(tx)).ReadAccountData(account)
+	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(account)
 	if err != nil {
 		return nil, err
 	} else if a == nil {
