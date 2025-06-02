@@ -32,7 +32,7 @@ type ChainEventNotifier interface {
 	OnNewHeader(newHeadersRlp [][]byte)
 	OnNewPendingLogs(types.Logs)
 	OnLogs([]*remote.SubscribeLogsReply)
-	HasLogSubsriptions() bool
+	HasLogSubscriptions() bool
 }
 
 func MiningStages(

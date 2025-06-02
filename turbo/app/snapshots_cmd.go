@@ -168,6 +168,22 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "remove_overlaps",
+			Action: func(c *cli.Context) error {
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+
+				return doRemoveOverlap(c, dirs)
+			},
+			Usage: "remove overlaps from e3 files",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
 			Name:   "uploader",
 			Action: doUploaderCommand,
 			Usage:  "run erigon in snapshot upload mode (no execution)",
@@ -265,7 +281,7 @@ var snapshotCommand = cli.Command{
 			Action: doSqueeze,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "type", Required: true},
+				&cli.StringFlag{Name: "type", Required: true, Aliases: []string{"domain"}},
 			}),
 		},
 		{
@@ -1536,6 +1552,28 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 
+func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+
+	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer db.Close()
+	chainConfig := fromdb.ChainConfig(db)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	ctx := cliCtx.Context
+
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+
+	return agg.RemoveOverlapsAfterMerge(ctx)
+}
+
 func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
@@ -1698,8 +1736,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
-	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
-	agg.SetMergeWorkers(2)
+	agg.SetCollateAndBuildWorkers(min(8, estimate.StateV3Collate.Workers()))
+	agg.SetMergeWorkers(min(8, estimate.StateV3Collate.Workers()))
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 

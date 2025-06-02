@@ -125,7 +125,26 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 				// get last receipt and store the last log index + 1
 				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
 				if lastReceipt == nil {
-					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+					if se.skipPostEvaluation {
+						// if we're in the startup block and the last tx has been skilled we'll
+						// need to run it as a historic tx to recover its logs
+						prevTask := *txTask
+						prevTask.TxNum = txTask.TxNum - 1
+						prevTask.TxIndex = txTask.TxIndex - 1
+						prevTask.Tx = prevTask.Txs[prevTask.TxIndex]
+						signer := *types.MakeSigner(se.cfg.chainConfig, prevTask.BlockNum, prevTask.Header.Time)
+						prevTask.TxAsMessage, err = prevTask.Tx.AsMessage(signer, prevTask.Header.BaseFee, txTask.Rules)
+						if err != nil {
+							return false, err
+						}
+						prevTask.Final = false
+						prevTask.HistoryExecution = true
+						se.applyWorker.RunTxTaskNoLock(&prevTask, se.isMining, se.skipPostEvaluation)
+						prevTask.CreateReceipt(se.applyTx.(kv.TemporalTx))
+						lastReceipt = txTask.BlockReceipts[txTask.TxIndex-1]
+					} else {
+						return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+					}
 				}
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1

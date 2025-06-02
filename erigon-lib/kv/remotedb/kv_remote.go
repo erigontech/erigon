@@ -188,6 +188,8 @@ func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.T
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
 func (db *DB) ReloadSalt() error                                   { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
+func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
+func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
@@ -668,8 +670,12 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err er
 }
 
 func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	//TODO implement me
-	panic("implement me")
+	req := &remote.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
+	reply, err := tx.db.remoteKV.HasPrefix(tx.ctx, req)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return reply.FirstKey, reply.FirstVal, reply.HasPrefix, nil
 }
 
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {

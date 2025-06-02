@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,6 +126,7 @@ type TxPool struct {
 	promoted                Announcements
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
+	chainConfig             *chain.Config
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -139,11 +139,12 @@ type TxPool struct {
 	isPostShanghai          atomic.Bool
 	agraBlock               *uint64
 	isPostAgra              atomic.Bool
+	bhilaiBlock             *uint64
+	isPostBhilai            atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
-	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -173,12 +174,7 @@ func New(
 	chainDB kv.TemporalRoDB,
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
-	chainID uint256.Int,
-	shanghaiTime *big.Int,
-	agraBlock *big.Int,
-	cancunTime *big.Int,
-	pragueTime *big.Int,
-	blobSchedule *chain.BlobSchedule,
+	chainConfig *chain.Config,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -208,6 +204,11 @@ func New(
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
+	configChainID, overflow := uint256.FromBig(chainConfig.ChainID)
+	if overflow {
+		return nil, errors.New("chainID overflow")
+	}
+
 	lock := &sync.Mutex{}
 
 	res := &TxPool{
@@ -227,12 +228,12 @@ func New(
 		poolDB:                  poolDB,
 		_chainDB:                chainDB,
 		cfg:                     cfg,
-		chainID:                 chainID,
+		chainID:                 *configChainID,
+		chainConfig:             chainConfig,
 		unprocessedRemoteTxns:   &TxnSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
-		blobSchedule:            blobSchedule,
 		feeCalculator:           options.feeCalculator,
 		ethBackend:              ethBackend,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
@@ -245,36 +246,47 @@ func New(
 		}),
 	}
 
-	if shanghaiTime != nil {
-		if !shanghaiTime.IsUint64() {
+	if chainConfig.ShanghaiTime != nil {
+		if !chainConfig.ShanghaiTime.IsUint64() {
 			return nil, errors.New("shanghaiTime overflow")
 		}
-		shanghaiTimeU64 := shanghaiTime.Uint64()
+		shanghaiTimeU64 := chainConfig.ShanghaiTime.Uint64()
 		res.shanghaiTime = &shanghaiTimeU64
 	}
-	if agraBlock != nil {
-		if !agraBlock.IsUint64() {
-			return nil, errors.New("agraBlock overflow")
+	if chainConfig.Bor != nil {
+		agraBlock := chainConfig.Bor.GetAgraBlock()
+		if agraBlock != nil {
+			if !agraBlock.IsUint64() {
+				return nil, errors.New("agraBlock overflow")
+			}
+			agraBlockU64 := agraBlock.Uint64()
+			res.agraBlock = &agraBlockU64
 		}
-		agraBlockU64 := agraBlock.Uint64()
-		res.agraBlock = &agraBlockU64
+		bhilaiBlock := chainConfig.Bor.GetBhilaiBlock()
+		if bhilaiBlock != nil {
+			if !bhilaiBlock.IsUint64() {
+				return nil, errors.New("bhilaiBlock overflow")
+			}
+			bhilaiBlockU64 := bhilaiBlock.Uint64()
+			res.bhilaiBlock = &bhilaiBlockU64
+		}
 	}
-	if cancunTime != nil {
-		if !cancunTime.IsUint64() {
+	if chainConfig.CancunTime != nil {
+		if !chainConfig.CancunTime.IsUint64() {
 			return nil, errors.New("cancunTime overflow")
 		}
-		cancunTimeU64 := cancunTime.Uint64()
+		cancunTimeU64 := chainConfig.CancunTime.Uint64()
 		res.cancunTime = &cancunTimeU64
 	}
-	if pragueTime != nil {
-		if !pragueTime.IsUint64() {
+	if chainConfig.PragueTime != nil {
+		if !chainConfig.PragueTime.IsUint64() {
 			return nil, errors.New("pragueTime overflow")
 		}
-		pragueTimeU64 := pragueTime.Uint64()
+		pragueTimeU64 := chainConfig.PragueTime.Uint64()
 		res.pragueTime = &pragueTimeU64
 	}
 
-	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, chainID, logger, opts...)
+	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
 
 	return res, nil
@@ -765,8 +777,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 	best := p.pending.best
 
-	isShanghai := p.isShanghai() || p.isAgra()
-	isPrague := p.isPrague()
+	isEIP3860 := p.isShanghai() || p.isAgra()
+	isEIP7623 := p.isPrague() || p.isBhilai()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -821,8 +833,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// this stage
 		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
-		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague, isAATxn)
-		if isPrague && floorGas > intrinsicGas {
+		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isEIP3860, isEIP7623, isAATxn)
+		if isEIP7623 && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
 		}
 		if intrinsicGas > availableGas {
@@ -933,8 +945,9 @@ func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
-	isShanghai := p.isShanghai() || p.isAgra()
-	if isShanghai && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
+	isEIP3860 := p.isShanghai() || p.isAgra()
+	isPrague := p.isPrague() || p.isBhilai()
+	if isEIP3860 && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
 		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
 	if txn.Type == BlobTxnType {
@@ -1002,7 +1015,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 
 	authorizationLen := len(txn.AuthAndNonces)
 	if txn.Type == SetCodeTxnType {
-		if !p.isPrague() {
+		if !isPrague {
 			return txpoolcfg.TypeNotActivated
 		}
 		if txn.Creation {
@@ -1022,15 +1035,15 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	isAATxn := txn.Type == types.AccountAbstractionTxType
-	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isShanghai, p.isPrague(), isAATxn)
-	if p.isPrague() && floorGas > gas {
+	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isEIP3860, isPrague, isAATxn)
+	if isPrague && floorGas > gas {
 		gas = floorGas
 	}
 
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
-	if overflow != false {
+	if overflow {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed due to overflow idHash=%x", txn.IDHash))
 		}
@@ -1137,20 +1150,20 @@ func (p *TxPool) isShanghai() bool {
 	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
 }
 
-func (p *TxPool) isAgra() bool {
+func (p *TxPool) isBlockNumBasedForkActivated(isPostFlag *atomic.Bool, forkBlockNum *uint64) bool {
 	// once this flag has been set for the first time we no longer need to check the block
-	set := p.isPostAgra.Load()
+	set := isPostFlag.Load()
 	if set {
 		return true
 	}
-	if p.agraBlock == nil {
+	if forkBlockNum == nil {
 		return false
 	}
-	agraBlock := *p.agraBlock
+	forkBlock := *forkBlockNum
 
-	// a zero here means Agra is always active
-	if agraBlock == 0 {
-		p.isPostAgra.Swap(true)
+	// a zero here means the fork is always active
+	if forkBlock == 0 {
+		isPostFlag.Swap(true)
 		return true
 	}
 
@@ -1164,13 +1177,21 @@ func (p *TxPool) isAgra() bool {
 	if headBlock == nil || err != nil {
 		return false
 	}
-	// A new block is built on top of the head block, so when the head is agraBlock-1,
-	// the new block should use the Agra rules.
-	activated := (*headBlock + 1) >= agraBlock
+	// A new block is built on top of the head block, so when the head is forkBlock-1,
+	// the new block should use the new fork rules.
+	activated := (*headBlock + 1) >= forkBlock
 	if activated {
-		p.isPostAgra.Swap(true)
+		isPostFlag.Swap(true)
 	}
 	return activated
+}
+
+func (p *TxPool) isAgra() bool {
+	return p.isBlockNumBasedForkActivated(&p.isPostAgra, p.agraBlock)
+}
+
+func (p *TxPool) isBhilai() bool {
+	return p.isBlockNumBasedForkActivated(&p.isPostBhilai, p.bhilaiBlock)
 }
 
 func (p *TxPool) isCancun() bool {
@@ -1182,7 +1203,8 @@ func (p *TxPool) isPrague() bool {
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
-	return p.blobSchedule.MaxBlobsPerBlock(p.isPrague())
+	now := time.Now().Unix()
+	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
 }
 
 // Check that the serialized txn should not exceed a certain max size

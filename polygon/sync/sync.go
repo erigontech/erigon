@@ -298,7 +298,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 			amount = 1024
 		}
 
-		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
+		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(5 * time.Second)}
 		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, newBlockHeaderHash, amount, event.PeerId, opts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
@@ -339,12 +339,13 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	oldTip := ccb.Tip()
 	newConnectedHeaders, err := ccb.Connect(ctx, headerChain)
 	if err != nil {
+		// IMPORTANT: we just log the error and do not return
+		// to process the possibility of a partially connected header chain
 		s.logger.Debug(
-			syncLogPrefix("applyNewBlockOnTip: couldn't connect a header to the local chain tip, ignoring"),
+			syncLogPrefix("applyNewBlockOnTip: couldn't connect header chain to the local chain tip"),
+			"partiallyConnected", len(newConnectedHeaders),
 			"err", err,
 		)
-
-		return nil
 	}
 	if len(newConnectedHeaders) == 0 {
 		return nil
@@ -378,8 +379,9 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		}
 	}
 
-	// len(newConnectedHeaders) is always <= len(blockChain)
-	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	newBlocksStartIdx := firstNewConnectedHeader.Number.Uint64() - blockChain[0].NumberU64()
+	newBlocksEndIdx := newBlocksStartIdx + uint64(len(newConnectedHeaders))
+	newConnectedBlocks := blockChain[newBlocksStartIdx:newBlocksEndIdx]
 	if len(newConnectedBlocks) > 1 {
 		s.logger.Info(
 			syncLogPrefix("inserting multiple connected blocks"),

@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -73,7 +72,7 @@ type executor interface {
 	execute(ctx context.Context, tasks []*state.TxTask, gp *core.GasPool) (bool, error)
 	status(ctx context.Context, commitThreshold uint64) error
 	wait() error
-	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header)
+	getHeader(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error)
 
 	//these are reset by commit - so need to be read from the executor once its processing
 	tx() kv.RwTx
@@ -111,26 +110,22 @@ func (te *txExecutor) domains() *state2.SharedDomains {
 	return te.doms
 }
 
-func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header) {
-	var err error
+func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
 	if te.applyTx != nil {
-		h, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		return h
+		return te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
 	}
 
-	if err = te.cfg.db.View(ctx, func(tx kv.Tx) error {
+	var h *types.Header
+	var err error
+
+	err = te.cfg.db.View(ctx, func(tx kv.Tx) error {
 		h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
 		if err != nil {
 			return err
 		}
 		return nil
-	}); err != nil {
-		panic(err)
-	}
-	return h
+	})
+	return h, err
 }
 
 type parallelExecutor struct {
@@ -247,11 +242,11 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				if pe.doms.BlockNum() != pe.outputBlockNum.GetValueUint64() {
 					panic(fmt.Errorf("%d != %d", pe.doms.BlockNum(), pe.outputBlockNum.GetValueUint64()))
 				}
-				_, err := pe.doms.ComputeCommitment(ctx, tx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
+				_, err := pe.doms.ComputeCommitment(ctx, true, pe.outputBlockNum.GetValueUint64(), pe.outputTxNum.Load(), pe.execStage.LogPrefix())
 				if err != nil {
 					return err
 				}
-				if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
+				if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 					return err
 				}
 				if !pe.inMemExec {
