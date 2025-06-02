@@ -3,9 +3,9 @@ package state
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 func TestDomainRoTx_findMergeRange(t *testing.T) {
@@ -27,9 +27,8 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 			startTxNum: startTxNum,
 			endTxNum:   endTxNum,
 			src: &filesItem{
-				startTxNum:   startTxNum,
-				endTxNum:     endTxNum,
-				decompressor: &seg.Decompressor{},
+				startTxNum: startTxNum,
+				endTxNum:   endTxNum,
 			},
 		}
 	}
@@ -66,7 +65,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 		assert.True(t, result.values.needMerge)
 		assert.Equal(t, uint64(0), result.values.from)
-		assert.Equal(t, uint64(1), result.values.to)
+		assert.Equal(t, uint64(2), result.values.to)
 	})
 
 	t.Run("maxEndTxNum_filter", func(t *testing.T) {

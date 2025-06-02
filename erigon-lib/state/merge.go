@@ -127,29 +127,20 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		history: hr,
 		aggStep: dt.aggStep,
 	}
-	fmt.Printf("DEBUG: dt.files length: %d, maxEndTxNum: %d, maxSpan: %d, aggStep: %d\n", len(dt.files), maxEndTxNum, maxSpan, dt.aggStep)
-	for i, item := range dt.files {
-		fmt.Printf("DEBUG: file %d: startTxNum=%d, endTxNum=%d\n", i, item.startTxNum, item.endTxNum)
+	for _, item := range dt.files {
 		if item.endTxNum > maxEndTxNum {
-			fmt.Printf("DEBUG: breaking because item.endTxNum %d > maxEndTxNum %d\n", item.endTxNum, maxEndTxNum)
 			break
 		}
 		endStep := item.endTxNum / dt.aggStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := spanStep * dt.aggStep
 		fromTxNum := item.endTxNum - span
-		fmt.Printf("DEBUG: endStep=%d, spanStep=%d, span=%d, fromTxNum=%d\n", endStep, spanStep, span, fromTxNum)
 		if fromTxNum < item.startTxNum {
-			fmt.Printf("DEBUG: merge condition met: fromTxNum %d < item.startTxNum %d\n", fromTxNum, item.startTxNum)
 			if !r.values.needMerge || fromTxNum < r.values.from {
 				r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
-				fmt.Printf("DEBUG: setting merge range: from=%d, to=%d\n", fromTxNum, item.endTxNum)
 			}
-		} else {
-			fmt.Printf("DEBUG: merge condition NOT met: fromTxNum %d >= item.startTxNum %d\n", fromTxNum, item.startTxNum)
 		}
 	}
-	fmt.Printf("DEBUG: final result: needMerge=%v, from=%d, to=%d\n", r.values.needMerge, r.values.from, r.values.to)
 	return r
 }
 
