@@ -55,7 +55,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	p2p "github.com/erigontech/erigon-p2p"
@@ -877,12 +876,8 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) s
 	return r
 }
 
-func (ms *MockSentry) NewStateReader(tx kv.TemporalTx) state.StateReader {
-	domains, err := libstate.NewSharedDomains(tx, log.New())
-	if err != nil {
-		return nil
-	}
-	return state.NewReaderV3(domains.AsGetter(tx))
+func (ms *MockSentry) NewStateReader(tx kv.TemporalGetter) state.StateReader {
+	return state.NewReaderV3(tx)
 }
 
 func (ms *MockSentry) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
