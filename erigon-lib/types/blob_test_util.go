@@ -212,7 +212,7 @@ func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 
 	ethKzgCtx := kzg.GoEthKzgCtx()
 	_, p1, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&wrappedTxn.Blobs[0]), 4)
-	_, p2, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&wrappedTxn.Blobs[2]), 4)
+	_, p2, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&wrappedTxn.Blobs[1]), 4)
 
 	for _, pp := range p1 {
 		wrappedTxn.Proofs = append(wrappedTxn.Proofs, (KZGProof(pp)))

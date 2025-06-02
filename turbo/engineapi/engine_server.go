@@ -962,7 +962,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 			} else {
 				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
-					ret[i].CellProofs[c] = res.Proofs[i*int(params.CellsPerExtBlob) + int(c)]
+					ret[i].CellProofs[c] = res.Proofs[i*int(params.CellsPerExtBlob)+int(c)]
 				}
 				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(cellProofs)=%d ", blobHashes[i], len(res.Blobs[i]), len(ret[i].CellProofs)))
 			}
