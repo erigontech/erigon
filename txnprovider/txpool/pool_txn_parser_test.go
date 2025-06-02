@@ -356,7 +356,7 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	rand.Read(commitment0[:])
 	rand.Read(commitment1[:])
 
-	var proofs []gokzg4844.KZGProof
+	proofs := make([]gokzg4844.KZGProof, 0, 256)
 	for range 256 {
 		var p gokzg4844.KZGProof
 		rand.Read(p[:])

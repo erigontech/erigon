@@ -201,7 +201,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 
 		// Check if blob txn has wrapperVersion
 		proofsPerBlob := 1
-		dataPos, dataLen, err = rlp.ParseString(payload, p)
+		_, dataLen, err = rlp.ParseString(payload, p)
 		if err == nil && dataLen == 1 {
 			p = p + 1
 			proofsPerBlob = int(params.CellsPerExtBlob)
