@@ -7,9 +7,10 @@ import (
 	"sort"
 
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/p2p/enode"
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
 type (
@@ -145,4 +146,54 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([]clt
 	}
 
 	return matrix, nil
+}
+
+// RecoverCellsAndKZGProofs uses the c-kzg-4844 library to recover the cells and proofs.
+func RecoverCellsAndKZGProofs(cellIndices []ColumnIndex, cells []cltypes.Cell) ([]cltypes.Cell, []cltypes.KZGProof, error) {
+	ckzgCells := make([]ckzg.Cell, len(cells))
+	for i, cell := range cells {
+		ckzgCells[i] = ckzg.Cell(cell)
+	}
+
+	// recover cells and proofs
+	recoveredCells, recoveredProofs, err := ckzg.RecoverCellsAndKZGProofs(cellIndices, ckzgCells)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to recover cells and proofs: %w", err)
+	}
+
+	returnedCells := make([]cltypes.Cell, len(recoveredCells))
+	for i, cell := range recoveredCells {
+		copy(returnedCells[i][:], cell[:])
+	}
+
+	returnedProofs := make([]cltypes.KZGProof, len(recoveredProofs))
+	for i := range recoveredProofs {
+		copy(returnedProofs[i][:], recoveredProofs[i][:])
+	}
+	return returnedCells, returnedProofs, nil
+}
+
+// ComputeCellsAndKZGProofs uses the c-kzg-4844 library to compute the cells and proofs.
+func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, error) {
+	ckzgBlob := ckzg.Blob{}
+	if len(blob) != len(ckzgBlob) {
+		return nil, nil, fmt.Errorf("blob length mismatch")
+	}
+	copy(ckzgBlob[:], blob)
+	cells, proofs, err := ckzg.ComputeCellsAndKZGProofs(&ckzgBlob)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to compute cells and proofs: %w", err)
+	}
+
+	returnedCells := make([]cltypes.Cell, len(cells))
+	for i, cell := range cells {
+		copy(returnedCells[i][:], cell[:])
+	}
+
+	returnedProofs := make([]cltypes.KZGProof, len(proofs))
+	for i, proof := range proofs {
+		copy(returnedProofs[i][:], proof[:])
+	}
+
+	return returnedCells, returnedProofs, nil
 }

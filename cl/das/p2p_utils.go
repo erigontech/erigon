@@ -2,8 +2,11 @@ package das
 
 import (
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
 type DataColumnsByRootIdentifier struct {
@@ -42,16 +45,40 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 	}
 
 	// Batch verify that the cells match the corresponding commitments and proofs
-	return VerifyCellKZGProofBatch( // in kzg pkg
+	ok, err := VerifyCellKZGProofBatch( // in kzg pkg
 		sidecar.KzgCommitments,
 		cellIndices,
 		sidecar.Column,
 		sidecar.KzgProofs,
 	)
+	if err != nil {
+		log.Warn("failed to verify cell kzg proofs", "error", err)
+		return false
+	}
+	return ok
 }
 
 // ComputeSubnetForDataColumnSidecar computes the subnet ID for a given data column sidecar index.
 // This function is re-entrant and thread-safe.
 func ComputeSubnetForDataColumnSidecar(columnIndex ColumnIndex) uint64 {
 	return columnIndex % clparams.GetBeaconConfig().DataColumnSidecarSubnetCount
+}
+
+func VerifyCellKZGProofBatch(commitments *solid.ListSSZ[*cltypes.KZGCommitment], cellIndices []uint64, cells *solid.ListSSZ[cltypes.Cell], proofs *solid.ListSSZ[*cltypes.KZGProof]) (bool, error) {
+	ckzgCommitments := make([]ckzg.Bytes48, commitments.Len())
+	for i := range ckzgCommitments {
+		copy(ckzgCommitments[i][:], commitments.Get(i)[:])
+	}
+
+	ckzgCells := make([]ckzg.Cell, cells.Len())
+	for i := range ckzgCells {
+		ckzgCells[i] = ckzg.Cell(cells.Get(i))
+	}
+
+	ckzgProofs := make([]ckzg.Bytes48, proofs.Len())
+	for i := range ckzgProofs {
+		copy(ckzgProofs[i][:], proofs.Get(i)[:])
+	}
+
+	return ckzg.VerifyCellKZGProofBatch(ckzgCommitments, cellIndices, ckzgCells, ckzgProofs)
 }
