@@ -25,8 +25,8 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
@@ -551,7 +551,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 		}
 		cfg.hist.iiCfg.salt.Store(&salt)
-		cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
+		cfg.hist.iiCfg.dirs = datadir.New(os.TempDir())
 		cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 		cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 
@@ -793,4 +793,70 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		checkFn(sc)
 		checkFn(cc)
 	})
+}
+
+func TestHistoryAndIIAlignment(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	t.Cleanup(db.Close)
+
+	agg, _ := newAggregatorOld(context.Background(), dirs, 1, db, logger)
+	setup := func() (account *Domain) {
+		agg.registerDomain(kv.AccountsDomain, nil, dirs, logger)
+		domain := agg.d[kv.AccountsDomain]
+		domain.History.InvertedIndex.Accessors = 0
+		domain.History.Accessors = 0
+		domain.Accessors = 0
+		return domain
+	}
+
+	account := setup()
+	require.NotNil(t, account.InvertedIndex.checker)
+
+	h := account.History
+	ii := h.InvertedIndex
+
+	h.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.v",
+		"v1.0-accounts.1-2.v",
+		"v1.0-accounts.2-3.v",
+		"v1.0-accounts.3-4.v",
+	})
+
+	h.dirtyFiles.Scan(func(item *filesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+
+	ii.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.0-4.ef",
+	})
+	ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+
+	roTx := h.BeginFilesRo()
+	defer roTx.Close()
+
+	for i, f := range roTx.files {
+		require.Equal(t, uint64(i), f.startTxNum)
+		require.Equal(t, uint64(i+1), f.endTxNum)
+	}
+
+	for i, f := range roTx.iit.files {
+		require.Equal(t, uint64(i), f.startTxNum)
+		require.Equal(t, uint64(i+1), f.endTxNum)
+	}
+
+	require.Len(t, roTx.garbage(&filesItem{startTxNum: 0, endTxNum: 4}), 4)
+
+	// no garbage with iit, since history is not merged
+	require.Len(t, roTx.iit.garbage(&filesItem{startTxNum: 0, endTxNum: 4}), 0)
 }
