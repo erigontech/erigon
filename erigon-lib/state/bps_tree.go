@@ -425,7 +425,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	cmp, keyCmpBuf, err = b.keyCmpFunc(key, l, g, keyCmpBuf[:0])
+	cmp, _, err = b.keyCmpFunc(key, l, g, keyCmpBuf[:0])
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
