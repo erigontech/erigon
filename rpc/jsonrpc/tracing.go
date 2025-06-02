@@ -382,9 +382,9 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 
 	var stateReader state.StateReader
 	if config == nil || config.TxIndex == nil || isLatest {
-		stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(dbtx, api._txNumReader, blockNumber, int(*config.TxIndex), chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
 	}
 	if err != nil {
 		return fmt.Errorf("create state reader: %v", err)
@@ -504,7 +504,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		transactionIndex = len(block.Transactions())
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), transactionIndex, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), transactionIndex, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		stream.WriteNil()
 		return err
