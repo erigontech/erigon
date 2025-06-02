@@ -26,6 +26,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	stateLib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/tracing"
 )
 
@@ -113,13 +115,19 @@ func TestStateLogger(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, tx, _ := NewTestTemporalDb(t)
 
-			err := rawdbv3.TxNums.Append(tx, 1, 1)
+			domains, err := stateLib.NewSharedDomains(tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+
+			domains.SetTxNum(1)
+			domains.SetBlockNum(1)
+			err = rawdbv3.TxNums.Append(tx, 1, 1)
 			require.NoError(t, err)
 
 			mockCtl := gomock.NewController(t)
 			defer mockCtl.Finish()
 			mt := mockTracer{}
-			state := New(NewReaderV3(tx))
+			state := New(NewReaderV3(domains.AsGetter(tx)))
 			state.SetHooks(mt.Hooks())
 
 			tt.run(state)

@@ -337,6 +337,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
 	txNum := -1
+	setBlockNum := func(blockNum uint64) {
+		domains.SetBlockNum(blockNum)
+	}
 	txNumIncrement := func() {
 		txNum++
 		stateWriter.SetTxNum(uint64(txNum))
@@ -403,6 +406,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 
 	for i := 0; i < n; i++ {
+		setBlockNum(uint64(i))
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {
