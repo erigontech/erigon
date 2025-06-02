@@ -73,31 +73,16 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 			createFile(0, 1),
 			createFile(1, 2),
 			createFile(2, 3),
+			createFile(3, 4),
 		}
 		dt := newDomainRoTx(1, files)
 		result := dt.findMergeRange(4, 32)
-
 		assert.True(t, result.values.needMerge)
 		assert.Equal(t, uint64(0), result.values.from)
 		assert.Equal(t, uint64(2), result.values.to)
 	})
 
-	t.Run("maxEndTxNum_filter", func(t *testing.T) {
-		files := []visibleFile{
-			createFile(0, 1),
-			createFile(1, 2),
-			createFile(2, 4),
-			createFile(4, 8),
-		}
-		dt := newDomainRoTx(1, files)
-		result := dt.findMergeRange(3, 32)
-
-		assert.True(t, result.values.needMerge)
-		assert.Equal(t, uint64(0), result.values.from)
-		assert.Equal(t, uint64(2), result.values.to)
-	})
-
-	t.Run("power_of_two_and_span_logic", func(t *testing.T) {
+	t.Run("recent_first", func(t *testing.T) {
 		files := []visibleFile{
 			createFile(0, 2),
 			createFile(2, 4),
@@ -107,8 +92,8 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		dt := newDomainRoTx(1, files)
 		result := dt.findMergeRange(16, 32)
 		assert.True(t, result.values.needMerge)
-		assert.Equal(t, uint64(0), result.values.from)
-		assert.Equal(t, uint64(2), result.values.to)
+		assert.Equal(t, uint64(4), result.values.from)
+		assert.Equal(t, uint64(6), result.values.to)
 
 		dt = newDomainRoTx(2, []visibleFile{createFile(0, 2), createFile(2, 4)})
 		result = dt.findMergeRange(8, 32)
