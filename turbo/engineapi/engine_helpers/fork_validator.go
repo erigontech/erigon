@@ -256,7 +256,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		if criticalError != nil {
 			return
 		}
-		logger.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
+		logger.Info("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
 	}
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
@@ -275,6 +275,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	txc.Doms = fv.sharedDom
 
 	fv.extendingForkNotifications = shards.NewNotifications(nil)
+
+	fmt.Println("entering validateAndStorePayload")
 	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
 }
 
@@ -309,6 +311,8 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 	}
+
+	fmt.Println("ending validateAndStorePayload")
 	fv.timingsCache.Add(header.Hash(), BlockTimings{time.Since(start), 0})
 
 	latestValidHash = header.Hash()
