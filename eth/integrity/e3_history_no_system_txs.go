@@ -43,7 +43,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	defer logEvery.Stop()
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	g := &errgroup.Group{}
-	g.SetLimit(estimate.BlocksExecution.Workers())
+	g.SetLimit(estimate.AlmostAllCPUs())
 
 	for j := 0; j < 256; j++ {
 		j := j
