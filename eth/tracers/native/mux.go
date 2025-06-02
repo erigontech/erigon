@@ -177,10 +177,34 @@ func (t *muxTracer) OnLog(log *types.Log) {
 	}
 }
 
+func (t *muxTracer) CaptureArbitrumStorageGet(key libcommon.Hash, depth int, before bool) {
+	for _, t := range t.tracers {
+		if t.CaptureArbitrumStorageGet != nil {
+			t.CaptureArbitrumStorageGet(key, depth, before)
+		}
+	}
+}
+
+func (t *muxTracer) CaptureArbitrumStorageSet(key, value libcommon.Hash, depth int, before bool) {
+	for _, t := range t.tracers {
+		if t.CaptureArbitrumStorageSet != nil {
+			t.CaptureArbitrumStorageSet(key, value, depth, before)
+		}
+	}
+}
+
 func (t *muxTracer) CaptureArbitrumTransfer(from, to *libcommon.Address, value *uint256.Int, before bool, reason string) {
 	for _, t := range t.tracers {
 		if t.CaptureArbitrumTransfer != nil {
 			t.CaptureArbitrumTransfer(from, to, value, before, reason)
+		}
+	}
+}
+
+func (t *muxTracer) CaptureStylusHostio(name string, args, outs []byte, startInk, endInk uint64) {
+	for _, t := range t.tracers {
+		if t.CaptureStylusHostio != nil {
+			t.CaptureStylusHostio(name, args, outs, startInk, endInk)
 		}
 	}
 }

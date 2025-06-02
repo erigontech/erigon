@@ -255,3 +255,7 @@ func (c *Contract) SetCodeOptionalHash(addr *libcommon.Address, codeAndHash *cod
 	c.CodeHash = codeAndHash.hash
 	c.CodeAddr = addr
 }
+
+func (c *Contract) JumpDest() *JumpDestCache {
+	return c.jumpdests
+}
