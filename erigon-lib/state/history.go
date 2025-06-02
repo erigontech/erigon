@@ -26,7 +26,6 @@ import (
 	"math"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	btree2 "github.com/tidwall/btree"
@@ -70,8 +69,6 @@ type History struct {
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []visibleFile
-
-	enableReadAhead atomic.Bool
 }
 
 type histCfg struct {

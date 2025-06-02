@@ -1765,7 +1765,6 @@ func (at *Aggregator) MadvNormal() *Aggregator {
 	for _, d := range at.d {
 		d.enableReadAhead.Store(true)
 		d.History.enableReadAhead.Store(true)
-		d.History.InvertedIndex.enableReadAhead.Store(true)
 		for _, f := range d.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
@@ -1791,7 +1790,6 @@ func (at *Aggregator) DisableReadAhead() {
 	for _, d := range at.d {
 		d.enableReadAhead.Store(false)
 		d.History.enableReadAhead.Store(false)
-		d.History.InvertedIndex.enableReadAhead.Store(false)
 		for _, f := range d.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}
