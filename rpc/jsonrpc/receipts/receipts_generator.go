@@ -170,7 +170,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	mu := g.txnExecMutex.lock(txnHash)
 	defer g.txnExecMutex.unlock(mu, txnHash)
 	if receipt, ok := g.receiptCache.Get(txnHash); ok {
-		return receipt, nil
+		if receipt.BlockHash == blockHash { // elegant way to handle reorgs
+			return receipt, nil
+		}
+		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
 	}
 
 	var receipt *types.Receipt
