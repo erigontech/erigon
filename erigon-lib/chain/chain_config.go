@@ -411,11 +411,15 @@ func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
-	return c.getBlobConfig(time).Max * params.BlobGasPerBlob
+	return c.GetMaxBlobsPerBlock(time) * params.BlobGasPerBlob
+}
+
+func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
+	return c.getBlobConfig(time).Target
 }
 
 func (c *Config) GetTargetBlobGasPerBlock(time uint64) uint64 {
-	return c.getBlobConfig(time).Target * params.BlobGasPerBlob
+	return c.GetTargetBlobsPerBlock(time) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
