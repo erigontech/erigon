@@ -178,7 +178,8 @@ const (
 	PointEvaluationGas   uint64 = 50000
 	FieldElementsPerBlob        = 4096 // each field element is 32 bytes
 	BlobSize                    = FieldElementsPerBlob * 32
-	BlobGasPerBlob       uint64 = 0x20000
+	BlobGasPerBlob       uint64 = 1 << 17 // GAS_PER_BLOB
+	BlobBaseCost         uint64 = 1 << 14 // EIP-7918: Blob base fee bounded by execution cost
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas uint64 = 3450

@@ -418,10 +418,6 @@ func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
 	return c.getBlobConfig(time).Target
 }
 
-func (c *Config) GetTargetBlobGasPerBlock(time uint64) uint64 {
-	return c.GetTargetBlobsPerBlock(time) * params.BlobGasPerBlob
-}
-
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
 	return c.getBlobConfig(time).BaseFeeUpdateFraction
 }
