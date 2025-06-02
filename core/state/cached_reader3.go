@@ -77,9 +77,12 @@ func (r *CachedReader3) ReadAccountStorage(address common.Address, key common.Ha
 		return uint256.Int{}, false, err
 	}
 	if len(enc) == 0 {
-		return nil, nil
+		return uint256.Int{}, false, err
 	}
-	return enc, nil
+
+	var res uint256.Int
+	(&res).SetBytes(enc)
+	return res, true, err
 }
 
 func (r *CachedReader3) ReadAccountCode(address common.Address) ([]byte, error) {

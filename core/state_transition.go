@@ -388,8 +388,8 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
-		SenderInitBalance:   &senderInitBalance,
-		CoinbaseInitBalance: &coinbaseInitBalance,
+		SenderInitBalance:   senderInitBalance,
+		CoinbaseInitBalance: coinbaseInitBalance,
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {
@@ -600,8 +600,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		ReturnData:          ret,
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
-		FeeTipped:           tipAmount,
-		FeeBurnt:            burnAmount,
+		FeeTipped:           *tipAmount,
+		FeeBurnt:            *burnAmount,
 		EvmRefund:           st.state.GetRefund(),
 	}
 

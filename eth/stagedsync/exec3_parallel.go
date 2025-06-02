@@ -182,7 +182,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	if task.shouldDelayFeeCalc {
 		if txTask.Config.IsLondon(blockNum) {
-			ibs.AddBalance(result.ExecutionResult.BurntContractAddress, *result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
+			ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
 		}
 
 		coinbaseBalance, err := ibs.GetBalance(result.Coinbase)
@@ -196,12 +196,12 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 			fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, task.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbaseBalance), "nonce", nonce)
 		}
 
-		ibs.AddBalance(result.Coinbase, *result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
+		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
 
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				execResult := *result.ExecutionResult
-				execResult.CoinbaseInitBalance = coinbaseBalance.Clone()
+				execResult.CoinbaseInitBalance = coinbaseBalance
 
 				message, err := task.TxMessage()
 				if err != nil {

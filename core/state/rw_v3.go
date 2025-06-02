@@ -581,6 +581,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (
 	}
 
 	ok := enc != nil
+	var res uint256.Int
 	if ok {
 		(&res).SetBytes(enc)
 	}
