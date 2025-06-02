@@ -991,6 +991,7 @@ type HistoryRoTx struct {
 	files   visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
 	getters []*seg.Reader
 	readers []*recsplit.IndexReader
+	aggStep uint64
 
 	trace bool
 
@@ -1010,10 +1011,11 @@ func (h *History) BeginFilesRo() *HistoryRoTx {
 	}
 
 	return &HistoryRoTx{
-		h:     h,
-		iit:   h.InvertedIndex.BeginFilesRo(),
-		files: files,
-		trace: false,
+		h:       h,
+		iit:     h.InvertedIndex.BeginFilesRo(),
+		files:   files,
+		aggStep: h.aggregationStep,
+		trace:   false,
 	}
 }
 
@@ -1219,8 +1221,8 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	historyItem, ok := ht.getFile(histTxNum)
 	if !ok {
-		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.h.aggregationStep)
-		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.filenameBase, histTxNum/ht.h.aggregationStep, histTxNum/ht.h.aggregationStep)
+		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.aggStep)
+		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.filenameBase, histTxNum/ht.aggStep, histTxNum/ht.aggStep)
 	}
 	reader := ht.statelessIdxReader(historyItem.i)
 	if reader.Empty() {
