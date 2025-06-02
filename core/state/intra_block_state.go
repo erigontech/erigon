@@ -308,6 +308,17 @@ func (sdb *IntraBlockState) Empty(addr common.Address) (bool, error) {
 // GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetBalance(addr common.Address) (uint256.Int, error) {
+	if sdb.versionMap == nil {
+		stateObject, err := sdb.getStateObject(addr)
+		if err != nil {
+			return *u256.Num0, err
+		}
+		if stateObject != nil && !stateObject.deleted {
+			return stateObject.Balance(), nil
+		}
+		return *u256.Num0, nil
+	}
+
 	balance, _, err := versionedRead(sdb, addr, BalancePath, common.Hash{}, false, *u256.Num0,
 		func(v uint256.Int) uint256.Int {
 			return v
@@ -324,6 +335,17 @@ func (sdb *IntraBlockState) GetBalance(addr common.Address) (uint256.Int, error)
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetNonce(addr common.Address) (uint64, error) {
+	if sdb.versionMap == nil {
+		stateObject, err := sdb.getStateObject(addr)
+		if err != nil {
+			return 0, err
+		}
+		if stateObject != nil && !stateObject.deleted {
+			return stateObject.Nonce(), nil
+		}
+		return 0, nil
+	}
+
 	nonce, _, err := versionedRead(sdb, addr, NoncePath, common.Hash{}, false, 0,
 		func(v uint64) uint64 { return v },
 		func(s *stateObject) (uint64, error) {
@@ -347,6 +369,23 @@ func (sdb *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr common.Address) ([]byte, error) {
+	if sdb.versionMap == nil {
+		stateObject, err := sdb.getStateObject(addr)
+		if err != nil {
+			return nil, err
+		}
+		if stateObject != nil && !stateObject.deleted {
+			code, err := stateObject.Code()
+			if sdb.trace {
+				fmt.Printf("GetCode %x, returned %d\n", addr, len(code))
+			}
+			return code, err
+		}
+		if sdb.trace {
+			fmt.Printf("GetCode %x, returned nil\n", addr)
+		}
+		return nil, nil
+	}
 	code, source, err := versionedRead(sdb, addr, CodePath, common.Hash{}, false, nil,
 		func(v []byte) []byte {
 			return v
@@ -368,6 +407,23 @@ func (sdb *IntraBlockState) GetCode(addr common.Address) ([]byte, error) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
+	if sdb.versionMap == nil {
+		stateObject, err := sdb.getStateObject(addr)
+		if err != nil {
+			return 0, err
+		}
+		if stateObject == nil || stateObject.deleted {
+			return 0, nil
+		}
+		if stateObject.code != nil {
+			return len(stateObject.code), nil
+		}
+		if stateObject.data.CodeHash == empty.CodeHash {
+			return 0, nil
+		}
+		return sdb.stateReader.ReadAccountCodeSize(addr)
+	}
+
 	size, source, err := versionedRead(sdb, addr, CodeSizePath, common.Hash{}, false, 0,
 		func(v int) int { return v },
 		func(s *stateObject) (int, error) {
@@ -399,6 +455,17 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeHash(addr common.Address) (common.Hash, error) {
+	if sdb.versionMap == nil {
+		stateObject, err := sdb.getStateObject(addr)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		if stateObject == nil || stateObject.deleted {
+			return common.Hash{}, nil
+		}
+		return stateObject.data.CodeHash, nil
+	}
+
 	hash, _, err := versionedRead(sdb, addr, CodeHashPath, common.Hash{}, false, common.Hash{},
 		func(v common.Hash) common.Hash { return v },
 		func(s *stateObject) (common.Hash, error) {
