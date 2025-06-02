@@ -106,7 +106,7 @@ func (r DomainRanges) String() string {
 
 func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
-func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.d.aggregationStep }
+func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.aggStep }
 func (ht *HistoryRoTx) FirstStepNotInFiles() uint64 {
 	return ht.files.EndTxNum() / ht.h.aggregationStep
 }
@@ -121,23 +121,19 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
-	domainName, err := kv.String2Domain(dt.d.filenameBase)
-	if err != nil {
-		panic(err)
-	}
 
 	r := DomainRanges{
-		name:    domainName,
+		name:    dt.name,
 		history: hr,
-		aggStep: dt.d.aggregationStep,
+		aggStep: dt.aggStep,
 	}
 	for _, item := range dt.files {
 		if item.endTxNum > maxEndTxNum {
 			break
 		}
-		endStep := item.endTxNum / dt.d.aggregationStep
+		endStep := item.endTxNum / dt.aggStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := spanStep * dt.d.aggregationStep
+		span := spanStep * dt.aggStep
 		fromTxNum := item.endTxNum - span
 		if fromTxNum < item.startTxNum {
 			if !r.values.needMerge || fromTxNum < r.values.from {
@@ -434,7 +430,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}
-	p := ps.AddNew("merge "+path.Base(kvFilePath), 1)
+
+	cnt := 0
+	for _, item := range domainFiles {
+		cnt += item.decompressor.Count()
+	}
+
+	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt)*2) // *2 because after adding words - will happen compression (which also slow)
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -464,12 +466,14 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	var keyFileStartTxNum, keyFileEndTxNum uint64
+	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
 		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
+			i++
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if ci1.idx.HasNext() {
 				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
@@ -480,27 +484,29 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 		// For the rest of types, empty value means deletion
 		deleted := r.values.from == 0 && len(lastVal) == 0
-		if !deleted {
-			if keyBuf != nil {
-				if vt != nil {
-					if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
-						valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
-						if err != nil {
-							return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
-						}
+		if deleted {
+			continue
+		}
+		if keyBuf != nil {
+			if vt != nil {
+				if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
+					valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+					if err != nil {
+						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
 				}
-				if _, err = kvWriter.Write(keyBuf); err != nil {
-					return nil, nil, nil, err
-				}
-				if _, err = kvWriter.Write(valBuf); err != nil {
-					return nil, nil, nil, err
-				}
 			}
-			keyBuf = append(keyBuf[:0], lastKey...)
-			valBuf = append(valBuf[:0], lastVal...)
-			keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
+			if _, err = kvWriter.Write(keyBuf); err != nil {
+				return nil, nil, nil, err
+			}
+			if _, err = kvWriter.Write(valBuf); err != nil {
+				return nil, nil, nil, err
+			}
 		}
+		keyBuf = append(keyBuf[:0], lastKey...)
+		valBuf = append(valBuf[:0], lastVal...)
+		keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
+		p.Processed.Store(i)
 	}
 	if keyBuf != nil {
 		if vt != nil {
@@ -525,7 +531,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter = nil
 	ps.Delete(p)
 
-	valuesIn = newFilesItem(r.values.from, r.values.to, dt.d.aggregationStep)
+	valuesIn = newFilesItem(r.values.from, r.values.to, dt.aggStep)
 	valuesIn.frozen = false
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
@@ -919,7 +925,7 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
 func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	dchecker := dt.d.checker
-	dname := dt.d.name
+	dname := dt.name
 	if dchecker != nil {
 		checker = func(startTxNum, endTxNum uint64) bool {
 			return dchecker.CheckDependentPresent(dname, Any, startTxNum, endTxNum)
