@@ -1369,7 +1369,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	}
 	rh1, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
 	require.NoError(t, err)
-	//t.Logf("stateRoot %x", rh1)
+	t.Logf("stateRoot %x", rh1)
 
 	trieCode, tcErr := r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
