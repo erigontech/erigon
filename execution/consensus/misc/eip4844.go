@@ -33,7 +33,7 @@ import (
 
 var (
 	blobBaseCost = big.NewInt(int64(params.BlobBaseCost))
-	gasPerBlob   = big.NewInt(int64(params.BlobGasPerBlob))
+	gasPerBlob   = big.NewInt(int64(params.GasPerBlob))
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
@@ -47,7 +47,7 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 		parentBlobGasUsed = *parent.BlobGasUsed
 	}
 	target := config.GetTargetBlobsPerBlock(currentHeaderTime)
-	targetBlobGas := target * params.BlobGasPerBlob
+	targetBlobGas := target * params.GasPerBlob
 
 	if parentExcessBlobGas+parentBlobGasUsed < targetBlobGas {
 		return 0
@@ -127,5 +127,5 @@ func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {
-	return uint64(numBlobs) * params.BlobGasPerBlob
+	return uint64(numBlobs) * params.GasPerBlob
 }

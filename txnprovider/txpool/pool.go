@@ -823,10 +823,10 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 		// Skip transactions that require more blob gas than is available
 		blobCount := uint64(len(mt.TxnSlot.BlobHashes))
-		if blobCount*params.BlobGasPerBlob > availableBlobGas {
+		if blobCount*params.GasPerBlob > availableBlobGas {
 			continue
 		}
-		availableBlobGas -= blobCount * params.BlobGasPerBlob
+		availableBlobGas -= blobCount * params.GasPerBlob
 
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
@@ -1103,7 +1103,7 @@ func requiredBalance(txn *TxnSlot) *uint256.Int {
 	// and https://eips.ethereum.org/EIPS/eip-4844#gas-accounting
 	blobCount := uint64(len(txn.BlobHashes))
 	if blobCount != 0 {
-		maxBlobGasCost := uint256.NewInt(params.BlobGasPerBlob)
+		maxBlobGasCost := uint256.NewInt(params.GasPerBlob)
 		maxBlobGasCost.Mul(maxBlobGasCost, uint256.NewInt(blobCount))
 		_, overflow = maxBlobGasCost.MulOverflow(maxBlobGasCost, &txn.BlobFeeCap)
 		if overflow {
