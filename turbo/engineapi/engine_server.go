@@ -949,9 +949,9 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 
 	if version == clparams.FuluVersion {
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
-		if len(blobHashes) != len(res.Blobs) || len(blobHashes)*int(params.CellsPerExtBlob) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
+		if len(blobHashes) != len(res.Blobs) || len(blobHashes)*int(params.CellsPerExtBlob) != len(res.Proofs) {
 			log.Warn("[GetBlobsV2] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
-			return ret, nil
+			return nil, nil
 		}
 		for i := range res.Blobs {
 			if res.Blobs[i] == nil {
@@ -959,15 +959,12 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 				ret = nil
 				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil, returning nil")
 				break
-			} else if len(res.Proofs)-proofIdx >= int(params.CellsPerExtBlob) {
-				// Proofs for this blob must have all the cellproofs
-				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
-				for c := 0; c < int(params.CellsPerExtBlob); c++ {
-					ret[i].CellProofs[c] = res.Proofs[i*int(params.CellsPerExtBlob)+c]
-				}
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
 			} else {
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
+				for c := range params.CellsPerExtBlob {
+					ret[i].CellProofs[c] = res.Proofs[i*int(params.CellsPerExtBlob) + int(c)]
+				}
+				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(cellProofs)=%d ", blobHashes[i], len(res.Blobs[i]), len(ret[i].CellProofs)))
 			}
 		}
 		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
@@ -990,7 +987,6 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		return ret, nil
 	}
 	return nil, nil
-
 }
 
 func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
