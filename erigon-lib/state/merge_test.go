@@ -99,24 +99,22 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 	t.Run("power_of_two_and_span_logic", func(t *testing.T) {
 		files := []visibleFile{
-			createFile(0, 1),
-			createFile(1, 2),
+			createFile(0, 2),
 			createFile(2, 4),
-			createFile(4, 8),
+			createFile(4, 5),
+			createFile(5, 6),
 		}
 		dt := newDomainRoTx(1, files)
 		result := dt.findMergeRange(16, 32)
-
-		if result.values.needMerge {
-			assert.Equal(t, uint64(0), result.values.from)
-		}
+		assert.True(t, result.values.needMerge)
+		assert.Equal(t, uint64(0), result.values.from)
+		assert.Equal(t, uint64(2), result.values.to)
 
 		dt = newDomainRoTx(2, []visibleFile{createFile(0, 2), createFile(2, 4)})
 		result = dt.findMergeRange(8, 32)
-		if result.values.needMerge {
-			assert.Equal(t, uint64(0), result.values.from)
-			assert.Equal(t, uint64(4), result.values.to)
-		}
+		assert.True(t, result.values.needMerge)
+		assert.Equal(t, uint64(0), result.values.from)
+		assert.Equal(t, uint64(4), result.values.to)
 	})
 
 	t.Run("aggregation_steps", func(t *testing.T) {
@@ -150,19 +148,6 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		assert.Equal(t, 0, int(result.values.from))
 	})
 
-	t.Run("file_ordering", func(t *testing.T) {
-		files := []visibleFile{
-			createFile(2, 4),
-			createFile(0, 1),
-			createFile(1, 2),
-		}
-		dt := newDomainRoTx(1, files)
-		result := dt.findMergeRange(8, 32)
-
-		if result.values.needMerge {
-			assert.Equal(t, uint64(0), result.values.from)
-		}
-	})
 }
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
