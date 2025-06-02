@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -33,19 +32,19 @@ func TestDependency(t *testing.T) {
 	}
 
 	dinfo := &DependentInfo{
-		entity:      FromDomain(kv.CommitmentDomain),
+		entity:      CommitmentDomainUniversal,
 		filesGetter: fg,
 		accessors:   AccessorHashMap,
 	}
 
 	checker := NewDependencyIntegrityChecker(dirs, logger)
-	checker.AddDependency(FromDomain(kv.AccountsDomain), dinfo)
+	checker.AddDependency(AccountDomainUniversal, dinfo)
 	// not adding dependency for storage
 
 	assertFn := func(startTxNum, endTxNum uint64, resultC, resultA, resultS bool) {
-		require.Equal(t, resultA, checker.CheckDependentPresent(FromDomain(kv.AccountsDomain), All, startTxNum, endTxNum))
-		require.Equal(t, resultS, checker.CheckDependentPresent(FromDomain(kv.StorageDomain), All, startTxNum, endTxNum))
-		require.Equal(t, resultC, checker.CheckDependentPresent(FromDomain(kv.CommitmentDomain), All, startTxNum, endTxNum))
+		require.Equal(t, resultA, checker.CheckDependentPresent(AccountDomainUniversal, All, startTxNum, endTxNum))
+		require.Equal(t, resultS, checker.CheckDependentPresent(StorageDomainUniversal, All, startTxNum, endTxNum))
+		require.Equal(t, resultC, checker.CheckDependentPresent(CommitmentDomainUniversal, All, startTxNum, endTxNum))
 
 	}
 
@@ -75,19 +74,19 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 	}
 
 	dinfo := &DependentInfo{
-		entity:      FromDomain(kv.CommitmentDomain),
+		entity:      CommitmentDomainUniversal,
 		filesGetter: fg,
 		accessors:   AccessorHashMap,
 	}
 
 	checker := NewDependencyIntegrityChecker(dirs, logger)
-	checker.AddDependency(FromDomain(kv.AccountsDomain), dinfo)
+	checker.AddDependency(AccountDomainUniversal, dinfo)
 	// not adding dependency for storage
 
 	assertFn := func(startTxNum, endTxNum uint64, resultC, resultA, resultS bool) {
-		require.Equal(t, resultA, checker.CheckDependentPresent(FromDomain(kv.AccountsDomain), All, startTxNum, endTxNum))
-		require.Equal(t, resultS, checker.CheckDependentPresent(FromDomain(kv.StorageDomain), All, startTxNum, endTxNum))
-		require.Equal(t, resultC, checker.CheckDependentPresent(FromDomain(kv.CommitmentDomain), All, startTxNum, endTxNum))
+		require.Equal(t, resultA, checker.CheckDependentPresent(AccountDomainUniversal, All, startTxNum, endTxNum))
+		require.Equal(t, resultS, checker.CheckDependentPresent(StorageDomainUniversal, All, startTxNum, endTxNum))
+		require.Equal(t, resultC, checker.CheckDependentPresent(CommitmentDomainUniversal, All, startTxNum, endTxNum))
 
 	}
 

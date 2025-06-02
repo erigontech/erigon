@@ -41,6 +41,12 @@ func (ue UniversalEntity) String() string {
 	return fmt.Sprintf("unknown:%d", ue)
 }
 
+var (
+	AccountDomainUniversal    = FromDomain(kv.AccountsDomain)
+	StorageDomainUniversal    = FromDomain(kv.StorageDomain)
+	CommitmentDomainUniversal = FromDomain(kv.CommitmentDomain)
+)
+
 type DirtyFilesGetter func() *btree2.BTreeG[*filesItem]
 
 // an DependencyIntegrityChecker used when a dependent domain has
