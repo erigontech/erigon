@@ -24,6 +24,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon-lib/common/datadir"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
@@ -31,9 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
 )
 
 func TestDomainRoTx_findMergeRange(t *testing.T) {
