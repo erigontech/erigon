@@ -551,7 +551,7 @@ func (rs Receipts) DeriveFields(hash common.Hash, number uint64, txs Transaction
 
 func (rs *Receipts) EncodeRLP69(w io.Writer) error {
 	for _, receipt := range *rs {
-		if err := receipt.EncodeRLP(w); err != nil {
+		if err := receipt.EncodeRLPNoBloom(w); err != nil {
 			return err
 		}
 	}

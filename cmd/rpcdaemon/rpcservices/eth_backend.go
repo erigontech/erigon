@@ -467,5 +467,5 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 }
 
 func (back *RemoteBackend) EarliestBlockNum(ctx context.Context) (uint64, error) {
-	return back.EarliestBlockNum(ctx)
+	return back.blockReader.EarliestBlockNum(ctx)
 }

@@ -83,6 +83,7 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	ids := []proto_sentry.MessageId{
 		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
+		eth.ToProto[direct.ETH69][eth.GetReceiptsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -174,7 +175,7 @@ func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
 				})
 				if err != nil {
 					cs.logger.Error("blockRangeUpdate", "err", err)
-					break
+					continue // continue sending message to other sentries
 				}
 			}
 		case <-ctx.Done():
@@ -243,6 +244,10 @@ func (cs *MultiClient) BlockRangeUpdateLoop(
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "BlockRangeUpdate", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
 }
 
+type StatusGetter interface {
+	GetStatusData(ctx context.Context) (*proto_sentry.StatusData, error)
+}
+
 // MultiClient - does handle request/response/subscriptions to multiple sentries
 // each sentry may support same or different p2p protocol
 type MultiClient struct {
@@ -254,7 +259,7 @@ type MultiClient struct {
 	db                                kv.TemporalRoDB
 	Engine                            consensus.Engine
 	blockReader                       services.FullBlockReader
-	statusDataProvider                *sentry.StatusDataProvider
+	statusDataProvider                StatusGetter
 	logPeerInfo                       bool
 	sendHeaderRequestsToMultiplePeers bool
 	maxBlockBroadcastPeers            func(*types.Header) uint
@@ -278,7 +283,7 @@ func NewMultiClient(
 	syncCfg ethconfig.Sync,
 	blockReader services.FullBlockReader,
 	blockBufferSize int,
-	statusDataProvider *sentry.StatusDataProvider,
+	statusDataProvider StatusGetter,
 	logPeerInfo bool,
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
@@ -840,9 +845,6 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 		"nodeURL", nodeURL, "clientID", clientID, "capabilities", capabilities)
 	return nil
 }
-
-//func (cs *MultiClient) HandleBlockRangeUpdate(ctx context.Context, event *proto_sentry.PeerEvent, sentryClient proto_sentry.SentryClient) error {
-//}
 
 func (cs *MultiClient) makeStatusData(ctx context.Context) (*proto_sentry.StatusData, error) {
 	return cs.statusDataProvider.GetStatusData(ctx)

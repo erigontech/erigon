@@ -196,6 +196,8 @@ func (pi *PeerInfo) SetIncreasedHeight(newHeight uint64) {
 }
 
 // MinBlock gets earliest block for eth/69 peers, falls back to height if not available
+// We use this to select a peer, fallback behaviour is valid since it will give us potentially
+// fewer peers but the peers will still be valid.
 func (pi *PeerInfo) MinBlock() uint64 {
 	minBlock := atomic.LoadUint64(&pi.minBlock)
 	if minBlock != 0 {
