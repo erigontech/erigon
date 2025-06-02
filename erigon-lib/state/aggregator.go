@@ -240,6 +240,11 @@ func (a *Aggregator) ReloadSalt() error {
 }
 
 func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
+	dd := a.d[dependent]
+	if dd.disable || a.d[dependency].disable {
+		a.logger.Info("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
+		return
+	}
 	// "hard alignment":
 	// only corresponding files should be included. e.g. commitment + account -
 	// cannot have merged account visibleFile, and unmerged commitment visibleFile for same step range.
@@ -247,7 +252,6 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
 	}
 
-	dd := a.d[dependent]
 	ue := FromDomain(dependent)
 	a.checker.AddDependency(ue, &DependentInfo{
 		entity:      ue,
