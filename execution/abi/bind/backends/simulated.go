@@ -42,12 +42,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -72,7 +72,7 @@ var (
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
 	m         *mock.MockSentry
-	getHeader func(hash common.Hash, number uint64) *types.Header
+	getHeader func(hash common.Hash, number uint64) (*types.Header, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -100,15 +100,12 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
-		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
-			var err error
-			if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		getHeader: func(hash common.Hash, number uint64) (h *types.Header, err error) {
+			err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
 				return nil
-			}); err != nil {
-				panic(err)
-			}
-			return h
+			})
+			return h, err
 		},
 	}
 	backend.emptyPendingBlock()
@@ -218,7 +215,8 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 	}
 	defer tx.Rollback()
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetBalance(contract)
+	balance, err := stateDB.GetBalance(contract)
+	return &balance, err
 }
 
 // NonceAt returns the nonce of a certain account in the blockchain.
@@ -579,7 +577,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call ethereum.CallMsg) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	defer b.pendingState.RevertToSnapshot(b.pendingState.Snapshot())
+	defer b.pendingState.RevertToSnapshot(b.pendingState.Snapshot(), nil)
 
 	res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
 	if err != nil {
@@ -649,7 +647,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 		}
 	}
 	gasCap = hi
-	b.pendingState.SetTxContext(len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(b.pendingBlock.Copy().NumberU64(), len(b.pendingBlock.Transactions()))
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *evmtypes.ExecutionResult, error) {
@@ -657,7 +655,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 		snapshot := b.pendingState.Snapshot()
 		res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
-		b.pendingState.RevertToSnapshot(snapshot)
+		b.pendingState.RevertToSnapshot(snapshot, nil)
 
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
@@ -729,7 +727,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	if err != nil {
 		return nil, err
 	}
-	from.SetBalance(uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
+	from.SetBalance(*uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 
@@ -764,7 +762,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", txn.GetNonce(), nonce)
 	}
 
-	b.pendingState.SetTxContext(len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, _, err := core.ApplyTransaction(
 		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,

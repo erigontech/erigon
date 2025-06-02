@@ -100,7 +100,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, api._txNumReader, stateBlockNumber+1, 0, chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber+1, 0, api._txNumReader)
 		if err != nil {
 			return nil, err
 		}
@@ -189,7 +189,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		txHash := txn.Hash().String()
 		jsonResult := map[string]interface{}{
 			"txHash":  txHash,
-			"gasUsed": result.UsedGas,
+			"gasUsed": result.GasUsed,
 		}
 		bundleHash.Write(txn.Hash().Bytes())
 		if result.Err != nil {

@@ -458,7 +458,7 @@ func (ot *OeTracer) OnEnter(depth int, typ byte, from common.Address, to common.
 	ot.captureStartOrEnter(depth != 0 /* deep */, vm.OpCode(typ), from, to, precompile, isCreate, input, gas, value, code)
 }
 
-func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, err error) {
+func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, err error) {
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
@@ -494,11 +494,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 			switch topTrace.Type {
 			case CALL:
 				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
+				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
+				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
 			}
 		} else {
@@ -517,10 +517,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 		switch topTrace.Type {
 		case CALL:
 			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 		case CREATE:
 			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
+			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -1054,7 +1054,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1146,7 +1146,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
-	ibs.SetTxContext(0)
+	ibs.SetTxContext(blockCtx.BlockNumber, 0)
 	ibs.SetHooks(ot.Tracer().Hooks)
 
 	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
@@ -1160,7 +1160,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 	}
 	traceResult.Output = common.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1271,11 +1271,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	chainConfig, err := api.chainConfig(ctx, dbtx)
-	if err != nil {
-		return nil, err
-	}
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1287,7 +1283,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	ibs := state.New(cachedReader)
 
 	trace, _, err := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, traceConfig)
+		txns, msgs, callParams, parentNrOrHash, parentHeader, true /* gasBailout */, traceConfig)
 
 	return trace, err
 }
@@ -1449,7 +1445,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 				tracer,
 			)
 		} else {
-			ibs.SetTxContext(txIndex)
+			ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
 			if tracer != nil {
 				ibs.SetHooks(tracer.Hooks)
 			}
@@ -1470,7 +1466,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 		}
 
 		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
@@ -1662,7 +1658,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 			tracer,
 		)
 	} else {
-		ibs.SetTxContext(txIndex)
+		ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
 		txCtx := core.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())

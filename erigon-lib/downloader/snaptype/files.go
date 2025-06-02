@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -267,10 +268,15 @@ func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Pat
 
 func (f FileInfo) Name() string { return f.name }
 func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }
+func (f FileInfo) Base() string { return path.Base(f.Path) }
 func (f FileInfo) Len() uint64  { return f.To - f.From }
 
 func (f FileInfo) GetRange() (from, to uint64) { return f.From, f.To }
 func (f FileInfo) GetType() Type               { return f.Type }
+func (f FileInfo) GetGrouping() string {
+	// range + grouping uniquely identifies a file i.e. range "+" grouping = filename
+	return f.Type.Name() + "_" + f.TypeString + "_" + f.Ext
+}
 
 func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.From, o.From); res != 0 {

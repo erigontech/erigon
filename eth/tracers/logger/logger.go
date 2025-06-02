@@ -132,7 +132,7 @@ type StructLogger struct {
 	err     error
 	env     *tracing.VMContext
 
-	usedGas uint64
+	gasUsed uint64
 }
 
 // NewStructLogger returns a new logger
@@ -176,7 +176,7 @@ func (l *StructLogger) OnTxEnd(receipt *types.Receipt, err error) {
 		}
 		return
 	}
-	l.usedGas = receipt.GasUsed
+	l.gasUsed = receipt.GasUsed
 }
 
 // OnOpcode also tracks SLOAD/SSTORE ops to track storage change.

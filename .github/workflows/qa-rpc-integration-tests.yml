@@ -20,6 +20,7 @@ jobs:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
 
@@ -30,7 +31,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.58.1  https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.62.0  https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 

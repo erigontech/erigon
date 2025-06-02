@@ -272,8 +272,19 @@ func ValidateHeaderTime(
 	config *borcfg.BorConfig,
 	signaturesCache *lru.ARCCache[common.Hash, common.Address],
 ) error {
-	if header.Time > uint64(now.Unix()) {
-		return consensus.ErrFutureBlock
+	if config.IsBhilai(header.Number.Uint64()) {
+		// Don't waste time checking blocks from the future but allow a buffer of block time for
+		// early block announcements. Note that this is a loose check and would allow early blocks
+		// from non-primary producer. Such blocks will be rejected later when we know the succession
+		// number of the signer in the current sprint.
+		if header.Time > uint64(now.Unix())+config.CalculatePeriod(header.Number.Uint64()) {
+			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+		}
+	} else {
+		// Don't waste time checking blocks from the future
+		if header.Time > uint64(now.Unix()) {
+			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+		}
 	}
 
 	if parent == nil {
@@ -288,6 +299,13 @@ func ValidateHeaderTime(
 	succession, err := validatorSet.GetSignerSuccessionNumber(signer, header.Number.Uint64())
 	if err != nil {
 		return err
+	}
+
+	// Post Bhilai HF, reject blocks form non-primary producers if they're earlier than the expected time
+	if config.IsBhilai(header.Number.Uint64()) && succession != 0 {
+		if header.Time > uint64(now.Unix()) {
+			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+		}
 	}
 
 	if header.Time < MinNextBlockTime(parent, succession, config) {
@@ -497,11 +515,25 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	if header.Number == nil {
 		return errUnknownBlock
 	}
+
 	number := header.Number.Uint64()
+	now := time.Now().Unix()
 
 	// Don't waste time checking blocks from the future
-	if header.Time > uint64(time.Now().Unix()) {
-		return consensus.ErrFutureBlock
+	// Allow early blocks if Bhilai HF is enabled
+	if c.config.IsBhilai(number) {
+		// Don't waste time checking blocks from the future but allow a buffer of block time for
+		// early block announcements. Note that this is a loose check and would allow early blocks
+		// from non-primary producer. Such blocks will be rejected later when we know the succession
+		// number of the signer in the current sprint.
+		if header.Time > uint64(now)+c.config.CalculatePeriod(number) {
+			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+		}
+	} else {
+		// Don't waste time checking blocks from the future
+		if header.Time > uint64(now) {
+			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+		}
 	}
 
 	if err := ValidateHeaderUnusedFields(header); err != nil {
@@ -1018,8 +1050,19 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	}
 
 	header.Time = MinNextBlockTime(parent, succession, c.config)
-	if header.Time < uint64(time.Now().Unix()) {
-		header.Time = uint64(time.Now().Unix())
+	now := time.Now()
+	if header.Time < uint64(now.Unix()) {
+		header.Time = uint64(now.Unix())
+	} else {
+		// For primary validators, wait until the current block production window
+		// starts. This prevents bor from starting to build next block before time
+		// as we'd like to wait for new transactions. Although this change doesn't
+		// need a check for hard fork as it doesn't change any consensus rules, we
+		// still keep it for safety and testing.
+		if c.config.IsBhilai(number) && succession == 0 {
+			startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
+			time.Sleep(time.Until(startTime))
+		}
 	}
 
 	return nil
@@ -1150,6 +1193,9 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	if chain != nil && chain.Config().IsBhilai(header.Number.Uint64()) {
+		misc.StoreBlockHashesEip2935(header, state, config, chain)
+	}
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -1207,8 +1253,15 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.B
 		}
 	}
 
+	var delay time.Duration
 	// Sweet, the protocol permits us to sign the block, wait for our time
-	delay := time.Until(time.Unix(int64(header.Time), 0))
+	if c.config.IsBhilai(header.Number.Uint64()) && successionNumber == 0 {
+		// For primary producers, set the delay to `header.Time - block time` instead of `header.Time`
+		// for early block announcement instead of waiting for full block time.
+		delay = time.Until(time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0))
+	} else {
+		delay = time.Until(time.Unix(int64(header.Time), 0)) // Wait until we reach header time
+	}
 	// wiggle was already accounted for in header.Time, this is just for logging
 	wiggle := time.Duration(successionNumber) * time.Duration(c.config.CalculateBackupMultiplier(number)) * time.Second
 
@@ -1717,19 +1770,19 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 	if err != nil {
 		return err
 	}
-	input1 = input1.Clone()
+	input1 = *input1.Clone()
 	input2, err := db.GetBalance(recipient)
 	if err != nil {
 		return err
 	}
-	input2 = input2.Clone()
+	input2 = *input2.Clone()
 	if !bailout {
-		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
 		if err != nil {
 			return err
 		}
 	}
-	err = db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	err = db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
 	if err != nil {
 		return err
 	}
@@ -1738,14 +1791,14 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 	if err != nil {
 		return err
 	}
-	output1 = output1.Clone()
+	output1 = *output1.Clone()
 	output2, err := db.GetBalance(recipient)
 	if err != nil {
 		return err
 	}
-	output2 = output2.Clone()
+	output2 = *output2.Clone()
 	// add transfer log into state
-	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
+	addTransferLog(db, transferLogSig, sender, recipient, amount, &input1, &input2, &output1, &output2)
 	return nil
 }
 
@@ -1763,11 +1816,11 @@ func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender common.Address, coin
 		transferFeeLogSig,
 		sender,
 		coinbase,
-		result.FeeTipped,
-		result.SenderInitBalance,
-		result.CoinbaseInitBalance,
-		output1.Sub(output1, result.FeeTipped),
-		output2.Add(output2, result.FeeTipped),
+		&result.FeeTipped,
+		&result.SenderInitBalance,
+		&result.CoinbaseInitBalance,
+		output1.Sub(output1, &result.FeeTipped),
+		output2.Add(output2, &result.FeeTipped),
 	)
 
 }

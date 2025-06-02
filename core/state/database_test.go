@@ -930,10 +930,9 @@ func TestReproduceCrash(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	tsw := state.NewWriter(sd, nil)
-	tsr := state.NewReaderV3(sd)
-	sd.SetTxNum(1)
-	sd.SetBlockNum(1)
+	txNum := uint64(1)
+	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	tsr := state.NewReaderV3(sd.AsGetter(tx))
 
 	intraBlockState := state.New(tsr)
 	// Start the 1st transaction
@@ -947,13 +946,13 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
+	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	intraBlockState.SetState(contract, storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
-	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
+	intraBlockState.SubBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	intraBlockState.SetState(contract, storageKey1, *value0)
 	intraBlockState.SetState(contract, storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
@@ -1021,7 +1020,7 @@ func TestEip2200Gas(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	var balanceBefore *uint256.Int
+	var balanceBefore uint256.Int
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {
@@ -1353,8 +1352,10 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
+	blockNum, txNum := uint64(1), uint64(3)
+	_ = blockNum
 
-	r, tsw := state.NewReaderV3(sd), state.NewWriter(sd, nil)
+	r, tsw := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1362,16 +1363,13 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, oldCode)
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
+	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	rh1, err := sd.ComputeCommitment(context.Background(), true, 0, "")
+	rh1, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
 	require.NoError(t, err)
 	t.Logf("stateRoot %x", rh1)
-
-	sd.SetTxNum(2)
-	sd.SetBlockNum(1)
 
 	trieCode, tcErr := r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
@@ -1388,7 +1386,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
-	rh2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
+	rh2, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
 	require.NoError(t, err)
 	require.NotEqual(t, rh1, rh2)
 }
@@ -1403,8 +1401,10 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
+	blockNum, txNum := uint64(1), uint64(3)
+	_ = blockNum
 
-	r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1413,7 +1413,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
+	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1441,8 +1441,10 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
+	blockNum := uint64(1)
+	txNum := uint64(3)
 
-	r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1451,7 +1453,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
+	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1459,7 +1461,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	r2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
+	r2, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
 	require.NoError(t, err)
 	require.Equal(t, root, common.CastToHash(r2))
 
@@ -1474,7 +1476,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
-	r2, err = sd.ComputeCommitment(context.Background(), true, 1, "")
+	r2, err = sd.ComputeCommitment(context.Background(), true, 1, 2, "")
 	require.NoError(t, err)
 	require.Equal(t, root, common.CastToHash(r2))
 }

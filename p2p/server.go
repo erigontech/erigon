@@ -41,12 +41,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/mclock"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/p2p/discover"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/p2p/netutil"
+	"github.com/erigontech/erigon-p2p/discover"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/enr"
+	"github.com/erigontech/erigon-p2p/event"
+	"github.com/erigontech/erigon-p2p/nat"
+	"github.com/erigontech/erigon-p2p/netutil"
 )
 
 const (
@@ -115,6 +115,8 @@ type Config struct {
 	// protocol.
 	BootstrapNodesV5 []*enode.Node `toml:",omitempty"`
 
+	LookupBootnodeURLs LookupBootnodeURLsFunc
+
 	// Static nodes are used as pre-configured connections which are always
 	// maintained and re-connected on disconnects.
 	StaticNodes []*enode.Node
@@ -181,6 +183,8 @@ type Config struct {
 	MetricsEnabled bool
 
 	DiscoveryDNS []string
+
+	LookupDNSNetwork LookupDNSNetworkFunc
 }
 
 func (config *Config) ListenPort() int {

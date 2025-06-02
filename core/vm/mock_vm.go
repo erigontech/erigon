@@ -23,7 +23,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/state"
 )
 
 type readonlyGetSetter interface {
@@ -110,9 +109,3 @@ func (d *dummyContractRef) AddBalance(amount *big.Int) {}
 func (d *dummyContractRef) SetBalance(*big.Int)        {}
 func (d *dummyContractRef) SetNonce(uint64)            {}
 func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
-
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }

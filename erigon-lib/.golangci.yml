@@ -54,7 +54,10 @@ linters:
     gocritic:
       enabled-checks:
         - ruleguard
+        - sortSlice
       disabled-checks:
+        - unnecessaryDefer
+        - appendAssign
         - rangeValCopy
         - exitAfterDefer
         - elseif
@@ -64,7 +67,6 @@ linters:
         - captLocal
         - commentFormatting
         - ifElseChain
-        - appendAssign
         - preferFprint
         - sloppyReassign
         - sprintfQuotedString
@@ -75,7 +77,6 @@ linters:
         - returnAfterHttpError
         - weakCond
         - builtinShadowDecl
-        - unnecessaryDefer
         - uncheckedInlineErr
         - preferStringWriter
       enabled-tags:
@@ -95,6 +96,8 @@ linters:
       excludes:
         - G115
     govet:
+      enable:
+        - nilness
       disable:
         - deepequalerrors
         - shadow
@@ -144,10 +147,6 @@ linters:
           - gocritic
           - gosec
         path: metrics/sample\.go
-      - linters:
-          - gocritic
-          - gosec
-        path: p2p/simulations
     paths:
       - third_party$
       - builtin$

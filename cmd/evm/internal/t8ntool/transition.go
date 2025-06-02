@@ -202,7 +202,7 @@ func Main(ctx *cli.Context) error {
 	var chainConfig *chain.Config
 	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
 		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
-	} else { //nolint:golint
+	} else {
 		chainConfig = cConf
 		vmConfig.ExtraEips = extraEips
 	}
@@ -284,17 +284,15 @@ func Main(ctx *cli.Context) error {
 	}
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
-	var hashError error
-	getHash := func(num uint64) common.Hash {
+	getHash := func(num uint64) (common.Hash, error) {
 		if prestate.Env.BlockHashes == nil {
-			hashError = fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
-			return common.Hash{}
+			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
 		}
 		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
 		if !ok {
-			hashError = fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
+			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
 		}
-		return h
+		return h, nil
 	}
 
 	db := temporaltest.NewTestDB(nil, datadir.New(""))
@@ -312,7 +310,14 @@ func Main(ctx *cli.Context) error {
 	}
 	defer sd.Close()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre)
+	blockNum, txNum := uint64(0), uint64(0)
+	sd.SetTxNum(txNum)
+	sd.SetBlockNum(blockNum)
+	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre, blockNum, txNum)
+	blockNum, txNum = uint64(1), uint64(2)
+	sd.SetTxNum(txNum)
+	sd.SetBlockNum(blockNum)
+
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
@@ -320,16 +325,13 @@ func Main(ctx *cli.Context) error {
 	t8logger := log.New("t8ntool")
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
-	if hashError != nil {
-		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
-	}
 
 	if err != nil {
 		return fmt.Errorf("error on EBE: %w", err)
 	}
 
 	// state root calculation
-	root, err := CalculateStateRoot(tx)
+	root, err := CalculateStateRoot(tx, blockNum, txNum)
 	if err != nil {
 		return err
 	}
@@ -620,7 +622,7 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
+func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*common.Hash, error) {
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
@@ -667,7 +669,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
 		}
 	}
 	c.Close()
-	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
 	if err != nil {
 		return nil, err
 	}

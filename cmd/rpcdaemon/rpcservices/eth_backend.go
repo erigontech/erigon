@@ -17,7 +17,6 @@
 package rpcservices
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -38,8 +37,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/services"
@@ -205,7 +204,7 @@ func (back *RemoteBackend) PendingBlock(ctx context.Context) (*types.Block, erro
 	}
 
 	var block types.Block
-	err = rlp.Decode(bytes.NewReader(blockRlp.BlockRlp), &block)
+	err = rlp.DecodeBytes(blockRlp.BlockRlp, &block)
 	if err != nil {
 		return nil, fmt.Errorf("decoding block from %x: %w", blockRlp.BlockRlp, err)
 	}

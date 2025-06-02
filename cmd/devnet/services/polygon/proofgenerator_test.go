@@ -158,28 +158,24 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 		return nil, err
 	}
 
-	var usedGas uint64
+	var gasUsed uint64
 	var usedBlobGas uint64
 
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Header().Time))
 
 	noopWriter := state.NewNoopWriter()
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := reader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return reader.Header(ctx, tx, hash, number)
 	}
 
 	header := block.Header()
+	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
+		ibs.SetTxContext(blockNum, i)
 
-		ibs.SetTxContext(i)
-
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &usedGas, &usedBlobGas, vm.Config{})
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &gasUsed, &usedBlobGas, vm.Config{})
 
 		if err != nil {
 			return nil, err

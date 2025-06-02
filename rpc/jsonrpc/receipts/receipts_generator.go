@@ -49,11 +49,11 @@ type Generator struct {
 
 type ReceiptEnv struct {
 	ibs         *state.IntraBlockState
-	usedGas     *uint64
+	gasUsed     *uint64
 	usedBlobGas *uint64
 	gp          *core.GasPool
 	noopWriter  *state.NoopWriter
-	getHeader   func(hash common.Hash, number uint64) *types.Header
+	getHeader   func(hash common.Hash, number uint64) (*types.Header, error)
 	header      *types.Header
 }
 
@@ -112,22 +112,22 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)
 	}
 
-	usedGas := new(uint64)
+	gasUsed := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
 
 	noopWriter := state.NewNoopWriter()
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		h, e := g.blockReader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
 		}
-		return h
+		return h, e
 	}
 	return &ReceiptEnv{
 		ibs:         ibs,
-		usedGas:     usedGas,
+		gasUsed:     gasUsed,
 		usedBlobGas: usedBlobGas,
 		gp:          gp,
 		noopWriter:  noopWriter,
@@ -170,7 +170,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	mu := g.txnExecMutex.lock(txnHash)
 	defer g.txnExecMutex.unlock(mu, txnHash)
 	if receipt, ok := g.receiptCache.Get(txnHash); ok {
-		return receipt, nil
+		if receipt.BlockHash == blockHash { // elegant way to handle reorgs
+			return receipt, nil
+		}
+		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
 	}
 
 	var receipt *types.Receipt
@@ -202,7 +205,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
-		receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+		receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 		}
@@ -255,10 +258,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 	//genEnv.ibs.SetTrace(true)
+	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
-		genEnv.ibs.SetTxContext(i)
-		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+		genEnv.ibs.SetTxContext(blockNum, i)
+		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 		}

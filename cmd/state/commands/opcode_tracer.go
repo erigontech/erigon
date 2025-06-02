@@ -609,15 +609,14 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate, err := rpchelper.CreateHistoryStateReader(historyTx, txNumReader,
-			block.NumberU64(), 0, chainConfig.ChainName)
+		dbstate, err := rpchelper.CreateHistoryStateReader(historyTx, block.NumberU64(), 0, txNumReader)
 		if err != nil {
 			return err
 		}
 		intraBlockState := state.New(dbstate)
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header {
-			return rawdb.ReadHeader(historyTx, hash, number)
+		getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+			return rawdb.ReadHeader(historyTx, hash, number), nil
 		}
 		receipts, err1 := runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, block, vmConfig, false, logger)
 		if err1 != nil {
@@ -730,18 +729,19 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 }
 
 func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *chain2.Config, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config, trace bool, logger log.Logger) (types.Receipts, error) {
+	chainConfig *chain2.Config, getHeader func(hash common.Hash, number uint64) (*types.Header, error), block *types.Block, vmConfig vm.Config, trace bool, logger log.Logger) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-	usedGas := new(uint64)
+	gasUsed := new(uint64)
 	usedBlobGas := new(uint64)
 	var receipts types.Receipts
 	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
-	rules := chainConfig.Rules(block.NumberU64(), block.Time())
+	blockNum := block.NumberU64()
+	rules := chainConfig.Rules(blockNum, block.Time())
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, txn, usedGas, usedBlobGas, vmConfig)
+		ibs.SetTxContext(blockNum, i)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply txn %d [%x] failed: %w", i, txn.Hash(), err)
 		}

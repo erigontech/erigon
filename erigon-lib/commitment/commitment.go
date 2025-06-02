@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/bits"
 	"sort"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -258,12 +259,9 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 	be.buf.Reset()
 
 	if !be.SkipEncoding {
-		var encoded [2]byte
+		var encoded [4]byte
 		binary.BigEndian.PutUint16(encoded[:], touchMap)
-		if _, err := be.buf.Write(encoded[:]); err != nil {
-			return nil, 0, err
-		}
-		binary.BigEndian.PutUint16(encoded[:], afterMap)
+		binary.BigEndian.PutUint16(encoded[2:], afterMap)
 		if _, err := be.buf.Write(encoded[:]); err != nil {
 			return nil, 0, err
 		}
@@ -1015,7 +1013,7 @@ func (t *Updates) initCollector() {
 				t.nibbles[i] = nil
 			}
 
-			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 			t.nibbles[i].SortAndFlushInBackground(true)
 		}
 		if t.etl != nil {

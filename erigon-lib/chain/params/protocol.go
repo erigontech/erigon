@@ -128,10 +128,11 @@ const (
 	// Introduced in Tangerine Whistle (Eip 150)
 	CreateBySelfdestructGas uint64 = 25000
 
-	BaseFeeChangeDenominator          = 8          // Bounds the amount the base fee can change between blocks.
-	BaseFeeChangeDenominatorPostDelhi = 16         // Bounds the amount the base fee can change between blocks post delhi hard fork for polygon networks.
-	ElasticityMultiplier              = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
-	InitialBaseFee                    = 1000000000 // Initial base fee for EIP-1559 blocks.
+	BaseFeeChangeDenominator           = 8          // Bounds the amount the base fee can change between blocks.
+	BaseFeeChangeDenominatorPostDelhi  = 16         // Bounds the amount the base fee can change between blocks post delhi hard fork for polygon networks.
+	BaseFeeChangeDenominatorPostBhilai = 64         // Bounds the amount the base fee can change between blocks post bhilai hard fork for polygon networks.
+	ElasticityMultiplier               = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
+	InitialBaseFee                     = 1000000000 // Initial base fee for EIP-1559 blocks.
 
 	MaxCodeSize              = 24576           // Maximum bytecode to permit for a contract
 	MaxCodeSizePostAhmedabad = 32768           // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
@@ -179,6 +180,13 @@ const (
 	BlobSize                    = FieldElementsPerBlob * 32
 	BlobGasPerBlob       uint64 = 0x20000
 
+	// EIP-7594: PeerDAS - Peer Data Availability Sampling
+	// See https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/polynomial-commitments-sampling.md
+	FieldElementsPerExtBlob        = 2 * FieldElementsPerBlob                       // Number of field elements in a Reed-Solomon extended blob
+	FieldElementsPerCell    uint64 = 64                                             // Number of Field elements in a cell
+	BytesPerCell                   = FieldElementsPerCell * 32                      // The number of bytes in a cell
+	CellsPerExtBlob                = FieldElementsPerExtBlob / FieldElementsPerCell // The number of cells in an extended blob
+
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas uint64 = 3450
 
@@ -219,3 +227,29 @@ var (
 	MinimumDifficulty      = big.NewInt(131072) // The minimum that the difficulty may ever be.
 	DurationLimit          = big.NewInt(13)     // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
 )
+
+// See EIP-7840: Add blob schedule to EL config files
+type BlobConfig struct {
+	Target                uint64 `json:"target"`
+	Max                   uint64 `json:"max"`
+	BaseFeeUpdateFraction uint64 `json:"baseFeeUpdateFraction"`
+}
+
+var DefaultCancunBlobConfig = BlobConfig{
+	Target:                3,
+	Max:                   6,
+	BaseFeeUpdateFraction: 3338477,
+}
+
+var DefaultPragueBlobConfig = BlobConfig{
+	Target:                6,
+	Max:                   9,
+	BaseFeeUpdateFraction: 5007716,
+}
+
+// TODO(yperbasis): update when Fusaka's blob config is decided
+var DefaultOsakaBlobConfig = BlobConfig{
+	Target:                6,
+	Max:                   9,
+	BaseFeeUpdateFraction: 5007716,
+}

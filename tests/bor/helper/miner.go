@@ -17,13 +17,13 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -134,7 +134,7 @@ func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *
 		GPO:       ethconfig.Defaults.GPO,
 		Miner: params.MiningConfig{
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
-			GasLimit:   genesis.GasLimit,
+			GasLimit:   &genesis.GasLimit,
 			GasPrice:   big.NewInt(1),
 			Recommit:   125 * time.Second,
 			SigKey:     privKey,

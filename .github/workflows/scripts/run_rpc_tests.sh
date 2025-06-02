@@ -21,10 +21,8 @@ disabled_tests=(
     eth_coinbase/test_01.json
     eth_createAccessList/test_16.json
     eth_getTransactionByHash/test_02.json
-    ots_searchTransactionsBefore/test_02.json
     # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
     ots_searchTransactionsBefore/test_04.tar
-    ots_getTransactionBySenderAndNonce/test_07.json
     eth_getWork/test_01.json
     eth_mining/test_01.json
     eth_protocolVersion/test_1.json
@@ -32,13 +30,12 @@ disabled_tests=(
     eth_submitWork/test_1.json
     net_peerCount/test_1.json
     net_version/test_1.json
-    parity_listStorageKeys/test_07.json
     txpool_status/test_1.json
     web3_clientVersion/test_1.json)
 
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
-python3 ./run_tests.py --port 8545 --engine-port 8545 --continue -f --json-diff --serial -x "$disabled_test_list" 
+python3 ./run_tests.py --port 8545 --engine-port 8545 --continue -f --json-diff -x "$disabled_test_list" 
 
 exit $?
