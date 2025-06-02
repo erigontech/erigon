@@ -57,7 +57,9 @@ func (d *DataColumnSidecar) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(d.getSchema()...)
 }
 
-type Cell []byte
+const BytesPerCell = 2048
+
+type Cell [BytesPerCell]byte
 
 func (c Cell) Clone() clonable.Clonable {
 	return &c
@@ -66,7 +68,7 @@ func (c Cell) Clone() clonable.Clonable {
 func (c Cell) DecodeSSZ(buf []byte, version int) error {
 	//return ssz2.UnmarshalSSZ(buf, version, c.getSchema()...)
 	// copy the buf to the cell
-	copy(c, buf)
+	copy(c[:], buf)
 	return nil
 }
 
@@ -77,7 +79,7 @@ func (c Cell) EncodingSizeSSZ() int {
 func (c Cell) EncodeSSZ(buf []byte) ([]byte, error) {
 	//return ssz2.MarshalSSZ(buf, c.getSchema()...)
 	// copy the cell to the buf
-	copy(buf, c)
+	copy(buf, c[:])
 	return buf, nil
 }
 
@@ -91,7 +93,7 @@ func (c Cell) HashSSZ() ([32]byte, error) {
 
 type MatrixEntry struct {
 	Cell        Cell        `json:"cell"`
-	KzgProof    *KZGProof   `json:"kzg_proof"`
+	KzgProof    KZGProof    `json:"kzg_proof"`
 	ColumnIndex ColumnIndex `json:"column_index"`
 	RowIndex    RowIndex    `json:"row_index"`
 }
