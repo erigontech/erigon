@@ -411,7 +411,7 @@ func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(time) * params.BlobGasPerBlob
+	return c.GetMaxBlobsPerBlock(time) * params.GasPerBlob
 }
 
 func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
