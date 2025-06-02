@@ -157,18 +157,23 @@ func TestGetBlobsV2(t *testing.T) {
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
 	require.NoError(err)
-	_, err = api.SendRawTransaction(ctx, buf.Bytes())
+	hh, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
+	require.NotEmpty(hh)
 
 	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
 	blobsResp, err := engineServer.GetBlobsV2(ctx, blobHashes)
 	require.NoError(err)
-	require.True(blobsResp[0] == nil)
-	require.Equal(blobsResp[1].Blob, hexutil.Bytes(wrappedTxn.Blobs[0][:]))
-	require.Equal(blobsResp[2].Blob, hexutil.Bytes(wrappedTxn.Blobs[1][:]))
+	require.True(blobsResp == nil) // Any one blob not found makes the whole response nil
+
+	blobHashes = blobHashes[1:]
+	blobsResp, err = engineServer.GetBlobsV2(ctx, blobHashes)
+	require.NoError(err)
+	require.Equal(blobsResp[0].Blob, hexutil.Bytes(wrappedTxn.Blobs[0][:]))
+	require.Equal(blobsResp[1].Blob, hexutil.Bytes(wrappedTxn.Blobs[1][:]))
 
 	for i := range 128 {
-		require.Equal(blobsResp[1].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i][:]))
-		require.Equal(blobsResp[2].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i+128][:]))
+		require.Equal(blobsResp[0].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i][:]))
+		require.Equal(blobsResp[1].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i+128][:]))
 	}
 }

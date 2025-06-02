@@ -191,6 +191,9 @@ func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	wrappedTxn.Tx.FeeCap = uint256.NewInt(10000000000)
 	wrappedTxn.Tx.MaxFeePerBlobGas = uint256.NewInt(123)
 
+	// Wrapper version = 0x1
+	wrappedTxn.WrapperVersion = 1
+
 	wrappedTxn.Blobs = make(Blobs, 2)
 	wrappedTxn.Commitments = make(BlobKzgs, 2)
 	wrappedTxn.Proofs = make(KZGProofs, 0, 2*params.CellsPerExtBlob)

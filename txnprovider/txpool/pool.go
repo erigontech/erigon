@@ -832,10 +832,19 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 		// Skip transactions that require more blob gas than is available
 		blobCount := uint64(len(mt.TxnSlot.BlobHashes))
-		if blobCount*params.BlobGasPerBlob > availableBlobGas {
-			continue
+		if blobCount > 0 {
+			if p.isOsaka() {
+				proofs := mt.TxnSlot.Proofs()
+				if len(proofs) != len(mt.TxnSlot.BlobBundles)*int(params.CellsPerExtBlob) { // cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
+					toRemove = append(toRemove, mt)
+					continue
+				}
+			}
+			if blobCount*params.BlobGasPerBlob > availableBlobGas {
+				continue
+			}
+			availableBlobGas -= blobCount * params.BlobGasPerBlob
 		}
-		availableBlobGas -= blobCount * params.BlobGasPerBlob
 
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
@@ -1601,7 +1610,6 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 				}
 				return txpoolcfg.ReplaceUnderpriced // TODO: This is the same as NotReplaced
 			}
-
 		}
 
 		//Regular txn threshold checks
