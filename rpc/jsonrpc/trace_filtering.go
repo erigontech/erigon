@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -764,7 +765,7 @@ func (api *TraceAPIImpl) callBlock(
 		RequireCanonical: true,
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, cfg.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -885,7 +886,7 @@ func (api *TraceAPIImpl) callTransaction(
 		RequireCanonical: true,
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, cfg.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
