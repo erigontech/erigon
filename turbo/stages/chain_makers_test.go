@@ -122,21 +122,21 @@ func TestGenerateChain(t *testing.T) {
 		t.Error(err)
 	}
 	if !uint256.NewInt(989000).Eq(&balance) {
-		t.Errorf("wrong balance of addr1: %s", balance)
+		t.Errorf("wrong balance of addr1: %s", &balance)
 	}
 	balance, err = st.GetBalance(addr2)
 	if err != nil {
 		t.Error(err)
 	}
 	if !uint256.NewInt(10000).Eq(&balance) {
-		t.Errorf("wrong balance of addr2: %s", balance)
+		t.Errorf("wrong balance of addr2: %s", &balance)
 	}
 	balance, err = st.GetBalance(addr3)
 	if err != nil {
 		t.Error(err)
 	}
-	if fmt.Sprintf("%s", balance) != "19687500000000001000" { //nolint
-		t.Errorf("wrong balance of addr3: %s", balance)
+	if fmt.Sprintf("%s", &balance) != "19687500000000001000" { //nolint
+		t.Errorf("wrong balance of addr3: %s", &balance)
 	}
 
 	// Test of receipts

@@ -137,9 +137,9 @@ func (e *TraceWorker) ExecTxn(txNum uint64, blockNum uint64, txIndex int, txn ty
 			return err
 		}
 	} else {
-		_, err = core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
+		result, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
 		if err != nil {
-			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum)
+			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, result.Err)
 		}
 	}
 

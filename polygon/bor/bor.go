@@ -1821,11 +1821,11 @@ func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender common.Address, coin
 		transferFeeLogSig,
 		sender,
 		coinbase,
-		result.FeeTipped,
-		result.SenderInitBalance,
-		result.CoinbaseInitBalance,
-		output1.Sub(output1, result.FeeTipped),
-		output2.Add(output2, result.FeeTipped),
+		&result.FeeTipped,
+		&result.SenderInitBalance,
+		&result.CoinbaseInitBalance,
+		output1.Sub(output1, &result.FeeTipped),
+		output2.Add(output2, &result.FeeTipped),
 	)
 
 }

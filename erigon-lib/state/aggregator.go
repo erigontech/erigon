@@ -25,7 +25,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -286,6 +285,10 @@ func (a *Aggregator) OpenFolder() error {
 func (a *Aggregator) openFolder() error {
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
+		if d.disable {
+			continue
+		}
+
 		d := d
 		eg.Go(func() error {
 			select {
@@ -297,6 +300,9 @@ func (a *Aggregator) openFolder() error {
 		})
 	}
 	for _, ii := range a.iis {
+		if ii.disable {
+			continue
+		}
 		ii := ii
 		eg.Go(func() error { return ii.openFolder() })
 	}
@@ -985,13 +991,24 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		case <-localTimeout.C: //must be first to improve responsivness
 			return true, nil
 		case <-logEvery.C:
-			at.a.logger.Info("[snapshots] pruning state",
-				"until commit", time.Until(started.Add(timeout)).String(),
-				"pruneLimit", pruneLimit,
-				"aggregatedStep", at.StepsInFiles(kv.StateDomains...),
-				"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
-				"pruned", fullStat.String(),
-			)
+			if furiousPrune {
+				at.a.logger.Info("[prune] state",
+					//"until commit", time.Until(started.Add(timeout)).String(),
+					//"pruneLimit", pruneLimit,
+					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
+					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
+					//"pruned", fullStat.String(),
+				)
+			} else {
+				at.a.logger.Info("[prune] state",
+					"until commit", time.Until(started.Add(timeout)).String(),
+					//"pruneLimit", pruneLimit,
+					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
+					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
+					//"pruned", fullStat.String(),
+				)
+			}
+
 		case <-ctx.Done():
 			return false, ctx.Err()
 		default:
@@ -1264,6 +1281,9 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		}
 	}
 	for id, d := range at.d {
+		if d.d.disable {
+			continue
+		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
@@ -1273,11 +1293,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		restorePrevRange := false
 		for k, dr := range &r.domain {
 			kd := kv.Domain(k)
-			if !slices.Contains(kv.StateDomains, kd) {
+			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
 			}
-
-			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
+			if !(kd == kv.AccountsDomain || kd == kv.StorageDomain || kd == kv.CommitmentDomain) {
 				continue
 			}
 			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
@@ -1304,6 +1323,9 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 	}
 
 	for id, ii := range at.iis {
+		if ii.ii.disable {
+			continue
+		}
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
@@ -1333,6 +1355,9 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
+		if at.d[id].d.disable {
+			continue
+		}
 		if !r.domain[id].any() {
 			continue
 		}
@@ -1367,6 +1392,10 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	}
 
 	for id, rng := range r.invertedIndex {
+		if at.iis[id].ii.disable {
+			continue
+		}
+
 		if !rng.needMerge {
 			continue
 		}
@@ -1394,10 +1423,16 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
+		if d.disable {
+			continue
+		}
 		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
 	for id, ii := range a.iis {
+		if ii.disable {
+			continue
+		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
 
@@ -1412,6 +1447,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range at.d {
+		if d.d.disable {
+			continue
+		}
 		if in == nil {
 			d.cleanAfterMerge(nil, nil, nil)
 		} else {
@@ -1419,6 +1457,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 		}
 	}
 	for id, ii := range at.iis {
+		if ii.ii.disable {
+			continue
+		}
 		if in == nil {
 			ii.cleanAfterMerge(nil)
 		} else {

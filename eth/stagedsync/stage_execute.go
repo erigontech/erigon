@@ -267,9 +267,10 @@ func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *libstate.Shar
 		return nil
 	}
 
-	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	stateChanges := etl.NewCollectorWithAllocator("unwind", "", etl.SmallSortableBuffers, logger)
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
+	stateChanges.LogLvl(log.LvlDebug)
 
 	accountDiffs := changeset[kv.AccountsDomain]
 	for _, kv := range accountDiffs {

@@ -124,8 +124,10 @@ func ExecuteBlockEphemerally(
 	var rejectedTxs []*RejectedTx
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
+	blockNum := block.NumberU64()
+
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(block.NumberU64(), i)
+		ibs.SetTxContext(blockNum, i)
 		writeTrace := false
 		if vmConfig.Tracer == nil && getTracer != nil {
 			tracer, err := getTracer(i, txn.Hash())

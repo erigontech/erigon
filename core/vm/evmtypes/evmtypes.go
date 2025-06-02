@@ -68,10 +68,10 @@ type ExecutionResult struct {
 	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted             bool   // Whether the execution was aborted by `REVERT`
 	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
-	SenderInitBalance    *uint256.Int
-	CoinbaseInitBalance  *uint256.Int
-	FeeTipped            *uint256.Int
-	FeeBurnt             *uint256.Int
+	SenderInitBalance    uint256.Int
+	CoinbaseInitBalance  uint256.Int
+	FeeTipped            uint256.Int
+	FeeBurnt             uint256.Int
 	BurntContractAddress common.Address
 	EvmRefund            uint64 // Gas refunded by EVM without considering refundQuotient
 }

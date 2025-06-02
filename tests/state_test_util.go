@@ -277,9 +277,9 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 	snapshot := statedb.Snapshot()
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
-	var res *evmtypes.ExecutionResult
-	if res, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil); err != nil {
-		statedb.RevertToSnapshot(snapshot, nil)
+	res, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
+	if err != nil {
+		statedb.RevertToSnapshot(snapshot, err)
 	}
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
 		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: res.GasUsed}, nil)

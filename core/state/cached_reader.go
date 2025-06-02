@@ -64,14 +64,14 @@ func (cr *CachedReader) ReadAccountStorage(address common.Address, key common.Ha
 	addrBytes := address.Bytes()
 	if s, ok := cr.cache.GetStorage(addrBytes, 1, key.Bytes()); ok {
 		var v uint256.Int
-		(&v).SetBytes(s) 
+		(&v).SetBytes(s)
 		return v, true, nil
 	}
 	v, ok, err := cr.r.ReadAccountStorage(address, key)
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
-	if len(v) == 0 {
+	if !ok {
 		cr.cache.SetStorageAbsent(addrBytes, 1, key.Bytes())
 	} else {
 		cr.cache.SetStorageRead(addrBytes, 1, key.Bytes(), v.Bytes())
