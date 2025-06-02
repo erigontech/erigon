@@ -298,7 +298,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 			amount = 1024
 		}
 
-		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
+		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(5 * time.Second)}
 		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, newBlockHeaderHash, amount, event.PeerId, opts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
@@ -379,8 +379,9 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		}
 	}
 
-	// len(newConnectedHeaders) is always <= len(blockChain)
-	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	newBlocksStartIdx := firstNewConnectedHeader.Number.Uint64() - blockChain[0].NumberU64()
+	newBlocksEndIdx := newBlocksStartIdx + uint64(len(newConnectedHeaders))
+	newConnectedBlocks := blockChain[newBlocksStartIdx:newBlocksEndIdx]
 	if len(newConnectedBlocks) > 1 {
 		s.logger.Info(
 			syncLogPrefix("inserting multiple connected blocks"),
