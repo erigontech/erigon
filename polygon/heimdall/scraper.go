@@ -125,9 +125,9 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 
 			select {
 			case <-progressLogTicker.C:
-				if len(entities) > 0 {
+				if len(entities) > 1 {
 					s.logger.Info(
-						heimdallLogPrefix("scraper periodic progress"),
+						heimdallLogPrefix("scraper progress"),
 						"name", s.name,
 						"rangeStart", idRange.Start,
 						"rangeEnd", idRange.End,
