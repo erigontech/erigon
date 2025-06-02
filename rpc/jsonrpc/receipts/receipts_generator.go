@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/google/go-cmp/cmp"
-	lru "github.com/hashicorp/golang-lru/v2"
-
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
@@ -27,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/google/go-cmp/cmp"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type Generator struct {
