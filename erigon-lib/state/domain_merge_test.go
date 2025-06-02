@@ -24,10 +24,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		return visibleFile{
 			startTxNum: startTxNum,
 			endTxNum:   endTxNum,
-			src: &filesItem{
-				startTxNum: startTxNum,
-				endTxNum:   endTxNum,
-			},
+			src:        &filesItem{startTxNum: startTxNum, endTxNum: endTxNum},
 		}
 	}
 
