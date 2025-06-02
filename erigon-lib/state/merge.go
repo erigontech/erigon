@@ -111,7 +111,7 @@ func (ht *HistoryRoTx) FirstStepNotInFiles() uint64 {
 	return ht.files.EndTxNum() / ht.aggStep
 }
 func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
-	return iit.files.EndTxNum() / iit.ii.aggregationStep
+	return iit.files.EndTxNum() / iit.aggStep
 }
 
 // findMergeRange
@@ -204,9 +204,9 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		endStep := item.endTxNum / iit.ii.aggregationStep
+		endStep := item.endTxNum / iit.aggStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := min(spanStep*iit.ii.aggregationStep, maxSpan)
+		span := min(spanStep*iit.aggStep, maxSpan)
 		start := item.endTxNum - span
 		foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
 		if foundSuperSet {
@@ -606,7 +606,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	fromStep, toStep := startTxNum/iit.ii.aggregationStep, endTxNum/iit.ii.aggregationStep
+	fromStep, toStep := startTxNum/iit.aggStep, endTxNum/iit.aggStep
 
 	datPath := iit.ii.efFilePath(fromStep, toStep)
 	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, iit.ii.CompressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
@@ -715,7 +715,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	comp.Close()
 	comp = nil
 
-	outItem = newFilesItem(startTxNum, endTxNum, iit.ii.aggregationStep)
+	outItem = newFilesItem(startTxNum, endTxNum, iit.aggStep)
 	if outItem.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
 	}

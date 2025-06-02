@@ -479,7 +479,7 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 		discard:         discard,
 		tmpdir:          tmpdir,
 		filenameBase:    iit.ii.filenameBase,
-		aggregationStep: iit.ii.aggregationStep,
+		aggregationStep: iit.aggStep,
 
 		indexKeysTable: iit.ii.keysTable,
 		indexTable:     iit.ii.valuesTable,
@@ -826,8 +826,8 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
-	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
-	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.ii.aggregationStep
+	maxStepInFiles := iit.files.EndTxNum() / iit.aggStep
+	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.aggStep
 	return maxStepInFiles < maxStepInDB
 }
 
@@ -902,7 +902,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//	ii.logger.Error("[snapshots] prune index",
 	//		"name", ii.filenameBase,
 	//		"forced", forced,
-	//		"pruned tx", fmt.Sprintf("%.2f-%.2f", float64(minTxnum)/float64(iit.ii.aggregationStep), float64(maxTxnum)/float64(iit.ii.aggregationStep)),
+	//		"pruned tx", fmt.Sprintf("%.2f-%.2f", float64(minTxnum)/float64(iit.aggStep), float64(maxTxnum)/float64(iit.aggStep)),
 	//		"pruned values", pruneCount,
 	//		"tx until limit", limit)
 	//}()
@@ -1283,11 +1283,11 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	fst, _ := kv.FirstKey(tx, iit.ii.keysTable)
 	if len(fst) > 0 {
-		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.ii.aggregationStep)
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.aggStep)
 	}
 	lst, _ := kv.LastKey(tx, iit.ii.keysTable)
 	if len(lst) > 0 {
-		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.ii.aggregationStep)
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.aggStep)
 	}
 	if to == 0 {
 		to = from
