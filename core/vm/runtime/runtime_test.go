@@ -332,7 +332,6 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	require.NoError(b, err)
 	defer domains.Close()
 
-
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 
