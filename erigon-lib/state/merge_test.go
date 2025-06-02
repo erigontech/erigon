@@ -129,6 +129,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 			dt := newDomainRoTx(aggStep, files)
 			result := dt.findMergeRange(endTx, 32)
 			assert.Equal(t, aggStep, result.aggStep)
+			assert.Equal(t, aggStep, result.aggStep)
 		}
 	})
 
@@ -146,6 +147,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 		result = dt.findMergeRange(4, 1000000)
 		assert.True(t, result.values.needMerge)
+		assert.Equal(t, 0, int(result.values.from))
 	})
 
 	t.Run("file_ordering", func(t *testing.T) {
