@@ -646,16 +646,15 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		return err
 	}
 
-	prev, err := sdb.GetBalance(addr)
-	if err != nil {
-		return err
-	}
+	prev := stateObject.Balance()
 
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
 		if stateObject.empty() {
-			sdb.versionWritten(addr, BalancePath, common.Hash{}, prev)
+			if sdb.versionMap != nil {
+				sdb.versionWritten(addr, BalancePath, common.Hash{}, prev)
+			}
 			if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
 				fmt.Printf("%d (%d.%d) Touch %x %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, AccountKey{Path: BalancePath})
 			}
@@ -667,7 +666,9 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 
 	update := new(uint256.Int).Add(&prev, &amount)
 	stateObject.SetBalance(*update, reason)
-	sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
+	if sdb.versionMap != nil {
+		sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
+	}
 	return nil
 }
 
@@ -691,15 +692,12 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, 
 		return err
 	}
 
-	prev, err := sdb.GetBalance(addr)
-	if err != nil {
-		return err
-	}
-
+	prev := stateObject.Balance()
 	update := new(uint256.Int).Sub(&prev, &amount)
 	stateObject.SetBalance(*update, reason)
-	sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
-
+	if sdb.versionMap != nil {
+		sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
+	}
 	return nil
 }
 
