@@ -73,10 +73,6 @@ func (a Address) String() string {
 	return a.Hex()
 }
 
-func (a Address) Cmp(o Address) int {
-	return bytes.Compare(a[:], o[:])
-}
-
 func (a *Address) checksumHex() []byte {
 	buf := a.hex()
 
@@ -179,4 +175,9 @@ func (a *Address) Scan(src interface{}) error {
 // Value implements valuer for database/sql.
 func (a Address) Value() (driver.Value, error) {
 	return a[:], nil
+}
+
+// Cmp compares two addresses.
+func (a Address) Cmp(other Address) int {
+	return bytes.Compare(a[:], other[:])
 }
