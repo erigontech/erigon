@@ -301,7 +301,7 @@ func allScenarios(cliCtx *cli.Context, runCtx devnet.Context) scenarios.Scenario
 	const sendValue uint64 = 10000
 
 	return scenarios.Scenarios{
-		"dynamic-tx-node-0": {
+		"dynamic-tx-node-0": &scenarios.Scenario{
 			Context: runCtx.WithCurrentNetwork(0).WithCurrentNode(0),
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
@@ -311,7 +311,7 @@ func allScenarios(cliCtx *cli.Context, runCtx devnet.Context) scenarios.Scenario
 				{Text: "AwaitBlocks", Args: []any{2 * time.Second}},
 			},
 		},
-		"dynamic-tx-any-node": {
+		"dynamic-tx-any-node": &scenarios.Scenario{
 			Context: runCtx.WithCurrentNetwork(0),
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
@@ -321,14 +321,14 @@ func allScenarios(cliCtx *cli.Context, runCtx devnet.Context) scenarios.Scenario
 				{Text: "AwaitBlocks", Args: []any{2 * time.Second}},
 			},
 		},
-		"call-contract": {
+		"call-contract": &scenarios.Scenario{
 			Context: runCtx.WithCurrentNetwork(0),
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
 				{Text: "DeployAndCallLogSubscriber", Args: []any{accounts.DevAddress}},
 			},
 		},
-		"state-sync": {
+		"state-sync": &scenarios.Scenario{
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
 				{Text: "CreateAccountWithFunds", Args: []any{networkname.Dev, "root-funder", 200.0}},
@@ -340,7 +340,7 @@ func allScenarios(cliCtx *cli.Context, runCtx devnet.Context) scenarios.Scenario
 				{Text: "BatchProcessRootTransfers", Args: []any{"root-funder", 1, 10, 2, 2}},
 			},
 		},
-		"child-chain-exit": {
+		"child-chain-exit": &scenarios.Scenario{
 			Steps: []*scenarios.Step{
 				{Text: "CreateAccountWithFunds", Args: []any{networkname.Dev, "root-funder", 200.0}},
 				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnet, "child-funder", 200.0}},
@@ -350,7 +350,7 @@ func allScenarios(cliCtx *cli.Context, runCtx devnet.Context) scenarios.Scenario
 				//{Text: "BatchProcessTransfers", Args: []any{"child-funder", 1, 10, 2, 2}},
 			},
 		},
-		"block-production": {
+		"block-production": &scenarios.Scenario{
 			Steps: []*scenarios.Step{
 				{Text: "SendTxLoad", Args: []any{recipientAddress, accounts.DevAddress, sendValue, cliCtx.Uint(txCountFlag.Name)}},
 			},
