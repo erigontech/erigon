@@ -108,7 +108,7 @@ func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() 
 
 func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.aggStep }
 func (ht *HistoryRoTx) FirstStepNotInFiles() uint64 {
-	return ht.files.EndTxNum() / ht.h.aggregationStep
+	return ht.files.EndTxNum() / ht.aggStep
 }
 func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
 	return iit.files.EndTxNum() / iit.ii.aggregationStep
@@ -154,9 +154,9 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		endStep := item.endTxNum / ht.h.aggregationStep
+		endStep := item.endTxNum / ht.aggStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := min(spanStep*ht.h.aggregationStep, maxSpan)
+		span := min(spanStep*ht.aggStep, maxSpan)
 		startTxNum := item.endTxNum - span
 
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
@@ -326,7 +326,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			if ok {
 				indexFiles = append(indexFiles, idxFile)
 			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.version.AccessorEFI.String(), ht.h.filenameBase, item.startTxNum/ht.h.aggregationStep, item.endTxNum/ht.h.aggregationStep)
+				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.version.AccessorEFI.String(), ht.h.filenameBase, item.startTxNum/ht.aggStep, item.endTxNum/ht.aggStep)
 				return nil, nil, walkErr
 			}
 		}
@@ -773,7 +773,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}()
-		fromStep, toStep := r.history.from/ht.h.aggregationStep, r.history.to/ht.h.aggregationStep
+		fromStep, toStep := r.history.from/ht.aggStep, r.history.to/ht.aggStep
 		datPath := ht.h.vFilePath(fromStep, toStep)
 		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
 		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
@@ -871,7 +871,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if index, err = recsplit.OpenIndex(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.filenameBase, err)
 		}
-		historyIn = newFilesItem(r.history.from, r.history.to, ht.h.aggregationStep)
+		historyIn = newFilesItem(r.history.from, r.history.to, ht.aggStep)
 		historyIn.decompressor = decomp
 		historyIn.index = index
 
