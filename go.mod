@@ -43,6 +43,7 @@ require (
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/emicklei/dot v1.6.2
 	github.com/felixge/fgprof v0.9.3
+	github.com/ethereum/c-kzg-4844/v2 v2.1.1
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-chi/chi/v5 v5.2.2
