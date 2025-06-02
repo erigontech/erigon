@@ -106,7 +106,7 @@ func (r DomainRanges) String() string {
 
 func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
-func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.d.aggregationStep }
+func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.aggStep }
 func (ht *HistoryRoTx) FirstStepNotInFiles() uint64 {
 	return ht.files.EndTxNum() / ht.h.aggregationStep
 }
@@ -123,20 +123,20 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
 
 	r := DomainRanges{
-		name:    dt.d.name,
+		name:    dt.name,
 		history: hr,
-		aggStep: dt.d.aggregationStep,
+		aggStep: dt.aggStep,
 	}
-	fmt.Printf("DEBUG: dt.files length: %d, maxEndTxNum: %d, maxSpan: %d, aggStep: %d\n", len(dt.files), maxEndTxNum, maxSpan, dt.d.aggregationStep)
+	fmt.Printf("DEBUG: dt.files length: %d, maxEndTxNum: %d, maxSpan: %d, aggStep: %d\n", len(dt.files), maxEndTxNum, maxSpan, dt.aggStep)
 	for i, item := range dt.files {
 		fmt.Printf("DEBUG: file %d: startTxNum=%d, endTxNum=%d\n", i, item.startTxNum, item.endTxNum)
 		if item.endTxNum > maxEndTxNum {
 			fmt.Printf("DEBUG: breaking because item.endTxNum %d > maxEndTxNum %d\n", item.endTxNum, maxEndTxNum)
 			break
 		}
-		endStep := item.endTxNum / dt.d.aggregationStep
+		endStep := item.endTxNum / dt.aggStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := spanStep * dt.d.aggregationStep
+		span := spanStep * dt.aggStep
 		fromTxNum := item.endTxNum - span
 		fmt.Printf("DEBUG: endStep=%d, spanStep=%d, span=%d, fromTxNum=%d\n", endStep, spanStep, span, fromTxNum)
 		if fromTxNum < item.startTxNum {
@@ -540,7 +540,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter = nil
 	ps.Delete(p)
 
-	valuesIn = newFilesItem(r.values.from, r.values.to, dt.d.aggregationStep)
+	valuesIn = newFilesItem(r.values.from, r.values.to, dt.aggStep)
 	valuesIn.frozen = false
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
@@ -934,7 +934,7 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
 func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	dchecker := dt.d.checker
-	dname := dt.d.name
+	dname := dt.name
 	if dchecker != nil {
 		checker = func(startTxNum, endTxNum uint64) bool {
 			return dchecker.CheckDependentPresent(dname, Any, startTxNum, endTxNum)
