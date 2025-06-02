@@ -690,11 +690,19 @@ var (
 		Value: "4mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
-	// TODO: Unused.
+	// Deprecated. Shouldn't do anything. TODO: Remove.
+	TorrentDownloadSlotsFlag = cli.IntFlag{
+		Name:   "torrent.download.slots",
+		Value:  32,
+		Usage:  "Amount of files to download in parallel.",
+		Hidden: true,
+	}
+	// TODO: Currently unused.
 	TorrentStaticPeersFlag = cli.StringFlag{
-		Name:  "torrent.staticpeers",
-		Usage: "Comma separated host:port to connect to",
-		Value: "",
+		Name:   "torrent.staticpeers",
+		Usage:  "Comma separated host:port to connect to",
+		Value:  "",
+		Hidden: true,
 	}
 	TorrentDisableTrackers = cli.BoolFlag{
 		Name:  "torrent.trackers.disable",
