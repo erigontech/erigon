@@ -17,7 +17,6 @@
 package downloader
 
 import (
-	"bufio"
 	"cmp"
 	"context"
 	"errors"
@@ -32,7 +31,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -104,12 +102,6 @@ func (me *Downloader) ResetLogInterval() {
 	me.resetLogInterval.Broadcast()
 }
 
-type downloadInfo struct {
-	torrent  *torrent.Torrent
-	time     time.Time
-	progress float32
-}
-
 type AggStats struct {
 	// When these stats were generated.
 	When time.Time
@@ -141,8 +133,6 @@ type AggStats struct {
 	WebseedDiscardCount   *atomic.Int64
 	WebseedServerFails    *atomic.Int64
 	WebseedBytesDownload  *atomic.Int64
-
-	lastTorrentStatus time.Time
 }
 
 func (me *AggStats) AllTorrentsComplete() bool {
@@ -601,7 +591,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 	stats := prevStats
 	logger := d.logger
 	verbosity := d.verbosity
-	downloading := map[string]*downloadInfo{}
 
 	// Call these methods outside `lock` critical section, because they have own locks with contention.
 	torrents := torrentClient.Torrents()
@@ -616,7 +605,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 	stats.TorrentsCompleted = 0
 	stats.NumTorrents = len(torrents)
 
-	var zeroProgress []string
 	var noMetadata []string
 
 	isDiagEnabled := diagnostics.TypeOf(diagnostics.SnapshoFilesList{}).Enabled()
@@ -652,19 +640,11 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 		if torrentComplete {
 			stats.TorrentsCompleted++
 			bytesCompleted = tLen
-			delete(downloading, torrentName)
 		} else {
 			bytesCompleted = t.BytesCompleted()
 		}
 
 		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
-
-		if info, ok := downloading[torrentName]; ok {
-			if progress != info.progress {
-				info.time = time.Now()
-				info.progress = progress
-			}
-		}
 
 		stats.BytesTotal += uint64(tLen)
 
@@ -678,11 +658,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 
 		// more detailed statistic: download rate of each peer (for each file)
 		if !torrentComplete && progress != 0 {
-			if info, ok := downloading[torrentName]; ok {
-				info.time = time.Now()
-				info.progress = progress
-			}
-
 			logger.Log(verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 			logger.Log(verbosity, "[snapshots] webseed peers", webseedRates...)
 			logger.Log(verbosity, "[snapshots] bittorrent peers", rates...)
@@ -704,42 +679,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			noMetadata = append(noMetadata[:5], "...")
 		}
 		logger.Info("[snapshots] no metadata yet", "files", amount, "list", strings.Join(noMetadata, ","))
-	}
-
-	var noDownloadProgress []string
-
-	if len(zeroProgress) > 0 {
-		amount := len(zeroProgress)
-
-		for _, file := range zeroProgress {
-			if _, ok := downloading[file]; ok {
-				noDownloadProgress = append(noDownloadProgress, file)
-			}
-		}
-
-		if len(zeroProgress) > 5 {
-			zeroProgress = append(zeroProgress[:5], "...")
-		}
-
-		logger.Info("[snapshots] no progress yet", "files", amount, "list", strings.Join(zeroProgress, ","))
-	}
-
-	if len(downloading) > 0 {
-		amount := len(downloading)
-
-		files := make([]string, 0, len(downloading))
-		for file, info := range downloading {
-			files = append(files, fmt.Sprintf("%s (%.0f%%)", file, info.progress))
-
-			if dp, ok := downloading[file]; ok {
-				if time.Since(dp.time) > 30*time.Minute {
-					noDownloadProgress = append(noDownloadProgress, file)
-				}
-			}
-		}
-		sort.Strings(files)
-
-		logger.Log(verbosity, "[snapshots] files progress", "files", amount, "list", strings.Join(files, ", "))
 	}
 
 	stats.When = time.Now()
@@ -766,57 +705,6 @@ func calculateRate(current, previous uint64, prevRate uint64, interval time.Dura
 	}
 	// TODO: Probably assert and find out what is wrong.
 	return 0
-}
-
-type filterWriter struct {
-	files     map[string][]byte
-	remainder []byte
-	file      string
-}
-
-func (f *filterWriter) Write(p []byte) (n int, err error) {
-	written := len(p)
-
-	p = append(f.remainder, p...)
-
-	for len(p) > 0 {
-		scanned, line, _ := bufio.ScanLines(p, false)
-
-		if scanned > 0 {
-			if len(f.file) > 0 {
-				if len(line) == 0 {
-					f.file = ""
-				} else {
-					line = append(line, '\n')
-					f.files[f.file] = append(f.files[f.file], line...)
-				}
-			} else {
-				if _, ok := f.files[string(line)]; ok {
-					f.file = string(line)
-				}
-			}
-
-			p = p[scanned:]
-		} else {
-			f.remainder = p
-			p = nil
-		}
-	}
-	return written, nil
-}
-
-func getProgressStatus(torrentClient *torrent.Client, noDownloadProgress []string) map[string][]byte {
-	writer := filterWriter{
-		files: map[string][]byte{},
-	}
-
-	for _, file := range noDownloadProgress {
-		writer.files[file] = nil
-	}
-
-	torrentClient.WriteStatus(&writer)
-
-	return writer.files
 }
 
 // Adds segment peer fields common to Peer instances.

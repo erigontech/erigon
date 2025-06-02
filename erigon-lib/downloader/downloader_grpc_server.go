@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,8 +49,7 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
-	d  *Downloader
-	mu sync.RWMutex
+	d *Downloader
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {

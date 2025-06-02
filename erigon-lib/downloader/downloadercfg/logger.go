@@ -70,6 +70,7 @@ func anacrolixToErigonLogLevel(level analog.Level) log.Lvl {
 	case analog.Never:
 		// This should never occur. Maybe log that a message leaked?
 		panic(level)
+		//nolint
 		return log.LvlTrace + 1
 	case analog.NotSet:
 		// This is usually bad practice. Set an appropriate default so it doesn't happen.
@@ -87,6 +88,7 @@ func anacrolixToErigonLogLevel(level analog.Level) log.Lvl {
 	case analog.Disabled:
 		panic(level)
 		// This should never occur. Maybe log that a message leaked?
+		//nolint
 		return log.LvlError
 	default:
 		// This shouldn't happen...

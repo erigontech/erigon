@@ -321,7 +321,7 @@ func IsSnapNameAllowed(name string) bool {
 // Don't need call torrent.VerifyData manually
 func (d *Downloader) addTorrentSpec(
 	ts *torrent.TorrentSpec,
-) (t *torrent.Torrent, new bool, err error) {
+) (t *torrent.Torrent, first bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.Trackers = Trackers
 	ts.Webseeds = nil
@@ -331,7 +331,7 @@ func (d *Downloader) addTorrentSpec(
 	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
 	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
 	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
-	t, new, err = d.torrentClient.AddTorrentSpec(ts)
+	t, first, err = d.torrentClient.AddTorrentSpec(ts)
 	if err != nil {
 		return
 	}

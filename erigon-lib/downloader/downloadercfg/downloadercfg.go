@@ -283,10 +283,6 @@ func New(
 			continue
 		}
 	}
-	log.Info("processed webseed configuration",
-		"webseedHttpProviders", webseedHttpProviders,
-		"webseedFileProviders", webseedFileProviders,
-		"webseedUrlsOrFiles", webseedUrlsOrFiles)
 	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
 	exists, err := dir.FileExist(localCfgFile)
 	if err != nil {
@@ -296,6 +292,14 @@ func New(
 	if exists {
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
+
+	// TODO: What do webseed file providers do? Linter warned it was unused, and it appears to be
+	// pointless.
+
+	log.Info("processed webseed configuration",
+		"webseedHttpProviders", webseedHttpProviders,
+		"webseedFileProviders", webseedFileProviders,
+		"webseedUrlsOrFiles", webseedUrlsOrFiles)
 
 	// TODO: constructor must not do http requests
 	preverifiedCfg, err := LoadSnapshotsHashes(ctx, dirs, chainName)
