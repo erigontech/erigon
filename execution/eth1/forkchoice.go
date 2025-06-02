@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -503,11 +504,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if log {
 			headNum := "unknown"
 			if headNumber != nil {
-				headNum = fmt.Sprint(*headNumber)
+				headNum = strconv.FormatUint(*headNumber, 10)
 			}
 			hashBlockNum := "unknown"
 			if blockHashBlockNum != nil {
-				hashBlockNum = fmt.Sprint(*blockHashBlockNum)
+				hashBlockNum = strconv.FormatUint(*blockHashBlockNum, 10)
 			}
 			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
 		}

@@ -1777,12 +1777,11 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 	if err != nil {
 		return err
 	}
-	input1 = input1
 	input2, err := db.GetBalance(recipient)
 	if err != nil {
 		return err
 	}
-	input2 = input2
+
 	if !bailout {
 		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
 		if err != nil {
