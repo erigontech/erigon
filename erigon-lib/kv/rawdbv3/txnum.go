@@ -128,7 +128,7 @@ func (d *DefaultTxBlockIndex) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint
 			lt := binary.BigEndian.Uint64(_lt)
 			ft := binary.BigEndian.Uint64(_ft)
 			lb := binary.BigEndian.Uint64(_lb)
-			err = fmt.Errorf("BlockNum(%d): seems broken TxNum value: %d -> %d; db has: (%d-%d, %d-%d)", txNum, sblk, maxTxNum, fb, lb, ft, lt)
+			err = fmt.Errorf("BlockNum(%d): seems broken TxNum value: %d -> %d; db has: (%d-%d, %d-%d)", txNum, sblk, maxTxNum, fb, ft, lb, lt)
 			return true
 		}
 		return maxTxNum >= txNum
