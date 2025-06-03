@@ -364,7 +364,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		defer roTx.Rollback()
 
-		_, blockNum, err := txNumsReader.FindBlockNum(roTx, toTxNumRange-1)
+		blockNum, _, err := txNumsReader.FindBlockNum(roTx, toTxNumRange-1)
 		if err != nil {
 			logger.Warn("failed to find block number for txNum", "txNum", toTxNumRange, "err", err)
 			return nil, err

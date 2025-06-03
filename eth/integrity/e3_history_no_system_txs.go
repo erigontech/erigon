@@ -60,7 +60,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 				}
 				defer keys.Close()
 
-				txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+				txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 
 				for keys.HasNext() {
 					key, _, err := keys.Next()
@@ -76,7 +76,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 						if err != nil {
 							return err
 						}
-						ok, blockNum, err := txNumsReader.FindBlockNum(tx, txNum)
+						blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
 						if err != nil {
 							return err
 						}

@@ -19,10 +19,8 @@ package freezeblocks
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -1539,54 +1537,102 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 	return nil
 }
 
-func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.ReadTxNumFunc {
-	cache := GetBlockNumber2MaxTxNumCache()
-	return func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
-		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(tx, c, blockNum)
-		if err != nil {
-			return
-		}
-		if ok || r == nil {
-			return
-		}
-
-		// check cache
-		if (hit+miss)%100 <= 10 {
-			ratio := 0
-			if hit+miss > 0 {
-				ratio = int(float64(hit) / float64(hit+miss) * 100)
-			}
-			fmt.Println("total and size and ratio", hit+miss, size, ratio)
-		}
-		_maxTxNum, found := cache.Load(blockNum)
-		if found {
-			hit++
-			return _maxTxNum.(uint64), true, nil
-		}
-		miss++
-
-		b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
-		if err != nil {
-			return 0, false, err
-		}
-		if b == nil {
-			return 0, false, nil
-		}
-		ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
-		cache.Store(blockNum, ret)
-		size++
-		return ret, true, nil
+func TxBlockIndexFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.TxBlockIndex {
+	return &txBlockIndexWithBlockReader{
+		r:   r,
+		ctx: ctx,
 	}
 }
 
-// don't expect big number of block numbers...
-var globalBlockNum2MaxTxNumCache sync.Map
-var hit, miss, size uint64
+type txBlockIndexWithBlockReader struct {
+	r   services.FullBlockReader
+	ctx context.Context
+}
 
-func GetBlockNumber2MaxTxNumCache() *sync.Map {
-	if flag.Lookup("test.v") == nil {
-		return &globalBlockNum2MaxTxNumCache
-	} else {
-		return &sync.Map{}
+func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
+	maxTxNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.MaxTxNum(tx, c, blockNum)
+	if err != nil {
+		return
 	}
+	r := t.r
+	if ok || r == nil {
+		return
+	}
+	b, err := r.CanonicalBodyForStorage(t.ctx, tx, blockNum)
+	if err != nil {
+		return 0, false, err
+	}
+	if b == nil {
+		return 0, false, nil
+	}
+	ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
+	return ret, true, nil
+}
+
+func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
+	blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(tx, txNum)
+	if err != nil {
+		return
+	}
+	r := t.r
+	if ok || r == nil {
+		return
+	}
+
+	// search in snapshots
+	// using txNum, find block range where snapshot can be
+	// then use txnHashIdx + transactions.seg to find the txHash
+	// then use txHash and txn2BlockId index to return blockNum..
+
+	view := r.Snapshots().(*snapshotsync.RoSnapshots).View()
+	defer view.Close()
+
+	txSegs := view.Segments(coresnaptype.Transactions)
+	var buf []byte
+	for _, seg := range txSegs {
+		txnHashIdx := seg.Src().Index(coresnaptype.Indexes.TxnHash)
+		startTxNum := txnHashIdx.BaseDataID()
+		endTxNum := startTxNum + txnHashIdx.KeyCount()
+		if txNum < startTxNum && txNum >= endTxNum {
+			continue
+		}
+		// found the file
+
+		var txHash common.Hash
+		{
+			// get hash now
+			elemPos := txNum - startTxNum
+			offset := txnHashIdx.OrdinalLookup(elemPos)
+			gg := seg.Src().MakeGetter()
+			gg.Reset(offset)
+
+			if !gg.HasNext() {
+				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d): elemPos:%d, offset: %d", seg.From(), seg.To(), elemPos, offset)
+			}
+
+			if len(buf) < 1+20 {
+				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d) bad value: elemPos:%d, offset: %d, value: %x", seg.From(), seg.To(), elemPos, offset, buf)
+			}
+			txRlp := buf[1+20:]
+			tx, err := types.DecodeTransaction(txRlp)
+			if err != nil {
+				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d) bad tx decode: elemPos:%d, offset: %d, %w", seg.From(), seg.To(), elemPos, offset, err)
+			}
+			txHash = tx.Hash()
+		}
+
+		{
+			// use tx2BlockId index
+			txn2BlockIdx := seg.Src().Index(coresnaptype.Indexes.TxnHash2BlockNum)
+			reader := recsplit.NewIndexReader(txn2BlockIdx)
+			blockNum, ok := reader.Lookup(txHash[:])
+			if !ok {
+				return 0, false, fmt.Errorf("txn2BlockIdx.Lookup(%d-%d) bad txHash: %s, blockNumber: %d", seg.From(), seg.To(), txHash.String(), blockNum)
+			}
+			return blockNum, true, nil
+		}
+	}
+
+	return 0, false, nil
+
 }
