@@ -115,7 +115,7 @@ func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 // further limitations on the content of transactions that can be
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
-func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine consensus.Engine, txn types.Transaction) {
+func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
@@ -131,7 +131,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	b.receipts = append(b.receipts, receipt)
 }
 
-func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine consensus.Engine, txn types.Transaction) {
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}

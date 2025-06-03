@@ -654,11 +654,12 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		lower = upper - params.BlockHashOldWindow
 	}
 	if arg64 >= lower && arg64 < upper {
-		hash, err := interpreter.evm.Context.GetHash(arg64)
-		if err != nil {
-			arg.Clear()
-			return nil, err
-		}
+		hash := interpreter.evm.Context.GetHash(arg64)
+		// TODO uncomment after GetHash with error checkin
+		//if err != nil {
+		//	arg.Clear()
+		//	return nil, err
+		//}
 		arg.SetBytes(hash.Bytes())
 	} else {
 		arg.Clear()

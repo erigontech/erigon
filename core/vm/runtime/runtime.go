@@ -62,7 +62,7 @@ type Config struct {
 	State *state.IntraBlockState
 
 	evm       *vm.EVM
-	GetHashFn func(n uint64) (common.Hash, error)
+	GetHashFn func(n uint64) common.Hash
 }
 
 // sets defaults on the config
@@ -108,8 +108,8 @@ func setDefaults(cfg *Config) {
 		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
-		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
-			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+		cfg.GetHashFn = func(n uint64) common.Hash {
+			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 		}
 	}
 }

@@ -42,7 +42,7 @@ type WitnessStore struct {
 	TrieStateWriter *state.TrieStateWriter
 	Statedb         *state.IntraBlockState
 	ChainReader     *ChainReaderImpl
-	GetHashFn       func(n uint64) (common.Hash, error)
+	GetHashFn       func(n uint64) common.Hash
 }
 
 func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
@@ -77,8 +77,12 @@ func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot common.Has
 
 	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 
-	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-		return cfg.blockReader.Header(ctx, tx, hash, number)
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		h, e := cfg.blockReader.Header(ctx, tx, hash, number)
+		if e != nil {
+			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
+		}
+		return h
 	}
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 
@@ -123,7 +127,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	return nil
 }
 
-func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader consensus.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) (common.Hash, error), logger log.Logger) (common.Hash, error) {
+func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader consensus.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) common.Hash, logger log.Logger) (common.Hash, error) {
 	blockNr := block.NumberU64()
 	nw, err := trie.NewWitnessFromReader(bytes.NewReader(buf.Bytes()), false)
 	if err != nil {
