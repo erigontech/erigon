@@ -80,9 +80,6 @@ func (d *DefaultTxBlockIndex) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum uint64) (
 }
 
 func (d *DefaultTxBlockIndex) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
-	var k [8]byte
-	binary.BigEndian.PutUint64(k[:], txNum)
-
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
 		return 0, false, err

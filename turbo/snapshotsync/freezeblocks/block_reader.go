@@ -1570,31 +1570,32 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum u
 }
 
 func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
-	blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(tx, txNum)
-	if err != nil {
-		return
-	}
-	r := t.r
-	if ok || r == nil {
-		return
-	}
-
 	// search in snapshots
 	// using txNum, find block range where snapshot can be
 	// then use txnHashIdx + transactions.seg to find the txHash
 	// then use txHash and txn2BlockId index to return blockNum..
 
-	view := r.Snapshots().(*snapshotsync.RoSnapshots).View()
+	var buf []byte
+	view := t.r.Snapshots().(*RoSnapshots).View()
 	defer view.Close()
 
-	txSegs := view.Segments(coresnaptype.Transactions)
-	var buf []byte
+	txSegs := view.Txs()
+	if len(txSegs) > 0 {
+		txnHashIdx := txSegs[len(txSegs)-1].Src().Index(coresnaptype.Indexes.TxnHash)
+		endTxNum := txnHashIdx.BaseDataID() + txnHashIdx.KeyCount()
+		if endTxNum <= txNum {
+			goto DB_SEARCH
+		}
+	}
 	for _, seg := range txSegs {
 		txnHashIdx := seg.Src().Index(coresnaptype.Indexes.TxnHash)
 		startTxNum := txnHashIdx.BaseDataID()
 		endTxNum := startTxNum + txnHashIdx.KeyCount()
-		if txNum < startTxNum && txNum >= endTxNum {
+		if txNum >= endTxNum {
 			continue
+		}
+		if txNum < startTxNum {
+			break
 		}
 		// found the file
 
@@ -1609,6 +1610,7 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 			if !gg.HasNext() {
 				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d): elemPos:%d, offset: %d", seg.From(), seg.To(), elemPos, offset)
 			}
+			buf, _ = gg.Next(buf[:0])
 
 			if len(buf) < 1+20 {
 				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d) bad value: elemPos:%d, offset: %d, value: %x", seg.From(), seg.To(), elemPos, offset, buf)
@@ -1631,6 +1633,16 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 			}
 			return blockNum, true, nil
 		}
+	}
+
+DB_SEARCH:
+	blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(tx, txNum)
+	if err != nil {
+		return
+	}
+	r := t.r
+	if ok || r == nil {
+		return
 	}
 
 	return 0, false, nil
