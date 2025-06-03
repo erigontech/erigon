@@ -539,16 +539,15 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	getHash := func(i uint64) (common.Hash, error) {
+	getHash := func(i uint64) common.Hash {
 		if hash, ok := overrideBlockHash[i]; ok {
-			return hash, nil
+			return hash
 		}
 		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
 		if err != nil || !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
-			return common.Hash{}, err
 		}
-		return hash, nil
+		return hash
 	}
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)

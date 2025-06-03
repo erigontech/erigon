@@ -112,11 +112,15 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	//}
 	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
 
-	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		if execCfg.blockReader == nil {
-			return rawdb.ReadHeader(txc.Tx, hash, number), nil
+			return rawdb.ReadHeader(txc.Tx, hash, number)
 		}
-		return execCfg.blockReader.Header(ctx, txc.Tx, hash, number)
+		header, err := execCfg.blockReader.Header(ctx, txc.Tx, hash, number)
+		if err != nil {
+			panic(fmt.Sprintf("cannot read header: %s", err))
+		}
+		return header
 	}
 
 	mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
@@ -421,7 +425,7 @@ func addTransactionsToMiningBlock(
 	current *MiningBlock,
 	chainConfig *chain.Config,
 	vmConfig *vm.Config,
-	getHeader func(hash common.Hash, number uint64) (*types.Header, error),
+	getHeader func(hash common.Hash, number uint64) *types.Header,
 	engine consensus.Engine,
 	txns types.Transactions,
 	coinbase common.Address,

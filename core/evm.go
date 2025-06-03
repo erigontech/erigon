@@ -20,25 +20,21 @@
 package core
 
 import (
-	"fmt"
 	"math/big"
-	"sync"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) common.Hash,
 	engine consensus.EngineReader, author *common.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
@@ -105,93 +101,37 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	}
 }
 
-var hashLookupCache = func() *lru.Cache[uint64, common.Hash] {
-	// lru.New only returns err on -ve size
-	cache, _ := lru.New[uint64, common.Hash](8192)
-	return cache
-}()
-var hashLookupCacheLock sync.Mutex
-
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
-func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
-	refNumber := ref.Number.Uint64() - 1
-	refHash := ref.ParentHash
-	lastKnownNumber := refNumber
-	lastKnownHash := refHash
+func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) *types.Header) func(n uint64) common.Hash {
+	// Cache will initially contain [refHash.parent],
+	// Then fill up with [refHash.p, refHash.pp, refHash.ppp, ...]
+	var cache []common.Hash
 
-	hashLookupCacheLock.Lock()
-	defer hashLookupCacheLock.Unlock()
-
-	if _, ok := hashLookupCache.Get(refNumber); !ok {
-		hashLookupCache.Add(refNumber, refHash)
-	}
-
-	return func(n uint64) (common.Hash, error) {
-		hashLookupCacheLock.Lock()
-		defer hashLookupCacheLock.Unlock()
-
-		if n == lastKnownNumber {
-			//fmt.Println("GH-LN", n, refHash)
-			return lastKnownHash, nil
+	return func(n uint64) common.Hash {
+		// If there's no hash cache yet, make one
+		if len(cache) == 0 {
+			cache = append(cache, ref.ParentHash)
 		}
-
-		if n == refNumber {
-			//fmt.Println("GH-RF", n, refHash)
-			return refHash, nil
+		if idx := ref.Number.Uint64() - n - 1; idx < uint64(len(cache)) {
+			return cache[idx]
 		}
-
-		if hash, ok := hashLookupCache.Get(n); ok {
-			//fmt.Println("GH-CA", n, hash)
-			return hash, nil
-		}
-
-		if n > lastKnownNumber {
-			if n > refNumber {
-				return common.Hash{}, fmt.Errorf("block number out of range: max=%d", refNumber)
-			}
-			lastKnownNumber = refNumber
-			lastKnownHash = refHash
-		}
+		// No luck in the cache, but we can start iterating from the last element we already know
+		lastKnownHash := cache[len(cache)-1]
+		lastKnownNumber := ref.Number.Uint64() - uint64(len(cache))
 
 		for {
-			for {
-				hash, ok := hashLookupCache.Get(lastKnownNumber - 1)
-
-				if !ok {
-					break
-				}
-
-				lastKnownHash = hash
-				lastKnownNumber = lastKnownNumber - 1
-				if n == lastKnownNumber {
-					//fmt.Println("GH-CA1", lastKnownNumber, lastKnownHash)
-					return lastKnownHash, nil
-				}
-			}
-
-			header, err := func() (*types.Header, error) {
-				hash, num := lastKnownHash, lastKnownNumber
-				hashLookupCacheLock.Unlock()
-				defer hashLookupCacheLock.Lock()
-				return getHeader(hash, num)
-			}()
-
-			if err != nil {
-				return common.Hash{}, err
-			}
+			header := getHeader(lastKnownHash, lastKnownNumber)
 			if header == nil {
 				break
 			}
+			cache = append(cache, header.ParentHash)
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
-			hashLookupCache.Add(lastKnownNumber, lastKnownHash)
-
 			if n == lastKnownNumber {
-				//fmt.Println("GH-DB", lastKnownNumber, lastKnownHash)
-				return lastKnownHash, nil
+				return lastKnownHash
 			}
 		}
-		return common.Hash{}, nil
+		return common.Hash{}
 	}
 }
 

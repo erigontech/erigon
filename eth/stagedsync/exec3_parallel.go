@@ -72,7 +72,7 @@ type executor interface {
 	execute(ctx context.Context, tasks []*state.TxTask, gp *core.GasPool) (bool, error)
 	status(ctx context.Context, commitThreshold uint64) error
 	wait() error
-	getHeader(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error)
+	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header)
 
 	//these are reset by commit - so need to be read from the executor once its processing
 	tx() kv.RwTx
@@ -110,22 +110,26 @@ func (te *txExecutor) domains() *state2.SharedDomains {
 	return te.doms
 }
 
-func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
+func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header) {
+	var err error
 	if te.applyTx != nil {
-		return te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
+		h, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
+		if err != nil {
+			panic(err)
+		}
+		return h
 	}
 
-	var h *types.Header
-	var err error
-
-	err = te.cfg.db.View(ctx, func(tx kv.Tx) error {
+	if err = te.cfg.db.View(ctx, func(tx kv.Tx) error {
 		h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
 		if err != nil {
 			return err
 		}
 		return nil
-	})
-	return h, err
+	}); err != nil {
+		panic(err)
+	}
+	return h
 }
 
 type parallelExecutor struct {

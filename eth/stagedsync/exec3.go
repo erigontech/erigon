@@ -508,7 +508,7 @@ Loop:
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header) {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return executor.getHeader(ctx, hash, number)

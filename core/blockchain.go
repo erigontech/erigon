@@ -84,7 +84,7 @@ type EphemeralExecResult struct {
 // writes the result to the provided stateWriter
 func ExecuteBlockEphemerally(
 	chainConfig *chain.Config, vmConfig *vm.Config,
-	blockHashFunc func(n uint64) (common.Hash, error),
+	blockHashFunc func(n uint64) common.Hash,
 	engine consensus.Engine, block *types.Block,
 	stateReader state.StateReader, stateWriter state.StateWriter,
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash common.Hash) (*tracing.Hooks, error),
