@@ -238,15 +238,19 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			}
 		} else {
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
+				var lastReceipt *types.Receipt
 				// get last receipt and store the last log index + 1
-				lastReceipt := blockReceipts[txTask.TxIndex-1]
+				if len(blockReceipts) >= txTask.TxIndex {
+					lastReceipt = blockReceipts[txTask.TxIndex-1]
+				}
+
 				if lastReceipt == nil {
 					if startTxIndex > 0 {
 						// if we're in the startup block and the last tx has been skilled we'll
 						// need to run it as a historic tx to recover its logs
 						prevTask := *txTask
 						prevTask.HistoryExecution = true
-						prevTask.ResetTx( txTask.TxNum - 1, txTask.TxIndex - 1)
+						prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
 						result := se.worker.RunTxTaskNoLock(&prevTask)
 						if result.Err != nil {
 							return false, result.Err
