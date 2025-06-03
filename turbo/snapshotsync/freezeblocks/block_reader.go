@@ -1556,7 +1556,7 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 			if hit+miss > 0 {
 				ratio = int(float64(hit) / float64(hit+miss) * 100)
 			}
-			fmt.Println("total and size and ratio", hit+miss, miss, ratio)
+			fmt.Println("total and size and ratio", hit+miss, size, ratio)
 		}
 		_maxTxNum, found := cache.Load(blockNum)
 		if found {
@@ -1574,13 +1574,14 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 		}
 		ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
 		cache.Store(blockNum, ret)
+		size++
 		return ret, true, nil
 	}
 }
 
 // don't expect big number of block numbers...
 var globalBlockNum2MaxTxNumCache sync.Map
-var hit, miss uint64
+var hit, miss, size uint64
 
 func GetBlockNumber2MaxTxNumCache() *sync.Map {
 	if flag.Lookup("test.v") == nil {
