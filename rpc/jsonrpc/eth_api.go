@@ -337,7 +337,7 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 		return nil, err
 	}
 
-	if (number == nil) {
+	if number == nil {
 		return nil, nil
 	}
 	return api._blockReader.Header(ctx, tx, hash, *number)
