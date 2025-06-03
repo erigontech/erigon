@@ -218,8 +218,7 @@ func (rs *ParallelExecutionState) ApplyState(ctx context.Context, txTask *TxTask
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, rs.tx, true, txTask.BlockNum,
-			fmt.Sprintf("applying step %d", txTask.TxNum/rs.domains.StepSize()))
+		_, err := rs.domains.ComputeCommitment(ctx, true, txTask.BlockNum, txTask.TxNum, fmt.Sprintf("applying step %d", txTask.TxNum/rs.domains.StepSize()))
 		if err != nil {
 			return fmt.Errorf("ParallelExecutionState.ComputeCommitment: %w", err)
 		}
@@ -409,7 +408,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 			return err
 		}
 
-		if err := w.rs.domains.IterateStoragePrefix(address[:], w.txNum, w.rs.tx, func(k, v []byte, step uint64) (bool, error) {
+		if err := w.rs.domains.IterateStoragePrefix(address[:], w.rs.tx, func(k, v []byte, step uint64) (bool, error) {
 			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
 			return true, nil
 		}); err != nil {
@@ -592,9 +591,14 @@ func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64,
 	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil, 0)
 }
 
+var fastCreate = dbg.EnvBool("FAST_CREATE", false)
+
 func (w *Writer) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
+	}
+	if fastCreate {
+		return nil
 	}
 	if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:], w.txNum); err != nil {
 		return err
@@ -654,11 +658,13 @@ func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Ac
 	return r.ReadAccountData(address)
 }
 
-func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key[:]...)
 	enc, _, err := r.tx.GetLatest(kv.StorageDomain, r.composite)
+	var res uint256.Int
+
 	if err != nil {
-		return nil, err
+		return res, false, err
 	}
 	if r.trace {
 		if enc == nil {
@@ -667,7 +673,12 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (
 			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
 		}
 	}
-	return enc, nil
+
+	ok := enc != nil
+	if ok {
+		(&res).SetBytes(enc)
+	}
+	return res, ok, err
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
@@ -785,11 +796,11 @@ func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*acc
 	return &acc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key[:]...)
 	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.tx, r.composite)
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 	if !r.discardReadList {
 		r.readLists[kv.StorageDomain.String()].Push(string(r.composite), enc)
@@ -801,7 +812,9 @@ func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, key common
 			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
 		}
 	}
-	return enc, nil
+	var res uint256.Int
+	(&res).SetBytes(enc)
+	return res, true, nil
 }
 
 func (r *ReaderParallelV3) ReadAccountCode(address common.Address) ([]byte, error) {

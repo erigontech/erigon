@@ -22,6 +22,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/types"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -122,6 +126,13 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 			return err
 		}
 	}
+
+	if dbg.AssertEnabled {
+		err = txnLookupIntegrity(logPrefix, tx, startBlock, endBlock, ctx, cfg, logger)
+		if err != nil {
+			return fmt.Errorf("txnLookupIntegrity: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -163,6 +174,34 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
 	}, logger)
+}
+
+// txnLookupTransform - [startKey, endKey)
+func txnLookupIntegrity(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
+	for i := blockFrom; i < blockTo; i++ {
+		var blockHeader *types.Header
+		blockHash, err := rawdb.ReadCanonicalHash(tx, i)
+		if err != nil {
+			return err
+		}
+		emptyHash := common.Hash{}
+		if blockHash != emptyHash {
+			blockHeader = rawdb.ReadHeader(tx, blockHash, i)
+			if blockHeader == nil {
+				logger.Warn(fmt.Sprintf("[%s] txnLookup integrity: empty block %d", logPrefix, i))
+				return fmt.Errorf("[%s] txnLookup integrity: header not found in db block: %d", logPrefix, i)
+			}
+		} else {
+			return fmt.Errorf("[%s] txnLookup integrity: hash not found in db block: %d", logPrefix, i)
+		}
+
+		calcHash := blockHeader.CalcHash()
+		if blockHash.Cmp(calcHash) != 0 {
+			logger.Error(fmt.Sprintf("[%s] txnLookup calc hash mismatch: block %d, currentHash %x calcHash %x", logPrefix, i, blockHash, calcHash))
+			return fmt.Errorf("[%s] txnLookup calc hash mismatch: block %d, currentHash %x calcHash %x", logPrefix, i, blockHash, calcHash)
+		}
+	}
+	return nil
 }
 
 func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {

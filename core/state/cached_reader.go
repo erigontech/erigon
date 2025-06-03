@@ -18,6 +18,7 @@ package state
 
 import (
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -59,21 +60,23 @@ func (cr *CachedReader) ReadAccountDataForDebug(address common.Address) (*accoun
 }
 
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
-func (cr *CachedReader) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (cr *CachedReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	addrBytes := address.Bytes()
 	if s, ok := cr.cache.GetStorage(addrBytes, 1, key.Bytes()); ok {
-		return s, nil
+		var v uint256.Int
+		(&v).SetBytes(s)
+		return v, true, nil
 	}
-	v, err := cr.r.ReadAccountStorage(address, key)
+	v, ok, err := cr.r.ReadAccountStorage(address, key)
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
-	if len(v) == 0 {
+	if !ok {
 		cr.cache.SetStorageAbsent(addrBytes, 1, key.Bytes())
 	} else {
-		cr.cache.SetStorageRead(addrBytes, 1, key.Bytes(), v)
+		cr.cache.SetStorageRead(addrBytes, 1, key.Bytes(), v.Bytes())
 	}
-	return v, nil
+	return v, ok, nil
 }
 
 func (cr *CachedReader) HasStorage(address common.Address) (bool, error) {

@@ -253,6 +253,9 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 		if config.Bor.GetNapoliBlock() != nil {
 			heightForks = append(heightForks, config.Bor.GetNapoliBlock().Uint64())
 		}
+		if config.Bor.GetBhilaiBlock() != nil {
+			heightForks = append(heightForks, config.Bor.GetBhilaiBlock().Uint64())
+		}
 	}
 
 	// Sort the fork block numbers & times to permit chronological XOR

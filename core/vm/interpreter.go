@@ -168,6 +168,8 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.ChainRules().IsBhilai:
+		jt = &bhilaiInstructionSet
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
@@ -252,6 +254,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 		debug   = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
+		trace   = dbg.TraceInstructions && in.evm.intraBlockState.Trace()
 	)
 
 	contract.Input = input
@@ -288,9 +291,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
 	steps := 0
+
 	for {
 		steps++
-		if steps%1000 == 0 && in.evm.Cancelled() {
+		if steps%5000 == 0 && in.evm.Cancelled() {
 			break
 		}
 		if debug {
@@ -355,7 +359,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		// TODO - move this to a trace & set in the worker
-		if dbg.TraceInstructions && in.evm.intraBlockState.Trace() {
+		if trace {
 			var str string
 			if operation.string != nil {
 				str = operation.string(*pc, callContext)

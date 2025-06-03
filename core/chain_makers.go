@@ -122,7 +122,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
-	b.ibs.SetTxContext(len(b.txs))
+	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
@@ -138,7 +138,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
-	b.ibs.SetTxContext(len(b.txs))
+	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, txn)
@@ -389,7 +389,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			//	return nil, nil, err
 			//}
 			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), "")
+			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), uint64(txNum), "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}

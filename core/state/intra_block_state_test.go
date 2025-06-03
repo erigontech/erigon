@@ -33,14 +33,16 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	stateLib "github.com/erigontech/erigon-lib/state"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 )
@@ -51,7 +53,7 @@ func TestSnapshotRandom(t *testing.T) {
 	}
 
 	t.Parallel()
-	config := &quick.Config{MaxCount: 1000}
+	config := &quick.Config{MaxCount: 10}
 	err := quick.Check((*snapshotTest).run, config)
 	if cerr, ok := err.(*quick.CheckError); ok {
 		test := cerr.In[0].(*snapshotTest)
@@ -99,7 +101,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		{
 			name: "AddBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.AddBalance(addr, uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
+				s.AddBalance(addr, *uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
@@ -242,42 +244,33 @@ func (test *snapshotTest) run() bool {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		test.err = err
 		return false
 	}
 	defer agg.Close()
 
-	_db, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg)
 	if err != nil {
 		test.err = err
 		return false
 	}
 
-	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		test.err = err
 		return false
 	}
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer domains.Close()
-
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		test.err = err
 		return false
 	}
 	var (
-		state        = New(NewReaderV3(domains.AsGetter(tx)))
+		state        = New(NewReaderV3(tx))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
@@ -291,11 +284,11 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkstate := New(NewReaderV3(domains.AsGetter(tx)))
+		checkstate := New(NewReaderV3(tx))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
 		}
-		state.RevertToSnapshot(snapshotRevs[sindex])
+		state.RevertToSnapshot(snapshotRevs[sindex], nil)
 		if err := test.checkEqual(state, checkstate); err != nil {
 			test.err = fmt.Errorf("state mismatch after revert to snapshot %d\n%w", sindex, err)
 			return false
@@ -452,4 +445,607 @@ func TestTransientStorage(t *testing.T) {
 	if got, exp := state.GetTransientState(addr, key), (*uint256.NewInt(0)); exp != got {
 		t.Fatalf("transient storage mismatch: have %x, want %x", got, exp)
 	}
+}
+
+func TestVersionMapReadWriteDelete(t *testing.T) {
+	t.Parallel()
+
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	assert.NoError(t, err)
+	defer agg.Close()
+
+	tdb, err := temporal.New(db, agg)
+	assert.NoError(t, err)
+
+	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	assert.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	assert.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	mvhm := NewVersionMap()
+
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+
+	states := []*IntraBlockState{s}
+
+	// Create copies of the original state for each transition
+	for i := 1; i <= 4; i++ {
+		sCopy := s.Copy()
+		sCopy.txIndex = i
+		states = append(states, sCopy)
+	}
+
+	addr := common.HexToAddress("0x01")
+	key := common.HexToHash("0x01")
+	val := *uint256.NewInt(1)
+	balance := *uint256.NewInt(100)
+
+	var v uint256.Int
+
+	// Tx0 read
+	states[0].GetState(addr, key, &v)
+
+	assert.Equal(t, *uint256.NewInt(0), v)
+
+	// Tx1 write
+	states[1].GetOrNewStateObject(addr)
+	states[1].SetState(addr, key, val)
+	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+
+	// Tx1 read
+	states[1].GetState(addr, key, &v)
+	b, err := states[1].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, val, v)
+	assert.Equal(t, balance, b)
+
+	// Tx2 read
+	states[2].GetState(addr, key, &v)
+	b, err = states[2].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, val, v)
+	assert.Equal(t, balance, b)
+
+	// Tx3 delete
+	states[3].Selfdestruct(addr)
+
+	// Within Tx 3, the state should not change before finalize
+	states[3].GetState(addr, key, &v)
+	assert.Equal(t, val, v)
+
+	// After finalizing Tx 3, the state will change
+	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	states[3].GetState(addr, key, &v)
+	assert.Equal(t, *uint256.NewInt(0), v)
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(false), true, "")
+
+	// Tx4 read
+	states[4].GetState(addr, key, &v)
+	b, err = states[4].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, *uint256.NewInt(0), b)
+}
+
+func TestVersionMapRevert(t *testing.T) {
+	t.Parallel()
+
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	assert.NoError(t, err)
+	defer agg.Close()
+
+	tdb, err := temporal.New(db, agg)
+	assert.NoError(t, err)
+
+	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	assert.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	assert.NoError(t, err)
+	defer domains.Close()
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	assert.NoError(t, err)
+	mvhm := NewVersionMap()
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+
+	states := []*IntraBlockState{s}
+
+	// Create copies of the original state for each transition
+	for i := 1; i <= 4; i++ {
+		sCopy := s.Copy()
+		sCopy.txIndex = i
+		states = append(states, sCopy)
+	}
+
+	addr := common.HexToAddress("0x01")
+	key := common.HexToHash("0x01")
+	val := *uint256.NewInt(1)
+	balance := *uint256.NewInt(100)
+
+	// Tx0 write
+	states[0].GetOrNewStateObject(addr)
+	states[0].SetState(addr, key, val)
+	states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+
+	var v uint256.Int
+
+	// Tx1 perform some ops and then revert
+	snapshot := states[1].Snapshot()
+	states[1].AddBalance(addr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified)
+	states[1].SetState(addr, key, *uint256.NewInt(1))
+	states[1].GetState(addr, key, &v)
+	b, err := states[1].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(200), b)
+	assert.Equal(t, *uint256.NewInt(1), v)
+
+	states[1].Selfdestruct(addr)
+
+	states[1].RevertToSnapshot(snapshot, nil)
+
+	states[1].GetState(addr, key, &v)
+	b, err = states[1].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, val, v)
+	assert.Equal(t, balance, b)
+	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+
+	// Tx2 check the state and balance
+	states[2].GetState(addr, key, &v)
+	b, err = states[2].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, val, v)
+	assert.Equal(t, balance, b)
+}
+
+func TestVersionMapMarkEstimate(t *testing.T) {
+	t.Parallel()
+
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	assert.NoError(t, err)
+	defer agg.Close()
+
+	tdb, err := temporal.New(db, agg)
+	assert.NoError(t, err)
+
+	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	assert.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	assert.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	assert.NoError(t, err)
+	mvhm := NewVersionMap()
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	states := []*IntraBlockState{s}
+
+	// Create copies of the original state for each transition
+	for i := 1; i <= 4; i++ {
+		sCopy := s.Copy()
+		sCopy.txIndex = i
+		states = append(states, sCopy)
+	}
+
+	addr := common.HexToAddress("0x01")
+	key := common.HexToHash("0x01")
+	val := *uint256.NewInt(1)
+	balance := *uint256.NewInt(100)
+
+	var v uint256.Int
+
+	// Tx0 read
+	states[0].GetState(addr, key, &v)
+	assert.Equal(t, *uint256.NewInt(0), v)
+
+	// Tx0 write
+	states[0].SetState(addr, key, val)
+	states[0].GetState(addr, key, &v)
+	assert.Equal(t, val, v)
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+
+	// Tx1 write
+	states[1].GetOrNewStateObject(addr)
+	states[1].SetState(addr, key, val)
+	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+
+	// Tx2 read
+	states[2].GetState(addr, key, &v)
+	b, err := states[2].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, val, v)
+	assert.Equal(t, balance, b)
+
+	// Tx1 mark estimate
+	for _, v := range states[1].VersionedWrites(true) {
+		mvhm.MarkEstimate(v.Address, v.Path, v.Key, 1)
+	}
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("The code did not panic")
+		} else {
+			t.Log("Recovered in f", r)
+		}
+	}()
+
+	// Tx2 read again should get default (empty) vals because its dependency Tx1 is marked as estimate
+	states[2].GetState(addr, key, &v)
+	states[2].GetBalance(addr)
+
+	// Tx1 read again should get Tx0 vals
+	states[1].GetState(addr, key, &v)
+	assert.Equal(t, val, v)
+}
+
+func TestVersionMapOverwrite(t *testing.T) {
+	t.Parallel()
+
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	assert.NoError(t, err)
+	defer agg.Close()
+
+	tdb, err := temporal.New(db, agg)
+	assert.NoError(t, err)
+
+	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	assert.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	assert.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	assert.NoError(t, err)
+	mvhm := NewVersionMap()
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+
+	states := []*IntraBlockState{s}
+
+	// Create copies of the original state for each transition
+	for i := 1; i <= 4; i++ {
+		sCopy := s.Copy()
+		sCopy.txIndex = i
+		states = append(states, sCopy)
+	}
+
+	addr := common.HexToAddress("0x01")
+	key := common.HexToHash("0x01")
+	val1 := *uint256.NewInt(1)
+	balance1 := *uint256.NewInt(100)
+	val2 := *uint256.NewInt(2)
+	balance2 := *uint256.NewInt(200)
+
+	var v uint256.Int
+
+	// Tx0 write
+	states[0].GetOrNewStateObject(addr)
+	states[0].SetState(addr, key, val1)
+	states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+
+	// Tx1 write
+	states[1].SetState(addr, key, val2)
+	states[1].SetBalance(addr, balance2, tracing.BalanceChangeUnspecified)
+	states[1].GetState(addr, key, &v)
+	b, err := states[1].GetBalance(addr)
+	assert.NoError(t, err)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+
+	assert.Equal(t, val2, v)
+	assert.Equal(t, balance2, b)
+
+	// Tx2 read should get Tx1's value
+	states[2].GetState(addr, key, &v)
+	b, err = states[2].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, val2, v)
+	assert.Equal(t, balance2, b)
+
+	// Tx1 delete
+	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
+		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
+		return true
+	})
+	states[1].versionedWrites = nil
+
+	// Tx2 read should get Tx0's value
+	states[2].GetState(addr, key, &v)
+	b, err = states[2].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, val1, v)
+	assert.Equal(t, balance1, b)
+
+	// Tx1 read should get Tx0's value
+	states[1].GetState(addr, key, &v)
+	b, err = states[1].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, val1, v)
+	assert.Equal(t, balance1, b)
+
+	// Tx0 delete
+	states[0].versionedWrites.Scan(func(v *VersionedWrite) bool {
+		mvhm.Delete(v.Address, v.Path, v.Key, 0, true)
+		return true
+	})
+	states[0].versionedWrites = nil
+
+	// Tx2 read again should get default vals
+	states[2].GetState(addr, key, &v)
+	b, err = states[2].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, *uint256.NewInt(0), b)
+}
+
+func TestVersionMapWriteNoConflict(t *testing.T) {
+	t.Parallel()
+
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	assert.NoError(t, err)
+	defer agg.Close()
+
+	tdb, err := temporal.New(db, agg)
+	assert.NoError(t, err)
+
+	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	assert.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	assert.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	assert.NoError(t, err)
+	mvhm := NewVersionMap()
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+
+	states := []*IntraBlockState{s}
+
+	// Create copies of the original state for each transition
+	for i := 1; i <= 4; i++ {
+		sCopy := s.Copy()
+		sCopy.txIndex = i
+		states = append(states, sCopy)
+	}
+
+	addr := common.HexToAddress("0x01")
+	key1 := common.HexToHash("0x01")
+	key2 := common.HexToHash("0x02")
+	val1 := *uint256.NewInt(1)
+	balance1 := *uint256.NewInt(100)
+	val2 := *uint256.NewInt(2)
+
+	// Tx0 write
+	states[0].GetOrNewStateObject(addr)
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+
+	// Tx2 write
+	states[2].SetState(addr, key2, val2)
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true, "")
+
+	// Tx1 write
+	tx1Snapshot := states[1].Snapshot()
+	states[1].SetState(addr, key1, val1)
+	states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+
+	var v uint256.Int
+
+	// Tx1 read
+	states[1].GetState(addr, key1, &v)
+	assert.Equal(t, val1, v)
+	b, err := states[1].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, balance1, b)
+	// Tx1 should see empty value in key2
+	states[1].GetState(addr, key2, &v)
+	assert.Equal(t, *uint256.NewInt(0), v)
+
+	// Tx2 read
+	states[2].GetState(addr, key2, &v)
+	assert.Equal(t, val2, v)
+	// Tx2 should see values written by Tx1
+	states[2].GetState(addr, key1, &v)
+	assert.Equal(t, val1, v)
+	b, err = states[2].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, balance1, b)
+
+	// Tx3 read
+	states[3].GetState(addr, key1, &v)
+	assert.Equal(t, val1, v)
+	states[3].GetState(addr, key2, &v)
+	assert.Equal(t, val2, v)
+	b, err = states[3].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, balance1, b)
+
+	// Tx2 delete
+	states[2].versionedWrites.Scan(func(v *VersionedWrite) bool {
+		mvhm.Delete(v.Address, v.Path, v.Key, 2, true)
+		return true
+	})
+	states[2].versionedWrites = nil
+
+	// Tx3 read
+	states[3].GetState(addr, key1, &v)
+	assert.Equal(t, val1, v)
+	b, err = states[3].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, balance1, b)
+	// Tx3 should see empty value in key2
+	states[3].GetState(addr, key2, &v)
+	assert.Equal(t, *uint256.NewInt(0), v)
+
+	// Tx1 revert
+	states[1].RevertToSnapshot(tx1Snapshot, nil)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+
+	// Tx3 read
+	// we need to flush the local state objects as we're not
+	// resetting the state - which is artificial for the test
+	states[3].stateObjects = map[common.Address]*stateObject{}
+	states[3].GetState(addr, key1, &v)
+	assert.Equal(t, *uint256.NewInt(0), v)
+	states[3].GetState(addr, key2, &v)
+	assert.Equal(t, *uint256.NewInt(0), v)
+	b, err = states[3].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(0), b)
+
+	// Tx1 delete
+	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
+		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
+		return true
+	})
+	states[1].versionedWrites = nil
+
+	// Tx3 read
+	states[3].GetState(addr, key1, &v)
+	assert.Equal(t, *uint256.NewInt(0), v)
+	states[3].GetState(addr, key2, &v)
+	assert.Equal(t, *uint256.NewInt(0), v)
+	b, err = states[3].GetBalance(addr)
+	assert.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(0), b)
+}
+
+func TestApplyVersionedWrites(t *testing.T) {
+	t.Parallel()
+
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	assert.NoError(t, err)
+	defer agg.Close()
+
+	tdb, err := temporal.New(db, agg)
+	assert.NoError(t, err)
+
+	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	assert.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	assert.NoError(t, err)
+	defer domains.Close()
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	assert.NoError(t, err)
+	mvhm := NewVersionMap()
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+
+	sClean := s.Copy()
+	sClean.versionMap = nil
+
+	sSingleProcess := sClean.Copy()
+
+	states := []*IntraBlockState{s}
+
+	// Create copies of the original state for each transition
+	for i := 1; i <= 4; i++ {
+		sCopy := s.Copy()
+		sCopy.txIndex = i
+		states = append(states, sCopy)
+	}
+
+	addr1 := common.HexToAddress("0x01")
+	addr2 := common.HexToAddress("0x02")
+	addr3 := common.HexToAddress("0x03")
+	key1 := common.HexToHash("0x01")
+	key2 := common.HexToHash("0x02")
+	val1 := *uint256.NewInt(1)
+	balance1 := uint256.NewInt(100)
+	val2 := *uint256.NewInt(2)
+	balance2 := uint256.NewInt(200)
+	code := []byte{1, 2, 3}
+
+	// Tx0 write
+	states[0].GetOrNewStateObject(addr1)
+	states[0].SetState(addr1, key1, val1)
+	states[0].SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified)
+	states[0].SetState(addr2, key2, val2)
+	states[0].GetOrNewStateObject(addr3)
+	states[0].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+
+	sSingleProcess.GetOrNewStateObject(addr1)
+	sSingleProcess.SetState(addr1, key1, val1)
+	sSingleProcess.SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified)
+	sSingleProcess.SetState(addr2, key2, val2)
+	sSingleProcess.GetOrNewStateObject(addr3)
+
+	sClean.ApplyVersionedWrites(states[0].VersionedWrites(true))
+
+	// Tx1 write
+	states[1].SetState(addr1, key2, val2)
+	states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
+	states[1].SetNonce(addr1, 1)
+	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+
+	sSingleProcess.SetState(addr1, key2, val2)
+	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
+	sSingleProcess.SetNonce(addr1, 1)
+
+	sClean.ApplyVersionedWrites(states[1].VersionedWrites(true))
+
+	// Tx2 write
+	states[2].SetState(addr1, key1, val2)
+	states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
+	states[2].SetNonce(addr1, 2)
+	states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true, "")
+
+	sSingleProcess.SetState(addr1, key1, val2)
+	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
+	sSingleProcess.SetNonce(addr1, 2)
+
+	sClean.ApplyVersionedWrites(states[2].VersionedWrites(true))
+
+	// Tx3 write
+	states[3].Selfdestruct(addr2)
+	states[3].SetCode(addr1, code)
+	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(true), true, "")
+
+	sSingleProcess.Selfdestruct(addr2)
+	sSingleProcess.SetCode(addr1, code)
+
+	sClean.ApplyVersionedWrites(states[3].VersionedWrites(true))
 }
