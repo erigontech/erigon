@@ -29,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -275,7 +274,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.TemporalRwTx, blockUnwindTo
 	return nil
 }
 
-func (rs *ParallelExecutionState) DoneCount() uint64 {
+func (rs *StateV3) DoneCount() uint64 {
 	return execTxsDone.GetValueUint64()
 }
 

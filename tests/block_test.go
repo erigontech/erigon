@@ -29,7 +29,7 @@ import (
 
 func TestLegacyBlockchain(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		//t.Skip()
 	}
 
 	defer log.Root().SetHandler(log.Root().GetHandler())
