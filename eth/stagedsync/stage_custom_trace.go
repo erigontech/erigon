@@ -473,7 +473,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				if prevTxNumLog > 0 {
 					dbg.ReadMemStats(&m)
 					txsPerSec := (txTask.TxNum - prevTxNumLog) / uint64(logPeriod.Seconds())
-					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", fmt.Sprintf("%dK", txTask.BlockNum/10_000), "tx/s", fmt.Sprintf("%dK", txsPerSec/1_000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", fmt.Sprintf("%dK", txTask.BlockNum/1_000), "tx/s", fmt.Sprintf("%dK", txsPerSec/1_000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				}
 				prevTxNumLog = txTask.TxNum
 			default:
