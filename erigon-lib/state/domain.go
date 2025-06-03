@@ -1694,6 +1694,9 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, uint64, bool, e
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromFiles: %w", err)
 	}
+	if !foundInFile {
+		v = nil
+	}
 	return v, endTxNum / dt.d.aggregationStep, foundInFile, nil
 }
 

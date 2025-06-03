@@ -158,7 +158,7 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.S
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
 
-		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() && !incr.IsEscrow {
+		if !incr.IsEscrow && emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
 			if err := domains.DomainDel(kv.AccountsDomain, addrBytes, nil, enc0, step0); err != nil {
 				return err
 			}

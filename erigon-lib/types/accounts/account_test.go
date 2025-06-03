@@ -46,6 +46,27 @@ func TestEmptyAccount(t *testing.T) {
 	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 
+func TestEmptyAcountEncoding(t *testing.T) {
+	t.Parallel()
+	emptyAcc := Account{
+		Initialised: true,
+		Nonce:       0,
+		Balance:     *new(uint256.Int),
+		Root:        emptyRoot,     // extAccount doesn't have Root value
+		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
+		Incarnation: 0,
+	}
+
+	encodedAccount := SerialiseV3(&emptyAcc)
+
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
+
+	isAccountsEqual(t, emptyAcc, decodedAcc)
+}
+
 func TestEmptyAccount2(t *testing.T) {
 	t.Parallel()
 	emptyAcc := Account{}
