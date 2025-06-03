@@ -231,7 +231,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		return 0, 0, true, nil
 	}
 
-	newRh, err := sdc.rebuildCommitment(ctx, blockNum, txNum)
+	newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -352,8 +352,8 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 
 // Dummy way to rebuild commitment. Dummy because works for small state only.
 // To rebuild commitment correctly for any state size - use RebuildCommitmentFiles.
-func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context, blockNum, txNum uint64) ([]byte, error) {
-	it, err := sdc.mainTtx.roTtx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
+func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) ([]byte, error) {
+	it, err := roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +366,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 		sdc.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
-	it, err = sdc.mainTtx.roTtx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
+	it, err = roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
