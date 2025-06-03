@@ -261,23 +261,13 @@ func (test *snapshotTest) run() bool {
 		return false
 	}
 	defer tx.Rollback()
-
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer domains.Close()
-
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		test.err = err
 		return false
 	}
 	var (
-		state        = New(NewReaderV3(domains.AsGetter(tx)))
+		state        = New(NewReaderV3(tx))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
