@@ -173,8 +173,8 @@ jobs:
       - name: Upload artifact -- linux/arm64
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
-          name: ${GITHUB_WORKSPACE}/docker-build-output/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
-          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+          path: ${{ github.workspace }}/docker-build-output/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
           retention-days: 3
           compression-level: 0
           if-no-files-found: error
@@ -183,7 +183,7 @@ jobs:
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
           name: ${GITHUB_WORKSPACE}/docker-build-output/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
-          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+          path: ${{ github.workspace }}/docker-build-output/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
           retention-days: 3
           compression-level: 0
           if-no-files-found: error
@@ -192,7 +192,7 @@ jobs:
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
           name: ${GITHUB_WORKSPACE}/docker-build-output/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
-          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+          path: ${{ github.workspace }}/docker-build-output/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
           retention-days: 3
           compression-level: 0
           if-no-files-found: error
