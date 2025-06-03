@@ -256,6 +256,8 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	require.NoError(b, err)
 	defer domains.Close()
 
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
@@ -525,6 +527,8 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 	require.NoError(b, err)
 	defer domains.Close()
 
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
@@ -658,12 +662,11 @@ func TestEip2929Cases(t *testing.T) {
 			}
 		}
 		ops := strings.Join(instrs, ", ")
-		//fmt.Printf("### Case %d\n\n", id)
-		//fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
-		//	comment,
-		//	code, ops)
-		_ = ops
+		fmt.Printf("### Case %d\n\n", id)
 		id++
+		fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
+			comment,
+			code, ops)
 		cfg := &Config{
 			EVMConfig: vm.Config{
 				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout).Hooks(),

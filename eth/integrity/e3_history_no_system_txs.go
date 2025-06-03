@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -42,6 +43,8 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	defer logEvery.Stop()
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	g := &errgroup.Group{}
+	g.SetLimit(estimate.AlmostAllCPUs())
+
 	for j := 0; j < 256; j++ {
 		j := j
 		for jj := 0; jj < 255; jj++ {
