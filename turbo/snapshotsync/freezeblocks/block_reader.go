@@ -1541,6 +1541,8 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 
 func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.ReadTxNumFunc {
 	cache := GetBlockNumber2MaxTxNumCache()
+	hit := 0
+	miss := 0
 	return func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
 		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(tx, c, blockNum)
 		if err != nil {
@@ -1551,10 +1553,15 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 		}
 
 		// check cache
+		if hit+miss%10 == 0 {
+			fmt.Println("hit/miss", hit, miss)
+		}
 		_maxTxNum, found := cache.Load(blockNum)
 		if found {
+			hit++
 			return _maxTxNum.(uint64), true, nil
 		}
+		miss++
 
 		b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
 		if err != nil {
@@ -1569,6 +1576,7 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 	}
 }
 
+// don't expect big number of block numbers...
 var globalBlockNum2MaxTxNumCache sync.Map
 
 func GetBlockNumber2MaxTxNumCache() *sync.Map {
