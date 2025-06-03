@@ -167,10 +167,7 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 	if cfg.TraceJumpDest {
 		txContext.TxHash = txn.Hash()
 	}
-	// todo load arbos txprocessor
-	// if evm.ChainConfig().IsArbitrum() {
-	// 	evm.ProcessingHook = arbos.NewTxProcessor(evm, msg)
-	// }
+
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, nil)

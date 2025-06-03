@@ -192,7 +192,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	} else {
 		vmenv.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
 	}
-	// receipt, _, err = core.ApplyArbTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 
 	receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vmcfg, vmenv)
 	if err != nil {
