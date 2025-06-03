@@ -118,7 +118,10 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		return fmt.Errorf("finalized checkpoint is not an ancestor of the sidecar's block")
 	}
 
-	// TODO: [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
+	// [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
+	if !das.VerifyDataColumnSidecarInclusionProof(msg) {
+		return fmt.Errorf("invalid inclusion proof for data column sidecar")
+	}
 
 	// [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
 	if !das.VerifyDataColumnSidecarKZGProofs(msg) {
