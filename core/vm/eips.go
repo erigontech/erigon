@@ -98,7 +98,7 @@ func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeCo
 	if err != nil {
 		return nil, err
 	}
-	callContext.Stack.push(balance)
+	callContext.Stack.push(&balance)
 	return nil, nil
 }
 

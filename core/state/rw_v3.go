@@ -653,11 +653,13 @@ func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Ac
 	return r.ReadAccountData(address)
 }
 
-func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key[:]...)
 	enc, _, err := r.tx.GetLatest(kv.StorageDomain, r.composite)
+	var res uint256.Int
+
 	if err != nil {
-		return nil, err
+		return res, false, err
 	}
 	if r.trace {
 		if enc == nil {
@@ -666,7 +668,12 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (
 			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
 		}
 	}
-	return enc, nil
+
+	ok := enc != nil
+	if ok {
+		(&res).SetBytes(enc)
+	}
+	return res, ok, err
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
@@ -773,11 +780,11 @@ func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*acc
 	return &acc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key[:]...)
 	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.tx, r.composite)
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 	if !r.discardReadList {
 		r.readLists[kv.StorageDomain.String()].Push(string(r.composite), enc)
@@ -789,7 +796,9 @@ func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, key common
 			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
 		}
 	}
-	return enc, nil
+	var res uint256.Int
+	(&res).SetBytes(enc)
+	return res, true, nil
 }
 
 func (r *ReaderParallelV3) ReadAccountCode(address common.Address) ([]byte, error) {

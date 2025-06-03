@@ -649,8 +649,11 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.las
 // Temporal Methods
 
 func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
-	// TODO: not yet implemented, return 0 for now
-	return 0
+	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remote.HistoryStartFromReq{Domain: uint32(name)})
+	if err != nil {
+		return 0
+	}
+	return reply.StartFrom
 }
 
 func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {

@@ -1020,7 +1020,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := m.DB.BeginRw(m.Ctx)
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return
@@ -1039,7 +1039,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+	if err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
 		if err != nil {
 			return err
@@ -1056,7 +1056,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+	if err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
 		if err != nil {
 			return err
@@ -1903,7 +1903,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		if err := m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
-		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 
 			statedb := state.New(m.NewStateReader(tx))
 			// If all is correct, then slot 1 and 2 are zero
@@ -2281,7 +2281,7 @@ func TestEIP1559Transition(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		actual = new(uint256.Int).Sub(funds, balance)
+		actual = *new(uint256.Int).Sub(funds, &balance)
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetTipCap().Uint64() + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
@@ -2331,7 +2331,7 @@ func TestEIP1559Transition(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		actual = new(uint256.Int).Sub(funds, balance)
+		actual = *new(uint256.Int).Sub(funds, &balance)
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + baseFee.Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
