@@ -1559,6 +1559,7 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 		_maxTxNum, found := cache.Load(blockNum)
 		if found {
 			hit++
+			fmt.Println("found something ")
 			return _maxTxNum.(uint64), true, nil
 		}
 		miss++
