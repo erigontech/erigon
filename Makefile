@@ -191,11 +191,21 @@ test-erigon-ext:
 
 ## test:                      run short tests with a 10m timeout
 test: test-erigon-lib test-erigon-db test-p2
-	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out | grep -v '=== CONT ' | grep -v '=== RUN' | grep -v '=== PAUSE' | grep -v 'PASS: '
+	@{ \
+		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
 
 ## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all test-erigon-db-all test-p2p-all
-	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race | grep -v '=== CONT ' | grep -v '=== RUN' | grep -v '=== PAUSE' | grep -v 'PASS: '
+	@{ \
+		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
