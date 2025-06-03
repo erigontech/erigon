@@ -430,19 +430,30 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	commonTx.R.SetFromBig(txJson.R.ToInt())
 	commonTx.S.SetFromBig(txJson.S.ToInt())
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
-		legacyTx := types.LegacyTx{
-			//it's ok to copy here - because it's constructor of object - no parallel access yet
-			CommonTx: commonTx, //nolint
-			GasPrice: gasPrice,
-		}
-
 		if txJson.Type == types.LegacyTxType {
-			return &legacyTx, nil
+			return &types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				GasPrice: gasPrice,
+			}, nil
 		}
 
 		return &types.AccessListTx{
-			//it's ok to copy here - because it's constructor of object - no parallel access yet
-			LegacyTx:   legacyTx, //nolint
+			LegacyTx: types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				GasPrice: gasPrice,
+			},
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
@@ -463,17 +474,20 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			}
 		}
 
-		dynamicFeeTx := types.DynamicFeeTransaction{
-			//it's ok to copy here - because it's constructor of object - no parallel access yet
-			CommonTx:   commonTx, //nolint
-			ChainID:    chainId,
-			TipCap:     tipCap,
-			FeeCap:     feeCap,
-			AccessList: *txJson.Accesses,
-		}
-
 		if txJson.Type == types.DynamicFeeTxType {
-			return &dynamicFeeTx, nil
+			return &types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				ChainID:    chainId,
+				TipCap:     tipCap,
+				FeeCap:     feeCap,
+				AccessList: *txJson.Accesses,
+			}, nil
 		}
 
 		auths := make([]types.Authorization, 0)
@@ -487,8 +501,20 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 
 		return &types.SetCodeTransaction{
 			// it's ok to copy here - because it's constructor of object - no parallel access yet
-			DynamicFeeTransaction: dynamicFeeTx, //nolint
-			Authorizations:        auths,
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				ChainID:    chainId,
+				TipCap:     tipCap,
+				FeeCap:     feeCap,
+				AccessList: *txJson.Accesses,
+			},
+			Authorizations: auths,
 		}, nil
 	} else {
 		return nil, nil
