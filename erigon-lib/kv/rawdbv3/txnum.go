@@ -93,19 +93,25 @@ func (d *DefaultTxBlockIndex) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint
 	if err != nil {
 		return 0, false, err
 	}
+	if _blk == nil {
+		return 0, false, nil
+	}
+	if len(_blk) != 8 {
+		return 0, false, fmt.Errorf("DefaultReadTxNumFunc: seems broken TxNum value: %x", _blk)
+	}
 
-	blockNumInDb := binary.BigEndian.Uint64(_blk)
+	lastBlockNum := binary.BigEndian.Uint64(_blk)
 	txNumInDb := binary.BigEndian.Uint64(v)
 
 	if txNumInDb < txNum {
 		return 0, false, nil
 	}
 
-	if blockNumInDb > uint64(math.MaxInt32) {
-		panic(fmt.Sprintf("block number is too big: %d", blockNumInDb))
+	if lastBlockNum > uint64(math.MaxInt32) {
+		panic(fmt.Sprintf("block number is too big: %d", lastBlockNum))
 	}
 
-	blockNum = uint64(sort.Search(int(blockNumInDb+1), func(sblk int) bool {
+	blockNum = uint64(sort.Search(int(lastBlockNum+1), func(sblk int) bool {
 		if err != nil {
 			return true
 		}
@@ -118,7 +124,11 @@ func (d *DefaultTxBlockIndex) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint
 		if !ok {
 			_fb, _ft, _ := c.First()
 			_lb, _lt, _ := c.Last()
-			err = fmt.Errorf("BlockNum(%d): seems broken TxNum value: %d -> %d; db has: (%d-%d, %d-%d)", txNum, sblk, maxTxNum, _fb, _lb, _ft, _lt)
+			fb := binary.BigEndian.Uint64(_fb)
+			lt := binary.BigEndian.Uint64(_lt)
+			ft := binary.BigEndian.Uint64(_ft)
+			lb := binary.BigEndian.Uint64(_lb)
+			err = fmt.Errorf("BlockNum(%d): seems broken TxNum value: %d -> %d; db has: (%d-%d, %d-%d)", txNum, sblk, maxTxNum, fb, lb, ft, lt)
 			return true
 		}
 		return maxTxNum >= txNum
@@ -126,7 +136,7 @@ func (d *DefaultTxBlockIndex) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint
 	if err != nil {
 		return 0, false, err
 	}
-	if blockNum > blockNumInDb {
+	if blockNum > lastBlockNum {
 		return 0, false, nil
 	}
 	return blockNum, true, nil
