@@ -5,8 +5,18 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils"
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+)
+
+const (
+	// get_generalized_index(BeaconBlockBody, 'blob_kzg_commitments') = 27
+	BlobKzgCommitmentsGeneralizedIndex = 27
+	// get_subtree_index(get_generalized_index(BeaconBlockBody, 'blob_kzg_commitments')) = 11
+	BlobKzgCommitmentsSubtreeIndex = 11
+
+	// floorlog2(get_generalized_index(BeaconBlockBody, 'blob_kzg_commitments')) = 4
+	KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH = 4
 )
 
 type DataColumnsByRootIdentifier struct {
@@ -44,13 +54,22 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 		cellIndices[i] = uint64(sidecar.Index)
 	}
 
-	// Batch verify that the cells match the corresponding commitments and proofs
-	ok, err := VerifyCellKZGProofBatch( // in kzg pkg
-		sidecar.KzgCommitments,
-		cellIndices,
-		sidecar.Column,
-		sidecar.KzgProofs,
-	)
+	ckzgCommitments := make([]ckzg.Bytes48, sidecar.KzgCommitments.Len())
+	for i := range ckzgCommitments {
+		copy(ckzgCommitments[i][:], sidecar.KzgCommitments.Get(i)[:])
+	}
+
+	ckzgCells := make([]ckzg.Cell, sidecar.Column.Len())
+	for i := range ckzgCells {
+		ckzgCells[i] = ckzg.Cell(sidecar.Column.Get(i))
+	}
+
+	ckzgProofs := make([]ckzg.Bytes48, sidecar.KzgProofs.Len())
+	for i := range ckzgProofs {
+		copy(ckzgProofs[i][:], sidecar.KzgProofs.Get(i)[:])
+	}
+
+	ok, err := ckzg.VerifyCellKZGProofBatch(ckzgCommitments, cellIndices, ckzgCells, ckzgProofs)
 	if err != nil {
 		log.Warn("failed to verify cell kzg proofs", "error", err)
 		return false
@@ -64,21 +83,25 @@ func ComputeSubnetForDataColumnSidecar(columnIndex ColumnIndex) uint64 {
 	return columnIndex % clparams.GetBeaconConfig().DataColumnSidecarSubnetCount
 }
 
-func VerifyCellKZGProofBatch(commitments *solid.ListSSZ[*cltypes.KZGCommitment], cellIndices []uint64, cells *solid.ListSSZ[cltypes.Cell], proofs *solid.ListSSZ[*cltypes.KZGProof]) (bool, error) {
-	ckzgCommitments := make([]ckzg.Bytes48, commitments.Len())
-	for i := range ckzgCommitments {
-		copy(ckzgCommitments[i][:], commitments.Get(i)[:])
+// VerifyDataColumnSidecarInclusionProof verifies if the inclusion proof in the sidecar is correct.
+// This function is re-entrant and thread-safe.
+func VerifyDataColumnSidecarInclusionProof(sidecar *cltypes.DataColumnSidecar) bool {
+	// Convert branch to hashes for merkle proof verification
+	branch := make([]common.Hash, sidecar.KzgCommitmentsInclusionProof.Length())
+	for i := range branch {
+		branch[i] = sidecar.KzgCommitmentsInclusionProof.Get(i)
 	}
 
-	ckzgCells := make([]ckzg.Cell, cells.Len())
-	for i := range ckzgCells {
-		ckzgCells[i] = ckzg.Cell(cells.Get(i))
+	hashRoot, err := sidecar.KzgCommitments.HashSSZ()
+	if err != nil {
+		return false
 	}
-
-	ckzgProofs := make([]ckzg.Bytes48, proofs.Len())
-	for i := range ckzgProofs {
-		copy(ckzgProofs[i][:], proofs.Get(i)[:])
-	}
-
-	return ckzg.VerifyCellKZGProofBatch(ckzgCommitments, cellIndices, ckzgCells, ckzgProofs)
+	// Verify the merkle branch
+	return utils.IsValidMerkleBranch(
+		hashRoot,
+		branch,
+		KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH,
+		BlobKzgCommitmentsSubtreeIndex,
+		sidecar.SignedBlockHeader.Header.BodyRoot,
+	)
 }
