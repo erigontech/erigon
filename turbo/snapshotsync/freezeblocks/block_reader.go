@@ -1541,8 +1541,6 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 
 func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.ReadTxNumFunc {
 	cache := GetBlockNumber2MaxTxNumCache()
-	hit := 0
-	miss := 0
 	return func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
 		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(tx, c, blockNum)
 		if err != nil {
@@ -1554,12 +1552,15 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 
 		// check cache
 		if hit+miss%10 == 0 {
-			fmt.Println("hit/miss", hit, miss)
+			ratio := 0
+			if hit+miss > 0 {
+				ratio = int(float64(hit) / float64(hit+miss) * 100)
+			}
+			fmt.Println("total and ratio", hit+miss, ratio)
 		}
 		_maxTxNum, found := cache.Load(blockNum)
 		if found {
 			hit++
-			fmt.Println("found something ")
 			return _maxTxNum.(uint64), true, nil
 		}
 		miss++
@@ -1579,6 +1580,7 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 
 // don't expect big number of block numbers...
 var globalBlockNum2MaxTxNumCache sync.Map
+var hit, miss uint64
 
 func GetBlockNumber2MaxTxNumCache() *sync.Map {
 	if flag.Lookup("test.v") == nil {
