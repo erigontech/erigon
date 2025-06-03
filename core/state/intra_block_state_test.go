@@ -263,7 +263,7 @@ func (test *snapshotTest) run() bool {
 		return false
 	}
 	defer tx.Rollback()
-  
+
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		test.err = err
