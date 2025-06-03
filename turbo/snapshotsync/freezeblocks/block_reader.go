@@ -1551,13 +1551,13 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 		}
 
 		// check cache
-		if hit+miss%10 == 0 {
-			ratio := 0
-			if hit+miss > 0 {
-				ratio = int(float64(hit) / float64(hit+miss) * 100)
-			}
-			fmt.Println("total and ratio", hit+miss, ratio)
+		//if hit+miss%10 == 0 {
+		ratio := 0
+		if hit+miss > 0 {
+			ratio = int(float64(hit) / float64(hit+miss) * 100)
 		}
+		fmt.Println("total and ratio", hit+miss, ratio)
+		//}
 		_maxTxNum, found := cache.Load(blockNum)
 		if found {
 			hit++
