@@ -128,3 +128,52 @@ func TestGetBlobsV1(t *testing.T) {
 	require.Equal(blobsResp[1].Proof, hexutil.Bytes(wrappedTxn.Proofs[0][:]))
 	require.Equal(blobsResp[2].Proof, hexutil.Bytes(wrappedTxn.Proofs[1][:]))
 }
+
+func TestGetBlobsV2(t *testing.T) {
+	logger := log.New()
+	buf := bytes.NewBuffer(nil)
+	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
+	oneBlockStep(mockSentry, require, t)
+
+	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
+	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	require.NoError(err)
+	dt := &wrappedTxn.Tx.DynamicFeeTransaction
+	v, r, s := txn.RawSignatureValues()
+	dt.V.Set(v)
+	dt.R.Set(r)
+	dt.S.Set(s)
+
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
+	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
+
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
+	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
+
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
+	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+
+	err = wrappedTxn.MarshalBinaryWrapped(buf)
+	require.NoError(err)
+	hh, err := api.SendRawTransaction(ctx, buf.Bytes())
+	require.NoError(err)
+	require.NotEmpty(hh)
+
+	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
+	blobsResp, err := engineServer.GetBlobsV2(ctx, blobHashes)
+	require.NoError(err)
+	require.True(blobsResp == nil) // Any one blob not found makes the whole response nil
+
+	blobHashes = blobHashes[1:]
+	blobsResp, err = engineServer.GetBlobsV2(ctx, blobHashes)
+	require.NoError(err)
+	require.Equal(blobsResp[0].Blob, hexutil.Bytes(wrappedTxn.Blobs[0][:]))
+	require.Equal(blobsResp[1].Blob, hexutil.Bytes(wrappedTxn.Blobs[1][:]))
+
+	for i := range 128 {
+		require.Equal(blobsResp[0].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i][:]))
+		require.Equal(blobsResp[1].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i+128][:]))
+	}
+}
