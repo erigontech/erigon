@@ -165,11 +165,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			return hash, nil
 		}
 		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			return common.Hash{}, err
-		}
-
-		if !ok {
+		if err != nil || !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
 		return hash, err
