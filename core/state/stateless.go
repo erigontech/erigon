@@ -146,8 +146,8 @@ func (s *Stateless) HasStorage(address common.Address) (bool, error) {
 		return false, nil
 	}
 	// check if we know about any storage updates with non-empty values
-	for _, v := range s.storageUpdates[addrHash] {
-		if len(v) > 0 {
+	for _, v := range s.storageWrites[addrHash] {
+		if !v.IsZero() {
 			return true, nil
 		}
 	}
