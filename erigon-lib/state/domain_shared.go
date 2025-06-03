@@ -201,6 +201,29 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	return ReadDiffSet(tx, blockNumber, blockHash)
 }
 
+// aggregator context should call aggTx.Unwind before this one.
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+	step := txUnwindTo / sd.stepSize
+	sd.logger.Info("aggregator unwind", "step", step,
+		"txUnwindTo", txUnwindTo)
+	//fmt.Printf("aggregator unwind step %d txUnwindTo %d\n", step, txUnwindTo)
+	sf := time.Now()
+	defer mxUnwindSharedTook.ObserveDuration(sf)
+
+	if err := sd.Flush(ctx, rwTx); err != nil {
+		return err
+	}
+
+	if err := rwTx.Unwind(ctx, txUnwindTo, changeset); err != nil {
+		return err
+	}
+
+	sd.ClearRam(true)
+	sd.SetTxNum(txUnwindTo)
+	sd.SetBlockNum(blockUnwindTo)
+	return sd.Flush(ctx, rwTx)
+}
+
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
@@ -493,10 +516,10 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
-	//_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
-	//if err != nil {
-	//	return err
-	//}
+	_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
+	if err != nil {
+		return err
+	}
 
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err

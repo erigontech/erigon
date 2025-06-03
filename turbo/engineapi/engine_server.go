@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -446,14 +447,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return parent == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
-			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
+			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return header == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
-			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
+			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
@@ -528,16 +529,32 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) {
+		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
+		(!s.config.IsOsaka(ts) && version >= clparams.FuluVersion) ||
+		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-	return &engine_types.GetPayloadResponse{
+	payload := &engine_types.GetPayloadResponse{
 		ExecutionPayload:  engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
 		BlockValue:        (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
 		BlobsBundle:       engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
 		ExecutionRequests: executionRequests,
-	}, nil
+	}
+
+	if version == clparams.FuluVersion {
+		if payload.BlobsBundle == nil {
+			payload.BlobsBundle = &engine_types.BlobsBundleV1{
+				Commitments: make([]hexutil.Bytes, 0),
+				Blobs:       make([]hexutil.Bytes, 0),
+				Proofs:      make([]hexutil.Bytes, 0),
+			}
+		}
+		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs)*int(params.CellsPerExtBlob) {
+			return nil, errors.New("built invalid blobsBundle")
+		}
+	}
+	return payload, nil
 }
 
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
@@ -758,9 +775,11 @@ func (e *EngineServer) HandleNewPayload(
 		}
 
 		if currentHeadNumber != nil {
+			// wait for the slot duration for full download
+			waitTime := time.Duration(e.config.SecondsPerSlot()) * time.Second
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
-			if stillSyncing, _ := waitForStuff(500*time.Millisecond, func() (bool, error) {
+			if stillSyncing, _ := waitForStuff(waitTime, func() (bool, error) {
 				return e.blockDownloader.Status() != headerdownload.Synced, nil
 			}); stillSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil

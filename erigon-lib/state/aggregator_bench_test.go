@@ -73,7 +73,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	var blockNum uint64
+
 	var prev []byte
 	for i := 0; i < b.N; i++ {
 		key := <-longKeys
@@ -85,7 +85,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		require.NoError(b, err)
 
 		if i%100000 == 0 {
-			_, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 			require.NoError(b, err)
 		}
 	}
