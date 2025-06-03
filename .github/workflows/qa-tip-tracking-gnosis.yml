@@ -76,6 +76,13 @@ jobs:
         else
           echo "Error detected during tests"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          
+          # Read result file and create GitHub summary for failures
+          if [ -f "${{ github.workspace }}/result-$CHAIN.json" ]; then
+            outcome=$(python3 -c "import json; data=json.load(open('${{ github.workspace }}/result-$CHAIN.json')); print(data.get('outcome', 'unknown outcome'))")
+            reason=$(python3 -c "import json; data=json.load(open('${{ github.workspace }}/result-$CHAIN.json')); print(data.get('reason', 'no reason provided'))")
+            echo "::error::${outcome} - ${reason}"
+          fi
         fi
 
     - name: Save test results
