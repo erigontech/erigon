@@ -213,7 +213,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			return err
 		}
 		if have, want := balance, balanceCheck; have.Cmp(want) < 0 {
-			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
+			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), &have, want)
 		}
 		st.state.SubBalance(st.msg.From(), *gasVal, tracing.BalanceDecreaseGasBuy)
 		st.state.SubBalance(st.msg.From(), *blobGasVal, tracing.BalanceDecreaseGasBuy)
