@@ -1,19 +1,3 @@
-// Copyright 2025 The Erigon Authors
-// This file is part of Erigon.
-//
-// Erigon is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Erigon is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-
 package engineapi
 
 import (
@@ -45,7 +29,6 @@ var ourCapabilities = []string{
 	"engine_getPayloadBodiesByRangeV1",
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
-	"engine_getBlobsV2",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -196,24 +179,5 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.CapellaVersion)
-	if err != nil {
-		return nil, err
-	}
-	if ret, ok := resp.([]*engine_types.BlobAndProofV1); ok {
-		return ret, err
-	}
-	return nil, err
-}
-
-func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
-	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
-	if err != nil {
-		return nil, err
-	}
-	if ret, ok := resp.([]*engine_types.BlobAndProofV2); ok {
-		return ret, err
-	}
-	return nil, err
+	return e.getBlobs(ctx, blobHashes)
 }

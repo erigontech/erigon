@@ -23,7 +23,6 @@ import (
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
@@ -172,62 +171,6 @@ func MakeWrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	}
 	copy(wrappedTxn.Proofs[0][:], proof0[:])
 	copy(wrappedTxn.Proofs[1][:], proof1[:])
-
-	wrappedTxn.Tx.BlobVersionedHashes = make([]common.Hash, 2)
-	wrappedTxn.Tx.BlobVersionedHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))
-	wrappedTxn.Tx.BlobVersionedHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitment1))
-	return &wrappedTxn
-}
-
-func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
-	wrappedTxn := BlobTxWrapper{}
-	wrappedTxn.Tx.To = &common.Address{129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215}
-	wrappedTxn.Tx.Nonce = 0
-	wrappedTxn.Tx.GasLimit = 100000
-	wrappedTxn.Tx.Value = uint256.NewInt(0)
-	wrappedTxn.Tx.Data = []byte{4, 247}
-	wrappedTxn.Tx.ChainID = chainId
-	wrappedTxn.Tx.TipCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.FeeCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.MaxFeePerBlobGas = uint256.NewInt(123)
-
-	// Wrapper version = 0x1
-	wrappedTxn.WrapperVersion = 1
-
-	wrappedTxn.Blobs = make(Blobs, 2)
-	wrappedTxn.Commitments = make(BlobKzgs, 2)
-	wrappedTxn.Proofs = make(KZGProofs, 0, 2*params.CellsPerExtBlob)
-
-	copy(wrappedTxn.Blobs[0][:], hexutil.MustDecodeHex(testdata.ValidBlob1Hex))
-	copy(wrappedTxn.Blobs[1][:], hexutil.MustDecodeHex(testdata.ValidBlob2Hex))
-
-	commitment0, err := kzg.Ctx().BlobToKZGCommitment(wrappedTxn.Blobs[0][:], 0)
-	if err != nil {
-		panic(err)
-	}
-	commitment1, err := kzg.Ctx().BlobToKZGCommitment(wrappedTxn.Blobs[1][:], 0)
-	if err != nil {
-		panic(err)
-	}
-	copy(wrappedTxn.Commitments[0][:], commitment0[:])
-	copy(wrappedTxn.Commitments[1][:], commitment1[:])
-
-	ethKzgCtx := kzg.GoEthKzgCtx()
-	_, p1, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&wrappedTxn.Blobs[0]), 4)
-	if err != nil {
-		panic(err)
-	}
-	_, p2, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&wrappedTxn.Blobs[1]), 4)
-	if err != nil {
-		panic(err)
-	}
-
-	for _, pp := range &p1 {
-		wrappedTxn.Proofs = append(wrappedTxn.Proofs, (KZGProof(pp)))
-	}
-	for _, pp := range &p2 {
-		wrappedTxn.Proofs = append(wrappedTxn.Proofs, (KZGProof(pp)))
-	}
 
 	wrappedTxn.Tx.BlobVersionedHashes = make([]common.Hash, 2)
 	wrappedTxn.Tx.BlobVersionedHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))

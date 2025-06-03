@@ -1261,14 +1261,6 @@ func makeBlobTxn() TxnSlot {
 	return blobTxn
 }
 
-func makeblobTxnWithCellProofs() TxnSlot {
-	return TxnSlot{}
-}
-
-func TestBlobValidation(t *testing.T) {
-
-}
-
 func TestDropRemoteAtNoGossip(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
