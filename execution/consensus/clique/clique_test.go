@@ -67,12 +67,14 @@ func TestReimportMirroredState(t *testing.T) {
 	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot)
 
 	// Generate a batch of blocks, each properly signed
-	getHeader := func(hash common.Hash, number uint64) (h *types.Header, err error) {
-		err = m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+	getHeader := func(hash common.Hash, number uint64) (h *types.Header) {
+		if err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
 			h, err = m.BlockReader.Header(m.Ctx, tx, hash, number)
 			return err
-		})
-		return h, err
+		}); err != nil {
+			panic(err)
+		}
+		return h
 	}
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {

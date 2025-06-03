@@ -72,7 +72,7 @@ var (
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
 	m         *mock.MockSentry
-	getHeader func(hash common.Hash, number uint64) (*types.Header, error)
+	getHeader func(hash common.Hash, number uint64) *types.Header
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -100,12 +100,15 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
-		getHeader: func(hash common.Hash, number uint64) (h *types.Header, err error) {
-			err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
+			var err error
+			if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
 				return nil
-			})
-			return h, err
+			}); err != nil {
+				panic(err)
+			}
+			return h
 		},
 	}
 	backend.emptyPendingBlock()
