@@ -2281,7 +2281,7 @@ func TestEIP1559Transition(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		actual = new(uint256.Int).Sub(funds, balance)
+		actual = *new(uint256.Int).Sub(funds, &balance)
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetTipCap().Uint64() + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
@@ -2331,7 +2331,7 @@ func TestEIP1559Transition(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		actual = new(uint256.Int).Sub(funds, balance)
+		actual = *new(uint256.Int).Sub(funds, &balance)
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + baseFee.Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
