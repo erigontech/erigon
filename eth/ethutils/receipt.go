@@ -49,8 +49,8 @@ func MarshalReceipt(
 
 	var from common.Address
 	if signed {
-		signer := types.LatestSignerForChainID(chainId)
-		from, _ = txn.Sender(*signer)
+		signer := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId))
+		from, _ = signer.Sender(txn)
 	}
 
 	fields := map[string]interface{}{

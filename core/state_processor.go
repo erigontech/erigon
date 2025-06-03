@@ -242,6 +242,16 @@ func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) libc
 	return applyArbTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
 }
 
+// ApplyArbTransactionVmenv attempts to apply a transaction to the given
+// state database using given environment. It returns the receipt
+// for the transaction, gas used and an error if the transaction failed,
+// indicating the block was invalid.
+func ApplyArbTransactionVmenv(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs state.IntraBlockStateArbitrum, stateWriter state.StateWriter,
+	header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64, cfg vm.Config, vmenv *vm.EVM,
+) (*types.Receipt, *evmtypes.ExecutionResult, error) {
+	return applyArbTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
+}
+
 // ProcessBeaconBlockRoot applies the EIP-4788 system call to the beacon block root
 // contract. This method is exported to be used in tests.
 //

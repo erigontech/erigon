@@ -19,12 +19,14 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/nitro-erigon/arbos"
 )
 
 type Generator struct {
@@ -176,8 +178,23 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, err
 	}
-	// log.Info("ApplyTransaction", "blockNum", blockNum, "index", index, "txnHash", txnHash, "cumGasUsed", cumGasUsed, "firstLogIndex", firstLogIndex)
-	receipt, _, err = core.ApplyArbTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
+	vmcfg := vm.Config{
+		SkipAnalysis: core.SkipAnalysis(cfg, header.Number.Uint64()),
+	}
+	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vmcfg)
+	msg, err := txn.AsMessage(*types.MakeSigner(cfg, blockNum, header.Time), header.BaseFee, vmenv.ChainRules())
+	if err != nil {
+		return nil, err
+	}
+	if vmenv.ProcessingHookSet.CompareAndSwap(false, true) {
+		vmenv.ProcessingHook = arbos.NewTxProcessorIBS(vmenv, state.NewArbitrum(genEnv.ibs), msg)
+	} else {
+		vmenv.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
+	}
+	// receipt, _, err = core.ApplyArbTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+
+	receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vmcfg, vmenv)
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 	}
@@ -226,7 +243,22 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	for i, txn := range block.Transactions() {
 		genEnv.ibs.SetTxContext(i)
-		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+		blockContext := core.NewEVMBlockContext(block.Header(), core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
+		vmcfg := vm.Config{
+			SkipAnalysis: core.SkipAnalysis(cfg, block.NumberU64()),
+		}
+		vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vmcfg)
+		msg, err := txn.AsMessage(*types.MakeSigner(cfg, block.NumberU64(), block.Time()), block.BaseFee(), vmenv.ChainRules())
+		if err != nil {
+			return nil, err
+		}
+		if vmenv.ProcessingHookSet.CompareAndSwap(false, true) {
+			vmenv.ProcessingHook = arbos.NewTxProcessorIBS(vmenv, state.NewArbitrum(genEnv.ibs), msg)
+		} else {
+			vmenv.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
+		}
+		receipt, _, err := core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vmcfg, vmenv)
+
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 		}
