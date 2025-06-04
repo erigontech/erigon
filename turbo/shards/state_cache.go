@@ -616,7 +616,7 @@ func (sc *StateCache) GetStorageByHashedAddress(addrHash common.Hash, incarnatio
 
 }
 
-// SetAccountRead adds given account address to the cache, marking it as a absent
+// SetAccountAbsent adds given account address to the cache, marking it as a absent
 func (sc *StateCache) SetAccountAbsent(address []byte) {
 	var ai AccountItem
 	h := common.NewHasher()
