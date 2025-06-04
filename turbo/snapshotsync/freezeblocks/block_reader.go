@@ -1609,14 +1609,14 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 		if txNum < startTxNum {
 			break
 		}
-		// found the file
-
+		// bin search on bodies.seg
 		bfrom, bto := txSeg.From(), txSeg.To()
 		blockSeg, ok := view.BodiesSegment(bfrom)
 		if !ok {
 			return 0, false, fmt.Errorf("BlockReader.BlockNumber: found txSeg, but no blockSeg: %d-%d", bfrom, bto)
 		}
 		var b *types.BodyForStorage
+		count := 0
 		blockNum = uint64(sort.Search(int(bto), func(i int) bool {
 			if err != nil {
 				return true
@@ -1624,6 +1624,7 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 			if bto < bfrom {
 				return false
 			}
+			count++
 			b, buf, err = bodyForStorageFromSnapshot(uint64(i), blockSeg, buf)
 			if err != nil {
 				return true
@@ -1633,52 +1634,18 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 				return true
 			}
 
+			fmt.Println("BlockReader.BlockNumber: ", b.BaseTxnID.U64()+uint64(b.TxCount)-1, txNum)
+
 			return b.BaseTxnID.U64()+uint64(b.TxCount)-1 >= txNum
 		}))
+
+		fmt.Printf("searching for txNum=%d in bodies.seg(%d-%d) gives readcnt=%d\n", txNum, bfrom/1000, bto/1000, count)
 
 		if err != nil {
 			return 0, false, err
 		}
 
 		return blockNum, true, nil
-
-		// var txHash common.Hash
-		// {
-		// 	// get hash now
-		// 	elemPos := txNum - startTxNum
-		// 	offset := txnHashIdx.OrdinalLookup(elemPos)
-		// 	gg := txSeg.Src().MakeGetter()
-		// 	gg.Reset(offset)
-
-		// 	if !gg.HasNext() {
-		// 		return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d): elemPos:%d, offset: %d", txSeg.From(), txSeg.To(), elemPos, offset)
-		// 	}
-		// 	buf, _ = gg.Next(buf[:0]) // safe to call .Next on uncompressed word
-		// 	isSystemTx := len(buf) == 0
-		// 	if isSystemTx {
-		// 		binary.BigEndian.PutUint64(txHash[:], txNum)
-		// 	} else if len(buf) < 1+20 {
-		// 		return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d) bad value: elemPos:%d, offset: %d, value: %x", txSeg.From(), txSeg.To(), elemPos, offset, buf)
-		// 	} else {
-		// 		txRlp := buf[1+20:]
-		// 		tx, err := types.DecodeTransaction(txRlp)
-		// 		if err != nil {
-		// 			return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d) bad tx decode: elemPos:%d, offset: %d, %w %s", txSeg.From(), txSeg.To(), elemPos, offset, err, hexutil.Encode(txRlp))
-		// 		}
-		// 		txHash = tx.Hash()
-		// 	}
-		// }
-
-		// {
-		// 	// use tx2BlockId index
-		// 	txn2BlockIdx := txSeg.Src().Index(coresnaptype.Indexes.TxnHash2BlockNum)
-		// 	reader := recsplit.NewIndexReader(txn2BlockIdx)
-		// 	blockNum, ok := reader.Lookup(txHash[:])
-		// 	if !ok {
-		// 		return 0, false, fmt.Errorf("txn2BlockIdx.Lookup(%d-%d) bad txHash: %s, blockNumber: %d", txSeg.From(), txSeg.To(), txHash.String(), blockNum)
-		// 	}
-		// 	return blockNum, true, nil
-		// }
 	}
 
 DB_SEARCH:
