@@ -1621,7 +1621,7 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 			if err != nil {
 				return true
 			}
-			if bto < bfrom {
+			if uint64(i) < bfrom {
 				return false
 			}
 			count++
