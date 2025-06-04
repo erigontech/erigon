@@ -33,7 +33,7 @@ FROM docker.io/library/alpine:3.22
 RUN apk add --no-cache ca-certificates libstdc++ tzdata
 RUN apk add --no-cache curl jq bind-tools
 
-# Setup user and group
+# Setup user and group 
 #
 # from the perspective of the container, uid=1000, gid=1000 is a sensible choice
 # (mimicking Ubuntu Server), but if caller creates a .env (example in repo root),
