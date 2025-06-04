@@ -1273,7 +1273,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, idxPath, cfg, ps, ii.logger)
+	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger)
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
