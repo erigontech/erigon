@@ -1855,18 +1855,9 @@ func (c *Bor) TxDependencies(h *types.Header) [][]int {
 		return nil
 	}
 
-	dependencies := make([][]int, len(blockExtraData.TxDependencies))
-	for i, txDependencies := range blockExtraData.TxDependencies {
-		deps := make([]int, len(txDependencies))
-		for j := range txDependencies {
-			deps[j] = int(txDependencies[j])
-		}
-		dependencies[i] = deps
-	}
+	c.Dependencies.Add(h.Hash(), blockExtraData.TxDependencies)
 
-	c.Dependencies.Add(h.Hash(), dependencies)
-
-	return dependencies
+	return blockExtraData.TxDependencies
 }
 
 // In bor, RLP encoding of BlockExtraData will be stored in the Extra field in the header
