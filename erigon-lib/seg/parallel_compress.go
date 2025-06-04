@@ -235,7 +235,14 @@ func (cq *CompressionQueue) Pop() interface{} {
 	return x
 }
 
-func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func (c *Compressor) compressWithPatternCandidates(ctx context.Context, countMetaField, emptyWordsCountMetaField uint64, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder) error {
+	logger := c.logger
+	lvl := c.lvl
+	logPrefix := c.logPrefix
+	trace := c.trace
+	cfg := c.WordLvlCfg
+	segmentFilePath := c.tmpOutFilePath
+
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -302,7 +309,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	defer intermediateFile.Close()
 	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
 
-	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
+	var inCount, outCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
 	totalWords := uncompressedFile.count
 
@@ -402,10 +409,6 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			uncompPosMap[0]++
 		}
 		inCount++
-		if len(v) == 0 {
-			emptyWordsCount++
-		}
-
 		return nil
 	}); err != nil {
 		return err
@@ -533,16 +536,19 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
+
+	//---- meta header ----
 	cw := bufio.NewWriterSize(cf, 4*etl.BufIOSize)
 	// 1-st, output amount of words - just a useful metadata
-	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
+	binary.BigEndian.PutUint64(numBuf[:], countMetaField)
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	binary.BigEndian.PutUint64(numBuf[:], emptyWordsCount)
+	binary.BigEndian.PutUint64(numBuf[:], emptyWordsCountMetaField)
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
+	// ----- dict -----
 	// 2-nd, output dictionary size
 	binary.BigEndian.PutUint64(numBuf[:], patternsSize) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -646,6 +652,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Positional dictionary", logPrefix), "positionList.len", positionList.Len(), "posSize", common.ByteCount(posSize))
 	}
+
+	// ---- data part ------
 	// Re-encode all the words with the use of optimised (via Huffman coding) dictionaries
 	wc := 0
 	var hc BitWriter
@@ -770,7 +778,7 @@ func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
+func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, cfg WordLvlCfg, completion *sync.WaitGroup, logger log.Logger) {
 	minPatternScore, minPatternLen, maxPatternLen := cfg.MinPatternScore, cfg.MinPatternLen, cfg.MaxPatternLen
 	defer completion.Done()
 	dictVal := make([]byte, 8)
@@ -944,7 +952,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	}
 }
 
-func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
+func DictionaryBuilderFromCollectors(ctx context.Context, cfg WordLvlCfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
 	t := time.Now()
 	dictCollector := etl.NewCollectorWithAllocator(logPrefix+"_collectDict", tmpDir, etl.LargeSortableBuffers, logger)
 	defer dictCollector.Close()

@@ -83,7 +83,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 
 	log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
 	path := a.parser.DataFile(version.V1_0, calcFrom, calcTo)
-	segCfg := seg.DefaultCfg
+	segCfg := seg.DefaultWordLvlCfg
 	segCfg.Workers = compressionWorkers
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, segCfg, log.LvlTrace, a.logger)
 	if err != nil {

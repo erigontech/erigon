@@ -99,7 +99,7 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 	t.Helper()
 
 	base := fmt.Sprintf(dirs.Snap+"/commitment.%d-%d", startTxNum, endTxNum)
-	comp, err := seg.NewCompressor(context.Background(), "", base+"data", dirs.Tmp, seg.DefaultCfg, log.LvlInfo, logger)
+	comp, err := seg.NewCompressor(context.Background(), "", base+"data", dirs.Tmp, seg.DefaultWordLvlCfg, log.LvlInfo, logger)
 	require.NoError(t, err)
 	require.NotNil(t, comp)
 

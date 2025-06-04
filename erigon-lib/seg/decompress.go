@@ -665,6 +665,7 @@ func (d *Decompressor) EmptyWordsCount() int { return int(d.emptyWordsCount) }
 // Getter is not thread-safe, but there can be multiple getters used simultaneously and concurrently
 // for the same decompressor
 func (d *Decompressor) MakeGetter() *Getter {
+	d.Count()
 	return &Getter{
 		d:           d,
 		posDict:     d.posDict,

@@ -38,12 +38,13 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	tmp := t.TempDir()
 
 	keyCount, M := 100, uint64(4)
-	compPath := generateKV(t, tmp, 52, 300, keyCount, logger, 0)
+	comp := seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg}
+	compPath := generateKV(t, tmp, 52, 300, keyCount, logger, comp)
 	decomp, err := seg.NewDecompressor(compPath)
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
+	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), comp.WordLvl), comp.PageLvl)
 	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), r, background.NewProgressSet(), tmp, 1, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(t, err)
 
@@ -59,34 +60,32 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 120, 30
-	compressFlags := seg.CompressKeys | seg.CompressVals
-
+	compressCfg := seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg} //, PageSize: 16, PageLvl: true}
 	t.Run("empty index", func(t *testing.T) {
-		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)
+		dataPath := generateKV(t, tmp, 8, 16, 0, logger, compressCfg)
 		indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+		buildBtreeIndex(t, dataPath, indexPath, compressCfg, 1, logger, true)
 
-		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressCfg, false)
 		require.NoError(t, err)
 		require.EqualValues(t, 0, bt.KeyCount())
 		bt.Close()
 		kv.Close()
 	})
-	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
+	dataPath := generateKV(t, tmp, 8, 16, keyCount, logger, compressCfg)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+	buildBtreeIndex(t, dataPath, indexPath, compressCfg, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressCfg, false)
 	require.NoError(t, err)
-	require.EqualValues(t, bt.KeyCount(), keyCount)
+	require.EqualValues(t, keyCount, int(bt.KeyCount()))
 	defer bt.Close()
 	defer kv.Close()
 
-	keys, err := pivotKeysFromKV(dataPath)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
+	keys, err := pivotKeysFromKV(getter)
 	require.NoError(t, err)
-
-	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
 		_, _, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
@@ -109,7 +108,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
-		require.Equal(t, keys[i], k)
+		require.Equal(t, fmt.Sprintf("%x", keys[i]), fmt.Sprintf("%x", k), i)
 		c.Next()
 	}
 	c.Close()
@@ -148,22 +147,21 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	logger := log.New()
 	keyCount, M := 20000, 510
 
-	compressFlags := seg.CompressKeys | seg.CompressVals
-	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
-	keys, err := pivotKeysFromKV(dataPath)
-	require.NoError(t, err)
+	compressCfg := seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg}
+	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressCfg)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
-	require.NoError(t, err)
+	buildBtreeIndex(t, dataPath, indexPath, compressCfg, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressCfg, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	defer bt.Close()
 	defer kv.Close()
 
-	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
+	keys, err := pivotKeysFromKV(getter)
+	require.NoError(t, err)
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
@@ -186,18 +184,18 @@ func Test_BtreeIndex_Build(t *testing.T) {
 }
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
-func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, seed uint32, logger log.Logger, noFsync bool) {
+func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressCfg seg.Cfg, seed uint32, logger log.Logger, noFsync bool) {
 	tb.Helper()
 	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(tb, err)
 	defer decomp.Close()
 
-	r := seg.NewReader(decomp.MakeGetter(), compressed)
+	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	err = BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 }
 
-func Test_BtreeIndex_Seek2(t *testing.T) {
+func TestBtree_Seek2(t *testing.T) {
 	t.Skip("issue #15028")
 
 	t.Parallel()
@@ -206,22 +204,21 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	logger := log.New()
 	keyCount, M := 1_200_000, 1024
 
-	compressFlags := seg.CompressKeys | seg.CompressVals
-	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
+	compressCfg := seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg}
+	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressCfg)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+	buildBtreeIndex(t, dataPath, indexPath, compressCfg, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressCfg, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	defer bt.Close()
 	defer kv.Close()
 
-	keys, err := pivotKeysFromKV(dataPath)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
+	keys, err := pivotKeysFromKV(getter)
 	require.NoError(t, err)
-
-	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
 		_, _, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
@@ -251,7 +248,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 
 		k, v, _, err := bt.dataLookup(0, getter)
 		require.NoError(t, err)
-		cur.Reset(0, getter)
+		cur.Reset(0, getter, nil)
 
 		require.Equal(t, k, cur.Key())
 		require.Equal(t, v, cur.Value())
@@ -299,57 +296,81 @@ func TestBpsTree_Seek(t *testing.T) {
 	tmp := t.TempDir()
 
 	logger := log.New()
+	pageLvlOn := seg.PageLvlCfg{PageSize: 4, Compress: true}
+	pageLvlOff := seg.PageLvlCfg{PageSize: 0, Compress: false}
+	cases := []struct {
+		name string
+		c    seg.Cfg
+	}{
+		{"no_comp", seg.Cfg{WordLvl: seg.CompressNone, PageLvl: pageLvlOff}},
+		{"only_word_lvl", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: pageLvlOff}},
+		{"only_page_lvl", seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: pageLvlOn}},
+		{"both", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: pageLvlOn}},
+	}
+	for _, tc := range cases {
+		compressCfg := tc.c
+		t.Run(tc.name, func(t *testing.T) {
+			dataPath := generateKV(t, tmp, 10, 48, keyCount, logger, compressCfg)
 
-	compressFlag := seg.CompressNone
-	dataPath := generateKV(t, tmp, 10, 48, keyCount, logger, compressFlag)
+			kv, err := seg.NewDecompressor(dataPath)
+			require.NoError(t, err)
+			defer kv.Close()
 
-	kv, err := seg.NewDecompressor(dataPath)
-	require.NoError(t, err)
-	defer kv.Close()
+			g := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
+			//g.PrintPages()
+			g.Reset(0)
+			ps := make([]uint64, 0, keyCount)
+			keys := make([][]byte, 0, keyCount)
 
-	g := seg.NewReader(kv.MakeGetter(), compressFlag)
+			p := uint64(0)
+			var k []byte
+			for g.HasNext() {
+				ps = append(ps, p)
+				k, _, p = g.NextKey(nil)
+				keys = append(keys, common.Copy(k))
+			}
 
-	g.Reset(0)
-	ps := make([]uint64, 0, keyCount)
-	keys := make([][]byte, 0, keyCount)
+			ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
+			for i := 0; i < len(ps); i++ {
+				ef.AddOffset(ps[i])
+			}
+			ef.Build()
 
-	p := uint64(0)
-	i := 0
-	for g.HasNext() {
-		ps = append(ps, p)
-		k, _ := g.Next(nil)
-		_, p = g.Next(nil)
-		keys = append(keys, k)
-		//fmt.Printf("%2d k=%x, p=%v\n", i, k, p)
-		i++
+			efi, _ := eliasfano32.ReadEliasFano(ef.AppendBytes(nil))
+
+			ir := NewMockIndexReader(efi)
+
+			{
+				//cmp, kk, _ := ir.keyCmp(nil, 1, g, nil)
+				//require.Equal(t, -1, cmp)
+				//if compressCfg.PageSize > 0 {
+				//	require.Equal(t, fmt.Sprintf("%x", keys[compressCfg.PageSize-1]), fmt.Sprintf("%x", kk))
+				//}
+			}
+
+			bp := NewBpsTree(g, efi, uint64(M), ir.dataLookup, ir.keyCmp)
+			bp.cursorGetter = ir.newCursor
+			bp.trace = false
+
+			ssk := keys[len(keys)-1]
+			c, err := bp.Seek(g, ssk[:len(ssk)/2])
+			require.Equal(t, fmt.Sprintf("%x", ssk), fmt.Sprintf("%x", c.Key()))
+
+			for i := 0; i < len(keys); i++ {
+				sk := keys[i]
+
+				c, err := bp.Seek(g, sk[:len(sk)/2])
+				require.NoError(t, err, i)
+				require.NotNil(t, c, i)
+				require.NotNil(t, c.Key(), i)
+
+				//k, _, err := it.KVFromGetter(g)
+				//require.NoError(t, err)
+				require.Equal(t, fmt.Sprintf("%x", keys[i]), fmt.Sprintf("%x", c.Key()), i)
+			}
+		})
 	}
 
-	//tr := newTrie()
-	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
-	for i := 0; i < len(ps); i++ {
-		//tr.insert(Node{i: uint64(i), key: common.Copy(keys[i]), off: ps[i]})
-		ef.AddOffset(ps[i])
-	}
-	ef.Build()
-
-	efi, _ := eliasfano32.ReadEliasFano(ef.AppendBytes(nil))
-
-	ir := NewMockIndexReader(efi)
-	bp := NewBpsTree(g, efi, uint64(M), ir.dataLookup, ir.keyCmp)
-	bp.cursorGetter = ir.newCursor
-	bp.trace = false
-
-	for i := 0; i < len(keys); i++ {
-		sk := keys[i]
-		c, err := bp.Seek(g, sk[:len(sk)/2])
-		require.NoError(t, err)
-		require.NotNil(t, c)
-		require.NotNil(t, c.Key())
-
-		//k, _, err := it.KVFromGetter(g)
-		//require.NoError(t, err)
-		require.Equal(t, keys[i], c.Key())
-	}
 }
 
 func NewMockIndexReader(ef *eliasfano32.EliasFano) *mockIndexReader {
@@ -360,7 +381,7 @@ type mockIndexReader struct {
 	ef *eliasfano32.EliasFano
 }
 
-func (b *mockIndexReader) newCursor(k, v []byte, di uint64, g *seg.Reader) *Cursor {
+func (b *mockIndexReader) newCursor(k, v []byte, di uint64, g *seg.PagedReader) *Cursor {
 	return &Cursor{
 		ef:     b.ef,
 		getter: g,
@@ -370,7 +391,7 @@ func (b *mockIndexReader) newCursor(k, v []byte, di uint64, g *seg.Reader) *Curs
 	}
 }
 
-func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint64, err error) {
+func (b *mockIndexReader) dataLookup(di uint64, g *seg.PagedReader) (k, v []byte, offset uint64, err error) {
 	if di >= b.ef.Count() {
 		return nil, nil, 0, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, g.FileName())
 	}
@@ -380,30 +401,16 @@ func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) (k, v []byte, off
 	if !g.HasNext() {
 		return nil, nil, 0, fmt.Errorf("pair %d/%d key not found, file: %s", di, b.ef.Count(), g.FileName())
 	}
-
-	k, _ = g.Next(nil)
-	if !g.HasNext() {
-		return nil, nil, 0, fmt.Errorf("pair %d/%d value not found, file: %s", di, b.ef.Count(), g.FileName())
-	}
-	v, _ = g.Next(nil)
+	k, v, _, _, _ = g.Next2(nil, nil)
 	return k, v, offset, nil
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
-func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int, []byte, error) {
+func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.PagedReader, resBuf []byte) (int, []byte, error) {
 	if di >= b.ef.Count() {
 		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, g.FileName())
 	}
 
-	offset := b.ef.Get(di)
-	g.Reset(offset)
-	if !g.HasNext() {
-		return 0, nil, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), g.FileName())
-	}
-
-	resBuf, _ = g.Next(resBuf)
-
-	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
-	return bytes.Compare(resBuf, k), resBuf, nil
-	//return b.getter.Match(k), result, nil
+	cmp, k := g.Cmp(k, b.ef.Get(di))
+	return cmp, k, nil
 }

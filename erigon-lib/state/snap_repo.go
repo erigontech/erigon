@@ -400,7 +400,8 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					f.logger.Warn("[agg] SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					r := seg.NewReader(item.decompressor.MakeGetter(), p.DataFileCompression())
+					compressCfg := p.DataFileCompression2()
+					r := seg.NewPagedReader(seg.NewReader(item.decompressor.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, r); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)

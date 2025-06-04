@@ -113,13 +113,14 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			defer sf.CleanupOnError()
 
 			efReader := h.InvertedIndex.dataReader(sf.efHistoryDecomp)
-			hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
+			hReader := h.dataReader(sf.historyDecomp)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
 			// h contains all values for all keys ordered by key + txNum
 
 			var keyBuf, valBuf, hValBuf []byte
+			_ = hValBuf
 			seenKeys := make([]string, 0)
 			for efReader.HasNext() {
 				keyBuf, _ = efReader.Next(nil)
@@ -142,7 +143,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
 
 					require.Truef(t, hReader.HasNext(), "hReader has no more values")
-					hValBuf, _ = hReader.Next(nil)
+					_, hValBuf, _, _, _ := hReader.Next2Copy(nil, nil)
 					if updates[vi].value == nil {
 						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
 					} else {
@@ -232,11 +233,11 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		gh := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
+		gh := h.dataReader(sf.historyDecomp)
 		gh.Reset(0)
 		for gh.HasNext() {
-			w, _ := gh.Next(nil)
-			valWords = append(valWords, string(w))
+			_, v, _, _, _ := gh.Next2(nil, nil)
+			valWords = append(valWords, string(v))
 		}
 		require.Equal([]string{"", "value1.1", "", "value2.1", "value2.2", ""}, valWords)
 		require.Equal(6, int(sf.historyIdx.KeyCount()))
@@ -266,7 +267,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
+		gh = h.dataReader(sf.historyDecomp)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
@@ -278,7 +279,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 					continue
 				}
 				gh.Reset(offset)
-				w, _ := gh.Next(nil)
+				_, w, _, _, _ := gh.Next2(nil, nil)
 				require.Equal(valWords[vi], string(w))
 				vi++
 			}

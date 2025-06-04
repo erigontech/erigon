@@ -496,7 +496,7 @@ func (br *BlockRetire) RemoveOverlaps() error {
 	return nil
 }
 
-func (br *BlockRetire) MadvNormal() *BlockRetire {
+func (br *BlockRetire) MadvNormal() seg.MadvDisabler {
 	br.snapshots().MadvNormal()
 	if br.chainConfig.Bor != nil {
 		br.borSnapshots().RoSnapshots.MadvNormal()
@@ -547,7 +547,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 type firstKeyGetter func(ctx context.Context) uint64
 type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collecter func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 
-var BlockCompressCfg = seg.Cfg{
+var BlockCompressCfg = seg.WordLvlCfg{
 	MinPatternScore: 1_000,
 	MinPatternLen:   8, // `5` - reducing ratio because producing too much prefixes
 	MaxPatternLen:   128,
