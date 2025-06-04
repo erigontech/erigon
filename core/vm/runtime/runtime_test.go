@@ -422,7 +422,7 @@ func (d *dummyChain) Engine() consensus.Engine {
 }
 
 // GetHeader returns the hash corresponding to their hash.
-func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header {
+func (d *dummyChain) GetHeader(h common.Hash, n uint64) (*types.Header, error) {
 	d.counter++
 	parentHash := common.Hash{}
 	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
@@ -430,7 +430,7 @@ func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header {
 
 	//parentHash := common.Hash{byte(n - 1)}
 	//fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
-	return fakeHeader(n, parentHash)
+	return fakeHeader(n, parentHash), nil
 }
 
 // TestBlockhash tests the blockhash operation. It's a bit special, since it internally
@@ -662,11 +662,12 @@ func TestEip2929Cases(t *testing.T) {
 			}
 		}
 		ops := strings.Join(instrs, ", ")
-		fmt.Printf("### Case %d\n\n", id)
+		//fmt.Printf("### Case %d\n\n", id)
+		//fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
+		//	comment,
+		//	code, ops)
+		_ = ops
 		id++
-		fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
-			comment,
-			code, ops)
 		cfg := &Config{
 			EVMConfig: vm.Config{
 				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout).Hooks(),

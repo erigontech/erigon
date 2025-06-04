@@ -62,9 +62,8 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	// Create the parent state database
 	statedb := state.New(reader)
 
-	getHeader := func(hash common.Hash, n uint64) *types.Header {
-		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
-		return h
+	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
+		return headerReader.HeaderByNumber(ctx, dbtx, n)
 	}
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
