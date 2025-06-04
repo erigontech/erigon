@@ -2643,8 +2643,12 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
 			if info.Completed != nil {
 				fi, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
-				if serr != nil || fi.Size() != *info.Length || !fi.ModTime().Equal(*info.Completed) {
-					if err := d.db.Update(d.ctx, torrentInfoReset(info.Name, info.Hash, *info.Length)); err != nil {
+				if serr != nil || info.Length == nil || fi.Size() != *info.Length || info.Completed == nil || !fi.ModTime().Equal(*info.Completed) {
+					infoLen := int64(0)
+					if info.Length != nil {
+						infoLen = *info.Length
+					}
+					if err := d.db.Update(d.ctx, torrentInfoReset(info.Name, info.Hash, infoLen)); err != nil {
 						if serr != nil {
 							log.Error("[snapshots] Failed to reset db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
 						} else {
