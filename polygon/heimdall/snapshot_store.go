@@ -462,7 +462,7 @@ func validateSnapshots[T Entity](
 	snaps *RoSnapshots,
 	t snaptype.Type,
 	makeEntity func() T,
-	firstEntityIdx uint64,
+	firstEntityId uint64,
 	alsoCheckDb bool,
 ) error {
 	tx := snaps.ViewType(t)
@@ -474,7 +474,7 @@ func validateSnapshots[T Entity](
 	}
 
 	var accumulatedErr error
-	expectedId := firstEntityIdx
+	expectedId := firstEntityId
 	for _, seg := range segs {
 		idx := seg.Src().Index()
 		if idx == nil || idx.KeyCount() == 0 {
