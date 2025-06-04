@@ -281,6 +281,11 @@ func TestEvmRun(t *testing.T) {
 			wantStdoutFile: "./testdata/evmrun/3.out.1.txt",
 			wantStderrFile: "./testdata/evmrun/3.out.2.txt",
 		},
+		{ // statetest
+			input:          []string{"--bench", "statetest", "./testdata/statetest.json"},
+			wantStdoutFile: "./testdata/evmrun/4.out.1.txt",
+			wantStderrFile: "./testdata/evmrun/4.out.2.txt",
+		},
 	} {
 		tt.Logf("args: go run ./cmd/evm %v\n", strings.Join(tc.input, " "))
 		tt.Run("evm-test", tc.input...)
