@@ -330,12 +330,12 @@ type BtIndex struct {
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed seg.FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors Accessors) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger, noFsync, accessors)
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors Accessors) (*BtIndex, error) {
+	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
 	if err != nil {
 		return nil, err
 	}
-	return OpenBtreeIndexWithDecompressor(indexPath, M, decompressor, compressed)
+	return OpenBtreeIndexWithDecompressor(indexPath, M, decompressor)
 }
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
@@ -353,7 +353,7 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 	return kv, bt, nil
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors Accessors) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors Accessors) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
@@ -385,15 +385,14 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	}
 	defer iw.Close()
 
-	getter := seg.NewReader(kv.MakeGetter(), compression)
-	getter.Reset(0)
+	kv.Reset(0)
 
 	key := make([]byte, 0, 64)
 	var pos uint64
 
 	var b0 [256]bool
-	for getter.HasNext() {
-		key, _ = getter.Next(key[:0])
+	for kv.HasNext() {
+		key, _ = kv.Next(key[:0])
 		keep := false
 		if !b0[key[0]] {
 			b0[key[0]] = true
@@ -407,7 +406,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 		if bloom != nil {
 			bloom.AddHash(hi)
 		}
-		pos, _ = getter.Skip()
+		pos, _ = kv.Skip()
 
 		p.Processed.Add(1)
 	}

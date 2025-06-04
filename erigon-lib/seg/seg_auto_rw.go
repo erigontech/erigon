@@ -50,7 +50,7 @@ func ParseFileCompression(s string) (FileCompression, error) {
 		return 0, fmt.Errorf("invalid file compression type: %s", s)
 	}
 }
-
+func (c FileCompression) Has(flag FileCompression) bool { return c&flag != 0 }
 func (c FileCompression) String() string {
 	switch c {
 	case CompressNone:
@@ -77,14 +77,14 @@ func NewReader(g *Getter, c FileCompression) *Reader {
 }
 
 func (g *Reader) MatchPrefix(prefix []byte) bool {
-	if g.c&CompressKeys != 0 {
+	if g.c.Has(CompressKeys) {
 		return g.Getter.MatchPrefix(prefix)
 	}
 	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
 func (g *Reader) MatchCmp(prefix []byte) int {
-	if g.c&CompressKeys != 0 {
+	if g.c.Has(CompressKeys) {
 		return g.Getter.MatchCmp(prefix)
 	}
 	return g.Getter.MatchCmpUncompressed(prefix)
@@ -100,7 +100,7 @@ func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 		g.nextValue = true
 	}
 
-	if g.c&fl != 0 {
+	if g.c.Has(fl) {
 		return g.Getter.Next(buf)
 	}
 	return g.Getter.NextUncompressed()
@@ -119,7 +119,7 @@ func (g *Reader) Skip() (uint64, int) {
 		g.nextValue = true
 	}
 
-	if g.c&fl != 0 {
+	if g.c.Has(fl) {
 		return g.Getter.Skip()
 	}
 	return g.Getter.SkipUncompressed()
@@ -128,13 +128,17 @@ func (g *Reader) Skip() (uint64, int) {
 
 type ReaderI interface {
 	Next(buf []byte) ([]byte, uint64)
+	Size() int
+	Count() int
 	Reset(offset uint64)
 	HasNext() bool
 	Skip() (uint64, int)
 	FileName() string
 	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
 }
-
+type MadvDisabler interface {
+	DisableReadAhead()
+}
 type PagedReader struct {
 	file                   ReaderI
 	snappy                 bool
@@ -166,6 +170,8 @@ func (g *PagedReader) Reset(offset uint64) {
 	g.page = &page.Reader{} // TODO: optimize
 }
 func (g *PagedReader) FileName() string { return g.file.FileName() }
+func (g *PagedReader) Count() int       { return g.file.Count() }
+func (g *PagedReader) Size() int        { return g.file.Size() }
 func (g *PagedReader) HasNext() bool {
 	return (g.valuesOnCompressedPage > 1 && g.page.HasNext()) || g.file.HasNext()
 }

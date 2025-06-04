@@ -967,6 +967,11 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	h.dirtyFiles.Set(fi)
 }
 
+func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
+func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
+	return seg.NewReader(f.MakeGetter(), h.Compression)
+}
+
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	k, err := kv.FirstKey(tx, h.valuesTable)
 	if err != nil {
@@ -1021,13 +1026,10 @@ func (ht *HistoryRoTx) statelessGetter(i int) *seg.Reader {
 	if ht.getters == nil {
 		ht.getters = make([]*seg.Reader, len(ht.files))
 	}
-	r := ht.getters[i]
-	if r == nil {
-		g := ht.files[i].src.decompressor.MakeGetter()
-		r = seg.NewReader(g, ht.h.Compression)
-		ht.getters[i] = r
+	if ht.getters[i] == nil {
+		ht.getters[i] = ht.dataReader(ht.files[i].src.decompressor)
 	}
-	return r
+	return ht.getters[i]
 }
 func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	if ht.readers == nil {
