@@ -967,11 +967,15 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	h.dirtyFiles.Set(fi)
 }
 
-func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
+func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
+func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *page.Writer { return ht.h.dataWriter(f) }
 
+func (h *History) dataWriter(f *seg.Compressor) *page.Writer {
+	return page.NewWriter(seg.NewWriter(f, h.Compression), h.historyValuesOnCompressedPage, true)
+}
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	k, err := kv.FirstKey(tx, h.valuesTable)
 	if err != nil {
