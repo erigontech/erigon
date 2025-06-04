@@ -450,13 +450,6 @@ func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatErr
 	return lasterr
 }
 
-func (c *Config) GetTxDependencies(extras []byte) [][]int {
-	if c.Bor != nil {
-		//return bor.GetTxDependencies(extras)
-	}
-	return nil
-}
-
 type forkBlockNumber struct {
 	name        string
 	blockNumber *big.Int

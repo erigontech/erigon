@@ -1877,7 +1877,7 @@ type BlockExtraData struct {
 	// length of TxDependencies          ->   n (n = number of transactions in the block)
 	// length of TxDependencies[i]       ->   k (k = a whole number)
 	// k elements in TxDependencies[i]   ->   transaction indexes on which transaction i is dependent on
-	TxDependencies [][]uint64
+	TxDependencies [][]int
 }
 
 func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
