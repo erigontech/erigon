@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -970,9 +971,15 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 }
 
 func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
+	if !strings.HasSuffix(f.FileName(), ".v") {
+		panic("assert: miss-use " + f.FileName())
+	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
 func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
+	if !strings.HasSuffix(f.FileName(), ".v") {
+		panic("assert: miss-use " + f.FileName())
+	}
 	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), h.historyValuesOnCompressedPage, true)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader     { return ht.h.dataReader(f) }

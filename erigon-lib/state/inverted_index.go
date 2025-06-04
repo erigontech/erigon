@@ -259,9 +259,15 @@ func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, p
 	return ii.buildMapAccessor(ctx, fromStep, toStep, ii.dataReader(item.decompressor), ps)
 }
 func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
+	if !strings.HasSuffix(f.FileName(), ".ef") {
+		panic("assert: miss-use " + f.FileName())
+	}
 	return seg.NewReader(f.MakeGetter(), ii.Compression)
 }
 func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
+	if !strings.HasSuffix(f.FileName(), ".ef") {
+		panic("assert: miss-use " + f.FileName())
+	}
 	if forceNoCompress {
 		return seg.NewWriter(f, seg.CompressNone)
 	}

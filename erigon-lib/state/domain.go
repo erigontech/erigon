@@ -25,6 +25,7 @@ import (
 	"math"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -1646,9 +1647,15 @@ func (dt *DomainRoTx) reusableReader(i int) *seg.Reader {
 }
 
 func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
+	if !strings.HasSuffix(f.FileName(), ".kv") {
+		panic("assert: miss-use " + f.FileName())
+	}
 	return seg.NewReader(f.MakeGetter(), d.Compression)
 }
 func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
+	if !strings.HasSuffix(f.FileName(), ".kv") {
+		panic("assert: miss-use " + f.FileName())
+	}
 	if forceNoCompress {
 		return seg.NewWriter(f, seg.CompressNone)
 	}
