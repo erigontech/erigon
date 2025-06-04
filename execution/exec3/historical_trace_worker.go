@@ -214,7 +214,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		txTask.Tracer.Reset() // txTask is retryable
 		rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
-		ibs.SetTxContext(txTask.TxIndex)
+		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
