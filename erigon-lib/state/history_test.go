@@ -52,6 +52,9 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	agg, err := NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(agg.Close)
 	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := Schema.AccountsDomain
@@ -69,6 +72,11 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
+
+	cfg.dirtyFilesLock = &agg.dirtyFilesLock
+	cfg.hist.dirtyFilesLock = &agg.dirtyFilesLock
+	cfg.hist.iiCfg.dirtyFilesLock = &agg.dirtyFilesLock
+
 	h, err := NewHistory(cfg.hist, aggregationStep, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()

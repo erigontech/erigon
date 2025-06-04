@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -82,11 +83,19 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
+
+	agg, err := NewAggregator(context.Background(), datadir2.New(t.TempDir()), 16, db, log.New())
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
 	salt := uint32(1)
 
 	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt.Store(&salt)
+	cfg.dirtyFilesLock = &agg.dirtyFilesLock
+	cfg.hist.dirtyFilesLock = &agg.dirtyFilesLock
+	cfg.hist.iiCfg.dirtyFilesLock = &agg.dirtyFilesLock
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	d, err := NewDomain(cfg, aggStep, logger)
 	require.NoError(t, err)
@@ -1057,7 +1066,10 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
-
+	dfM := sync.Mutex{}
+	cfg.dirtyFilesLock = &dfM
+	cfg.hist.dirtyFilesLock = &dfM
+	cfg.hist.iiCfg.dirtyFilesLock = &dfM
 	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {
 		panic(err)
