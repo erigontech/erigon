@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/google/go-cmp/cmp"
-	lru "github.com/hashicorp/golang-lru/v2"
-
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
@@ -27,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/google/go-cmp/cmp"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type Generator struct {
@@ -53,7 +52,7 @@ type ReceiptEnv struct {
 	usedBlobGas *uint64
 	gp          *core.GasPool
 	noopWriter  *state.NoopWriter
-	getHeader   func(hash common.Hash, number uint64) *types.Header
+	getHeader   func(hash common.Hash, number uint64) (*types.Header, error)
 	header      *types.Header
 }
 
@@ -118,12 +117,12 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 
 	noopWriter := state.NewNoopWriter()
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		h, e := g.blockReader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
 		}
-		return h
+		return h, e
 	}
 	return &ReceiptEnv{
 		ibs:         ibs,
@@ -170,7 +169,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	mu := g.txnExecMutex.lock(txnHash)
 	defer g.txnExecMutex.unlock(mu, txnHash)
 	if receipt, ok := g.receiptCache.Get(txnHash); ok {
-		return receipt, nil
+		if receipt.BlockHash == blockHash { // elegant way to handle reorgs
+			return receipt, nil
+		}
+		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
 	}
 
 	var receipt *types.Receipt
@@ -255,9 +257,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 	//genEnv.ibs.SetTrace(true)
+	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
-		genEnv.ibs.SetTxContext(i)
+		genEnv.ibs.SetTxContext(blockNum, i)
 		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)

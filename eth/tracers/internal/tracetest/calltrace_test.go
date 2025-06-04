@@ -283,7 +283,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		if _, err = tracer.GetResult(); err != nil {
 			b.Fatal(err)
 		}
-		statedb.RevertToSnapshot(snap)
+		statedb.RevertToSnapshot(snap, nil)
 	}
 }
 

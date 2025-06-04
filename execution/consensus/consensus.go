@@ -208,10 +208,10 @@ type PoW interface {
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
 func Transfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) error {
 	if !bailout {
-		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
 		if err != nil {
 			return err
 		}
 	}
-	return db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	return db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
 }

@@ -28,8 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/version"
-
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -46,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type History struct {
@@ -419,6 +418,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
 
+	seq := &multiencseq.SequenceReader{}
+
 	i := 0
 	for {
 		histReader.Reset(0)
@@ -432,7 +433,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
-			seq := multiencseq.ReadMultiEncSeq(efBaseTxNum, valBuf)
+			seq.Reset(efBaseTxNum, valBuf)
 			it := seq.Iterator(0)
 			for it.HasNext() {
 				txNum, err := it.Next()

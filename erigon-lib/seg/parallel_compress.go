@@ -306,12 +306,21 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var numBuf [binary.MaxVarintLen64]byte
 	totalWords := uncompressedFile.count
 
+	ii := 0
 	if err = uncompressedFile.ForEach(func(v []byte, compression bool) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		ii++
+		if ii%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				if lvl < log.LvlTrace {
+					logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "queue", compressionQueue.Len(), "workers", cfg.Workers)
+				}
+			default:
+			}
 		}
+
 		if cfg.Workers > 1 {
 			// take processed words in non-blocking way and push them to the queue
 		outer:
@@ -397,13 +406,6 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			emptyWordsCount++
 		}
 
-		select {
-		case <-logEvery.C:
-			if lvl < log.LvlTrace {
-				logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "queue", compressionQueue.Len(), "workers", cfg.Workers)
-			}
-		default:
-		}
 		return nil
 	}); err != nil {
 		return err
@@ -910,12 +912,14 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				break
 			}
 		}
+
+		superStringsPool.Put(superstring)
 	}
 }
 
 func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
 	t := time.Now()
-	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger)
+	dictCollector := etl.NewCollectorWithAllocator(logPrefix+"_collectDict", tmpDir, etl.LargeSortableBuffers, logger)
 	defer dictCollector.Close()
 	dictCollector.SortAndFlushInBackground(true)
 	dictCollector.LogLvl(lvl)

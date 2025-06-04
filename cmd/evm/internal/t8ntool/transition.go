@@ -284,17 +284,15 @@ func Main(ctx *cli.Context) error {
 	}
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
-	var hashError error
-	getHash := func(num uint64) common.Hash {
+	getHash := func(num uint64) (common.Hash, error) {
 		if prestate.Env.BlockHashes == nil {
-			hashError = fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
-			return common.Hash{}
+			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
 		}
 		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
 		if !ok {
-			hashError = fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
+			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
 		}
-		return h
+		return h, nil
 	}
 
 	db := temporaltest.NewTestDB(nil, datadir.New(""))
@@ -327,9 +325,6 @@ func Main(ctx *cli.Context) error {
 	t8logger := log.New("t8ntool")
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
-	if hashError != nil {
-		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
-	}
 
 	if err != nil {
 		return fmt.Errorf("error on EBE: %w", err)
@@ -430,19 +425,30 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	commonTx.R.SetFromBig(txJson.R.ToInt())
 	commonTx.S.SetFromBig(txJson.S.ToInt())
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
-		legacyTx := types.LegacyTx{
-			//it's ok to copy here - because it's constructor of object - no parallel access yet
-			CommonTx: commonTx, //nolint
-			GasPrice: gasPrice,
-		}
-
 		if txJson.Type == types.LegacyTxType {
-			return &legacyTx, nil
+			return &types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				GasPrice: gasPrice,
+			}, nil
 		}
 
 		return &types.AccessListTx{
-			//it's ok to copy here - because it's constructor of object - no parallel access yet
-			LegacyTx:   legacyTx, //nolint
+			LegacyTx: types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				GasPrice: gasPrice,
+			},
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
@@ -463,17 +469,20 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			}
 		}
 
-		dynamicFeeTx := types.DynamicFeeTransaction{
-			//it's ok to copy here - because it's constructor of object - no parallel access yet
-			CommonTx:   commonTx, //nolint
-			ChainID:    chainId,
-			TipCap:     tipCap,
-			FeeCap:     feeCap,
-			AccessList: *txJson.Accesses,
-		}
-
 		if txJson.Type == types.DynamicFeeTxType {
-			return &dynamicFeeTx, nil
+			return &types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				ChainID:    chainId,
+				TipCap:     tipCap,
+				FeeCap:     feeCap,
+				AccessList: *txJson.Accesses,
+			}, nil
 		}
 
 		auths := make([]types.Authorization, 0)
@@ -487,8 +496,20 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 
 		return &types.SetCodeTransaction{
 			// it's ok to copy here - because it's constructor of object - no parallel access yet
-			DynamicFeeTransaction: dynamicFeeTx, //nolint
-			Authorizations:        auths,
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				ChainID:    chainId,
+				TipCap:     tipCap,
+				FeeCap:     feeCap,
+				AccessList: *txJson.Accesses,
+			},
+			Authorizations: auths,
 		}, nil
 	} else {
 		return nil, nil

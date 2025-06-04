@@ -869,16 +869,15 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 }
 
 func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
-	r, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ms.Ctx, ms.BlockReader)),
-		blockNum, 0, ms.ChainConfig.ChainName)
+	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ms.Ctx, ms.BlockReader)))
 	if err != nil {
 		panic(err)
 	}
 	return r
 }
 
-func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
-	return state.NewReaderV3(tx.(kv.TemporalGetter))
+func (ms *MockSentry) NewStateReader(tx kv.TemporalGetter) state.StateReader {
+	return state.NewReaderV3(tx)
 }
 
 func (ms *MockSentry) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
