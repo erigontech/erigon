@@ -18,6 +18,7 @@ package state
 
 import (
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -59,21 +60,34 @@ func (cr *CachedReader) ReadAccountDataForDebug(address common.Address) (*accoun
 }
 
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
-func (cr *CachedReader) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (cr *CachedReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	addrBytes := address.Bytes()
 	if s, ok := cr.cache.GetStorage(addrBytes, 1, key.Bytes()); ok {
-		return s, nil
+		var v uint256.Int
+		(&v).SetBytes(s)
+		return v, true, nil
 	}
-	v, err := cr.r.ReadAccountStorage(address, key)
+	v, ok, err := cr.r.ReadAccountStorage(address, key)
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
-	if len(v) == 0 {
+	if !ok {
 		cr.cache.SetStorageAbsent(addrBytes, 1, key.Bytes())
 	} else {
-		cr.cache.SetStorageRead(addrBytes, 1, key.Bytes(), v)
+		cr.cache.SetStorageRead(addrBytes, 1, key.Bytes(), v.Bytes())
 	}
-	return v, nil
+	return v, ok, nil
+}
+
+func (cr *CachedReader) HasStorage(address common.Address) (bool, error) {
+	// note: theoretically we could try to use the cache here using cr.cache.StorageTree
+	// to traverse the cached storage, however that will be only useful in case of a
+	// collision (ie creating an account which already has storage as per eip-7610) which
+	// in reality is very rare; for all the other most likely situations in which we query
+	// if an account has storage (and that account is newly created and doesn't have storage)
+	// the cache will say that there is no known storage in which case we will still need to
+	// check in the DB to be absolutely sure anyway (this deems such an "optimisation" useless)
+	return cr.r.HasStorage(address)
 }
 
 // ReadAccountCode is called when code of an account needs to be fetched from the state

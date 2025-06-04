@@ -58,8 +58,8 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 		return nil, err
 	}
 
-	a.AddDependency(kv.AccountsDomain, kv.CommitmentDomain)
-	a.AddDependency(kv.StorageDomain, kv.CommitmentDomain)
+	a.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
+	a.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
 
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 
@@ -323,8 +323,8 @@ var DomainCompressCfg = seg.Cfg{
 	DictReducerSoftLimit: 2000000,
 	MinPatternLen:        20,
 	MaxPatternLen:        128,
-	SamplingFactor:       4,
-	MaxDictPatterns:      64 * 1024 * 2,
+	SamplingFactor:       1,
+	MaxDictPatterns:      64 * 1024,
 	Workers:              1,
 }
 

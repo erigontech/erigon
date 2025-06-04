@@ -49,6 +49,9 @@ import (
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
 var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
+var BorDefaultMinerGasLimit uint64 = 45_000_000
+
+var DefaultMinerGasLimit uint64 = 36_000_000
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -91,7 +94,6 @@ var Defaults = Config{
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
-		GasLimit: 36_000_000,
 		GasPrice: big.NewInt(common.GWei),
 		Recommit: 3 * time.Second,
 	},
@@ -242,7 +244,7 @@ type Config struct {
 	// Consensus layer
 	InternalCL bool
 
-	OverridePragueTime *big.Int `toml:",omitempty"`
+	OverrideOsakaTime *big.Int `toml:",omitempty"`
 
 	// Embedded Silkworm support
 	SilkwormExecution            bool

@@ -25,7 +25,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -184,6 +183,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	if err != nil {
 		return err
 	}
+	a.AddDependencyBtwnHistoryII(name)
 	return nil
 }
 
@@ -238,7 +238,12 @@ func (a *Aggregator) ReloadSalt() error {
 	return nil
 }
 
-func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
+func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
+	dd := a.d[dependent]
+	if dd.disable || a.d[dependency].disable {
+		a.logger.Info("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
+		return
+	}
 	// "hard alignment":
 	// only corresponding files should be included. e.g. commitment + account -
 	// cannot have merged account visibleFile, and unmerged commitment visibleFile for same step range.
@@ -246,12 +251,37 @@ func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
 		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
 	}
 
-	a.checker.AddDependency(dependency, &DependentInfo{
-		domain:      dependent,
-		filesGetter: func() *btree.BTreeG[*filesItem] { return a.d[dependent].dirtyFiles },
-		accessors:   a.d[dependent].Accessors,
+	ue := FromDomain(dependent)
+	a.checker.AddDependency(ue, &DependentInfo{
+		entity:      ue,
+		filesGetter: func() *btree.BTreeG[*filesItem] { return dd.dirtyFiles },
+		accessors:   dd.Accessors,
 	})
-	a.d[dependency].SetDependency(a.checker)
+	dd.SetChecker(a.checker)
+}
+
+func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
+	// ii has checker on history dirtyFiles (same domain)
+	dd := a.d[domain]
+	if dd.histCfg.snapshotsDisabled || dd.histCfg.historyDisabled || dd.disable {
+		a.logger.Info("history or ii disabled, can't register dependency", "domain", domain.String())
+		return
+	}
+
+	if a.checker == nil {
+		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+	}
+
+	h := dd.History
+	ue := FromII(dd.InvertedIndex.iiCfg.name)
+	a.checker.AddDependency(ue, &DependentInfo{
+		entity: ue,
+		filesGetter: func() *btree.BTreeG[*filesItem] {
+			return h.dirtyFiles
+		},
+		accessors: h.Accessors,
+	})
+	h.InvertedIndex.SetChecker(a.checker)
 }
 
 func (a *Aggregator) EnableAllDependencies() {
@@ -286,6 +316,10 @@ func (a *Aggregator) OpenFolder() error {
 func (a *Aggregator) openFolder() error {
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
+		if d.disable {
+			continue
+		}
+
 		d := d
 		eg.Go(func() error {
 			select {
@@ -297,6 +331,9 @@ func (a *Aggregator) openFolder() error {
 		})
 	}
 	for _, ii := range a.iis {
+		if ii.disable {
+			continue
+		}
 		ii := ii
 		eg.Go(func() error { return ii.openFolder() })
 	}
@@ -305,6 +342,13 @@ func (a *Aggregator) openFolder() error {
 	}
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 	return nil
+}
+
+func (a *Aggregator) ReloadFiles() error {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.closeDirtyFiles()
+	return a.openFolder()
 }
 
 func (a *Aggregator) OpenList(files []string, readonly bool) error {
@@ -386,7 +430,7 @@ func (at *AggregatorRoTx) StepSize() uint64                    { return at.a.Ste
 func (a *Aggregator) Files() []string {
 	ac := a.BeginFilesRo()
 	defer ac.Close()
-	return ac.AllFiles().Names()
+	return ac.AllFiles().Fullpaths()
 }
 func (a *Aggregator) LS() {
 	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {
@@ -736,7 +780,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		a.cleanAfterMerge(nil)
-		// TODO: add files notification here too.
 		return false, nil
 	}
 
@@ -978,13 +1021,24 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		case <-localTimeout.C: //must be first to improve responsivness
 			return true, nil
 		case <-logEvery.C:
-			at.a.logger.Info("[snapshots] pruning state",
-				"until commit", time.Until(started.Add(timeout)).String(),
-				"pruneLimit", pruneLimit,
-				"aggregatedStep", at.StepsInFiles(kv.StateDomains...),
-				"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
-				"pruned", fullStat.String(),
-			)
+			if furiousPrune {
+				at.a.logger.Info("[prune] state",
+					//"until commit", time.Until(started.Add(timeout)).String(),
+					//"pruneLimit", pruneLimit,
+					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
+					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
+					//"pruned", fullStat.String(),
+				)
+			} else {
+				at.a.logger.Info("[prune] state",
+					"until commit", time.Until(started.Add(timeout)).String(),
+					//"pruneLimit", pruneLimit,
+					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
+					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
+					//"pruned", fullStat.String(),
+				)
+			}
+
 		case <-ctx.Done():
 			return false, ctx.Err()
 		default:
@@ -1257,6 +1311,9 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		}
 	}
 	for id, d := range at.d {
+		if d.d.disable {
+			continue
+		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
@@ -1266,11 +1323,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		restorePrevRange := false
 		for k, dr := range &r.domain {
 			kd := kv.Domain(k)
-			if !slices.Contains(kv.StateDomains, kd) {
+			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
 			}
-
-			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
+			if !(kd == kv.AccountsDomain || kd == kv.StorageDomain || kd == kv.CommitmentDomain) {
 				continue
 			}
 			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
@@ -1297,6 +1353,9 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 	}
 
 	for id, ii := range at.iis {
+		if ii.ii.disable {
+			continue
+		}
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
@@ -1326,6 +1385,9 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
+		if at.d[id].d.disable {
+			continue
+		}
 		if !r.domain[id].any() {
 			continue
 		}
@@ -1360,6 +1422,10 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	}
 
 	for id, rng := range r.invertedIndex {
+		if at.iis[id].ii.disable {
+			continue
+		}
+
 		if !rng.needMerge {
 			continue
 		}
@@ -1387,10 +1453,16 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
+		if d.disable {
+			continue
+		}
 		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
 	for id, ii := range a.iis {
+		if ii.disable {
+			continue
+		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
 
@@ -1405,6 +1477,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range at.d {
+		if d.d.disable {
+			continue
+		}
 		if in == nil {
 			d.cleanAfterMerge(nil, nil, nil)
 		} else {
@@ -1412,6 +1487,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 		}
 	}
 	for id, ii := range at.iis {
+		if ii.ii.disable {
+			continue
+		}
 		if in == nil {
 			ii.cleanAfterMerge(nil)
 		} else {
@@ -1613,7 +1691,9 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 		ac.iis[id] = ii.BeginFilesRo()
 	}
 	for id, d := range a.d {
-		ac.d[id] = d.BeginFilesRo()
+		if d != nil {
+			ac.d[id] = d.BeginFilesRo()
+		}
 	}
 	a.visibleFilesLock.RUnlock()
 
@@ -1644,7 +1724,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.d[domain].GetLatest(k, tx)
 }
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, uint64, bool, error) {
-	return at.d[domain].getLatestFromDB(key, tx)
+	return at.d[domain].getLatestFromDb(key, tx)
 }
 func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return at.d[domain].getLatestFromFiles(k, maxTxNum)

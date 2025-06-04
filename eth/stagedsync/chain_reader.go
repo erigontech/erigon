@@ -33,7 +33,7 @@ import (
 
 // ChainReader implements consensus.ChainReader
 type ChainReader struct {
-	Cfg         chain.Config
+	Cfg         *chain.Config
 	Db          kv.Tx
 	BlockReader services.FullBlockReader
 	Logger      log.Logger
@@ -41,7 +41,7 @@ type ChainReader struct {
 
 // Config retrieves the blockchain's chain configuration.
 func (cr ChainReader) Config() *chain.Config {
-	return &cr.Cfg
+	return cr.Cfg
 }
 
 // CurrentHeader retrieves the current header from the local chain.

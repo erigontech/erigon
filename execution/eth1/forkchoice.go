@@ -43,7 +43,7 @@ import (
 // This is the range in which we sanity check and potentially fix the canonical chain if it is broken.
 // a broken canonical chain is very dangerous, as it can lead to a situation where the RPC and snapshots break down.
 // better to have an hack than to regenerate all chains.
-const fixCanonicalFailsafeRange = 512
+const fixCanonicalFailsafeRange = 16
 
 const startPruneFrom = 1024
 
@@ -202,12 +202,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 }
 
 func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
-	casted, ok := tx.(state.HasAggTx)
-	if !ok {
-		return 0, errors.New("tx does not support state.HasAggTx")
-	}
-	return casted.AggTx().(*state.AggregatorRoTx).CanUnwindToBlockNum(tx)
-
+	return state.AggTx(tx).CanUnwindToBlockNum(tx)
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {

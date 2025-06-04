@@ -76,6 +76,8 @@ type InvertedIndex struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *iiVisible
 	logger   log.Logger
+
+	checker *DependencyIntegrityChecker
 }
 
 type iiCfg struct {
@@ -164,7 +166,7 @@ func filesFromDir(dir string) ([]string, error) {
 	}
 	filtered := make([]string, 0, len(allFiles))
 	for _, f := range allFiles {
-		if f.IsDir() || !f.Type().IsRegular() {
+		if f.IsDir() || (!f.Type().IsRegular() && f.Type()&os.ModeSymlink == 0) {
 			continue
 		}
 		if strings.HasPrefix(f.Name(), ".") { // hidden files
@@ -224,6 +226,10 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 }
 
+func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
+	ii.checker = checker
+}
+
 type Accessors = ee.Accessors
 
 const (
@@ -233,7 +239,15 @@ const (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, nil, false, toTxNum))
+	var checker func(startTxNum, endTxNum uint64) bool
+	c := ii.checker
+	if c != nil {
+		ue := FromII(ii.name)
+		checker = func(startTxNum, endTxNum uint64) bool {
+			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+		}
+	}
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {

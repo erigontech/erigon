@@ -594,6 +594,8 @@ type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
 	ReloadSalt() error
+	BuildMissedAccessors(ctx context.Context, workers int) error
+	ReloadFiles() error
 }
 
 type WithFreezeInfo interface {

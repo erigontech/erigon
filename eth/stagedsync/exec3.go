@@ -241,10 +241,12 @@ func ExecV3(ctx context.Context,
 	if !inMemExec && !isMining {
 		if initialCycle {
 			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+			agg.SetMergeWorkers(min(1, estimate.StateV3Collate.Workers()))
 			agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		} else {
-			agg.SetCompressWorkers(1)
 			agg.SetCollateAndBuildWorkers(1)
+			agg.SetMergeWorkers(1)
+			agg.SetCompressWorkers(1)
 		}
 	}
 
@@ -506,7 +508,7 @@ Loop:
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header) {
+		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return executor.getHeader(ctx, hash, number)
