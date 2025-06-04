@@ -168,29 +168,38 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-lib:
-	@cd erigon-lib && $(MAKE) test
+test-erigon-lib-short:
+	@cd erigon-lib && $(MAKE) test-short
 
 test-erigon-lib-all:
 	@cd erigon-lib && $(MAKE) test-all
 
-test-erigon-db:
-	@cd erigon-db && $(MAKE) test
+test-erigon-lib-all-race:
+	@cd erigon-lib && $(MAKE) test-all-race
+
+test-erigon-db-short:
+	@cd erigon-db && $(MAKE) test-short
 
 test-erigon-db-all:
 	@cd erigon-db && $(MAKE) test-all
 
-test-p2:
-	@cd p2p && $(MAKE) test
+test-erigon-db-all-race:
+	@cd erigon-db && $(MAKE) test-all-race
+
+test-p2-short:
+	@cd p2p && $(MAKE) test-short
 
 test-p2p-all:
 	@cd p2p && $(MAKE) test-all
 
+test-p2p-all-race:
+	@cd p2p && $(MAKE) test-all-race
+
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
-## test:                      run short tests with a 10m timeout
-test: test-erigon-lib test-erigon-db test-p2
+## test-short:                run short tests with a 10m timeout
+test-short: test-erigon-lib-short test-erigon-db-short test-p2-short
 	@{ \
 		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
 		STATUS=$$?; \
@@ -200,6 +209,15 @@ test: test-erigon-lib test-erigon-db test-p2
 
 ## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all test-erigon-db-all test-p2p-all
+	@{ \
+		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
+
+## test-all-race:             run all tests with the race flag
+test-all-race: test-erigon-lib-all-race test-erigon-db-all-race test-p2p-all-race
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
 		STATUS=$$?; \

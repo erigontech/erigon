@@ -79,7 +79,7 @@ jobs:
         
       - name: Run all tests on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-all
+        run: GOGC=80 make test-all-race
 
       - name: SonarCloud
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
