@@ -492,8 +492,9 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	if d.checker != nil {
+		ue := FromDomain(d.name)
 		checker = func(startTxNum, endTxNum uint64) bool {
-			return d.checker.CheckDependentPresent(d.name, All, startTxNum, endTxNum)
+			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
 	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
