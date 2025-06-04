@@ -212,7 +212,7 @@ func makeDecoder(typ reflect.Type, tags tags) (dec decoder, err error) {
 	case isUint(kind):
 		return decodeUint, nil
 	case isInt(kind):
-		return decodeInt, nil	
+		return decodeInt, nil
 	case kind == reflect.Bool:
 		return decodeBool, nil
 	case kind == reflect.String:
