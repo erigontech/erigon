@@ -30,7 +30,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -78,7 +77,7 @@ func prepareLoremDictOnPagedWriter(t *testing.T, sampling int, pageCompression b
 	wr := NewWriter(c, CompressNone)
 	defer wr.Close()
 
-	p := page.NewWriter(wr, sampling, pageCompression)
+	p := NewPagedWriter(wr, sampling, pageCompression)
 	for k, w := range loremStrings {
 		key := fmt.Sprintf("key %d", k)
 		val := fmt.Sprintf("%s %d", w, k)
