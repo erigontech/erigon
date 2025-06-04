@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader"
@@ -62,6 +63,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
@@ -232,6 +234,13 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&cli.PathFlag{Name: "src", Required: true},
 				&cli.StringFlag{Name: "key", Required: true},
+			}),
+		},
+		{
+			Name:   "explore-tx",
+			Action: doExploreTx,
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag,
+				&SnapshotFileFlag,
 			}),
 		},
 		{
@@ -556,6 +565,79 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
 
 	return nil
+}
+
+func doExploreTx(cliCtx *cli.Context) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
+	freezeCfg := ethconfig.Defaults.Snapshot
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	snaps := freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, logger)
+	if err = snaps.OpenFolder(); err != nil {
+		return err
+	}
+
+	res, _, ok := snaptype.ParseFileName(dirs.Snap, cliCtx.String(SnapshotFileFlag.Name))
+	if !ok {
+		return fmt.Errorf("invalid snapshot file name: %s", cliCtx.String(SnapshotFileFlag.Name))
+	}
+	queryFrom, queryTo := res.From, res.To
+	view := snaps.View()
+	defer view.Close()
+	if len(view.Txs()) == 0 {
+		return fmt.Errorf("no transactions in %s", res.Path)
+	}
+	found := false
+	for _, seg := range view.Txs() {
+		if seg.Range.From() != queryFrom || seg.Range.To() != queryTo {
+			continue
+		}
+
+		found = true
+		txnHashIdx := seg.Src().Index(coresnaptype.Indexes.TxnHash)
+		startTxNum := txnHashIdx.BaseDataID()
+		//endTxNum := startTxNum + txnHashIdx.KeyCount()
+
+		// print above info
+		fmt.Printf("Transactions in %s:\n", res.Path)
+		fmt.Printf("From: %d, To: %d, TxCount(-): %d, BaseDataId: %d\n", queryFrom, queryTo, txnHashIdx.KeyCount(), startTxNum)
+
+		gg := seg.Src().MakeGetter()
+		gg.Reset(0)
+		var buf []byte
+		offset := uint64(0)
+		i := uint64(0)
+
+		for gg.HasNext() {
+			buf, offset = gg.Next(buf[:0])
+			if len(buf) < 1+20 {
+				offset2 := txnHashIdx.OrdinalLookup(i)
+				fmt.Println("invalid transaction length:", len(buf), "offset:", offset, "offset2:", offset2, "index", i)
+				//return fmt.Errorf("invalid transaction length: %d, offset: %d, %d", len(buf), offset, offset2)
+			} else {
+				fmt.Println("TxHash:", hexutil.Encode(buf[:1]), "Offset:", offset, "index", i)
+			}
+
+			if i == 1537637 || i == 1537636 {
+				fmt.Println("txhash (first byte):", hexutil.Encode(buf[:1]), "sender", hexutil.Encode(buf[1:21]), "txnrlp", hexutil.Encode(buf[21:]))
+				txd, err := types.DecodeTransaction(buf[21:])
+				if err != nil {
+					return fmt.Errorf("failed to decode transaction: %w", err)
+				}
+				fmt.Println("Decoded Transaction:", txd)
+			}
+
+			i++
+		}
+	}
+	if !found {
+		return fmt.Errorf("no transactions file found in %s for range %d-%d", res.Path, queryFrom, queryTo)
+	}
+
+	return nil
+
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
