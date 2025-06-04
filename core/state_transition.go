@@ -264,10 +264,8 @@ func CheckEip1559TxGasFeeCap(from common.Address, feeCap, tipCap, baseFee *uint2
 		return fmt.Errorf("%w: address %v, tipCap: %s, feeCap: %s", ErrTipAboveFeeCap,
 			from.Hex(), tipCap, feeCap)
 	}
-	// 'gasfeecap' and 'baseFee' are passed out of our RPC API - changing them will result
-	// in a breaking change to the API
 	if baseFee != nil && feeCap.Lt(baseFee) && !isFree {
-		return fmt.Errorf("%w: address %v, gasfeecap: %s baseFee: %s", ErrFeeCapTooLow,
+		return fmt.Errorf("%w: address %v, feeCap: %s baseFee: %s", ErrFeeCapTooLow,
 			from.Hex(), feeCap, baseFee)
 	}
 	return nil
