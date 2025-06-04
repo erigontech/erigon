@@ -27,6 +27,7 @@ const (
 	CapellaVersion   StateVersion = 3
 	DenebVersion     StateVersion = 4
 	ElectraVersion   StateVersion = 5
+	FuluVersion      StateVersion = 6
 )
 
 func (v StateVersion) String() string {
