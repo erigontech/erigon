@@ -22,7 +22,6 @@ package native
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/big"
 	"sync/atomic"
 
