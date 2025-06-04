@@ -341,16 +341,17 @@ func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
 // Mostly useful for testing
 func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed seg.FileCompression, trace bool) (*seg.Decompressor, *BtIndex, error) {
-	kv, err := seg.NewDecompressor(dataPath)
+	d, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, nil, err
 	}
-	bt, err := OpenBtreeIndexWithDecompressor(indexPath, M, kv, compressed)
+	kv := seg.NewReader(d.MakeGetter(), compressed)
+	bt, err := OpenBtreeIndexWithDecompressor(indexPath, M, kv)
 	if err != nil {
-		kv.Close()
+		d.Close()
 		return nil, nil, err
 	}
-	return kv, bt, nil
+	return d, bt, nil
 }
 
 func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors Accessors) error {
@@ -358,7 +359,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
-	defer kv.MadvSequential().DisableReadAhead()
+	defer kv.MadvNormal().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
 	var bloom *existence.Filter
