@@ -36,7 +36,7 @@ func chargeGas(
 	}
 
 	if balance.Cmp(preCharge) < 0 {
-		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", core.ErrInsufficientFunds, chargeFrom.Hex(), balance, preCharge)
+		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", core.ErrInsufficientFunds, chargeFrom.Hex(), &balance, preCharge)
 	}
 
 	if err := ibs.SubBalance(*chargeFrom, *preCharge, 0); err != nil {
