@@ -1577,6 +1577,9 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 	// then use txnHashIdx + transactions.seg to find the txHash
 	// then use txHash and txn2BlockId index to return blockNum..
 
+	// IDEA: alternate way to do this was to enable Enums=true in txn2BlockId index...
+	// then we get directly get blocNum from txNum... (without touch txs.seg)
+
 	var buf []byte
 	view := t.r.Snapshots().(*RoSnapshots).View()
 	defer view.Close()
