@@ -424,7 +424,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 							//return false
 						}
 					}
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, d.Compression); err != nil {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -1266,7 +1266,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
+	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
 }
 
 func (d *Domain) MissedBtreeAccessors() (l []*filesItem) {
@@ -1307,7 +1307,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			idxPath := d.kvBtAccessorFilePath(fromStep, toStep)
-			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, d.Compression, ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil
@@ -1320,7 +1320,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		item := item
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			err := d.buildHashMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
+			err := d.buildHashMapAccessor(ctx, fromStep, toStep, d.dataReader(item.decompressor), ps)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
@@ -1335,16 +1335,16 @@ func BuildHashMapAccessor(ctx context.Context, d *seg.Reader, idxPath string, va
 	return buildHashMapAccessor(ctx, d, idxPath, values, cfg, ps, logger)
 }
 
-func buildHashMapAccessor(ctx context.Context, d *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	_, fileName := filepath.Split(idxPath)
-	count := d.Count()
+	count := g.Count()
 	if !values {
-		count = d.Count() / 2
+		count = g.Count() / 2
 	}
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
 
-	defer d.MadvSequential().DisableReadAhead()
+	defer g.MadvNormal().DisableReadAhead()
 
 	var rs *recsplit.RecSplit
 	var err error

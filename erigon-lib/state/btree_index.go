@@ -424,7 +424,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 }
 
 // For now, M is not stored inside index file.
-func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress seg.FileCompression) (bt *BtIndex, err error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Reader) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
 	}
@@ -474,8 +474,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
-	defer kv.MadvNormal().DisableReadAhead()
-	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
+	defer kvGetter.MadvNormal().DisableReadAhead()
 
 	if len(idx.data[pos:]) == 0 {
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
