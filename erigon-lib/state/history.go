@@ -645,11 +645,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		}
 	}()
 
-	_histComp, err = seg.NewCompressor(ctx, "collate hist "+h.filenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
-	if err != nil {
-		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
-	}
-
 	keysCursor, err := roTx.CursorDupSort(h.keysTable)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
@@ -696,14 +691,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		defer cd.Close()
 	}
 
-	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
-	if err != nil {
-		return HistoryCollation{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
-	}
-	if h.noFsync {
-		_efComp.DisableFsync()
-	}
-
 	var (
 		keyBuf  = make([]byte, 0, 256)
 		numBuf  = make([]byte, 8)
@@ -719,6 +706,22 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	cnt := 0
 	var histKeyBuf []byte
 	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
+
+	_histComp, err = seg.NewCompressor(ctx, "collate hist "+h.filenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	if err != nil {
+		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
+	}
+	if h.noFsync {
+		_histComp.DisableFsync()
+	}
+	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	if err != nil {
+		return HistoryCollation{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
+	}
+	if h.noFsync {
+		_efComp.DisableFsync()
+	}
+
 	historyWriter := h.dataWriter(_histComp)
 	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // coll+build must be fast - no Compression
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
