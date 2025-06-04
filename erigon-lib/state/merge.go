@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -771,11 +770,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}
-		compr := seg.NewWriter(comp, ht.h.Compression)
 		if ht.h.noFsync {
-			compr.DisableFsync()
+			comp.DisableFsync()
 		}
-		pagedWr := page.NewWriter(compr, ht.h.historyValuesOnCompressedPage, true)
+		pagedWr := ht.datarWriter(comp)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
@@ -843,13 +841,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}
-		if err := pagedWr.Flush(); err != nil {
+		if err := pagedWr.Compress(); err != nil {
 			return nil, nil, err
 		}
-		if err = compr.Compress(); err != nil {
-			return nil, nil, err
-		}
-		compr.Close()
+		comp.Close()
 		comp = nil
 		if decomp, err = seg.NewDecompressor(datPath); err != nil {
 			return nil, nil, err

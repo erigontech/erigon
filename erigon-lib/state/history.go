@@ -33,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -650,7 +649,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
-	historyComp = seg.NewWriter(comp, h.Compression)
 
 	keysCursor, err := roTx.CursorDupSort(h.keysTable)
 	if err != nil {
@@ -722,7 +720,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	cnt := 0
 	var histKeyBuf []byte
 	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
-	historyWriter := page.NewWriter(historyComp, h.historyValuesOnCompressedPage, true)
+	historyWriter := h.dataWriter(comp)
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
 		if !initialized {
@@ -1246,7 +1244,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if ht.h.historyValuesOnCompressedPage > 1 {
-		v, ht.snappyReadBuffer = page.Get(historyKey, v, ht.snappyReadBuffer, true)
+		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
 	}
 	return v, true, nil
 }
