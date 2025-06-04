@@ -510,10 +510,11 @@ func validateSnapshots[T Entity](
 			}
 
 			accumulatedErr = fmt.Errorf("%w: snap [%d, %d)", accumulatedErr, expectedId, entity.RawId())
-			expectedId = entity.RawId() + 1
 			if failFast {
 				return accumulatedErr
 			}
+
+			expectedId = entity.RawId() + 1
 		}
 	}
 
