@@ -211,10 +211,7 @@ func ExecuteTraceTx(
 
 	result, err := execCb(evm, refunds)
 	if err != nil {
-		if streaming {
-			stream.WriteArrayEnd()
-			stream.WriteObjectEnd()
-		} else {
+		if !streaming {
 			stream.WriteNil()
 		}
 		return fmt.Errorf("tracing failed: %w", err)
