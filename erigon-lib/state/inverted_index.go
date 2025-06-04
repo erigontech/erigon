@@ -258,11 +258,17 @@ func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, p
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 	return ii.buildMapAccessor(ctx, fromStep, toStep, ii.dataReader(item.decompressor), ps)
 }
+func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
+	return seg.NewReader(f.MakeGetter(), ii.Compression)
+}
+func (ii *InvertedIndex) dataWriter(f *seg.Compressor) *seg.Writer {
+	return seg.NewWriter(f, ii.Compression)
+}
 func (iit *InvertedIndexRoTx) dataReader(f *seg.Decompressor) *seg.Reader {
 	return iit.ii.dataReader(f)
 }
-func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
-	return seg.NewReader(f.MakeGetter(), ii.Compression)
+func (iit *InvertedIndexRoTx) dataWriter(f *seg.Decompressor) *seg.Writer {
+	return iit.ii.dataWriter(f)
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
