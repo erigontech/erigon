@@ -421,11 +421,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
 	}
 
-	compression := dt.d.Compression
-	if toStep-fromStep < DomainMinStepsToCompress {
-		compression = seg.CompressNone
-	}
-	kvWriter = seg.NewWriter(kvFile, compression)
+	forceNoCompress := toStep-fromStep < DomainMinStepsToCompress
+	kvWriter = dt.dataWriter(kvFile, forceNoCompress)
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}
@@ -441,7 +438,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
-		g := seg.NewReader(item.decompressor.MakeGetter(), dt.d.Compression)
+		g := dt.dataReader(item.decompressor)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -606,7 +603,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		comp.DisableFsync()
 	}
 
-	write := iit.dataWriter(comp)
+	write := iit.dataWriter(comp, false)
 	p := ps.AddNew(path.Base(datPath), 1)
 	defer ps.Delete(p)
 
@@ -780,13 +777,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		var cp CursorHeap
 		heap.Init(&cp)
 		for _, item := range indexFiles {
-			g := seg.NewReader(item.decompressor.MakeGetter(), ht.h.Compression)
+			g := ht.iit.dataReader(item.decompressor)
 			g.Reset(0)
 			if g.HasNext() {
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.Compression), ht.h.historyValuesOnCompressedPage, true)
+						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.historyValuesOnCompressedPage, true)
 						break
 					}
 				}

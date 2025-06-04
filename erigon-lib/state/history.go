@@ -380,7 +380,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer hist.MadvSequential().DisableReadAhead()
 	defer efHist.MadvSequential().DisableReadAhead()
 
-	iiReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.Compression)
+	iiReader := h.InvertedIndex.dataReader(efHist)
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
@@ -395,7 +395,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		}
 	}
 
-	histReader := seg.NewReader(hist.MakeGetter(), h.Compression)
+	histReader := h.dataReader(hist)
 
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(efHist.Count())/2)
@@ -712,7 +712,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		initialized bool
 	)
-	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no Compression
+	efHistoryComp = h.InvertedIndex.dataWriter(efComp, true) // coll+build must be fast - no Compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
@@ -916,7 +916,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.filenameBase, err)
 	}
 	{
-		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, h.dataReader(efHistoryDecomp), ps); err != nil {
+		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, h.InvertedIndex.dataReader(efHistoryDecomp), ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.filenameBase, err)
 		}
 		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorFilePath(step, step+1)); err != nil {
@@ -968,12 +968,12 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
-func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader     { return ht.h.dataReader(f) }
-func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter { return ht.h.dataWriter(f) }
-
 func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), h.historyValuesOnCompressedPage, true)
 }
+func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader     { return ht.h.dataReader(f) }
+func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter { return ht.h.dataWriter(f) }
+
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	k, err := kv.FirstKey(tx, h.valuesTable)
 	if err != nil {

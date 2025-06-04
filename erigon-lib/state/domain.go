@@ -1645,9 +1645,19 @@ func (dt *DomainRoTx) reusableReader(i int) *seg.Reader {
 	return dt.dataReaders[i]
 }
 
-func (dt *DomainRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return dt.d.dataReader(f) }
 func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 	return seg.NewReader(f.MakeGetter(), d.Compression)
+}
+func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
+	if forceNoCompress {
+		return seg.NewWriter(f, seg.CompressNone)
+	}
+	return seg.NewWriter(f, d.Compression)
+}
+
+func (dt *DomainRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return dt.d.dataReader(f) }
+func (dt *DomainRoTx) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
+	return dt.d.dataWriter(f, forceNoCompress)
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
