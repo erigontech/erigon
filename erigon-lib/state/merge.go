@@ -607,7 +607,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		comp.DisableFsync()
 	}
 
-	write := iit.ii.dataWriter(comp)
+	write := iit.dataWriter(comp)
 	p := ps.AddNew(path.Base(datPath), 1)
 	defer ps.Delete(p)
 
@@ -615,7 +615,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	heap.Init(&cp)
 
 	for _, item := range files {
-		g := iit.ii.dataReader(item.decompressor)
+		g := iit.dataReader(item.decompressor)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
