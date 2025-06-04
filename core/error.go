@@ -110,4 +110,8 @@ var (
 	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
 	// See EIP-3607: Reject transactions from senders with deployed code.
 	ErrSenderNoEOA = errors.New("sender not an eoa")
+
+	// ErrGasLimitTooHigh if the gas limit of a transaction exceeds MaxTxnGasLimit.
+	// See EIP-7825: Transaction Gas Limit Cap.
+	ErrGasLimitTooHigh = errors.New("gas limit too high")
 )
