@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // RollingFinality checker for authority round consensus.
@@ -30,16 +30,16 @@ import (
 type RollingFinality struct {
 	headers    unAssembledHeaders //nolint
 	signers    *SimpleList
-	signCount  map[libcommon.Address]uint
-	lastPushed *libcommon.Hash // Option<H256>,
+	signCount  map[common.Address]uint
+	lastPushed *common.Hash // Option<H256>,
 }
 
 // NewRollingFinality creates a blank finality checker under the given validator set.
-func NewRollingFinality(signers []libcommon.Address) *RollingFinality {
+func NewRollingFinality(signers []common.Address) *RollingFinality {
 	return &RollingFinality{
 		signers:   NewSimpleList(signers),
 		headers:   unAssembledHeaders{l: list.New()},
-		signCount: map[libcommon.Address]uint{},
+		signCount: map[common.Address]uint{},
 	}
 }
 
@@ -62,7 +62,7 @@ func (f *RollingFinality) print(num uint64) {
 
 func (f *RollingFinality) clear() {
 	f.headers = unAssembledHeaders{l: list.New()}
-	f.signCount = map[libcommon.Address]uint{}
+	f.signCount = map[common.Address]uint{}
 	f.lastPushed = nil
 }
 
@@ -70,7 +70,7 @@ func (f *RollingFinality) clear() {
 //
 // Fails if `signer` isn't a member of the active validator set.
 // Returns a list of all newly finalized headers.
-func (f *RollingFinality) push(head libcommon.Hash, num uint64, signers []libcommon.Address) (newlyFinalized []unAssembledHeader, err error) {
+func (f *RollingFinality) push(head common.Hash, num uint64, signers []common.Address) (newlyFinalized []unAssembledHeader, err error) {
 	for i := range signers {
 		if !f.hasSigner(signers[i]) {
 			return nil, errors.New("unknown validator")
@@ -100,7 +100,7 @@ func (f *RollingFinality) isFinalized() bool {
 	}
 	return len(f.signCount)*2 > len(f.signers.validators)
 }
-func (f *RollingFinality) hasSigner(signer libcommon.Address) bool {
+func (f *RollingFinality) hasSigner(signer common.Address) bool {
 	for j := range f.signers.validators {
 		if f.signers.validators[j] == signer {
 			return true
@@ -109,7 +109,7 @@ func (f *RollingFinality) hasSigner(signer libcommon.Address) bool {
 	}
 	return false
 }
-func (f *RollingFinality) addSigners(signers []libcommon.Address) bool {
+func (f *RollingFinality) addSigners(signers []common.Address) bool {
 	for i := range signers {
 		count, ok := f.signCount[signers[i]]
 		if ok {
@@ -120,7 +120,7 @@ func (f *RollingFinality) addSigners(signers []libcommon.Address) bool {
 	}
 	return false
 }
-func (f *RollingFinality) removeSigners(signers []libcommon.Address) {
+func (f *RollingFinality) removeSigners(signers []common.Address) {
 	for i := range signers {
 		count, ok := f.signCount[signers[i]]
 		if !ok {
@@ -134,7 +134,7 @@ func (f *RollingFinality) removeSigners(signers []libcommon.Address) {
 		}
 	}
 }
-func (f *RollingFinality) buildAncestrySubChain(get func(hash libcommon.Hash) ([]libcommon.Address, libcommon.Hash, libcommon.Hash, uint64, bool), parentHash, epochTransitionHash libcommon.Hash) error { // starts from chainHeadParentHash
+func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool), parentHash, epochTransitionHash common.Hash) error { // starts from chainHeadParentHash
 	f.clear()
 
 	for {

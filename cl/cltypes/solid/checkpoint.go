@@ -19,7 +19,7 @@ package solid
 import (
 	"bytes"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -28,8 +28,8 @@ import (
 const CheckpointSizeSSZ = 40
 
 type Checkpoint struct {
-	Epoch uint64         `json:"epoch,string"`
-	Root  libcommon.Hash `json:"root"`
+	Epoch uint64      `json:"epoch,string"`
+	Root  common.Hash `json:"root"`
 }
 
 // EncodingSizeSSZ returns the size of the Checkpoint object when encoded as SSZ.

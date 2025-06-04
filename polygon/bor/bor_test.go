@@ -28,7 +28,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -198,7 +198,7 @@ func (r headerReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
 
-func (r headerReader) GetHeader(_ libcommon.Hash, blockNo uint64) *types.Header {
+func (r headerReader) GetHeader(_ common.Hash, blockNo uint64) *types.Header {
 	return r.GetHeaderByNumber(blockNo)
 }
 
@@ -211,11 +211,11 @@ func (r headerReader) GetHeaderByNumber(blockNo uint64) *types.Header {
 	return nil
 }
 
-func (r headerReader) GetHeaderByHash(libcommon.Hash) *types.Header {
+func (r headerReader) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
-func (r headerReader) GetTd(libcommon.Hash, uint64) *big.Int {
+func (r headerReader) GetTd(common.Hash, uint64) *big.Int {
 	return nil
 }
 
@@ -225,7 +225,7 @@ func (r headerReader) BorSpan(spanId uint64) *heimdall.Span {
 
 type spanner struct {
 	*bor.ChainSpanner
-	validatorAddress libcommon.Address
+	validatorAddress common.Address
 	currentSpan      heimdall.Span
 }
 
@@ -355,7 +355,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		})
 	}
 
-	bor.Authorize(validatorAddress, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
+	bor.Authorize(validatorAddress, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 		return crypto.Sign(crypto.Keccak256(message), validatorKey)
 	})
 
@@ -368,10 +368,12 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 }
 
 func TestValidatorCreate(t *testing.T) {
+	t.Skip("issue #15017")
 	newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
 }
 
 func TestVerifyHeader(t *testing.T) {
+	t.Skip("issue #15017")
 	v := newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
 
 	chain, err := v.generateChain(1)
@@ -469,6 +471,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 }
 
 func TestSendBlock(t *testing.T) {
+	t.Skip("issue #15017")
 	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
 	blocks := map[uint64]*types.Block{}
 

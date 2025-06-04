@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/transition"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -47,13 +47,13 @@ type attestationProducer struct {
 
 	attCacheMutex              sync.RWMutex
 	attestationsCache          *lru.CacheWithTTL[uint64, solid.AttestationData] // Epoch => Base AttestationData
-	blockRootsUsedForSlotCache *lru.Cache[uint64, libcommon.Hash]               // Slot => BlockRoot
+	blockRootsUsedForSlotCache *lru.Cache[uint64, common.Hash]                  // Slot => BlockRoot
 }
 
 func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
 	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second / 2
 	attestationsCache := lru.NewWithTTL[uint64, solid.AttestationData]("attestations", attestationsCacheSize, ttl)
-	blockRootsUsedForSlotCache, err := lru.New[uint64, libcommon.Hash]("blockRootsUsedForSlot", attestationsCacheSize)
+	blockRootsUsedForSlotCache, err := lru.New[uint64, common.Hash]("blockRootsUsedForSlot", attestationsCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -65,14 +65,14 @@ func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) Attestation
 	return p
 }
 
-func (ap *attestationProducer) beaconBlockRootForSlot(baseState *state.CachingBeaconState, baseBlockRoot libcommon.Hash, slot uint64) (libcommon.Hash, error) {
+func (ap *attestationProducer) beaconBlockRootForSlot(baseState *state.CachingBeaconState, baseBlockRoot common.Hash, slot uint64) (common.Hash, error) {
 	if blockRoot, ok := ap.blockRootsUsedForSlotCache.Get(slot); ok {
 		return blockRoot, nil
 	}
 	if baseState.Slot() > slot {
 		blockRoot, err := baseState.GetBlockRootAtSlot(slot)
 		if err != nil {
-			return libcommon.Hash{}, fmt.Errorf("failed to get block root at slot %d: %w", slot, err)
+			return common.Hash{}, fmt.Errorf("failed to get block root at slot %d: %w", slot, err)
 		}
 		ap.blockRootsUsedForSlotCache.Add(slot, blockRoot)
 		return blockRoot, nil
@@ -81,17 +81,17 @@ func (ap *attestationProducer) beaconBlockRootForSlot(baseState *state.CachingBe
 	return baseBlockRoot, nil
 }
 
-func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot libcommon.Hash, slot uint64) (solid.Checkpoint, error) {
+func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.Checkpoint, error) {
 	var err error
 	targetEpoch := slot / ap.beaconCfg.SlotsPerEpoch
 	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
-	var targetRoot libcommon.Hash
+	var targetRoot common.Hash
 	if tx != nil {
 		targetRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, epochStartTargetSlot)
 		if err != nil {
 			return solid.Checkpoint{}, fmt.Errorf("failed to get targetRoot at slot from db %d: %w", epochStartTargetSlot, err)
 		}
-		if targetRoot != (libcommon.Hash{}) {
+		if targetRoot != (common.Hash{}) {
 			return solid.Checkpoint{
 				Root:  targetRoot,
 				Epoch: targetEpoch,
@@ -108,7 +108,7 @@ func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *stat
 			return solid.Checkpoint{}, fmt.Errorf("failed to get targetRoot at slot %d: %w", epochStartTargetSlot, err)
 		}
 
-		if targetRoot == (libcommon.Hash{}) {
+		if targetRoot == (common.Hash{}) {
 			// if the target root is not found, we can't generate the attestation
 			return solid.Checkpoint{}, ErrHeadStateBehind
 		}
@@ -119,7 +119,7 @@ func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *stat
 	}, nil
 }
 
-func (ap *attestationProducer) CachedAttestationData(slot uint64, committeeIndex uint64) (solid.AttestationData, bool, error) {
+func (ap *attestationProducer) CachedAttestationData(slot uint64) (solid.AttestationData, bool, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	ap.attCacheMutex.RLock()
 	defer ap.attCacheMutex.RUnlock()
@@ -130,7 +130,6 @@ func (ap *attestationProducer) CachedAttestationData(slot uint64, committeeIndex
 		}
 		return solid.AttestationData{
 			Slot:            slot,
-			CommitteeIndex:  committeeIndex,
 			BeaconBlockRoot: beaconBlockRoot,
 			Source:          baseAttestationData.Source,
 			Target:          baseAttestationData.Target,
@@ -139,7 +138,7 @@ func (ap *attestationProducer) CachedAttestationData(slot uint64, committeeIndex
 	return solid.AttestationData{}, false, nil
 }
 
-func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot libcommon.Hash, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
+func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	var err error
 	ap.attCacheMutex.RLock()
@@ -156,7 +155,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		}
 		return solid.AttestationData{
 			Slot:            slot,
-			CommitteeIndex:  committeeIndex,
 			BeaconBlockRoot: beaconBlockRoot,
 			Source:          baseAttestationData.Source,
 			Target:          targetCheckpoint,
@@ -190,9 +188,9 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		return solid.AttestationData{}, err
 	}
 	baseAttestationData := solid.AttestationData{
-		Slot:            0,                // slot will be filled in later
-		CommitteeIndex:  0,                // committee index will be filled in later
-		BeaconBlockRoot: libcommon.Hash{}, // beacon block root will be filled in later
+		Slot:            0,             // slot will be filled in later
+		CommitteeIndex:  0,             // committee index is deprecated after Electra
+		BeaconBlockRoot: common.Hash{}, // beacon block root will be filled in later
 		Source:          baseState.CurrentJustifiedCheckpoint(),
 		Target:          targetCheckpoint,
 	}
@@ -201,7 +199,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 
 	return solid.AttestationData{
 		Slot:            slot,
-		CommitteeIndex:  committeeIndex,
 		BeaconBlockRoot: baseStateBlockRoot,
 		Source:          baseAttestationData.Source,
 		Target:          targetCheckpoint,

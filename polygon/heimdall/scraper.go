@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	commonerrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/event"
@@ -92,7 +92,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 
 		if idRange.Start > idRange.End {
 			s.syncEvent.SetAndBroadcast()
-			if err := libcommon.Sleep(ctx, s.pollDelay); err != nil {
+			if err := common.Sleep(ctx, s.pollDelay); err != nil {
 				s.syncEvent.Reset()
 				return err
 			}

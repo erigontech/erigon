@@ -312,7 +312,7 @@ func (a *ApiHandler) init() {
 					})
 					r.Get("/blinded_blocks/{slot}", http.NotFound) // deprecated
 					r.Get("/attestation_data", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAttestationData))
-					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAggregateAttestation))
+					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAggregateAttestation)) // deprecated
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
 					r.Post("/beacon_committee_subscriptions", a.PostEthV1ValidatorBeaconCommitteeSubscription)
 					r.Post("/sync_committee_subscriptions", a.PostEthV1ValidatorSyncCommitteeSubscriptions)

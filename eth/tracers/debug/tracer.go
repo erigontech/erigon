@@ -25,9 +25,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -36,54 +37,64 @@ type Tracer struct {
 	outputDir     string
 	flushMode     FlushMode
 	recordOptions RecordOptions
+	wrapped       *tracers.Tracer
 	traces        Traces
 	currentBlock  *types.Block
 }
 
-func New(outputDir string, flushMode FlushMode, recordOptions RecordOptions) *tracers.Tracer {
-	debugTracer := &Tracer{
-		outputDir:     outputDir,
-		flushMode:     flushMode,
-		recordOptions: recordOptions,
+func New(outputDir string, opts ...Option) *tracers.Tracer {
+	t := &Tracer{
+		outputDir: outputDir,
+		flushMode: FlushModeBlock,
+	}
+
+	for _, opt := range opts {
+		opt(t)
 	}
 
 	return &tracers.Tracer{
-		Hooks: debugTracer.Hooks(),
+		Hooks:     t.Hooks(),
+		GetResult: t.GetResult,
+		Stop:      t.Stop,
 	}
 }
 
-func (r *Tracer) Hooks() *tracing.Hooks {
+func (t *Tracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		// VM events
-		OnTxStart:   r.OnTxStart,
-		OnTxEnd:     r.OnTxEnd,
-		OnEnter:     r.OnEnter,
-		OnExit:      r.OnExit,
-		OnOpcode:    r.OnOpcode,
-		OnFault:     r.OnFault,
-		OnGasChange: r.OnGasChange,
+		OnTxStart:   t.OnTxStart,
+		OnTxEnd:     t.OnTxEnd,
+		OnEnter:     t.OnEnter,
+		OnExit:      t.OnExit,
+		OnOpcode:    t.OnOpcode,
+		OnFault:     t.OnFault,
+		OnGasChange: t.OnGasChange,
 		// Chain events
-		OnBlockchainInit:  r.OnBlockchainInit,
-		OnBlockStart:      r.OnBlockStart,
-		OnBlockEnd:        r.OnBlockEnd,
-		OnGenesisBlock:    r.OnGenesisBlock,
-		OnSystemCallStart: r.OnSystemCallStart,
-		OnSystemCallEnd:   r.OnSystemCallEnd,
+		OnBlockchainInit:  t.OnBlockchainInit,
+		OnBlockStart:      t.OnBlockStart,
+		OnBlockEnd:        t.OnBlockEnd,
+		OnGenesisBlock:    t.OnGenesisBlock,
+		OnSystemCallStart: t.OnSystemCallStart,
+		OnSystemCallEnd:   t.OnSystemCallEnd,
 		// State events
-		OnBalanceChange: r.OnBalanceChange,
-		OnNonceChange:   r.OnNonceChange,
-		OnCodeChange:    r.OnCodeChange,
-		OnStorageChange: r.OnStorageChange,
-		OnLog:           r.OnLog,
+		OnBalanceChange: t.OnBalanceChange,
+		OnNonceChange:   t.OnNonceChange,
+		OnCodeChange:    t.OnCodeChange,
+		OnStorageChange: t.OnStorageChange,
+		OnLog:           t.OnLog,
 	}
 }
 
-func (r *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from libcommon.Address) {
-	if r.recordOptions.DisableOnTxStartRecording {
+func (t *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from common.Address) {
+	if t.recordOptions.DisableOnTxStartRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnTxStart != nil {
+		t.wrapped.OnTxStart(vm, txn, from)
+	}
+
+	t.traces.Append(Trace{
 		OnTxStart: &OnTxStartTrace{
 			VMContext:   vm,
 			Transaction: txn,
@@ -92,39 +103,54 @@ func (r *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from li
 	})
 }
 
-func (r *Tracer) OnTxEnd(receipt *types.Receipt, err error) {
-	if r.recordOptions.DisableOnTxEndRecording {
+func (t *Tracer) OnTxEnd(receipt *types.Receipt, err error) {
+	if t.recordOptions.DisableOnTxEndRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnTxEnd != nil {
+		t.wrapped.OnTxEnd(receipt, err)
+	}
+
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
+	}
+
+	t.traces.Append(Trace{
 		OnTxEnd: &OnTxEndTrace{
 			Receipt: receipt,
-			Error:   err,
+			Error:   errStr,
 		},
 	})
 
-	if r.flushMode != FlushModeTxn {
+	if t.flushMode != FlushModeTxn {
 		return
 	}
 
 	txnTraceFile := fmt.Sprintf("txn_trace_%d_%s_%d_%s.json", receipt.TransactionIndex, receipt.TxHash, receipt.BlockNumber, receipt.BlockHash)
-	r.mustFlushToFile(path.Join(r.outputDir, txnTraceFile))
+	t.mustFlushToFile(path.Join(t.outputDir, txnTraceFile))
 }
 
-func (r *Tracer) OnEnter(depth int, typ byte, from, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if r.recordOptions.DisableOnEnterRecording {
+func (t *Tracer) OnEnter(depth int, typ byte, from, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if t.recordOptions.DisableOnEnterRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnEnter != nil {
+		t.wrapped.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
+	}
+
+	inputCopy := make([]byte, len(input))
+	copy(inputCopy, input)
+	t.traces.Append(Trace{
 		OnEnter: &OnEnterTrace{
 			Depth:      depth,
 			Type:       typ,
 			From:       from,
 			To:         to,
 			Precompile: precompile,
-			Input:      input,
+			Input:      inputCopy,
 			Gas:        gas,
 			Value:      value,
 			Code:       code,
@@ -132,127 +158,213 @@ func (r *Tracer) OnEnter(depth int, typ byte, from, to libcommon.Address, precom
 	})
 }
 
-func (r *Tracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	if r.recordOptions.DisableOnExitRecording {
+func (t *Tracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if t.recordOptions.DisableOnExitRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnExit != nil {
+		t.wrapped.OnExit(depth, output, gasUsed, err, reverted)
+	}
+
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
+	}
+
+	t.traces.Append(Trace{
 		OnExit: &OnExitTrace{
 			Depth:    depth,
 			Output:   output,
 			GasUsed:  gasUsed,
-			Error:    err,
+			Error:    errStr,
 			Reverted: reverted,
 		},
 	})
 }
 
-func (r *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, opContext tracing.OpContext, returnData []byte, depth int, err error) {
-	if r.recordOptions.DisableOnOpcodeRecording {
+func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, opContext tracing.OpContext, returnData []byte, depth int, err error) {
+	if t.recordOptions.DisableOnOpcodeRecording {
 		return
 	}
 
-	if r.recordOptions.DisableOpContextRecording {
-		opContext = nil
+	if t.wrapped != nil && t.wrapped.OnOpcode != nil {
+		t.wrapped.OnOpcode(pc, op, gas, cost, opContext, returnData, depth, err)
 	}
 
-	r.traces.Append(Trace{
+	var memory hexutil.Bytes
+	if !t.recordOptions.DisableOnOpcodeMemoryRecording {
+		data := opContext.MemoryData()
+		memory = make(hexutil.Bytes, len(data))
+		copy(memory, data)
+	}
+
+	var stack []hexutil.Bytes
+	if !t.recordOptions.DisableOnOpcodeStackRecording {
+		data := opContext.StackData()
+		stack = make([]hexutil.Bytes, len(data))
+		for i, d := range data {
+			stack[i] = d.Bytes()
+		}
+	}
+
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
+	}
+
+	t.traces.Append(Trace{
 		OnOpcode: &OnOpcodeTrace{
 			PC:         pc,
 			Op:         fmt.Sprintf("%v", vm.OpCode(op)),
 			Gas:        gas,
 			Cost:       cost,
-			OpContext:  opContext,
+			Caller:     opContext.Caller(),
+			Stack:      stack,
+			Memory:     memory,
+			MemorySize: len(memory),
 			ReturnData: returnData,
 			Depth:      depth,
-			Error:      err,
+			Error:      errStr,
 		},
 	})
 }
 
-func (r *Tracer) OnFault(pc uint64, op byte, gas, cost uint64, opContext tracing.OpContext, depth int, err error) {
-	if r.recordOptions.DisableOnFaultRecording {
+func (t *Tracer) OnFault(pc uint64, op byte, gas, cost uint64, opContext tracing.OpContext, depth int, err error) {
+	if t.recordOptions.DisableOnFaultRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnFault != nil {
+		t.wrapped.OnFault(pc, op, gas, cost, opContext, depth, err)
+	}
+
+	var memory hexutil.Bytes
+	if !t.recordOptions.DisableOnOpcodeMemoryRecording {
+		data := opContext.MemoryData()
+		memory = make(hexutil.Bytes, len(data))
+		copy(memory, data)
+	}
+
+	var stack []hexutil.Bytes
+	if !t.recordOptions.DisableOnOpcodeStackRecording {
+		data := opContext.StackData()
+		stack = make([]hexutil.Bytes, len(data))
+		for i, d := range data {
+			stack[i] = d.Bytes()
+		}
+	}
+
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
+	}
+
+	t.traces.Append(Trace{
 		OnFault: &OnFaultTrace{
-			PC:        pc,
-			Op:        op,
-			Gas:       gas,
-			Cost:      cost,
-			OpContext: opContext,
-			Depth:     depth,
-			Error:     err,
+			PC:         pc,
+			Op:         op,
+			Gas:        gas,
+			Cost:       cost,
+			Caller:     opContext.Caller(),
+			Stack:      stack,
+			Memory:     memory,
+			MemorySize: len(memory),
+			Depth:      depth,
+			Error:      errStr,
 		},
 	})
 }
 
-func (r *Tracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
-	if r.recordOptions.DisableOnGasChangeRecording {
+func (t *Tracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
+	if t.recordOptions.DisableOnGasChangeRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnGasChange != nil {
+		t.wrapped.OnGasChange(old, new, reason)
+	}
+
+	t.traces.Append(Trace{
 		OnGasChange: &OnGasChangeTrace{
 			OldGas: old,
 			NewGas: new,
-			Reason: reason,
+			Reason: fmt.Sprintf("%v", reason),
 		},
 	})
 }
 
-func (r *Tracer) OnBlockchainInit(chainConfig *chain.Config) {
-	if r.recordOptions.DisableOnBlockchainInitRecording {
+func (t *Tracer) OnBlockchainInit(chainConfig *chain.Config) {
+	if t.recordOptions.DisableOnBlockchainInitRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnBlockchainInit != nil {
+		t.wrapped.OnBlockchainInit(chainConfig)
+	}
+
+	t.traces.Append(Trace{
 		OnBlockchainInit: &OnBlockchainInitTrace{
 			ChainConfig: chainConfig,
 		},
 	})
 }
 
-func (r *Tracer) OnBlockStart(event tracing.BlockEvent) {
-	if r.recordOptions.DisableOnBlockStartRecording {
+func (t *Tracer) OnBlockStart(event tracing.BlockEvent) {
+	if t.recordOptions.DisableOnBlockStartRecording {
 		return
 	}
 
-	r.currentBlock = event.Block
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnBlockStart != nil {
+		t.wrapped.OnBlockStart(event)
+	}
+
+	t.currentBlock = event.Block
+	t.traces.Append(Trace{
 		OnBlockStart: &OnBlockStartTrace{
 			Event: event,
 		},
 	})
 }
 
-func (r *Tracer) OnBlockEnd(err error) {
-	if r.recordOptions.DisableOnBlockEndRecording {
+func (t *Tracer) OnBlockEnd(err error) {
+	if t.recordOptions.DisableOnBlockEndRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnBlockEnd != nil {
+		t.wrapped.OnBlockEnd(err)
+	}
+
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
+	}
+
+	t.traces.Append(Trace{
 		OnBlockEnd: &OnBlockEndTrace{
-			Error: err,
+			Error: errStr,
 		},
 	})
 
-	if r.currentBlock == nil || r.flushMode != FlushModeBlock {
+	if t.currentBlock == nil || t.flushMode != FlushModeBlock {
 		return
 	}
 
-	blockTraceFile := fmt.Sprintf("block_trace_%d_%s.json", r.currentBlock.NumberU64(), r.currentBlock.Hash())
-	r.mustFlushToFile(path.Join(r.outputDir, blockTraceFile))
+	blockTraceFile := fmt.Sprintf("block_trace_%d_%s.json", t.currentBlock.NumberU64(), t.currentBlock.Hash())
+	t.mustFlushToFile(path.Join(t.outputDir, blockTraceFile))
 }
 
-func (r *Tracer) OnGenesisBlock(genesis *types.Block, alloc types.GenesisAlloc) {
-	if r.recordOptions.DisableOnGenesisBlockRecording {
+func (t *Tracer) OnGenesisBlock(genesis *types.Block, alloc types.GenesisAlloc) {
+	if t.recordOptions.DisableOnGenesisBlockRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnGenesisBlock != nil {
+		t.wrapped.OnGenesisBlock(genesis, alloc)
+	}
+
+	t.traces.Append(Trace{
 		OnGenesisBlock: &OnGenesisBlockTrace{
 			Header: genesis.Header(),
 			Alloc:  alloc,
@@ -260,47 +372,63 @@ func (r *Tracer) OnGenesisBlock(genesis *types.Block, alloc types.GenesisAlloc) 
 	})
 }
 
-func (r *Tracer) OnSystemCallStart() {
-	if r.recordOptions.DisableOnSystemCallStartRecording {
+func (t *Tracer) OnSystemCallStart() {
+	if t.recordOptions.DisableOnSystemCallStartRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnSystemCallStart != nil {
+		t.wrapped.OnSystemCallStart()
+	}
+
+	t.traces.Append(Trace{
 		OnSystemCallStart: &OnSystemCallStartTrace{},
 	})
 }
 
-func (r *Tracer) OnSystemCallEnd() {
-	if r.recordOptions.DisableOnSystemCallEndRecording {
+func (t *Tracer) OnSystemCallEnd() {
+	if t.recordOptions.DisableOnSystemCallEndRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnSystemCallEnd != nil {
+		t.wrapped.OnSystemCallEnd()
+	}
+
+	t.traces.Append(Trace{
 		OnSystemCallEnd: &OnSystemCallEndTrace{},
 	})
 }
 
-func (r *Tracer) OnBalanceChange(address libcommon.Address, oldBalance, newBalance *uint256.Int, reason tracing.BalanceChangeReason) {
-	if r.recordOptions.DisableOnBalanceChangeRecording {
+func (t *Tracer) OnBalanceChange(address common.Address, oldBalance, newBalance uint256.Int, reason tracing.BalanceChangeReason) {
+	if t.recordOptions.DisableOnBalanceChangeRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnBalanceChange != nil {
+		t.wrapped.OnBalanceChange(address, oldBalance, newBalance, reason)
+	}
+
+	t.traces.Append(Trace{
 		OnBalanceChange: &OnBalanceChangeTrace{
 			Address:    address,
 			OldBalance: oldBalance,
 			NewBalance: newBalance,
-			Reason:     reason,
+			Reason:     fmt.Sprintf("%v", reason),
 		},
 	})
 }
 
-func (r *Tracer) OnNonceChange(address libcommon.Address, oldNonce, newNonce uint64) {
-	if r.recordOptions.DisableOnNonceChangeRecording {
+func (t *Tracer) OnNonceChange(address common.Address, oldNonce, newNonce uint64) {
+	if t.recordOptions.DisableOnNonceChangeRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnNonceChange != nil {
+		t.wrapped.OnNonceChange(address, oldNonce, newNonce)
+	}
+
+	t.traces.Append(Trace{
 		OnNonceChange: &OnNonceChangeTrace{
 			Address:  address,
 			OldNonce: oldNonce,
@@ -309,12 +437,16 @@ func (r *Tracer) OnNonceChange(address libcommon.Address, oldNonce, newNonce uin
 	})
 }
 
-func (r *Tracer) OnCodeChange(address libcommon.Address, prevCodeHash libcommon.Hash, prevCode []byte, newCodeHash libcommon.Hash, newCode []byte) {
-	if r.recordOptions.DisableOnCodeChangeRecording {
+func (t *Tracer) OnCodeChange(address common.Address, prevCodeHash common.Hash, prevCode []byte, newCodeHash common.Hash, newCode []byte) {
+	if t.recordOptions.DisableOnCodeChangeRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnCodeChange != nil {
+		t.wrapped.OnCodeChange(address, prevCodeHash, prevCode, newCodeHash, newCode)
+	}
+
+	t.traces.Append(Trace{
 		OnCodeChange: &OnCodeChangeTrace{
 			Address:      address,
 			PrevCodeHash: prevCodeHash,
@@ -325,12 +457,16 @@ func (r *Tracer) OnCodeChange(address libcommon.Address, prevCodeHash libcommon.
 	})
 }
 
-func (r *Tracer) OnStorageChange(address libcommon.Address, slot *libcommon.Hash, prev, new uint256.Int) {
-	if r.recordOptions.DisableOnStorageChangeRecording {
+func (t *Tracer) OnStorageChange(address common.Address, slot common.Hash, prev, new uint256.Int) {
+	if t.recordOptions.DisableOnStorageChangeRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnStorageChange != nil {
+		t.wrapped.OnStorageChange(address, slot, prev, new)
+	}
+
+	t.traces.Append(Trace{
 		OnStorageChange: &OnStorageChangeTrace{
 			Address: address,
 			Slot:    slot,
@@ -340,27 +476,45 @@ func (r *Tracer) OnStorageChange(address libcommon.Address, slot *libcommon.Hash
 	})
 }
 
-func (r *Tracer) OnLog(log *types.Log) {
-	if r.recordOptions.DisableOnLogRecording {
+func (t *Tracer) OnLog(log *types.Log) {
+	if t.recordOptions.DisableOnLogRecording {
 		return
 	}
 
-	r.traces.Append(Trace{
+	if t.wrapped != nil && t.wrapped.OnLog != nil {
+		t.wrapped.OnLog(log)
+	}
+
+	t.traces.Append(Trace{
 		OnLog: &OnLogTrace{
 			Log: log,
 		},
 	})
 }
 
-func (r *Tracer) mustFlushToFile(filePath string) {
-	err := r.flushToFile(filePath)
+func (t *Tracer) GetResult() (json.RawMessage, error) {
+	if t.wrapped != nil && t.wrapped.GetResult != nil {
+		return t.wrapped.GetResult()
+	}
+
+	return nil, nil
+}
+
+func (t *Tracer) Stop(err error) {
+	if t.wrapped != nil && t.wrapped.Stop != nil {
+		t.wrapped.Stop(err)
+	}
+}
+
+func (t *Tracer) mustFlushToFile(filePath string) {
+	err := t.flushToFile(filePath)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func (r *Tracer) flushToFile(filePath string) error {
-	b, err := json.MarshalIndent(r.traces, "", "    ")
+func (t *Tracer) flushToFile(filePath string) error {
+	b, err := json.MarshalIndent(t.traces, "", "    ")
 	if err != nil {
 		return err
 	}
@@ -381,8 +535,28 @@ func (r *Tracer) flushToFile(filePath string) error {
 		return err
 	}
 
-	r.traces = Traces{}
+	t.traces = Traces{}
 	return nil
+}
+
+type Option func(*Tracer)
+
+func WithRecordOptions(recordOptions RecordOptions) Option {
+	return func(t *Tracer) {
+		t.recordOptions = recordOptions
+	}
+}
+
+func WithFlushMode(flushMode FlushMode) Option {
+	return func(t *Tracer) {
+		t.flushMode = flushMode
+	}
+}
+
+func WithWrappedTracer(wrapped *tracers.Tracer) Option {
+	return func(t *Tracer) {
+		t.wrapped = wrapped
+	}
 }
 
 type FlushMode int
@@ -398,6 +572,8 @@ type RecordOptions struct {
 	DisableOnEnterRecording           bool
 	DisableOnExitRecording            bool
 	DisableOnOpcodeRecording          bool
+	DisableOnOpcodeMemoryRecording    bool
+	DisableOnOpcodeStackRecording     bool
 	DisableOnFaultRecording           bool
 	DisableOnGasChangeRecording       bool
 	DisableOnBlockchainInitRecording  bool
@@ -411,7 +587,6 @@ type RecordOptions struct {
 	DisableOnCodeChangeRecording      bool
 	DisableOnStorageChangeRecording   bool
 	DisableOnLogRecording             bool
-	DisableOpContextRecording         bool
 }
 
 type Traces struct {
@@ -449,59 +624,65 @@ type Trace struct {
 type OnTxStartTrace struct {
 	VMContext   *tracing.VMContext `json:"vmContext,omitempty"`
 	Transaction types.Transaction  `json:"transaction,omitempty"`
-	From        libcommon.Address  `json:"from,omitempty"`
+	From        common.Address     `json:"from,omitempty"`
 }
 
 type OnTxEndTrace struct {
 	Receipt *types.Receipt `json:"receipt,omitempty"`
-	Error   error          `json:"error,omitempty"`
+	Error   string         `json:"error,omitempty"`
 }
 
 type OnEnterTrace struct {
-	Depth      int               `json:"depth,omitempty"`
-	Type       byte              `json:"type,omitempty"`
-	From       libcommon.Address `json:"from,omitempty"`
-	To         libcommon.Address `json:"to,omitempty"`
-	Precompile bool              `json:"precompile,omitempty"`
-	Input      []byte            `json:"input,omitempty"`
-	Gas        uint64            `json:"gas,omitempty"`
-	Value      *uint256.Int      `json:"value,omitempty"`
-	Code       []byte            `json:"code,omitempty"`
+	Depth      int            `json:"depth,omitempty"`
+	Type       byte           `json:"type,omitempty"`
+	From       common.Address `json:"from,omitempty"`
+	To         common.Address `json:"to,omitempty"`
+	Precompile bool           `json:"precompile,omitempty"`
+	Input      hexutil.Bytes  `json:"input,omitempty"`
+	Gas        uint64         `json:"gas,omitempty"`
+	Value      *uint256.Int   `json:"value,omitempty"`
+	Code       hexutil.Bytes  `json:"code,omitempty"`
 }
 
 type OnExitTrace struct {
-	Depth    int    `json:"depth,omitempty"`
-	Output   []byte `json:"output,omitempty"`
-	GasUsed  uint64 `json:"gasUsed,omitempty"`
-	Error    error  `json:"error,omitempty"`
-	Reverted bool   `json:"reverted,omitempty"`
+	Depth    int           `json:"depth,omitempty"`
+	Output   hexutil.Bytes `json:"output,omitempty"`
+	GasUsed  uint64        `json:"gasUsed,omitempty"`
+	Error    string        `json:"error,omitempty"`
+	Reverted bool          `json:"reverted,omitempty"`
 }
 
 type OnOpcodeTrace struct {
-	PC         uint64            `json:"pc,omitempty"`
-	Op         string            `json:"op,omitempty"`
-	Gas        uint64            `json:"gas,omitempty"`
-	Cost       uint64            `json:"cost,omitempty"`
-	OpContext  tracing.OpContext `json:"opContext,omitempty"`
-	ReturnData []byte            `json:"returnData,omitempty"`
-	Depth      int               `json:"depth,omitempty"`
-	Error      error             `json:"error,omitempty"`
+	PC         uint64          `json:"pc,omitempty"`
+	Op         string          `json:"op,omitempty"`
+	Gas        uint64          `json:"gas,omitempty"`
+	Cost       uint64          `json:"cost,omitempty"`
+	Caller     common.Address  `json:"caller,omitempty"`
+	Stack      []hexutil.Bytes `json:"stack,omitempty"`
+	Memory     hexutil.Bytes   `json:"memory,omitempty"`
+	MemorySize int             `json:"memSize,omitempty"`
+	ReturnData hexutil.Bytes   `json:"returnData,omitempty"`
+	Depth      int             `json:"depth,omitempty"`
+	Error      string          `json:"error,omitempty"`
 }
 
 type OnFaultTrace struct {
-	PC        uint64            `json:"pc,omitempty"`
-	Op        byte              `json:"op,omitempty"`
-	Gas       uint64            `json:"gas,omitempty"`
-	Cost      uint64            `json:"cost,omitempty"`
-	OpContext tracing.OpContext `json:"opContext,omitempty"`
-	Depth     int               `json:"depth,omitempty"`
-	Error     error             `json:"error,omitempty"`
+	PC         uint64          `json:"pc,omitempty"`
+	Op         byte            `json:"op,omitempty"`
+	Gas        uint64          `json:"gas,omitempty"`
+	Cost       uint64          `json:"cost,omitempty"`
+	Caller     common.Address  `json:"caller,omitempty"`
+	Stack      []hexutil.Bytes `json:"stack,omitempty"`
+	Memory     hexutil.Bytes   `json:"memory,omitempty"`
+	MemorySize int             `json:"memSize,omitempty"`
+	Depth      int             `json:"depth,omitempty"`
+	Error      string          `json:"error,omitempty"`
 }
 
 type OnGasChangeTrace struct {
-	OldGas uint64                  `json:"oldGas,omitempty"`
-	NewGas uint64                  `json:"newGas,omitempty"`
-	Reason tracing.GasChangeReason `json:"reason,omitempty"`
+	OldGas uint64 `json:"oldGas,omitempty"`
+	NewGas uint64 `json:"newGas,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type OnBlockchainInitTrace struct {
@@ -513,7 +694,7 @@ type OnBlockStartTrace struct {
 }
 
 type OnBlockEndTrace struct {
-	Error error `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 type OnGenesisBlockTrace struct {
@@ -526,31 +707,31 @@ type OnSystemCallStartTrace struct{}
 type OnSystemCallEndTrace struct{}
 
 type OnBalanceChangeTrace struct {
-	Address    libcommon.Address           `json:"address,omitempty"`
-	OldBalance *uint256.Int                `json:"oldBalance,omitempty"`
-	NewBalance *uint256.Int                `json:"newBalance,omitempty"`
-	Reason     tracing.BalanceChangeReason `json:"reason,omitempty"`
+	Address    common.Address `json:"address,omitempty"`
+	OldBalance uint256.Int    `json:"oldBalance,omitempty"`
+	NewBalance uint256.Int    `json:"newBalance,omitempty"`
+	Reason     string         `json:"reason,omitempty"`
 }
 
 type OnNonceChangeTrace struct {
-	Address  libcommon.Address `json:"address,omitempty"`
-	OldNonce uint64            `json:"oldNonce,omitempty"`
-	NewNonce uint64            `json:"newNonce,omitempty"`
+	Address  common.Address `json:"address,omitempty"`
+	OldNonce uint64         `json:"oldNonce,omitempty"`
+	NewNonce uint64         `json:"newNonce,omitempty"`
 }
 
 type OnCodeChangeTrace struct {
-	Address      libcommon.Address `json:"address,omitempty"`
-	PrevCodeHash libcommon.Hash    `json:"prevCodeHash,omitempty"`
-	PrevCode     []byte            `json:"prevCode,omitempty"`
-	NewCodeHash  libcommon.Hash    `json:"newCodeHash,omitempty"`
-	NewCode      []byte            `json:"newCode,omitempty"`
+	Address      common.Address `json:"address,omitempty"`
+	PrevCodeHash common.Hash    `json:"prevCodeHash,omitempty"`
+	PrevCode     hexutil.Bytes  `json:"prevCode,omitempty"`
+	NewCodeHash  common.Hash    `json:"newCodeHash,omitempty"`
+	NewCode      hexutil.Bytes  `json:"newCode,omitempty"`
 }
 
 type OnStorageChangeTrace struct {
-	Address libcommon.Address `json:"address,omitempty"`
-	Slot    *libcommon.Hash   `json:"slot,omitempty"`
-	Prev    uint256.Int       `json:"prev,omitempty"`
-	New     uint256.Int       `json:"new,omitempty"`
+	Address common.Address `json:"address,omitempty"`
+	Slot    common.Hash    `json:"slot,omitempty"`
+	Prev    uint256.Int    `json:"prev,omitempty"`
+	New     uint256.Int    `json:"new,omitempty"`
 }
 
 type OnLogTrace struct {

@@ -32,8 +32,8 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/p2p"
 )
 
 var (
@@ -96,6 +96,10 @@ func TestNodeStartMultipleTimes(t *testing.T) {
 
 // Tests that if the data dir is already in use, an appropriate error is returned.
 func TestNodeUsedDataDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}

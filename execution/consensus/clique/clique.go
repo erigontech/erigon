@@ -35,19 +35,18 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/params"
@@ -144,10 +143,10 @@ var (
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.
-type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
+type SignerFn func(signer common.Address, mimeType string, message []byte) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address]) (libcommon.Address, error) {
+func ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.Address]) (common.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 
@@ -158,17 +157,17 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < ExtraSeal {
-		return libcommon.Address{}, errMissingSignature
+		return common.Address{}, errMissingSignature
 	}
 	signature := header.Extra[len(header.Extra)-ExtraSeal:]
 
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(SealHash(header).Bytes(), signature)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 
-	var signer libcommon.Address
+	var signer common.Address
 	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
 
 	sigcache.Add(hash, signer)
@@ -183,14 +182,14 @@ type Clique struct {
 	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
 	DB             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
 
-	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
-	recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
+	signatures *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
+	recents    *lru.ARCCache[common.Hash, *Snapshot]      // Snapshots for recent block to speed up reorgs
 
-	proposals map[libcommon.Address]bool // Current list of proposals we are pushing
+	proposals map[common.Address]bool // Current list of proposals we are pushing
 
-	signer libcommon.Address // Ethereum address of the signing key
-	signFn SignerFn          // Signer function to authorize hashes with
-	lock   sync.RWMutex      // Protects the signer and proposals fields
+	signer common.Address // Ethereum address of the signing key
+	signFn SignerFn       // Signer function to authorize hashes with
+	lock   sync.RWMutex   // Protects the signer and proposals fields
 
 	// The fields below are for testing only
 	FakeDiff bool // Skip difficulty verifications
@@ -210,8 +209,8 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 		conf.Epoch = epochLength
 	}
 	// Allocate the snapshot caches and create the engine
-	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](snapshotConfig.InmemorySnapshots)
-	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](snapshotConfig.InmemorySignatures)
+	recents, _ := lru.NewARC[common.Hash, *Snapshot](snapshotConfig.InmemorySnapshots)
+	signatures, _ := lru.NewARC[common.Hash, common.Address](snapshotConfig.InmemorySignatures)
 
 	exitCh := make(chan struct{})
 
@@ -222,7 +221,7 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 		DB:             cliqueDB,
 		recents:        recents,
 		signatures:     signatures,
-		proposals:      make(map[libcommon.Address]bool),
+		proposals:      make(map[common.Address]bool),
 		exitCh:         exitCh,
 		logger:         logger,
 	}
@@ -256,7 +255,7 @@ func (c *Clique) Type() chain.ConsensusName {
 // from the signature in the header's extra-data section.
 // This is thread-safe (only access the header, as well as signatures, which
 // are lru.ARCCache, which is thread-safe)
-func (c *Clique) Author(header *types.Header) (libcommon.Address, error) {
+func (c *Clique) Author(header *types.Header) (common.Address, error) {
 	return ecrecover(header, c.signatures)
 }
 
@@ -270,7 +269,7 @@ type VerifyHeaderResponse struct {
 	Cancel  func()
 }
 
-func (c *Clique) recentsAdd(num uint64, hash libcommon.Hash, s *Snapshot) {
+func (c *Clique) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {
 	c.recents.Add(hash, s.copy())
 }
 
@@ -299,7 +298,7 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
-	header.Coinbase = libcommon.Address{}
+	header.Coinbase = common.Address{}
 	header.Nonce = types.BlockNonce{}
 
 	number := header.Number.Uint64()
@@ -311,7 +310,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	c.lock.RLock()
 	if number%c.config.Epoch != 0 {
 		// Gather all the proposals that make sense voting on
-		addresses := make([]libcommon.Address, 0, len(c.proposals))
+		addresses := make([]common.Address, 0, len(c.proposals))
 		for address, authorize := range c.proposals {
 			if snap.validVote(address, authorize) {
 				addresses = append(addresses, address)
@@ -349,7 +348,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Extra = append(header.Extra, make([]byte, ExtraSeal)...)
 
 	// Mix digest is reserved for now, set to empty
-	header.MixDigest = libcommon.Hash{}
+	header.MixDigest = common.Hash{}
 
 	// Ensure the timestamp has the correct delay
 	parent := chain.GetHeader(header.ParentHash, number-1)
@@ -395,7 +394,7 @@ func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.He
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (c *Clique) Authorize(signer libcommon.Address, signFn SignerFn) {
+func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -452,7 +451,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
 		delay += time.Duration(rand.Int63n(int64(wiggle))) // nolint: gosec
 
-		c.logger.Trace("Out-of-turn signing requested", "wiggle", libcommon.PrettyDuration(wiggle))
+		c.logger.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
 	// Sign all the things!
 	sighash, err := signFn(signer, accounts.MimetypeClique, CliqueRLP(header))
@@ -461,7 +460,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 	}
 	copy(header.Extra[len(header.Extra)-ExtraSeal:], sighash)
 	// Wait until sealing is terminated or delay timeout.
-	c.logger.Trace("Waiting for slot to sign and propagate", "delay", libcommon.PrettyDuration(delay))
+	c.logger.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
 		defer debug.LogPanic()
 		select {
@@ -484,7 +483,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 // that a new block should have:
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ libcommon.Hash, _ uint64) *big.Int {
+func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
 
 	snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
@@ -496,7 +495,7 @@ func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, 
 	return calcDifficulty(snap, signer)
 }
 
-func calcDifficulty(snap *Snapshot, signer libcommon.Address) *big.Int {
+func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 	if snap.inturn(snap.Number+1, signer) {
 		return new(big.Int).Set(DiffInTurn)
 	}
@@ -504,18 +503,18 @@ func calcDifficulty(snap *Snapshot, signer libcommon.Address) *big.Int {
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
-func (c *Clique) SealHash(header *types.Header) libcommon.Hash {
+func (c *Clique) SealHash(header *types.Header) common.Hash {
 	return SealHash(header)
 }
 
-func (c *Clique) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+func (c *Clique) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
 	return false
 }
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *Clique) Close() error {
 	c.DB.Close()
-	libcommon.SafeClose(c.exitCh)
+	common.SafeClose(c.exitCh)
 	return nil
 }
 
@@ -547,9 +546,9 @@ func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader, blockReader service
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
-func SealHash(header *types.Header) (hash libcommon.Hash) {
-	hasher := cryptopool.NewLegacyKeccak256()
-	defer cryptopool.ReturnToPoolKeccak256(hasher)
+func SealHash(header *types.Header) (hash common.Hash) {
+	hasher := crypto.NewKeccakState()
+	defer crypto.ReturnToPool(hasher)
 
 	encodeSigHeader(hasher, header)
 	hasher.Sum(hash[:0])

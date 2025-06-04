@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -56,13 +56,13 @@ type HistoryRangeAsOfFiles struct {
 func (hi *HistoryRangeAsOfFiles) Close() {
 }
 
-func (hi *HistoryRangeAsOfFiles) init(files visibleFiles) error {
-	for i, item := range files {
+func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
+	for i, item := range iiFiles {
 		if item.endTxNum <= hi.startTxNum {
 			continue
 		}
 		// TODO: seek(from)
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), hi.hc.h.compression)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), hi.hc.h.Compression)
 
 		idx := hi.hc.iit.statelessIdxReader(i)
 		var offset uint64
@@ -116,13 +116,13 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
+		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
 		}
 
 		hi.nextKey = key
-		binary.BigEndian.PutUint64(hi.txnKey[:], n)
+		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
 			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
@@ -132,9 +132,22 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if !ok {
 			continue
 		}
-		g := hi.hc.statelessGetter(historyItem.i)
-		g.Reset(offset)
-		hi.nextVal, _ = g.Next(nil)
+		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
+			g := hi.hc.statelessGetter(historyItem.i)
+			g.Reset(offset)
+			hi.nextVal, _ = g.Next(nil)
+		} else {
+			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historyValuesOnCompressedPage, true)
+			g.Reset(offset)
+			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
+				k, v, _, _ := g.Next2(nil)
+				histKey := historyKey(txNum, hi.nextKey, nil)
+				if bytes.Equal(histKey, k) {
+					hi.nextVal = v
+					break
+				}
+			}
+		}
 		return nil
 	}
 	hi.nextKey = nil
@@ -397,16 +410,16 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
+		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
 		}
-		if int(n) >= hi.endTxNum {
+		if int(txNum) >= hi.endTxNum {
 			continue
 		}
 
 		hi.nextKey = key
-		binary.BigEndian.PutUint64(hi.txnKey[:], n)
+		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
 			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
@@ -416,9 +429,23 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if !ok {
 			continue
 		}
-		g := hi.hc.statelessGetter(historyItem.i)
-		g.Reset(offset)
-		hi.nextVal, _ = g.Next(nil)
+
+		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
+			g := hi.hc.statelessGetter(historyItem.i)
+			g.Reset(offset)
+			hi.nextVal, _ = g.Next(nil)
+		} else {
+			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historyValuesOnCompressedPage, true)
+			g.Reset(offset)
+			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
+				k, v, _, _ := g.Next2(nil)
+				histKey := historyKey(txNum, hi.nextKey, nil)
+				if bytes.Equal(histKey, k) {
+					hi.nextVal = v
+					break
+				}
+			}
+		}
 		return nil
 	}
 	hi.nextKey = nil

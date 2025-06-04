@@ -26,7 +26,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -36,13 +38,15 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/eth1"
+	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -50,8 +54,6 @@ import (
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_logs_spammer"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
-	"github.com/erigontech/erigon/turbo/execution/eth1"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
@@ -166,7 +168,7 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -201,7 +203,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		GasLimit:    uint64(req.GasLimit),
 		Time:        uint64(req.Timestamp),
 		MixDigest:   req.PrevRandao,
-		UncleHash:   types.EmptyUncleHash,
+		UncleHash:   empty.UncleHash,
 		Difficulty:  merge.ProofOfStakeDifficulty,
 		Nonce:       merge.ProofOfStakeNonce,
 		ReceiptHash: req.ReceiptsRoot,
@@ -275,7 +277,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	for _, txn := range req.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
-			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", libcommon.Bytes2Hex(txn))
+			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
@@ -355,7 +357,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
-func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash libcommon.Hash, blockNumber uint64, parentHash libcommon.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool) (*engine_types.PayloadStatus, error) {
+func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool) (*engine_types.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -400,7 +402,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		s.logger.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
-		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &libcommon.Hash{}, ValidationError: engine_types.NewStringifiedErrorFromString("Beacon Chain request before TTD")}, nil
+		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &common.Hash{}, ValidationError: engine_types.NewStringifiedErrorFromString("Beacon Chain request before TTD")}, nil
 	}
 
 	var isCanonical bool
@@ -445,14 +447,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return parent == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
-			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
+			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return header == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
-			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
+			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
@@ -527,16 +529,32 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) {
+		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
+		(!s.config.IsOsaka(ts) && version >= clparams.FuluVersion) ||
+		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-	return &engine_types.GetPayloadResponse{
+	payload := &engine_types.GetPayloadResponse{
 		ExecutionPayload:  engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
 		BlockValue:        (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
 		BlobsBundle:       engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
 		ExecutionRequests: executionRequests,
-	}, nil
+	}
+
+	if version == clparams.FuluVersion {
+		if payload.BlobsBundle == nil {
+			payload.BlobsBundle = &engine_types.BlobsBundleV1{
+				Commitments: make([]hexutil.Bytes, 0),
+				Blobs:       make([]hexutil.Bytes, 0),
+				Proofs:      make([]hexutil.Bytes, 0),
+			}
+		}
+		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs)*int(params.CellsPerExtBlob) {
+			return nil, errors.New("built invalid blobsBundle")
+		}
+	}
+	return payload, nil
 }
 
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
@@ -552,7 +570,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 	s.engineLogSpamer.RecordRequest()
 
-	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
+	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
 	}
@@ -627,8 +645,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	var resp *execution.AssembleBlockResponse
-
-	execBusy, err := waitForStuff(500*time.Millisecond, func() (bool, error) {
+	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
+	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
+	execBusy, err := waitForStuff(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
 		resp, err = s.executionService.AssembleBlock(ctx, req)
 		if err != nil {
 			return false, err
@@ -651,7 +670,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}, nil
 }
 
-func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
+func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
 	if len(request) > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
@@ -724,7 +743,7 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
-	versionedHashes []libcommon.Hash,
+	versionedHashes []common.Hash,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -751,14 +770,16 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
-		if !e.blockDownloader.StartDownloading(ctx, 0, header.ParentHash, block) {
+		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerNumber-1, block) {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
 		if currentHeadNumber != nil {
+			// wait for the slot duration for full download
+			waitTime := time.Duration(e.config.SecondsPerSlot()) * time.Second
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
-			if stillSyncing, _ := waitForStuff(500*time.Millisecond, func() (bool, error) {
+			if stillSyncing, _ := waitForStuff(waitTime, func() (bool, error) {
 				return e.blockDownloader.Status() != headerdownload.Synced, nil
 			}); stillSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -771,7 +792,7 @@ func (e *EngineServer) HandleNewPayload(
 					if e.test {
 						return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 					}
-					if e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block) {
+					if e.blockDownloader.StartDownloading(0, missingBlkHash, 0, block) {
 						e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 					}
 					return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -808,7 +829,7 @@ func (e *EngineServer) HandleNewPayload(
 			if e.test {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			if e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block) {
+			if e.blockDownloader.StartDownloading(0, missingBlkHash, 0, block) {
 				e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 			}
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -867,7 +888,7 @@ func (e *EngineServer) HandlesForkChoice(
 	if headerNumber == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
 		if !e.test {
-			e.blockDownloader.StartDownloading(ctx, requestId, headerHash, nil)
+			e.blockDownloader.StartDownloading(requestId, headerHash, 0, nil)
 		}
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
@@ -877,7 +898,7 @@ func (e *EngineServer) HandlesForkChoice(
 	if header == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
 		if !e.test {
-			e.blockDownloader.StartDownloading(ctx, requestId, headerHash, nil)
+			e.blockDownloader.StartDownloading(requestId, headerHash, *headerNumber, nil)
 		}
 
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -912,7 +933,7 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash) ([]*engine_types.BlobAndProofV1, error) {
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}

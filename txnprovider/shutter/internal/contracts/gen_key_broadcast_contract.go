@@ -10,11 +10,11 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -34,18 +34,18 @@ var (
 const KeyBroadcastContractABI = "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"keyperSetManagerAddress\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"AlreadyHaveKey\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidKey\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"NotAllowed\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint64\",\"name\":\"eon\",\"type\":\"uint64\"},{\"indexed\":false,\"internalType\":\"bytes\",\"name\":\"key\",\"type\":\"bytes\"}],\"name\":\"EonKeyBroadcast\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"uint64\",\"name\":\"eon\",\"type\":\"uint64\"},{\"internalType\":\"bytes\",\"name\":\"key\",\"type\":\"bytes\"}],\"name\":\"broadcastEonKey\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint64\",\"name\":\"eon\",\"type\":\"uint64\"}],\"name\":\"getEonKey\",\"outputs\":[{\"internalType\":\"bytes\",\"name\":\"\",\"type\":\"bytes\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]"
 
 // KeyBroadcastContractBin is the compiled bytecode used for deploying new contracts.
-var KeyBroadcastContractBin = "0x6080604052348015600e575f5ffd5b5060405161069f38038061069f833981016040819052602b91604f565b600180546001600160a01b0319166001600160a01b0392909216919091179055607a565b5f60208284031215605e575f5ffd5b81516001600160a01b03811681146073575f5ffd5b9392505050565b610618806100875f395ff3fe608060405234801561000f575f5ffd5b5060043610610034575f3560e01c80638a0b8b2814610038578063daade8e814610061575b5f5ffd5b61004b6100463660046102fc565b610076565b604051610058919061034a565b60405180910390f35b61007461006f366004610370565b610120565b005b67ffffffffffffffff81165f90815260208190526040902080546060919061009d90610434565b80601f01602080910402602001604051908101604052809291908181526020018280546100c990610434565b80156101145780601f106100eb57610100808354040283529160200191610114565b820191905f5260205f20905b8154815290600101906020018083116100f757829003601f168201915b50505050509050919050565b80515f0361014157604051630eda9c3d60e31b815260040160405180910390fd5b67ffffffffffffffff82165f908152602081905260408120805461016490610434565b9050111561018557604051632c6c0cd160e11b815260040160405180910390fd5b60015460405163f90f3bed60e01b815267ffffffffffffffff841660048201525f916001600160a01b03169063f90f3bed90602401602060405180830381865afa1580156101d5573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906101f9919061046c565b60405163cde1532d60e01b81523360048201529091506001600160a01b0382169063cde1532d90602401602060405180830381865afa15801561023e573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906102629190610492565b61027f57604051631eb49d6d60e11b815260040160405180910390fd5b67ffffffffffffffff83165f9081526020819052604090206102a183826104fd565b507ff0dbcf46bf98296dd97ce9cb1ef117ac6fd1b2f126741125433174d56dad376883836040516102d39291906105b8565b60405180910390a1505050565b803567ffffffffffffffff811681146102f7575f5ffd5b919050565b5f6020828403121561030c575f5ffd5b610315826102e0565b9392505050565b5f81518084528060208401602086015e5f602082860101526020601f19601f83011685010191505092915050565b602081525f610315602083018461031c565b634e487b7160e01b5f52604160045260245ffd5b5f5f60408385031215610381575f5ffd5b61038a836102e0565b9150602083013567ffffffffffffffff8111156103a5575f5ffd5b8301601f810185136103b5575f5ffd5b803567ffffffffffffffff8111156103cf576103cf61035c565b604051601f8201601f19908116603f0116810167ffffffffffffffff811182821017156103fe576103fe61035c565b604052818152828201602001871015610415575f5ffd5b816020840160208301375f602083830101528093505050509250929050565b600181811c9082168061044857607f821691505b60208210810361046657634e487b7160e01b5f52602260045260245ffd5b50919050565b5f6020828403121561047c575f5ffd5b81516001600160a01b0381168114610315575f5ffd5b5f602082840312156104a2575f5ffd5b81518015158114610315575f5ffd5b601f8211156104f857805f5260205f20601f840160051c810160208510156104d65750805b601f840160051c820191505b818110156104f5575f81556001016104e2565b50505b505050565b815167ffffffffffffffff8111156105175761051761035c565b61052b816105258454610434565b846104b1565b6020601f82116001811461055d575f83156105465750848201515b5f19600385901b1c1916600184901b1784556104f5565b5f84815260208120601f198516915b8281101561058c578785015182556020948501946001909201910161056c565b50848210156105a957868401515f19600387901b60f8161c191681555b50505050600190811b01905550565b67ffffffffffffffff83168152604060208201525f6105da604083018461031c565b94935050505056fea2646970667358221220577b53dd6f4f36615d986a7d19f894cf5772e8abf74ede39a44323009cd23c3364736f6c634300081c0033"
+var KeyBroadcastContractBin = "0x6080604052348015600e575f5ffd5b5060405161069f38038061069f833981016040819052602b91604f565b600180546001600160a01b0319166001600160a01b0392909216919091179055607a565b5f60208284031215605e575f5ffd5b81516001600160a01b03811681146073575f5ffd5b9392505050565b610618806100875f395ff3fe608060405234801561000f575f5ffd5b5060043610610034575f3560e01c80638a0b8b2814610038578063daade8e814610061575b5f5ffd5b61004b6100463660046102fc565b610076565b604051610058919061034a565b60405180910390f35b61007461006f366004610370565b610120565b005b67ffffffffffffffff81165f90815260208190526040902080546060919061009d90610434565b80601f01602080910402602001604051908101604052809291908181526020018280546100c990610434565b80156101145780601f106100eb57610100808354040283529160200191610114565b820191905f5260205f20905b8154815290600101906020018083116100f757829003601f168201915b50505050509050919050565b80515f0361014157604051630eda9c3d60e31b815260040160405180910390fd5b67ffffffffffffffff82165f908152602081905260408120805461016490610434565b9050111561018557604051632c6c0cd160e11b815260040160405180910390fd5b60015460405163f90f3bed60e01b815267ffffffffffffffff841660048201525f916001600160a01b03169063f90f3bed90602401602060405180830381865afa1580156101d5573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906101f9919061046c565b60405163cde1532d60e01b81523360048201529091506001600160a01b0382169063cde1532d90602401602060405180830381865afa15801561023e573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906102629190610492565b61027f57604051631eb49d6d60e11b815260040160405180910390fd5b67ffffffffffffffff83165f9081526020819052604090206102a183826104fd565b507ff0dbcf46bf98296dd97ce9cb1ef117ac6fd1b2f126741125433174d56dad376883836040516102d39291906105b8565b60405180910390a1505050565b803567ffffffffffffffff811681146102f7575f5ffd5b919050565b5f6020828403121561030c575f5ffd5b610315826102e0565b9392505050565b5f81518084528060208401602086015e5f602082860101526020601f19601f83011685010191505092915050565b602081525f610315602083018461031c565b634e487b7160e01b5f52604160045260245ffd5b5f5f60408385031215610381575f5ffd5b61038a836102e0565b9150602083013567ffffffffffffffff8111156103a5575f5ffd5b8301601f810185136103b5575f5ffd5b803567ffffffffffffffff8111156103cf576103cf61035c565b604051601f8201601f19908116603f0116810167ffffffffffffffff811182821017156103fe576103fe61035c565b604052818152828201602001871015610415575f5ffd5b816020840160208301375f602083830101528093505050509250929050565b600181811c9082168061044857607f821691505b60208210810361046657634e487b7160e01b5f52602260045260245ffd5b50919050565b5f6020828403121561047c575f5ffd5b81516001600160a01b0381168114610315575f5ffd5b5f602082840312156104a2575f5ffd5b81518015158114610315575f5ffd5b601f8211156104f857805f5260205f20601f840160051c810160208510156104d65750805b601f840160051c820191505b818110156104f5575f81556001016104e2565b50505b505050565b815167ffffffffffffffff8111156105175761051761035c565b61052b816105258454610434565b846104b1565b6020601f82116001811461055d575f83156105465750848201515b5f19600385901b1c1916600184901b1784556104f5565b5f84815260208120601f198516915b8281101561058c578785015182556020948501946001909201910161056c565b50848210156105a957868401515f19600387901b60f8161c191681555b50505050600190811b01905550565b67ffffffffffffffff83168152604060208201525f6105da604083018461031c565b94935050505056fea2646970667358221220f19bf4d639a2900e8a0a39902f1d3fb5bcc6fcc6c3f6bacf1bdc27402fafd81a64736f6c634300081c0033"
 
 // DeployKeyBroadcastContract deploys a new Ethereum contract, binding an instance of KeyBroadcastContract to it.
-func DeployKeyBroadcastContract(auth *bind.TransactOpts, backend bind.ContractBackend, keyperSetManagerAddress libcommon.Address) (libcommon.Address, types.Transaction, *KeyBroadcastContract, error) {
+func DeployKeyBroadcastContract(auth *bind.TransactOpts, backend bind.ContractBackend, keyperSetManagerAddress common.Address) (common.Address, types.Transaction, *KeyBroadcastContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(KeyBroadcastContractABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(KeyBroadcastContractBin), backend, keyperSetManagerAddress)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(KeyBroadcastContractBin), backend, keyperSetManagerAddress)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &KeyBroadcastContract{KeyBroadcastContractCaller: KeyBroadcastContractCaller{contract: contract}, KeyBroadcastContractTransactor: KeyBroadcastContractTransactor{contract: contract}, KeyBroadcastContractFilterer: KeyBroadcastContractFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type KeyBroadcastContractTransactorRaw struct {
 }
 
 // NewKeyBroadcastContract creates a new instance of KeyBroadcastContract, bound to a specific deployed contract.
-func NewKeyBroadcastContract(address libcommon.Address, backend bind.ContractBackend) (*KeyBroadcastContract, error) {
+func NewKeyBroadcastContract(address common.Address, backend bind.ContractBackend) (*KeyBroadcastContract, error) {
 	contract, err := bindKeyBroadcastContract(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewKeyBroadcastContract(address libcommon.Address, backend bind.ContractBac
 }
 
 // NewKeyBroadcastContractCaller creates a new read-only instance of KeyBroadcastContract, bound to a specific deployed contract.
-func NewKeyBroadcastContractCaller(address libcommon.Address, caller bind.ContractCaller) (*KeyBroadcastContractCaller, error) {
+func NewKeyBroadcastContractCaller(address common.Address, caller bind.ContractCaller) (*KeyBroadcastContractCaller, error) {
 	contract, err := bindKeyBroadcastContract(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewKeyBroadcastContractCaller(address libcommon.Address, caller bind.Contra
 }
 
 // NewKeyBroadcastContractTransactor creates a new write-only instance of KeyBroadcastContract, bound to a specific deployed contract.
-func NewKeyBroadcastContractTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*KeyBroadcastContractTransactor, error) {
+func NewKeyBroadcastContractTransactor(address common.Address, transactor bind.ContractTransactor) (*KeyBroadcastContractTransactor, error) {
 	contract, err := bindKeyBroadcastContract(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewKeyBroadcastContractTransactor(address libcommon.Address, transactor bin
 }
 
 // NewKeyBroadcastContractFilterer creates a new log filterer instance of KeyBroadcastContract, bound to a specific deployed contract.
-func NewKeyBroadcastContractFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*KeyBroadcastContractFilterer, error) {
+func NewKeyBroadcastContractFilterer(address common.Address, filterer bind.ContractFilterer) (*KeyBroadcastContractFilterer, error) {
 	contract, err := bindKeyBroadcastContract(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewKeyBroadcastContractFilterer(address libcommon.Address, filterer bind.Co
 }
 
 // bindKeyBroadcastContract binds a generic wrapper to an already deployed contract.
-func bindKeyBroadcastContract(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindKeyBroadcastContract(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(KeyBroadcastContractABI))
 	if err != nil {
 		return nil, err
@@ -357,8 +357,8 @@ type KeyBroadcastContractEonKeyBroadcast struct {
 	Raw types.Log // Blockchain specific contextual infos
 }
 
-func (_KeyBroadcastContract *KeyBroadcastContractFilterer) EonKeyBroadcastEventID() libcommon.Hash {
-	return libcommon.HexToHash("0xf0dbcf46bf98296dd97ce9cb1ef117ac6fd1b2f126741125433174d56dad3768")
+func (_KeyBroadcastContract *KeyBroadcastContractFilterer) EonKeyBroadcastEventID() common.Hash {
+	return common.HexToHash("0xf0dbcf46bf98296dd97ce9cb1ef117ac6fd1b2f126741125433174d56dad3768")
 }
 
 // FilterEonKeyBroadcast is a free log retrieval operation binding the contract event 0xf0dbcf46bf98296dd97ce9cb1ef117ac6fd1b2f126741125433174d56dad3768.

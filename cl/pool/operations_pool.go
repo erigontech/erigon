@@ -17,7 +17,7 @@
 package pool
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/blake2b"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -27,35 +27,35 @@ import (
 const operationsPerPool = 512
 
 // DoubleSignatureKey uses blake2b algorithm to merge two signatures together. blake2 is faster than sha3.
-func doubleSignatureKey(one, two libcommon.Bytes96) (out libcommon.Bytes96) {
+func doubleSignatureKey(one, two common.Bytes96) (out common.Bytes96) {
 	res := blake2b.Sum256(append(one[:], two[:]...))
 	copy(out[:], res[:])
 	return
 }
 
-func ComputeKeyForProposerSlashing(slashing *cltypes.ProposerSlashing) libcommon.Bytes96 {
+func ComputeKeyForProposerSlashing(slashing *cltypes.ProposerSlashing) common.Bytes96 {
 	return doubleSignatureKey(slashing.Header1.Signature, slashing.Header2.Signature)
 }
 
-func ComputeKeyForAttesterSlashing(slashing *cltypes.AttesterSlashing) libcommon.Bytes96 {
+func ComputeKeyForAttesterSlashing(slashing *cltypes.AttesterSlashing) common.Bytes96 {
 	return doubleSignatureKey(slashing.Attestation_1.Signature, slashing.Attestation_2.Signature)
 }
 
 // OperationsPool is the collection of all gossip-collectable operations.
 type OperationsPool struct {
-	AttestationsPool          *OperationPool[libcommon.Bytes96, *solid.Attestation]
-	AttesterSlashingsPool     *OperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing]
-	ProposerSlashingsPool     *OperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing]
-	BLSToExecutionChangesPool *OperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange]
+	AttestationsPool          *OperationPool[common.Bytes96, *solid.Attestation]
+	AttesterSlashingsPool     *OperationPool[common.Bytes96, *cltypes.AttesterSlashing]
+	ProposerSlashingsPool     *OperationPool[common.Bytes96, *cltypes.ProposerSlashing]
+	BLSToExecutionChangesPool *OperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange]
 	VoluntaryExitsPool        *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
 }
 
 func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 	return OperationsPool{
-		AttestationsPool:          NewOperationPool[libcommon.Bytes96, *solid.Attestation](operationsPerPool, "attestationsPool"),
-		AttesterSlashingsPool:     NewOperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing](operationsPerPool, "attesterSlashingsPool"),
-		ProposerSlashingsPool:     NewOperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing](operationsPerPool, "proposerSlashingsPool"),
-		BLSToExecutionChangesPool: NewOperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange](operationsPerPool, "blsExecutionChangesPool"),
+		AttestationsPool:          NewOperationPool[common.Bytes96, *solid.Attestation](operationsPerPool, "attestationsPool"),
+		AttesterSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.AttesterSlashing](operationsPerPool, "attesterSlashingsPool"),
+		ProposerSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](operationsPerPool, "proposerSlashingsPool"),
+		BLSToExecutionChangesPool: NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](operationsPerPool, "blsExecutionChangesPool"),
 		VoluntaryExitsPool:        NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](operationsPerPool, "voluntaryExitsPool"),
 	}
 }

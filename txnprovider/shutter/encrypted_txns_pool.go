@@ -24,10 +24,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/google/btree"
 	"golang.org/x/sync/errgroup"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
@@ -35,7 +36,7 @@ import (
 
 type EncryptedTxnsPool struct {
 	logger            log.Logger
-	config            Config
+	config            shuttercfg.Config
 	sequencerContract *contracts.Sequencer
 	blockListener     *BlockListener
 	mu                sync.RWMutex
@@ -43,8 +44,8 @@ type EncryptedTxnsPool struct {
 	initialLoadDone   chan struct{}
 }
 
-func NewEncryptedTxnsPool(logger log.Logger, config Config, cb bind.ContractBackend, bl *BlockListener) *EncryptedTxnsPool {
-	sequencerContractAddress := libcommon.HexToAddress(config.SequencerContractAddress)
+func NewEncryptedTxnsPool(logger log.Logger, config shuttercfg.Config, cb bind.ContractBackend, bl *BlockListener) *EncryptedTxnsPool {
+	sequencerContractAddress := common.HexToAddress(config.SequencerContractAddress)
 	sequencerContract, err := contracts.NewSequencer(sequencerContractAddress, cb)
 	if err != nil {
 		panic(fmt.Errorf("failed to create shutter sequencer contract: %w", err))

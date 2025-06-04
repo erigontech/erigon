@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 )
 
 // search key in all files of all domains and print file names
@@ -55,6 +55,11 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 		}
 	case kv.ReceiptHistoryIdx:
 		err := at.d[kv.ReceiptDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		if err != nil {
+			return err
+		}
+	case kv.RCacheHistoryIdx:
+		err := at.d[kv.RCacheDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
@@ -120,13 +125,12 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 				continue
 			}
 			eliasVal, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-
+			r := multiencseq.ReadMultiEncSeq(item.startTxNum, eliasVal)
 			last2 := uint64(0)
-			if ef.Count() > 2 {
-				last2 = ef.Get(ef.Count() - 2)
+			if r.Count() > 2 {
+				last2 = r.Get(r.Count() - 2)
 			}
-			log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
+			log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.decompressor.FileName(), r.Min(), r.Max(), last2, stream.ToArrU64Must(r.Iterator(0))))
 		}
 		return true
 	})
@@ -140,26 +144,26 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 	iterStep := func(item visibleFile) error {
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)
-		defer item.src.decompressor.EnableReadAhead().DisableReadAhead()
 
 		for g.HasNext() {
 			k, _ := g.NextUncompressed()
 			_ = k
-			eliasVal, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-			if ef.Count() == 0 {
+
+			encodedSeq, _ := g.NextUncompressed()
+			r := multiencseq.ReadMultiEncSeq(item.startTxNum, encodedSeq)
+			if r.Count() == 0 {
 				continue
 			}
-			if item.startTxNum > ef.Min() {
-				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), common.Shorten(k, 8))
+			if item.startTxNum > r.Min() {
+				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, r.Min(), g.FileName(), common.Shorten(k, 8))
 				if failFast {
 					return err
 				} else {
 					log.Warn(err.Error())
 				}
 			}
-			if item.endTxNum < ef.Max() {
-				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), common.Shorten(k, 8))
+			if item.endTxNum < r.Max() {
+				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, r.Max(), g.FileName(), common.Shorten(k, 8))
 				if failFast {
 					return err
 				} else {

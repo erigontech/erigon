@@ -35,7 +35,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/utils"
 )
@@ -83,6 +83,9 @@ type CaplinConfig struct {
 
 	BootstrapNodes []string
 	StaticPeers    []string
+
+	// Extra
+	EnableEngineAPI bool
 }
 
 func (c CaplinConfig) IsDevnet() bool {
@@ -377,25 +380,25 @@ func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 type ConfigDurationSec time.Duration
 
 func (d *ConfigDurationSec) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"%d\"", int64(time.Duration(*d).Seconds()))), nil
+	return fmt.Appendf(nil, "\"%d\"", int64(time.Duration(*d).Seconds())), nil
 }
 
 type ConfigDurationMSec time.Duration
 
 func (d *ConfigDurationMSec) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"%d\"", time.Duration(*d).Milliseconds())), nil
+	return fmt.Appendf(nil, "\"%d\"", time.Duration(*d).Milliseconds()), nil
 }
 
 type ConfigByte byte
 
 func (b ConfigByte) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"0x%02x\"", b)), nil
+	return fmt.Appendf(nil, "\"0x%02x\"", b), nil
 }
 
 type ConfigForkVersion uint32
 
 func (v ConfigForkVersion) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"0x%08x\"", v)), nil
+	return fmt.Appendf(nil, "\"0x%08x\"", v), nil
 }
 
 type VersionScheduleEntry struct {
@@ -406,7 +409,7 @@ type VersionScheduleEntry struct {
 type ConfigHex4Bytes [4]byte
 
 func (b ConfigHex4Bytes) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"0x%s"`, hex.EncodeToString(b[:]))), nil
+	return fmt.Appendf(nil, `"0x%s"`, hex.EncodeToString(b[:])), nil
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
@@ -517,20 +520,20 @@ type BeaconChainConfig struct {
 	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP,string"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
 	MaxBlobCommittmentsPerBlock      uint64 `yaml:"MAX_BLOB_COMMITMENTS_PER_BLOCK" spec:"true" json:"MAX_BLOB_COMMITMENTS_PER_BLOCK,string"`             // MaxBlobsCommittmentsPerBlock defines the maximum number of blobs commitments in a block.
 	// BLS domain values.
-	DomainBeaconProposer              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true" json:"DOMAIN_BEACON_PROPOSER"`                               // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
-	DomainRandao                      libcommon.Bytes4 `yaml:"DOMAIN_RANDAO" spec:"true" json:"DOMAIN_RANDAO"`                                                 // DomainRandao defines the BLS signature domain for randao verification.
-	DomainBeaconAttester              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_ATTESTER" spec:"true" json:"DOMAIN_BEACON_ATTESTER"`                               // DomainBeaconAttester defines the BLS signature domain for attestation verification.
-	DomainDeposit                     libcommon.Bytes4 `yaml:"DOMAIN_DEPOSIT" spec:"true" json:"DOMAIN_DEPOSIT"`                                               // DomainDeposit defines the BLS signature domain for deposit verification.
-	DomainVoluntaryExit               libcommon.Bytes4 `yaml:"DOMAIN_VOLUNTARY_EXIT" spec:"true" json:"DOMAIN_VOLUNTARY_EXIT"`                                 // DomainVoluntaryExit defines the BLS signature domain for exit verification.
-	DomainSelectionProof              libcommon.Bytes4 `yaml:"DOMAIN_SELECTION_PROOF" spec:"true" json:"DOMAIN_SELECTION_PROOF"`                               // DomainSelectionProof defines the BLS signature domain for selection proof.
-	DomainAggregateAndProof           libcommon.Bytes4 `yaml:"DOMAIN_AGGREGATE_AND_PROOF" spec:"true" json:"DOMAIN_AGGREGATE_AND_PROOF"`                       // DomainAggregateAndProof defines the BLS signature domain for aggregate and proof.
-	DomainSyncCommittee               libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE" spec:"true" json:"DOMAIN_SYNC_COMMITTEE"`                                 // DomainVoluntaryExit defines the BLS signature domain for sync committee.
-	DomainSyncCommitteeSelectionProof libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF" spec:"true" json:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF"` // DomainSelectionProof defines the BLS signature domain for sync committee selection proof.
-	DomainContributionAndProof        libcommon.Bytes4 `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true" json:"DOMAIN_CONTRIBUTION_AND_PROOF"`                 // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
-	DomainApplicationMask             libcommon.Bytes4 `yaml:"DOMAIN_APPLICATION_MASK" spec:"true" json:"DOMAIN_APPLICATION_MASK"`                             // DomainApplicationMask defines the BLS signature domain for application mask.
-	DomainApplicationBuilder          libcommon.Bytes4 `json:"-"`                                                                                              // DomainApplicationBuilder defines the BLS signature domain for application builder.
-	DomainBLSToExecutionChange        libcommon.Bytes4 `json:"-"`                                                                                              // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
-	DomainBlobSideCar                 libcommon.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true" json:"DOMAIN_BLOB_SIDECAR"`                                     // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
+	DomainBeaconProposer              common.Bytes4 `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true" json:"DOMAIN_BEACON_PROPOSER"`                               // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
+	DomainRandao                      common.Bytes4 `yaml:"DOMAIN_RANDAO" spec:"true" json:"DOMAIN_RANDAO"`                                                 // DomainRandao defines the BLS signature domain for randao verification.
+	DomainBeaconAttester              common.Bytes4 `yaml:"DOMAIN_BEACON_ATTESTER" spec:"true" json:"DOMAIN_BEACON_ATTESTER"`                               // DomainBeaconAttester defines the BLS signature domain for attestation verification.
+	DomainDeposit                     common.Bytes4 `yaml:"DOMAIN_DEPOSIT" spec:"true" json:"DOMAIN_DEPOSIT"`                                               // DomainDeposit defines the BLS signature domain for deposit verification.
+	DomainVoluntaryExit               common.Bytes4 `yaml:"DOMAIN_VOLUNTARY_EXIT" spec:"true" json:"DOMAIN_VOLUNTARY_EXIT"`                                 // DomainVoluntaryExit defines the BLS signature domain for exit verification.
+	DomainSelectionProof              common.Bytes4 `yaml:"DOMAIN_SELECTION_PROOF" spec:"true" json:"DOMAIN_SELECTION_PROOF"`                               // DomainSelectionProof defines the BLS signature domain for selection proof.
+	DomainAggregateAndProof           common.Bytes4 `yaml:"DOMAIN_AGGREGATE_AND_PROOF" spec:"true" json:"DOMAIN_AGGREGATE_AND_PROOF"`                       // DomainAggregateAndProof defines the BLS signature domain for aggregate and proof.
+	DomainSyncCommittee               common.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE" spec:"true" json:"DOMAIN_SYNC_COMMITTEE"`                                 // DomainVoluntaryExit defines the BLS signature domain for sync committee.
+	DomainSyncCommitteeSelectionProof common.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF" spec:"true" json:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF"` // DomainSelectionProof defines the BLS signature domain for sync committee selection proof.
+	DomainContributionAndProof        common.Bytes4 `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true" json:"DOMAIN_CONTRIBUTION_AND_PROOF"`                 // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
+	DomainApplicationMask             common.Bytes4 `yaml:"DOMAIN_APPLICATION_MASK" spec:"true" json:"DOMAIN_APPLICATION_MASK"`                             // DomainApplicationMask defines the BLS signature domain for application mask.
+	DomainApplicationBuilder          common.Bytes4 `json:"-"`                                                                                              // DomainApplicationBuilder defines the BLS signature domain for application builder.
+	DomainBLSToExecutionChange        common.Bytes4 `json:"-"`                                                                                              // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
+	DomainBlobSideCar                 common.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true" json:"DOMAIN_BLOB_SIDECAR"`                                     // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
 
 	// Slasher constants.
 	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
@@ -553,7 +556,7 @@ type BeaconChainConfig struct {
 	FuluForkVersion      ConfigForkVersion `yaml:"FULU_FORK_VERSION" spec:"true" json:"FULU_FORK_VERSION"`              // FuluForkVersion is used to represent the fork version for Fulu.
 	FuluForkEpoch        uint64            `yaml:"FULU_FORK_EPOCH" spec:"true" json:"FULU_FORK_EPOCH,string"`           // FuluForkEpoch is used to represent the assigned fork epoch for Fulu.
 
-	ForkVersionSchedule map[libcommon.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
+	ForkVersionSchedule map[common.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -593,10 +596,10 @@ type BeaconChainConfig struct {
 	MinSyncCommitteeParticipants uint64 `yaml:"MIN_SYNC_COMMITTEE_PARTICIPANTS" spec:"true" json:"MIN_SYNC_COMMITTEE_PARTICIPANTS,string"` // MinSyncCommitteeParticipants defines the minimum amount of sync committee participants for which the light client acknowledges the signature.
 
 	// Bellatrix
-	TerminalBlockHash                libcommon.Hash `yaml:"TERMINAL_BLOCK_HASH" spec:"true" json:"TERMINAL_BLOCK_HASH"`                                          // TerminalBlockHash of beacon chain.
-	TerminalBlockHashActivationEpoch uint64         `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true" json:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH,string"` // TerminalBlockHashActivationEpoch of beacon chain.
-	TerminalTotalDifficulty          string         `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"  json:"TERMINAL_TOTAL_DIFFICULTY"`                             // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
-	DefaultBuilderGasLimit           uint64         `json:"-"`                                                                                                   // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
+	TerminalBlockHash                common.Hash `yaml:"TERMINAL_BLOCK_HASH" spec:"true" json:"TERMINAL_BLOCK_HASH"`                                          // TerminalBlockHash of beacon chain.
+	TerminalBlockHashActivationEpoch uint64      `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true" json:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH,string"` // TerminalBlockHashActivationEpoch of beacon chain.
+	TerminalTotalDifficulty          string      `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"  json:"TERMINAL_TOTAL_DIFFICULTY"`                             // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
+	DefaultBuilderGasLimit           uint64      `json:"-"`                                                                                                   // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
 
 	// Mev-boost circuit breaker
 	MaxBuilderConsecutiveMissedSlots uint64 `json:"-"` // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
@@ -685,8 +688,8 @@ func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
 }
 
-func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]VersionScheduleEntry {
-	fvs := map[libcommon.Bytes4]VersionScheduleEntry{}
+func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleEntry {
+	fvs := map[common.Bytes4]VersionScheduleEntry{}
 	fvs[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = VersionScheduleEntry{b.GenesisSlot / b.SlotsPerEpoch, Phase0Version}
 	fvs[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = VersionScheduleEntry{b.AltairForkEpoch, AltairVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = VersionScheduleEntry{b.BellatrixForkEpoch, BellatrixVersion}

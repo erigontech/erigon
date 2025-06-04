@@ -20,13 +20,12 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 )
 
 func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState, config *chain.Config, headerReader consensus.ChainHeaderReader) error {
@@ -45,9 +44,9 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState,
 	return storeHash(headerNum-1, header.ParentHash, state)
 }
 
-func storeHash(num uint64, hash libcommon.Hash, state *state.IntraBlockState) error {
+func storeHash(num uint64, hash common.Hash, state *state.IntraBlockState) error {
 	slotNum := num % params.BlockHashHistoryServeWindow
-	storageSlot := libcommon.BytesToHash(uint256.NewInt(slotNum).Bytes())
+	storageSlot := common.BytesToHash(uint256.NewInt(slotNum).Bytes())
 	parentHashInt := uint256.NewInt(0).SetBytes32(hash.Bytes())
-	return state.SetState(params.HistoryStorageAddress, &storageSlot, *parentHashInt)
+	return state.SetState(params.HistoryStorageAddress, storageSlot, *parentHashInt)
 }

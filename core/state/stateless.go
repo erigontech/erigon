@@ -40,7 +40,8 @@ type Stateless struct {
 	t              *trie.Trie             // State trie
 	codeUpdates    map[common.Hash][]byte // Lookup index from code hashes to corresponding bytecode
 	blockNr        uint64                 // Current block number
-	storageUpdates map[common.Hash]map[common.Hash][]byte
+	storageWrites  map[common.Hash]map[common.Hash]uint256.Int
+	storageDeletes map[common.Hash]map[common.Hash]struct{}
 	accountUpdates map[common.Hash]*accounts.Account
 	deleted        map[common.Hash]struct{}
 	created        map[common.Hash]struct{}
@@ -70,7 +71,8 @@ func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uin
 	return &Stateless{
 		t:              t,
 		codeUpdates:    make(map[common.Hash][]byte),
-		storageUpdates: make(map[common.Hash]map[common.Hash][]byte),
+		storageWrites:  make(map[common.Hash]map[common.Hash]uint256.Int),
+		storageDeletes: make(map[common.Hash]map[common.Hash]struct{}),
 		accountUpdates: make(map[common.Hash]*accounts.Account),
 		deleted:        make(map[common.Hash]struct{}),
 		created:        make(map[common.Hash]struct{}),
@@ -111,29 +113,55 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 
 // ReadAccountStorage is a part of the StateReader interface
 // This implementation attempts to look up the storage in the state trie, and fails if it is not found
-func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (s *Stateless) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	if s.trace {
-		fmt.Printf("Stateless: ReadAccountStorage(address=%x, incarnation=%d, key=%x)\n", address.Bytes(), incarnation, key.Bytes())
+		fmt.Printf("Stateless: ReadAccountStorage(address=%x, key=%x)\n", address[:], key[:])
 	}
 	seckey, err := common.HashData(key[:])
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 
 	if enc, ok := s.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey)); ok {
-		return enc, nil
+		var res uint256.Int
+		(&res).SetBytes(enc)
+		return res, true, nil
 	}
 
-	return nil, nil
+	return uint256.Int{}, false, nil
+}
+
+func (s *Stateless) HasStorage(address common.Address) (bool, error) {
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return false, err
+	}
+	// check if account has been deleted, in which case it has no storage
+	if _, ok := s.deleted[addrHash]; ok {
+		return false, nil
+	}
+	// check if we know about any storage updates with non-empty values
+	for _, v := range s.storageWrites[addrHash] {
+		if !v.IsZero() {
+			return true, nil
+		}
+	}
+	// check if account does not exist in trie, in which case it has no storage
+	acc, ok := s.t.GetAccount(addrHash[:])
+	if !ok {
+		return false, nil
+	}
+	// check if account in trie has empty storage root or not
+	return acc.Root == trie.EmptyRoot, nil
 }
 
 // ReadAccountCode is a part of the StateReader interface
-func (s *Stateless) ReadAccountCode(address common.Address, incarnation uint64) (code []byte, err error) {
+func (s *Stateless) ReadAccountCode(address common.Address) (code []byte, err error) {
 	if s.trace {
 		fmt.Printf("Getting code for address %x\n", address)
 	}
@@ -156,7 +184,7 @@ func (s *Stateless) ReadAccountCode(address common.Address, incarnation uint64) 
 // ReadAccountCodeSize is a part of the StateReader interface
 // This implementation looks the code up in the codeMap, and returns its size
 // It fails if the code is not found in the map
-func (s *Stateless) ReadAccountCodeSize(address common.Address, incarnation uint64) (codeSize int, err error) {
+func (s *Stateless) ReadAccountCodeSize(address common.Address) (codeSize int, err error) {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return 0, err
@@ -223,29 +251,26 @@ func (s *Stateless) UpdateAccountCode(address common.Address, incarnation uint64
 
 // WriteAccountStorage is a part of the StateWriter interface
 // This implementation registeres the change of the account's storage in the internal double map `storageUpdates`
-func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return err
 	}
-
-	v := value.Bytes()
-	m, ok := s.storageUpdates[addrHash]
+	m, ok := s.storageWrites[addrHash]
 	if !ok {
-		m = make(map[common.Hash][]byte)
-		s.storageUpdates[addrHash] = m
+		m = make(map[common.Hash]uint256.Int)
+		s.storageWrites[addrHash] = m
 	}
 	seckey, err := common.HashData(key[:])
 	if err != nil {
 		return err
 	}
-	if len(v) > 0 {
-		m[seckey] = v
-	} else {
-		m[seckey] = nil
+	m[seckey] = value
+	if d, ok := s.storageDeletes[addrHash]; ok {
+		delete(d, seckey)
 	}
 	if s.trace {
-		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, *key, *value)
+		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, key, value)
 	}
 	return nil
 }
@@ -261,6 +286,7 @@ func (s *Stateless) CreateContract(address common.Address) error {
 		fmt.Printf("Stateless: CreateContract %x hash %x\n", address, addrHash)
 	}
 	s.created[addrHash] = struct{}{}
+	delete(s.deleted, addrHash)
 	return nil
 }
 
@@ -307,20 +333,38 @@ func (s *Stateless) Finalize() common.Hash {
 			s.t.Delete(addrHash[:])
 		}
 	}
-	for addrHash, m := range s.storageUpdates {
+
+	updatedAccounts := map[common.Hash]struct{}{}
+
+	for addrHash, m := range s.storageWrites {
 		if _, ok := s.deleted[addrHash]; ok {
 			// Deleted contracts will be dealth with later, in the next loop
 			continue
 		}
 
+		updatedAccounts[addrHash] = struct{}{}
+
 		for keyHash, v := range m {
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			if len(v) > 0 {
-				s.t.Update(cKey, v)
-			} else {
-				s.t.Delete(cKey)
-			}
+			// TODO v.Bytes32() will avoid GC - is trie construct is adjusted
+			s.t.Update(cKey, v.Bytes())
 		}
+	}
+	for addrHash, m := range s.storageDeletes {
+		if _, ok := s.deleted[addrHash]; ok {
+			// Deleted contracts will be dealth with later, in the next loop
+			continue
+		}
+
+		updatedAccounts[addrHash] = struct{}{}
+
+		for keyHash := range m {
+			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
+			s.t.Delete(cKey)
+		}
+	}
+
+	for addrHash := range updatedAccounts {
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			ok, root := s.t.DeepHash(addrHash[:])
 			if ok {
@@ -330,6 +374,7 @@ func (s *Stateless) Finalize() common.Hash {
 			}
 		}
 	}
+
 	// For the contracts that got deleted
 	for addrHash := range s.deleted {
 		if _, ok := s.created[addrHash]; ok {
@@ -349,7 +394,8 @@ func (s *Stateless) Finalize() common.Hash {
 		s.t.DeleteSubtree(addrHash[:])
 	}
 
-	s.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
+	s.storageWrites = make(map[common.Hash]map[common.Hash]uint256.Int)
+	s.storageDeletes = make(map[common.Hash]map[common.Hash]struct{})
 	s.accountUpdates = make(map[common.Hash]*accounts.Account)
 	s.deleted = make(map[common.Hash]struct{})
 	s.created = make(map[common.Hash]struct{})

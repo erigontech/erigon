@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
@@ -33,12 +31,15 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 )
 
 func TestState(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
@@ -51,22 +52,15 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
-	// these need to implement eip-7610
-	st.skipLoad(`InitCollisionParis.json`)
-	st.skipLoad(`RevertInCreateInInit_Paris.json`)
-	st.skipLoad(`RevertInCreateInInitCreate2Paris.json`)
-	st.skipLoad(`create2collisionStorageParis.json`)
-	st.skipLoad(`dynamicAccountOverwriteEmpty_Paris.json`)
-
 	dirs := datadir.New(t.TempDir())
-	db, _ := temporaltest.NewTestDB(t, dirs)
+	db := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
-					tx, err := db.BeginRw(context.Background())
+					tx, err := db.BeginTemporalRw(context.Background())
 					if err != nil {
 						t.Fatal(err)
 					}

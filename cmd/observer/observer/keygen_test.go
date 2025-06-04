@@ -31,7 +31,7 @@ import (
 func TestKeygen(t *testing.T) {
 	targetKeyPair, err := crypto.GenerateKey()
 	assert.NotNil(t, targetKeyPair)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	targetKey := &targetKeyPair.PublicKey
 	keys := keygen(context.Background(), targetKey, 50*time.Millisecond, uint(runtime.GOMAXPROCS(-1)), log.Root())

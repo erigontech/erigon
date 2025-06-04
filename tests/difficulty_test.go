@@ -17,17 +17,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
 	"encoding/json"
 	"fmt"
 	"testing"
+
+	"github.com/erigontech/erigon/execution/testutil"
 )
 
 func TestDifficulty(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	dt := new(testMatcher)
 
 	dt.walk(t, difficultyTestDir, func(t *testing.T, name string, superTest map[string]json.RawMessage) {
@@ -41,9 +45,9 @@ func TestDifficulty(t *testing.T) {
 				continue
 			}
 
-			cfg, ok := Forks[fork]
+			cfg, ok := testutil.Forks[fork]
 			if !ok {
-				t.Error(UnsupportedForkError{fork})
+				t.Error(testutil.UnsupportedForkError{Name: fork})
 				continue
 			}
 

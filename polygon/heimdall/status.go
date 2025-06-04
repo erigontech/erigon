@@ -22,6 +22,9 @@ type Status struct {
 	LatestBlockHeight string `json:"latest_block_height"`
 	LatestBlockTime   string `json:"latest_block_time"`
 	CatchingUp        bool   `json:"catching_up"`
+	NodeInfo          struct {
+		Version string `json:"version"`
+	} `json:"node_info"`
 }
 
 type StatusResponse struct {

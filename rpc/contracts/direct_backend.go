@@ -23,11 +23,11 @@ import (
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/eth/filters"
-	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -46,7 +46,7 @@ func NewDirectBackend(api jsonrpc.EthAPI) DirectBackend {
 	}
 }
 
-func (b DirectBackend) CodeAt(ctx context.Context, account libcommon.Address, blockNum *big.Int) ([]byte, error) {
+func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, blockNum *big.Int) ([]byte, error) {
 	return b.api.GetCode(ctx, account, BlockNumArg(blockNum))
 }
 
@@ -54,11 +54,11 @@ func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMs
 	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), BlockNumArg(blockNum), nil)
 }
 
-func (b DirectBackend) PendingCodeAt(ctx context.Context, account libcommon.Address) ([]byte, error) {
+func (b DirectBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
 	return b.api.GetCode(ctx, account, PendingBlockNumArg())
 }
 
-func (b DirectBackend) PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error) {
+func (b DirectBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
 	count, err := b.api.GetTransactionCount(ctx, account, PendingBlockNumArg())
 	if err != nil {
 		return 0, err
@@ -155,8 +155,8 @@ func PendingBlockNumArg() rpc.BlockNumberOrHash {
 }
 
 func CallArgsFromCallMsg(callMsg ethereum.CallMsg) ethapi.CallArgs {
-	var emptyAddress libcommon.Address
-	var from *libcommon.Address
+	var emptyAddress common.Address
+	var from *common.Address
 	if callMsg.From != emptyAddress {
 		from = &callMsg.From
 	}

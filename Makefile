@@ -52,12 +52,14 @@ ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
+override BUILD_TAGS := $(BUILD_TAGS),$(EXTRA_BUILD_TAGS)
+
 GOPRIVATE = github.com/erigontech/silkworm-go
 
 PACKAGE = github.com/erigontech/erigon
 
-GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
-GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+override GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
+override GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
 GOBUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
@@ -169,16 +171,41 @@ db-tools:
 test-erigon-lib:
 	@cd erigon-lib && $(MAKE) test
 
+test-erigon-lib-all:
+	@cd erigon-lib && $(MAKE) test-all
+
+test-erigon-db:
+	@cd erigon-db && $(MAKE) test
+
+test-erigon-db-all:
+	@cd erigon-db && $(MAKE) test-all
+
+test-p2:
+	@cd p2p && $(MAKE) test
+
+test-p2p-all:
+	@cd p2p && $(MAKE) test-all
+
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
-## test:                              run unit tests with a 100s timeout
-test: test-erigon-lib
-	$(GOTEST) --timeout 10m -coverprofile=coverage.out
+## test:                      run short tests with a 10m timeout
+test: test-erigon-lib test-erigon-db test-p2
+	@{ \
+		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
 
-## test-integration:                  run integration tests with a 30m timeout
-test-integration: test-erigon-lib
-	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
+## test-all:                  run all tests with a 1h timeout
+test-all: test-erigon-lib-all test-erigon-db-all test-p2p-all
+	@{ \
+		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
@@ -213,17 +240,21 @@ define run_suite
     printf "\n"; \
     echo "-----------   Results for $1-$2    -----------"; \
     echo "Tests: $$tests, Failed: $$failed"; \
-    printf "\n\n============================================================"
+    printf "\n\n============================================================\n"
 endef
 
 hive-local:
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
 	rm -rf "hive-local-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
-	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
 
 	cd "hive-local-$(SHORT_COMMIT)/hive" && \
-	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+	$(if $(filter Darwin,$(UNAME)), \
+		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
+		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
+	)
 	cd "hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
@@ -234,16 +265,42 @@ hive-local:
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
 eest-hive:
+	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
-	rm -rf "eest-hive-$(SHORT_COMMIT)" && mkdir "eest-hive-$(SHORT_COMMIT)"
-	cd "eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
-
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && \
+	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
+
+# define kurtosis assertoor runner
+define run-kurtosis-assertoor
+	docker build -t test/erigon:current . ; \
+	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
+	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
+	printf "\nTo view logs: \nkurtosis service logs makefile-kurtosis-testnet el-1-erigon-lighthouse\n"
+endef
+
+check-kurtosis:
+	@if ! command -v kurtosis >/dev/null 2>&1; then \
+		echo "kurtosis command not found in PATH, please source it in PATH. If Kurtosis is not installed, install it by visiting https://docs.kurtosis.com/install/"; \
+		exit 1; \
+	fi; \
+
+kurtosis-pectra-assertoor:	check-kurtosis
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
+
+kurtosis-regular-assertoor:	check-kurtosis 
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
+
+kurtosis-cleanup:
+	@echo "Currently Running Enclaves: "
+	@kurtosis enclave ls
+	@echo "-----------------------------------\n"
+	kurtosis enclave rm -f makefile-kurtosis-testnet
 
 ## lint-deps:                         install lint dependencies
 lint-deps:
@@ -259,6 +316,8 @@ lint:
 	@cd erigon-lib && $(MAKE) lint
 	@./erigon-lib/tools/golangci_lint.sh
 	@./erigon-lib/tools/mod_tidy_check.sh
+	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
+	@cd p2p && ./../erigon-lib/tools/mod_tidy_check.sh
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -308,8 +367,13 @@ grpc:
 	@cd erigon-lib && $(MAKE) grpc
 	@cd txnprovider/shutter && $(MAKE) proto
 
+## stringer:                          generate stringer code
+stringer:
+	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
+	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc
+gen: mocks solc abigen gencodec graphql grpc stringer
 	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts

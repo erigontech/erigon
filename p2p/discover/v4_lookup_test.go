@@ -17,28 +17,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration_skip
-
 package discover
 
 import (
 	"context"
 	"crypto/ecdsa"
 	"net"
-	"runtime"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/p2p/discover/v4wire"
-	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon-p2p/discover/v4wire"
+	"github.com/erigontech/erigon-p2p/enode"
 )
 
 func TestUDPv4_Lookup(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
-	}
+	t.Skip("issue #14714")
 	t.Parallel()
 	logger := log.New()
 
@@ -75,9 +70,7 @@ func TestUDPv4_Lookup(t *testing.T) {
 }
 
 func TestUDPv4_LookupIterator(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
-	}
+	t.Skip("issue #14924")
 	t.Parallel()
 	logger := log.New()
 

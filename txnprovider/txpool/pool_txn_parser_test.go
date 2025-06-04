@@ -27,12 +27,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/testdata"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types/testdata"
 )
 
 func TestParseTransactionRLP(t *testing.T) {
@@ -116,22 +116,22 @@ func TestTxnSlotsGrowth(t *testing.T) {
 	assert := assert.New(t)
 	s := &TxnSlots{}
 	s.Resize(11)
-	assert.Equal(11, len(s.Txns))
+	assert.Len(s.Txns, 11)
 	assert.Equal(11, s.Senders.Len())
 	s.Resize(23)
-	assert.Equal(23, len(s.Txns))
+	assert.Len(s.Txns, 23)
 	assert.Equal(23, s.Senders.Len())
 
 	s = &TxnSlots{Txns: make([]*TxnSlot, 20), Senders: make(Addresses, 20*20)}
 	s.Resize(20)
-	assert.Equal(20, len(s.Txns))
+	assert.Len(s.Txns, 20)
 	assert.Equal(20, s.Senders.Len())
 	s.Resize(23)
-	assert.Equal(23, len(s.Txns))
+	assert.Len(s.Txns, 23)
 	assert.Equal(23, s.Senders.Len())
 
 	s.Resize(2)
-	assert.Equal(2, len(s.Txns))
+	assert.Len(s.Txns, 2)
 	assert.Equal(2, s.Senders.Len())
 }
 
@@ -160,8 +160,8 @@ func TestDedupHashes(t *testing.T) {
 	c = h.DedupCopy()
 	assert.Zero(h.Len())
 	assert.Zero(c.Len())
-	assert.Zero(len(h))
-	assert.Zero(len(c))
+	assert.Empty(h)
+	assert.Empty(c)
 
 	h = toHashes(1, 2, 3, 4)
 	c = h.DedupCopy()
@@ -218,10 +218,10 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.Size))
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
 	assert.Equal(t, BlobTxnType, thinTxn.Type)
-	assert.Equal(t, 2, len(thinTxn.BlobHashes))
-	assert.Equal(t, 0, len(thinTxn.Blobs))
-	assert.Equal(t, 0, len(thinTxn.Commitments))
-	assert.Equal(t, 0, len(thinTxn.Proofs))
+	assert.Len(t, thinTxn.BlobHashes, 2)
+	assert.Empty(t, thinTxn.Blobs)
+	assert.Empty(t, thinTxn.Commitments)
+	assert.Empty(t, thinTxn.Proofs)
 
 	// Now parse the same txn body, but wrapped with blobs/commitments/proofs
 	wrappedWithBlobs = true
@@ -229,9 +229,9 @@ func TestBlobTxnParsing(t *testing.T) {
 
 	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
 	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
-	blob0 := make([]byte, fixedgas.BlobSize)
+	blob0 := make([]byte, params.BlobSize)
 	rand.Read(blob0)
-	blob1 := make([]byte, fixedgas.BlobSize)
+	blob1 := make([]byte, params.BlobSize)
 	rand.Read(blob1)
 
 	proofsRlpPrefix := hexutil.MustDecodeHex("f862")
@@ -286,9 +286,9 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, thinTxn.BlobFeeCap, fatTxn.BlobFeeCap)
 	assert.Equal(t, thinTxn.BlobHashes, fatTxn.BlobHashes)
 
-	require.Equal(t, 2, len(fatTxn.Blobs))
-	require.Equal(t, 2, len(fatTxn.Commitments))
-	require.Equal(t, 2, len(fatTxn.Proofs))
+	require.Len(t, fatTxn.Blobs, 2)
+	require.Len(t, fatTxn.Commitments, 2)
+	require.Len(t, fatTxn.Proofs, 2)
 	assert.Equal(t, blob0, fatTxn.Blobs[0])
 	assert.Equal(t, blob1, fatTxn.Blobs[1])
 	assert.Equal(t, commitment0, fatTxn.Commitments[0])
@@ -325,8 +325,8 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	setCodeTx := types.SetCodeTransaction{}
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
 	setCodeTx.DecodeRLP(rlpStream)
-	require.Len(t, txn.Authorities, 1)
-	require.Equal(t, expectedSigner, *txn.Authorities[0])
+	require.Len(t, txn.AuthAndNonces, 1)
+	require.Equal(t, expectedSigner.String(), txn.AuthAndNonces[0].authority)
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {
@@ -344,7 +344,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 2, len(txn.Authorities))
+	assert.Len(t, txn.AuthAndNonces, 2)
 	assert.Equal(t, SetCodeTxnType, txn.Type)
 
 	// test empty authorizations
@@ -360,7 +360,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx2, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 0, len(tx2.Authorities))
+	assert.Empty(t, tx2.AuthAndNonces)
 	assert.Equal(t, SetCodeTxnType, tx2.Type)
 
 	// generated using this in core/types/encdec_test.go
@@ -369,7 +369,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 			tr := NewTRand()
 			var txn Transaction
 			requiredAuthLen := 0
-			for txn = tr.RandTransaction(); txn.Type() != types2.SetCodeTxnType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction() {
+			for txn = tr.RandTransaction(); txn.Type() != types.SetCodeTxnType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction() {
 			}
 			v, _, _ := txn.RawSignatureValues()
 			v.SetUint64(uint64(randIntInRange(0, 2)))
@@ -387,7 +387,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 			}
 
 			hex := hexutil.Bytes(w.Bytes()).String()
-			//hex := libcommon.BytesToHash().Hex()
+			//hex := common.BytesToHash().Hex()
 			authj, err := json.Marshal(txn.(*SetCodeTransaction).GetAuthorizations())
 			if err != nil {
 				t.Error(err)
@@ -405,7 +405,7 @@ func TestSetCodeTxnParsingWithLargeAuthorizationValues(t *testing.T) {
 			tr := NewTRand()
 			var txn. Transaction
 			requiredAuthLen := 1
-			for txn. = tr.RandTransaction(); txn..Type() != types2.SetCodeTxnType || len(txn..(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn. = tr.RandTransaction() {
+			for txn. = tr.RandTransaction(); txn..Type() != types.SetCodeTxnType || len(txn..(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn. = tr.RandTransaction() {
 			}
 			v, _, _ := txn..RawSignatureValues()
 			v.SetUint64(uint64(randIntInRange(0, 2)))

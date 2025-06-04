@@ -24,9 +24,9 @@ import (
 
 	"golang.org/x/net/context"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -43,7 +43,7 @@ type OnNewBlock func(blk *cltypes.SignedBeaconBlock) (finished bool, err error)
 type BackwardBeaconDownloader struct {
 	ctx            context.Context
 	slotToDownload atomic.Uint64
-	expectedRoot   libcommon.Hash
+	expectedRoot   common.Hash
 	rpc            *rpc.BeaconRpcP2P
 	engine         execution_client.ExecutionEngine
 	onNewBlock     OnNewBlock
@@ -81,7 +81,7 @@ func (b *BackwardBeaconDownloader) SetSlotToDownload(slot uint64) {
 }
 
 // SetExpectedRoot sets the expected root we expect to download.
-func (b *BackwardBeaconDownloader) SetExpectedRoot(root libcommon.Hash) {
+func (b *BackwardBeaconDownloader) SetExpectedRoot(root common.Hash) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.expectedRoot = root
@@ -125,7 +125,7 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
-	count := uint64(64)
+	count := uint64(16)
 	start := b.slotToDownload.Load() - count + 1
 	// Overflow? round to 0.
 	if start > b.slotToDownload.Load() {
@@ -179,7 +179,7 @@ Loop:
 		}
 		// No? Reject.
 		if blockRoot != b.expectedRoot {
-			log.Debug("Gotten unexpected root", "got", libcommon.Hash(blockRoot), "expected", b.expectedRoot)
+			log.Debug("Gotten unexpected root", "got", common.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
 		// Yes? then go for the callback.
@@ -251,7 +251,7 @@ Loop:
 			if err != nil {
 				return err
 			}
-			if blockHash == (libcommon.Hash{}) || blockNumber == nil {
+			if blockHash == (common.Hash{}) || blockNumber == nil {
 				break
 			}
 			if *blockNumber >= elFrozenBlocks {

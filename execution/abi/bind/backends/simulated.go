@@ -31,28 +31,27 @@ import (
 	"github.com/holiman/uint256"
 
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -73,7 +72,7 @@ var (
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
 	m         *mock.MockSentry
-	getHeader func(hash common.Hash, number uint64) *types.Header
+	getHeader func(hash common.Hash, number uint64) (*types.Header, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -82,7 +81,7 @@ type SimulatedBackend struct {
 	gasPool         *core.GasPool
 	pendingBlock    *types.Block // Currently pending block that will be imported on request
 	pendingReader   state.StateReader
-	pendingReaderTx kv.Tx
+	pendingReaderTx kv.TemporalTx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
 	rmLogsFeed event.Feed
@@ -101,15 +100,12 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
-		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
-			var err error
-			if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		getHeader: func(hash common.Hash, number uint64) (h *types.Header, err error) {
+			err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
 				return nil
-			}); err != nil {
-				panic(err)
-			}
-			return h
+			})
+			return h, err
 		},
 	}
 	backend.emptyPendingBlock()
@@ -118,7 +114,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewTestSimulatedBackendWithConfig(t, alloc, params.TestChainConfig, gasLimit)
+	b := NewTestSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
 	return b
 }
 
@@ -128,7 +124,6 @@ func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, c
 	return b
 }
 func (b *SimulatedBackend) DB() kv.TemporalRwDB                   { return b.m.DB }
-func (b *SimulatedBackend) Agg() *state2.Aggregator               { return b.m.HistoryV3Components() }
 func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
 func (b *SimulatedBackend) Engine() consensus.Engine              { return b.m.Engine }
 func (b *SimulatedBackend) BlockReader() services.FullBlockReader { return b.m.BlockReader }
@@ -180,7 +175,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
-	tx, err := b.m.DB.BeginRo(context.Background()) //nolint:gocritic
+	tx, err := b.m.DB.BeginTemporalRo(context.Background()) //nolint:gocritic
 	if err != nil {
 		panic(err)
 	}
@@ -220,7 +215,8 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 	}
 	defer tx.Rollback()
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetBalance(contract)
+	balance, err := stateDB.GetBalance(contract)
+	return &balance, err
 }
 
 // NonceAt returns the nonce of a certain account in the blockchain.
@@ -249,7 +245,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
 	var val uint256.Int
-	stateDB.GetState(contract, &key, &val)
+	stateDB.GetState(contract, key, &val)
 	return val.Bytes(), nil
 }
 
@@ -560,7 +556,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 		return nil, errBlockNumberUnsupported
 	}
 	var res *evmtypes.ExecutionResult
-	if err := b.m.DB.View(context.Background(), func(tx kv.Tx) (err error) {
+	if err := b.m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
 		s := state.New(b.m.NewStateReader(tx))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
@@ -581,7 +577,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call ethereum.CallMsg) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	defer b.pendingState.RevertToSnapshot(b.pendingState.Snapshot())
+	defer b.pendingState.RevertToSnapshot(b.pendingState.Snapshot(), nil)
 
 	res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
 	if err != nil {
@@ -651,7 +647,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 		}
 	}
 	gasCap = hi
-	b.pendingState.SetTxContext(len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *evmtypes.ExecutionResult, error) {
@@ -659,7 +655,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 		snapshot := b.pendingState.Snapshot()
 		res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
-		b.pendingState.RevertToSnapshot(snapshot)
+		b.pendingState.RevertToSnapshot(snapshot, nil)
 
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
@@ -731,7 +727,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	if err != nil {
 		return nil, err
 	}
-	from.SetBalance(uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
+	from.SetBalance(*uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 
@@ -766,7 +762,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", txn.GetNonce(), nonce)
 	}
 
-	b.pendingState.SetTxContext(len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, _, err := core.ApplyTransaction(
 		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,

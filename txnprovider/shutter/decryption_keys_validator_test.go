@@ -25,10 +25,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 func TestDecryptionKeysValidators(t *testing.T) {
@@ -36,7 +37,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 
 	instanceId := uint64(123)
 	maxNumKeysPerMessage := uint64(10)
-	config := shutter.Config{
+	config := shuttercfg.Config{
 		InstanceId:           instanceId,
 		MaxNumKeysPerMessage: maxNumKeysPerMessage,
 	}
@@ -599,7 +600,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 
 type decryptionKeysValidationTestCase struct {
 	name                  string
-	config                shutter.Config
+	config                shuttercfg.Config
 	msg                   *pubsub.Message
 	slotCalculator        func(t *testing.T) *testhelpers.MockSlotCalculator
 	eonTracker            func(t *testing.T) *testhelpers.MockEonTracker

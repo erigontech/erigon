@@ -71,7 +71,7 @@ func (b *EthAPIBackend) HeaderByNumberOrHash(ctx context.Context, blockNrOrHash 
 	return nil, errors.New("invalid arguments; neither block nor hash specified")
 }
 
-func (b *EthAPIBackend) HeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error) {
+func (b *EthAPIBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
 	return b.eth.blockchain.GetHeaderByHash(hash), nil
 }
 
@@ -80,7 +80,7 @@ func (b *EthAPIBackend) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumb
 	return b.eth.blockchain.GetBlockByNumber(bn), nil
 }
 
-func (b *EthAPIBackend) BlockByHash(ctx context.Context, hash libcommon.Hash) (*types.Block, error) {
+func (b *EthAPIBackend) BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	return b.eth.blockchain.GetBlockByHash(hash), nil
 }
 
@@ -142,7 +142,7 @@ func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockN
 	return nil, nil, errors.New("invalid arguments; neither block nor hash specified")
 }
 
-func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
+func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
 	number := rawdb.ReadHeaderNumber(b.eth.chainDb, hash)
 	if number == nil {
 		return nil, nil
@@ -162,13 +162,13 @@ func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, 
 	statedb := state.New(dbstate)
 	header := block.Header()
 	var receipts types.Receipts
-	var usedGas = new(uint64)
+	var gasUsed = new(uint64)
 	var gp = new(core.GasPool).AddGas(block.GasLimit())
 	vmConfig := vm.Config{}
 	for i, txn := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
 
-		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain.GetHeader, b.eth.blockchain.Engine(), nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain.GetHeader, b.eth.blockchain.Engine(), nil, gp, statedb, dbstate, header, tx, gasUsed, vmConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +187,7 @@ func (b *EthAPIBackend) tryGetReceiptsFromDb(block *types.Block) types.Receipts 
 	)
 }
 
-func (b *EthAPIBackend) GetLogs(ctx context.Context, hash libcommon.Hash) ([][]*types.Log, error) {
+func (b *EthAPIBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
 	number := rawdb.ReadHeaderNumber(b.eth.chainDb, hash)
 	if number == nil {
 		return nil, nil
@@ -206,7 +206,7 @@ func (b *EthAPIBackend) GetLogs(ctx context.Context, hash libcommon.Hash) ([][]*
 	return logs, nil
 }
 
-func (b *EthAPIBackend) GetTd(ctx context.Context, hash libcommon.Hash) *big.Int {
+func (b *EthAPIBackend) GetTd(ctx context.Context, hash common.Hash) *big.Int {
 	return b.eth.blockchain.GetTdByHash(hash)
 }
 
@@ -254,16 +254,16 @@ func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
 	return txs, nil
 }
 
-func (b *EthAPIBackend) GetPoolTransaction(hash libcommon.Hash) types.Transaction {
+func (b *EthAPIBackend) GetPoolTransaction(hash common.Hash) types.Transaction {
 	return b.eth.txPool.Get(hash)
 }
 
-func (b *EthAPIBackend) GetTransaction(ctx context.Context, txHash libcommon.Hash) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
+func (b *EthAPIBackend) GetTransaction(ctx context.Context, txHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
 	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(b.eth.ChainDb(), txHash)
 	return tx, blockHash, blockNumber, index, nil
 }
 
-func (b *EthAPIBackend) GetPoolNonce(ctx context.Context, addr libcommon.Address) (uint64, error) {
+func (b *EthAPIBackend) GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error) {
 	return b.eth.txPool.Nonce(addr), nil
 }
 
@@ -271,7 +271,7 @@ func (b *EthAPIBackend) Stats() (pending int, queued int) {
 	return b.eth.txPool.Stats()
 }
 
-func (b *EthAPIBackend) TxPoolContent() (map[libcommon.Address]types.Transactions, map[libcommon.Address]types.Transactions) {
+func (b *EthAPIBackend) TxPoolContent() (map[common.Address]types.Transactions, map[common.Address]types.Transactions) {
 	return b.eth.TxPool().Content()
 }
 

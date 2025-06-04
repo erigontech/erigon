@@ -21,9 +21,9 @@ import (
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
 )
@@ -38,7 +38,7 @@ type JsonRpcBackend struct {
 	client requests.RequestGenerator
 }
 
-func (b JsonRpcBackend) CodeAt(ctx context.Context, contract libcommon.Address, blockNum *big.Int) ([]byte, error) {
+func (b JsonRpcBackend) CodeAt(ctx context.Context, contract common.Address, blockNum *big.Int) ([]byte, error) {
 	return b.client.GetCode(contract, rpc.BlockReference(BlockNumArg(blockNum)))
 }
 
@@ -46,11 +46,11 @@ func (b JsonRpcBackend) CallContract(ctx context.Context, call ethereum.CallMsg,
 	return b.client.Call(CallArgsFromCallMsg(call), rpc.BlockReference(BlockNumArg(blockNum)), nil)
 }
 
-func (b JsonRpcBackend) PendingCodeAt(ctx context.Context, account libcommon.Address) ([]byte, error) {
+func (b JsonRpcBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
 	return b.client.GetCode(account, rpc.PendingBlock)
 }
 
-func (b JsonRpcBackend) PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error) {
+func (b JsonRpcBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
 	res, err := b.client.GetTransactionCount(account, rpc.PendingBlock)
 	if err != nil {
 		return 0, err
