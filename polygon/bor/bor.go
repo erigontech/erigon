@@ -644,8 +644,8 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 // ValidateHeaderGas validates GasUsed, GasLimit and BaseFee.
 func ValidateHeaderGas(header *types.Header, parent *types.Header, chainConfig *chain.Config) error {
 	// Verify that the gas limit is <= 2^63-1
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	if header.GasLimit > params.MaxBlockGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxBlockGasLimit)
 	}
 
 	// Verify that the gasUsed is <= gasLimit

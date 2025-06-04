@@ -29,8 +29,8 @@ import (
 func CalcGasLimit(parentGasLimit, desiredLimit uint64) uint64 {
 	delta := parentGasLimit/params.GasLimitBoundDivisor - 1
 	limit := parentGasLimit
-	if desiredLimit < params.MinGasLimit {
-		desiredLimit = params.MinGasLimit
+	if desiredLimit < params.MinBlockGasLimit {
+		desiredLimit = params.MinBlockGasLimit
 	}
 	// If we're outside our allowed gas range, we try to hone towards them
 	if limit < desiredLimit {
