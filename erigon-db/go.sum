@@ -31,8 +31,8 @@ github.com/anacrolix/missinggo v1.3.0/go.mod h1:bqHm8cE8xr+15uVfMG3BFui/TxyB6//H
 github.com/anacrolix/missinggo/perf v1.0.0/go.mod h1:ljAFWkBuzkO12MQclXzZrosP5urunoLS0Cbvb4V0uMQ=
 github.com/anacrolix/missinggo/v2 v2.2.0/go.mod h1:o0jgJoYOyaoYQ4E2ZMISVa9c88BbUBVQQW4QeRkNCGY=
 github.com/anacrolix/missinggo/v2 v2.5.1/go.mod h1:WEjqh2rmKECd0t1VhQkLGTdIWXO6f6NLjp5GlMZ+6FA=
-github.com/anacrolix/missinggo/v2 v2.8.0 h1:6pGnVOlR6TWL9JM5Msyezij8YHU3+oHO7r82Eql/kpA=
-github.com/anacrolix/missinggo/v2 v2.8.0/go.mod h1:vVO5FEziQm+NFmJesc7StpkquZk+WJFCaL0Wp//2sa0=
+github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c h1:G03Pz6KUd3iPhg0+2O/dJ4zo9KeHL52H9eS8SrFhICk=
+github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c/go.mod h1:vVO5FEziQm+NFmJesc7StpkquZk+WJFCaL0Wp//2sa0=
 github.com/anacrolix/multiless v0.4.0 h1:lqSszHkliMsZd2hsyrDvHOw4AbYWa+ijQ66LzbjqWjM=
 github.com/anacrolix/multiless v0.4.0/go.mod h1:zJv1JF9AqdZiHwxqPgjuOZDGWER6nyE48WBCi/OOrMM=
 github.com/anacrolix/stm v0.2.0/go.mod h1:zoVQRvSiGjGoTmbM0vSLIiaKjWtNPeTvXUSdJQA4hsg=

@@ -21,8 +21,8 @@ require (
 	github.com/anacrolix/generics v0.0.3-0.20250526144502-593be7092deb
 	github.com/anacrolix/go-libutp v1.3.2
 	github.com/anacrolix/log v0.16.1-0.20250526073428-5cb74e15092b
-	github.com/anacrolix/missinggo/v2 v2.8.0
-	github.com/anacrolix/torrent v1.58.2-0.20250526145351-80c17abd53a6
+	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c
+	github.com/anacrolix/torrent v1.58.2-0.20250604010703-7c29c120a504
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/containerd/cgroups/v3 v3.0.3

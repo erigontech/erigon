@@ -42,8 +42,8 @@ require (
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.4.5 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
-	github.com/anacrolix/missinggo/v2 v2.8.0 // indirect
-	github.com/anacrolix/torrent v1.58.2-0.20250526145351-80c17abd53a6 // indirect
+	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c // indirect
+	github.com/anacrolix/torrent v1.58.2-0.20250604010703-7c29c120a504 // indirect
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
