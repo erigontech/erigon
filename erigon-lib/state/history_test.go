@@ -112,8 +112,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotNil(t, sf)
 			defer sf.CleanupOnError()
 
-			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.Compression)
-			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+			efReader := h.InvertedIndex.dataReader(sf.efHistoryDecomp)
+			hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -232,7 +232,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+		gh := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
 		gh.Reset(0)
 		for gh.HasNext() {
 			w, _ := gh.Next(nil)
@@ -266,7 +266,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]

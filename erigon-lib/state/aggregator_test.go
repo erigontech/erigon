@@ -1457,13 +1457,13 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	roots := make([]common.Hash, 0)
 
 	// collect latest root from each available file
-	compression := ac.d[kv.CommitmentDomain].d.Compression
+	dt := ac.d[kv.CommitmentDomain]
 	fnames := []string{}
-	for _, f := range ac.d[kv.CommitmentDomain].files {
+	for _, f := range dt.files {
 		var k, stateVal []byte
-		if ac.d[kv.CommitmentDomain].d.Accessors.Has(AccessorHashMap) {
+		if dt.d.Accessors.Has(AccessorHashMap) {
 			idx := f.src.index.GetReaderFromPool()
-			r := seg.NewReader(f.src.decompressor.MakeGetter(), compression)
+			r := dt.dataReader(f.src.decompressor)
 
 			offset, ok := idx.TwoLayerLookup(keyCommitmentState)
 			require.True(t, ok)
@@ -1473,7 +1473,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		} else {
 			var found bool
 			var err error
-			k, stateVal, _, found, err = f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
+			k, stateVal, _, found, err = f.src.bindex.Get(keyCommitmentState, dt.dataReader(f.src.decompressor))
 			require.NoError(t, err)
 			require.True(t, found)
 			require.Equal(t, keyCommitmentState, k)

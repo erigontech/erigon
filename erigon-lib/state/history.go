@@ -1413,7 +1413,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		if toTxNum >= 0 && item.startTxNum >= uint64(toTxNum) {
 			break
 		}
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), ht.h.Compression)
+		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
 		if g.HasNext() {
 			key, offset := g.Next(nil)

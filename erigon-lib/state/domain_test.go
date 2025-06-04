@@ -210,7 +210,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
+		g := d.dataReader(sf.valuesDecomp)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -247,7 +247,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), seg.CompressNone)
+		g := d.dataReader(sf.valuesDecomp)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -1146,7 +1146,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer sf.CleanupOnError()
 	c.Close()
 
-	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
+	g := d.dataReader(sf.valuesDecomp)
 	g.Reset(0)
 	var words []string
 	for g.HasNext() {
@@ -2564,7 +2564,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		lastFile := findFile(st, en)
 		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
 
-		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.Compression)
+		lf := dc.dataReader(lastFile.decompressor)
 
 		shortenedKey, found := dc.findShortenedKey([]byte(key), lf, lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())

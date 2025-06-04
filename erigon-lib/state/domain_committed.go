@@ -177,8 +177,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.Compression)
-	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.Compression)
+	storageGetter := sto.dataReader(storageItem.decompressor)
+	accountGetter := acc.dataReader(accountItem.decompressor)
 	metricI := 0
 	for i, f := range aggTx.d[kv.CommitmentDomain].files {
 		if i > 5 {
@@ -411,7 +411,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if _, ok := accountFileMap[f.startTxNum]; !ok {
 				accountFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
 			}
-			accountFileMap[f.startTxNum][f.endTxNum] = seg.NewReader(f.decompressor.MakeGetter(), accounts.d.Compression)
+			accountFileMap[f.startTxNum][f.endTxNum] = accounts.dataReader(f.decompressor)
 		}
 	}
 	storageFileMap := make(map[uint64]map[uint64]*seg.Reader)
@@ -420,12 +420,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if _, ok := storageFileMap[f.startTxNum]; !ok {
 				storageFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
 			}
-			storageFileMap[f.startTxNum][f.endTxNum] = seg.NewReader(f.decompressor.MakeGetter(), storage.d.Compression)
+			storageFileMap[f.startTxNum][f.endTxNum] = storage.dataReader(f.decompressor)
 		}
 	}
 
-	ms := seg.NewReader(mergedStorage.decompressor.MakeGetter(), storage.d.Compression)
-	ma := seg.NewReader(mergedAccount.decompressor.MakeGetter(), accounts.d.Compression)
+	ms := storage.dataReader(mergedStorage.decompressor)
+	ma := accounts.dataReader(mergedAccount.decompressor)
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.aggregationStep), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
@@ -441,7 +441,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
-			sig = seg.NewReader(dirty.decompressor.MakeGetter(), storage.d.Compression)
+			sig = storage.dataReader(dirty.decompressor)
 			storageFileMap[keyFromTxNum][keyEndTxNum] = sig
 		}
 
@@ -454,7 +454,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
-			aig = seg.NewReader(dirty.decompressor.MakeGetter(), accounts.d.Compression)
+			aig = accounts.dataReader(dirty.decompressor)
 			accountFileMap[keyFromTxNum][keyEndTxNum] = aig
 		}
 
