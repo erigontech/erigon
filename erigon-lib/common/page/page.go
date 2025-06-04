@@ -4,110 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
 
 	"github.com/erigontech/erigon-lib/common/compress"
 )
-
-func NewWriter(parent io.Writer, limit int, compressionEnabled bool) *Writer {
-	return &Writer{parent: parent, limit: limit, compressionEnabled: compressionEnabled}
-}
-
-type Writer struct {
-	parent             io.Writer
-	i, limit           int
-	keys, vals         []byte
-	kLengths, vLengths []int
-
-	compressionBuf     []byte
-	compressionEnabled bool
-}
-
-func (c *Writer) Empty() bool { return c.i == 0 }
-func (c *Writer) Add(k, v []byte) (err error) {
-	if c.limit <= 1 {
-		_, err = c.parent.Write(v)
-		return err
-	}
-
-	c.i++
-	c.kLengths = append(c.kLengths, len(k))
-	c.vLengths = append(c.vLengths, len(v))
-	c.keys = append(c.keys, k...)
-	c.vals = append(c.vals, v...)
-	isFull := c.i%c.limit == 0
-	//fmt.Printf("[dbg] write: %x, %x\n", k, v)
-	if isFull {
-		//fmt.Printf("[dbg] write--\n")
-		bts := c.bytesAndReset()
-		_, err = c.parent.Write(bts)
-		return err
-	}
-	return nil
-}
-
-func (c *Writer) Reset() {
-	c.i = 0
-	c.kLengths, c.vLengths = c.kLengths[:0], c.vLengths[:0]
-	c.keys, c.vals = c.keys[:0], c.vals[:0]
-}
-func (c *Writer) Flush() error {
-	if c.limit <= 1 {
-		return nil
-	}
-
-	defer c.Reset()
-	if !c.Empty() {
-		bts := c.bytesAndReset()
-		_, err := c.parent.Write(bts)
-		return err
-	}
-	return nil
-}
-
-func (c *Writer) bytesAndReset() []byte {
-	v := c.bytes()
-	c.Reset()
-	return v
-}
-
-func (c *Writer) bytes() []byte {
-	//TODO: alignment,compress+alignment
-
-	c.keys = append(c.keys, c.vals...)
-	keysAndVals := c.keys
-
-	c.vals = growslice(c.vals[:0], 1+len(c.kLengths)*2*4)
-	for i := range c.vals {
-		c.vals[i] = 0
-	}
-	c.vals[0] = uint8(len(c.kLengths)) // first byte is amount of vals
-	lensBuf := c.vals[1:]
-	for i, l := range c.kLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
-	}
-	lensBuf = lensBuf[len(c.kLengths)*4:]
-	for i, l := range c.vLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
-	}
-
-	c.vals = append(c.vals, keysAndVals...)
-	lengthsAndKeysAndVals := c.vals
-
-	c.compressionBuf, lengthsAndKeysAndVals = compress.EncodeZstdIfNeed(c.compressionBuf, lengthsAndKeysAndVals, c.compressionEnabled)
-
-	return lengthsAndKeysAndVals
-}
-
-type disableFsycn interface {
-	DisableFsync()
-}
-
-func (c *Writer) DisableFsync() {
-	if casted, ok := c.parent.(disableFsycn); ok {
-		casted.DisableFsync()
-	}
-}
 
 var be = binary.BigEndian
 
@@ -189,15 +88,6 @@ func (r *Reader) Next() (k, v []byte) {
 	r.kOffset += kLen
 	r.vOffset += vLen
 	return k, v
-}
-
-// growslice ensures b has the wanted length by either expanding it to its capacity
-// or allocating a new slice if b has insufficient capacity.
-func growslice(b []byte, wantLength int) []byte {
-	if cap(b) >= wantLength {
-		return b[:wantLength]
-	}
-	return make([]byte, wantLength)
 }
 
 func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
