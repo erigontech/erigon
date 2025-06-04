@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -92,8 +93,8 @@ type iiCfg struct {
 	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
 	name         kv.InvertedIdx
 
-	Compression   seg.FileCompression // compression type for inverted index keys and values
-	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
+	Compression   seg.WordLevelCompression // compression type for inverted index keys and values
+	CompressorCfg seg.WordLvlCfg           // advanced configuration for compressor encodings
 
 	Accessors Accessors
 }
@@ -118,7 +119,7 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 		panic("assert: empty `filenameBase`")
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	cfg.CompressorCfg = seg.DefaultCfg
+	cfg.CompressorCfg = seg.DefaultWordLvlCfg
 	if cfg.Accessors == 0 {
 		cfg.Accessors = AccessorHashMap
 	}
@@ -272,17 +273,18 @@ func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, p
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 	return ii.buildMapAccessor(ctx, fromStep, toStep, ii.dataReader(item.decompressor), ps)
 }
+
 func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".ef") {
 		panic("assert: miss-use " + f.FileName())
 	}
 	return seg.NewReader(f.MakeGetter(), ii.Compression)
 }
-func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
+func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompression bool) *seg.Writer {
 	if !strings.Contains(f.FileName(), ".ef") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	if forceNoCompress {
+	if forceNoCompression {
 		return seg.NewWriter(f, seg.CompressNone)
 	}
 	return seg.NewWriter(f, ii.Compression)
@@ -290,8 +292,8 @@ func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompress bool) *se
 func (iit *InvertedIndexRoTx) dataReader(f *seg.Decompressor) *seg.Reader {
 	return iit.ii.dataReader(f)
 }
-func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
-	return iit.ii.dataWriter(f, forceNoCompress)
+func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompression bool) *seg.Writer {
+	return iit.ii.dataWriter(f, forceNoCompression)
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -1055,7 +1057,8 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 		if item.endTxNum >= endTxNum {
 			ii1.hasNextInDb = false
 		}
-		g := iit.dataReader(item.src.decompressor)
+		//g := iit.dataReader(item.src.decompressor)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), iit.ii.Compression)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key})
@@ -1124,7 +1127,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 	}
-	coll.writer = seg.NewWriter(comp, ii.Compression)
+	coll.writer = ii.dataWriter(comp, true)
 
 	var (
 		prevEf      []byte
@@ -1268,7 +1271,13 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	return InvertedFiles{decomp: decomp, index: index, existence: existence}, nil
 }
 
-func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
+func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) (err error) {
+	defer func() {
+		rec := recover()
+		if rec != nil {
+			err = fmt.Errorf("ii.buildMapAccessor: %s, %s", rec, dbg.Stack())
+		}
+	}()
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	// Design decision: `why Enum=true and LessFalsePositives=true`?
 	//
@@ -1307,7 +1316,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger)
+	return buildHashMapAccessor2(ctx, data, idxPath, cfg, ps, ii.logger)
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {

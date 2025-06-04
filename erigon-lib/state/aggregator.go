@@ -402,7 +402,7 @@ func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers
 func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
-		d.CompressCfg.Workers = i
+		d.CompressCfg.WordLvlCfg.Workers = i
 		d.History.CompressorCfg.Workers = i
 		d.History.InvertedIndex.CompressorCfg.Workers = i
 	}
@@ -601,7 +601,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
-	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
+	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.WordLvlCfg.Workers)
 
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
@@ -777,7 +777,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 }
 
 func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
-	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
+	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.WordLvlCfg.Workers)
 
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
@@ -1009,7 +1009,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		}
 		if stat == nil || stat.PrunedNothing() {
 			if !fullStat.PrunedNothing() {
-				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
+				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String()) //, "stat", fullStat.String())
 			}
 			return false, nil
 		}

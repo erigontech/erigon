@@ -82,7 +82,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	from, to := RootNum(filesToMerge[0].startTxNum), RootNum(filesToMerge.EndTxNum())
 
 	segPath := f.snaps.schema.DataFile(version.V1_0, from, to)
-	cfg := seg.DefaultCfg
+	cfg := seg.DefaultWordLvlCfg
 	cfg.Workers = compressWorkers
 	r := ee.Registry
 	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+r.String(f.a), segPath, r.Dirs(f.a).Tmp, cfg, log.LvlTrace, f.logger)

@@ -34,7 +34,7 @@ func TestCompressEmptyDict(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	cfg := DefaultCfg
+	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 100
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
@@ -85,7 +85,7 @@ func prepareDict(t *testing.T) *Decompressor {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	cfg := DefaultCfg
+	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)

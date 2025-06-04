@@ -41,10 +41,10 @@ func TestArchiveWriter(t *testing.T) {
 
 	td := generateTestData(t, 4, 8, 1, 1, 10_000)
 
-	openWriter := func(tb testing.TB, tmp, name string, compFlags seg.FileCompression) *seg.Writer {
+	openWriter := func(tb testing.TB, tmp, name string, compFlags seg.WordLevelCompression) *seg.Writer {
 		tb.Helper()
 		file := filepath.Join(tmp, name)
-		compressCfg := seg.DefaultCfg
+		compressCfg := seg.DefaultWordLvlCfg
 		compressCfg.MinPatternScore = 8
 		comp, err := seg.NewCompressor(context.Background(), "", file, tmp, compressCfg, log.LvlDebug, logger)
 		require.NoError(tb, err)

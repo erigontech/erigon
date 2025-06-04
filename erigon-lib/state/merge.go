@@ -396,11 +396,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}()
 
 	closeFiles := true
-	var kvWriter *seg.Writer
+	var _kvFile *seg.Compressor
 	defer func() {
 		if closeFiles {
-			if kvWriter != nil {
-				kvWriter.Close()
+			if _kvFile != nil {
+				_kvFile.Close()
 			}
 			if indexIn != nil {
 				indexIn.closeFilesAndRemove()
@@ -425,13 +425,19 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
 
-	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
+	_kvFile, err = seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg.WordLvlCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
 	}
+	if dt.d.noFsync {
+		_kvFile.DisableFsync()
+	}
 
-	forceNoCompress := toStep-fromStep < DomainMinStepsToCompress
-	kvWriter = dt.dataWriter(kvFile, forceNoCompress)
+	forceNoCompress := false
+	if toStep-fromStep < DomainMinStepsToCompress {
+		forceNoCompress = true
+	}
+	kvWriter := dt.d.dataWriter(_kvFile, forceNoCompress)
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}
@@ -447,14 +453,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
-		g := dt.dataReader(item.decompressor)
+		g := dt.d.dataReader(item.decompressor)
 		g.Reset(0)
 		if g.HasNext() {
-			key, _ := g.Next(nil)
-			val, _ := g.Next(nil)
+			key, val, _, _, _ := g.Next2Copy(nil, nil)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				domain:     g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -480,9 +485,9 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			i++
 			ci1 := heap.Pop(&cp).(*CursorItem)
-			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+			if ci1.domain.HasNext() {
+				//ci1.key, ci1.val, _, _, _ = ci1.domain.Next2Copy(ci1.key[:0], ci1.val[:0])
+				ci1.key, ci1.val, _, _, _ = ci1.domain.Next2Copy(nil, nil)
 				heap.Push(&cp, ci1)
 			}
 		}
@@ -501,10 +506,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 					}
 				}
 			}
-			if _, err = kvWriter.Write(keyBuf); err != nil {
-				return nil, nil, nil, err
-			}
-			if _, err = kvWriter.Write(valBuf); err != nil {
+			if err = kvWriter.Add(keyBuf, valBuf); err != nil {
 				return nil, nil, nil, err
 			}
 		}
@@ -522,17 +524,14 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 				}
 			}
 		}
-		if _, err = kvWriter.Write(keyBuf); err != nil {
-			return nil, nil, nil, err
-		}
-		if _, err = kvWriter.Write(valBuf); err != nil {
+		if err = kvWriter.Add(keyBuf, valBuf); err != nil {
 			return nil, nil, nil, err
 		}
 	}
 	if err = kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
-	kvWriter.Close()
+	_kvFile.Close()
 	kvWriter = nil
 	ps.Delete(p)
 
@@ -746,15 +745,15 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		return nil, nil, err
 	}
 	if r.history.needMerge {
-		var comp *seg.Compressor
+		var _comp *seg.Compressor
 		var decomp *seg.Decompressor
 		var rs *recsplit.RecSplit
 		var index *recsplit.Index
 		var closeItem = true
 		defer func() {
 			if closeItem {
-				if comp != nil {
-					comp.Close()
+				if _comp != nil {
+					_comp.Close()
 				}
 				if decomp != nil {
 					decomp.Close()
@@ -773,26 +772,27 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		fromStep, toStep := r.history.from/ht.aggStep, r.history.to/ht.aggStep
 		datPath := ht.h.vFilePath(fromStep, toStep)
 		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
-		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
+		_comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger)
+		if err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}
 		if ht.h.noFsync {
-			comp.DisableFsync()
+			_comp.DisableFsync()
 		}
-		pagedWr := ht.datarWriter(comp)
+		histWriter := ht.h.dataWriter(_comp)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
 		var cp CursorHeap
 		heap.Init(&cp)
 		for _, item := range indexFiles {
-			g := ht.iit.dataReader(item.decompressor)
+			g := ht.h.InvertedIndex.dataReader(item.decompressor)
 			g.Reset(0)
 			if g.HasNext() {
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.historyValuesOnCompressedPage, true)
+						g2 = ht.dataReader(hi.decompressor)
 						break
 					}
 				}
@@ -832,8 +832,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 					}
 
 					var k, v []byte
-					k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
-					if err = pagedWr.Add(k, v); err != nil {
+					k, v, valBuf, _ = ci1.hist.Next2ForHistory(valBuf[:0])
+					if err = histWriter.AddForHistory(k, v); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -847,11 +847,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}
-		if err := pagedWr.Compress(); err != nil {
+		if err = histWriter.Compress(); err != nil {
 			return nil, nil, err
 		}
-		comp.Close()
-		comp = nil
+		_comp.Close()
 		if decomp, err = seg.NewDecompressor(datPath); err != nil {
 			return nil, nil, err
 		}

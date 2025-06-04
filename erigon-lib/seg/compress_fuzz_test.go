@@ -52,7 +52,7 @@ func FuzzCompress(f *testing.F) {
 		ctx := context.Background()
 		tmpDir := t.TempDir()
 		file := filepath.Join(tmpDir, fmt.Sprintf("compressed-%d", rand.Int31()))
-		cfg := DefaultCfg
+		cfg := DefaultWordLvlCfg
 		cfg.MinPatternScore = 2
 		cfg.Workers = int(workers)
 		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
