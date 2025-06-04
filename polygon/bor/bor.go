@@ -1777,12 +1777,10 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 	if err != nil {
 		return err
 	}
-	input1 = input1
 	input2, err := db.GetBalance(recipient)
 	if err != nil {
 		return err
 	}
-	input2 = input2
 	if !bailout {
 		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
 		if err != nil {
@@ -1856,18 +1854,9 @@ func (c *Bor) TxDependencies(h *types.Header) [][]int {
 		return nil
 	}
 
-	dependencies := make([][]int, len(blockExtraData.TxDependencies))
-	for i, txDependencies := range blockExtraData.TxDependencies {
-		deps := make([]int, len(txDependencies))
-		for j := range txDependencies {
-			deps[j] = int(txDependencies[j])
-		}
-		dependencies[i] = deps
-	}
+	c.Dependencies.Add(h.Hash(), blockExtraData.TxDependencies)
 
-	c.Dependencies.Add(h.Hash(), dependencies)
-
-	return dependencies
+	return blockExtraData.TxDependencies
 }
 
 // In bor, RLP encoding of BlockExtraData will be stored in the Extra field in the header
@@ -1878,7 +1867,7 @@ type BlockExtraData struct {
 	// length of TxDependencies          ->   n (n = number of transactions in the block)
 	// length of TxDependencies[i]       ->   k (k = a whole number)
 	// k elements in TxDependencies[i]   ->   transaction indexes on which transaction i is dependent on
-	TxDependencies [][]uint64
+	TxDependencies [][]int
 }
 
 func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
