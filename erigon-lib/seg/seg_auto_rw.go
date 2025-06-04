@@ -90,7 +90,12 @@ func (g *Reader) MatchCmp(prefix []byte) int {
 	return g.Getter.MatchCmpUncompressed(prefix)
 }
 
-func (g *Reader) FileName() string { return g.Getter.FileName() }
+func (g *Reader) MadvNormal() MadvDisabler {
+	g.d.MadvNormal()
+	return g
+}
+func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
+func (g *Reader) FileName() string  { return g.Getter.FileName() }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	fl := CompressKeys
 	if g.nextValue {
@@ -135,6 +140,8 @@ type ReaderI interface {
 	Skip() (uint64, int)
 	FileName() string
 	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
+	MadvNormal() MadvDisabler
+	DisableReadAhead()
 }
 type MadvDisabler interface {
 	DisableReadAhead()
@@ -169,9 +176,14 @@ func (g *PagedReader) Reset(offset uint64) {
 	g.nextPageOffset = offset
 	g.page = &page.Reader{} // TODO: optimize
 }
-func (g *PagedReader) FileName() string { return g.file.FileName() }
-func (g *PagedReader) Count() int       { return g.file.Count() }
-func (g *PagedReader) Size() int        { return g.file.Size() }
+func (g *PagedReader) MadvNormal() *PagedReader {
+	g.file.MadvNormal()
+	return g
+}
+func (g *PagedReader) DisableReadAhead() { g.file.DisableReadAhead() }
+func (g *PagedReader) FileName() string  { return g.file.FileName() }
+func (g *PagedReader) Count() int        { return g.file.Count() }
+func (g *PagedReader) Size() int         { return g.file.Size() }
 func (g *PagedReader) HasNext() bool {
 	return (g.valuesOnCompressedPage > 1 && g.page.HasNext()) || g.file.HasNext()
 }
