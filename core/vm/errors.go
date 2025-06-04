@@ -85,7 +85,7 @@ type ErrInvalidOpCode struct {
 
 func (e *ErrInvalidOpCode) Error() string { return fmt.Sprintf("invalid opcode: %s", e.opcode) }
 
-func (m *ErrInvalidOpCode) Is(target error) bool { 
+func (m *ErrInvalidOpCode) Is(target error) bool {
 	_, is := target.(*ErrInvalidOpCode)
 	return is
 }

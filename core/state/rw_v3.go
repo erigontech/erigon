@@ -611,6 +611,11 @@ func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
 
 func (r *ReaderV3) SetTrace(trace bool) { r.trace = trace }
 
+func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
+	_, _, hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, address[:])
+	return hasStorage, err
+}
+
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	_, acc, err := r.readAccountData(address)
 	return acc, err
@@ -760,6 +765,17 @@ func (r *bufferedReader) ReadAccountStorage(address common.Address, key common.H
 	r.bufferedState.accountsMutex.RUnlock()
 
 	return r.reader.ReadAccountStorage(address, key)
+}
+
+func (r *bufferedReader) HasStorage(address common.Address) (bool, error) {
+	firstK, firstV, hasStorage, err := r.sd.HasPrefix(kv.StorageDomain, address[:], r.tx)
+	if err != nil {
+		return false, err
+	}
+	if !r.discardReadList {
+		r.readLists[kv.StorageDomain.String()].Push(string(firstK), firstV)
+	}
+	return hasStorage, nil
 }
 
 func (r *bufferedReader) ReadAccountCode(address common.Address) ([]byte, error) {
