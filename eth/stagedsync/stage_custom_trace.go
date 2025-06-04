@@ -166,6 +166,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 Loop:
 	for {
 		select {
+		case <-ctx.Done():
+			logger.Warn("[snapshots] user has interrupted process but anyway waiting for build & merge files")
 		case <-cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).WaitForBuildAndMerge(context.Background()):
 			break Loop // Here we don't quit due to ctx because it's not safe for files.
 		case <-logEvery.C:
