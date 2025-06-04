@@ -135,18 +135,10 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
 			g.Reset(offset)
-			hi.nextVal, _ = g.Next(nil)
+			_, hi.nextVal, _, _, _ = g.Next2Copy(nil, nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historyValuesOnCompressedPage, true)
-			g.Reset(offset)
-			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
-				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
-				if bytes.Equal(histKey, k) {
-					hi.nextVal = v
-					break
-				}
-			}
+			histKey := historyKey(txNum, hi.nextKey, nil)
+			hi.nextVal = hi.hc.dataReader(historyItem.src.decompressor).FindOnPageForHistory(histKey, offset)
 		}
 		return nil
 	}
@@ -433,18 +425,10 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
 			g.Reset(offset)
-			hi.nextVal, _ = g.Next(nil)
+			_, hi.nextVal, _, _, _ = g.Next2Copy(nil, nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historyValuesOnCompressedPage, true)
-			g.Reset(offset)
-			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
-				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
-				if bytes.Equal(histKey, k) {
-					hi.nextVal = v
-					break
-				}
-			}
+			histKey := historyKey(txNum, hi.nextKey, nil)
+			hi.nextVal = hi.hc.dataReader(historyItem.src.decompressor).FindOnPageForHistory(histKey, offset)
 		}
 		return nil
 	}

@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -92,8 +93,8 @@ type iiCfg struct {
 	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
 	name         kv.InvertedIdx
 
-	Compression   seg.FileCompression // compression type for inverted index keys and values
-	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
+	Compression   seg.WordLevelCompression // compression type for inverted index keys and values
+	CompressorCfg seg.Params               // advanced configuration for compressor encodings
 
 	Accessors Accessors
 }
@@ -118,7 +119,7 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 		panic("assert: empty `filenameBase`")
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	cfg.CompressorCfg = seg.DefaultCfg
+	cfg.CompressorCfg = seg.DefaultWordLvlCfg
 	if cfg.Accessors == 0 {
 		cfg.Accessors = AccessorHashMap
 	}
@@ -270,7 +271,29 @@ func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, p
 		return fmt.Errorf("buildEfAccessor: passed item with nil decompressor %s %d-%d", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
 	}
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-	return ii.buildMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
+	return ii.buildMapAccessor(ctx, fromStep, toStep, ii.dataReader(item.decompressor), ps)
+}
+
+func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.PagedReader {
+	if !strings.Contains(f.FileName(), ".ef") {
+		panic("assert: miss-use " + f.FileName())
+	}
+	return seg.NewPagedReader(seg.NewReader(f.MakeGetter(), ii.Compression), 0, false)
+}
+func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompression bool) *seg.Writer {
+	if !strings.Contains(f.FileName(), ".ef") {
+		panic("assert: miss-use " + f.FileName())
+	}
+	if forceNoCompression {
+		return seg.NewWriter(f, seg.CompressNone)
+	}
+	return seg.NewWriter(f, ii.Compression)
+}
+func (iit *InvertedIndexRoTx) dataReader(f *seg.Decompressor) *seg.PagedReader {
+	return iit.ii.dataReader(f)
+}
+func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompression bool) *seg.Writer {
+	return iit.ii.dataWriter(f, forceNoCompression)
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -1103,7 +1126,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 	}
-	coll.writer = seg.NewWriter(comp, ii.Compression)
+	coll.writer = ii.dataWriter(comp, true)
 
 	var (
 		prevEf      []byte
@@ -1236,7 +1259,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
 
-	if err := ii.buildMapAccessor(ctx, step, step+1, decomp, ps); err != nil {
+	if err := ii.buildMapAccessor(ctx, step, step+1, ii.dataReader(decomp), ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 	if index, err = recsplit.OpenIndex(ii.efAccessorFilePath(step, step+1)); err != nil {
@@ -1247,7 +1270,13 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	return InvertedFiles{decomp: decomp, index: index, existence: existence}, nil
 }
 
-func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
+func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.PagedReader, ps *background.ProgressSet) (err error) {
+	defer func() {
+		rec := recover()
+		if rec != nil {
+			err = fmt.Errorf("ii.buildMapAccessor: %s, %s", rec, dbg.Stack())
+		}
+	}()
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	// Design decision: `why Enum=true and LessFalsePositives=true`?
 	//
@@ -1286,7 +1315,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger)
+	return buildHashMapAccessor(ctx, data, idxPath, cfg, ps, ii.logger)
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {

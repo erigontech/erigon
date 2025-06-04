@@ -102,12 +102,20 @@ func TestDomain_CollationBuild(t *testing.T) {
 
 	t.Parallel()
 
-	t.Run("compressDomainVals=true", func(t *testing.T) {
-		testCollationBuild(t, true)
-	})
-	t.Run("compressDomainVals=false", func(t *testing.T) {
-		testCollationBuild(t, false)
-	})
+	cases := []struct {
+		name string
+		c    seg.Cfg
+	}{
+		{"no_comp", seg.Cfg{WordLvl: seg.CompressNone, PageLvl: false}},
+		{"only_word_lvl", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 0, PageLvl: false}},
+		{"only_page_lvl", seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}},
+		{"both", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			testCollationBuild(t, testCase.c)
+		})
+	}
 }
 
 func TestDomain_OpenFolder(t *testing.T) {
@@ -137,7 +145,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 	d.Close()
 }
 
-func testCollationBuild(t *testing.T, compressDomainVals bool) {
+func testCollationBuild(t *testing.T, compressCfg seg.Cfg) {
 	t.Helper()
 
 	logger := log.New()
@@ -146,9 +154,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	db, d := testDbAndDomainOfStep(t, 16, logger)
 	ctx := context.Background()
 
-	if compressDomainVals {
-		d.Compression = seg.CompressKeys | seg.CompressVals
-	}
+	d.CompressCfg = compressCfg
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -211,12 +217,12 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
+		g := dc.dataReader(sf.valuesDecomp)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
-			w, _ := g.Next(nil)
-			words = append(words, string(w))
+			k, v, _, _, _ := g.Next2(nil, nil)
+			words = append(words, string(k), string(v))
 		}
 		require.Equal(t, []string{"key1", "value1.2", "key2", "value2.1"}, words)
 		// Check index
@@ -248,12 +254,12 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), seg.CompressNone)
+		g := dc.dataReader(sf.valuesDecomp)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
-			w, _ := g.Next(nil)
-			words = append(words, string(w))
+			k, v, _, _, _ := g.Next2(nil, nil)
+			words = append(words, string(k), string(v))
 		}
 		require.Equal(t, []string{"key1", "value1.4"}, words)
 		// Check index
@@ -370,6 +376,14 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	t.Helper()
 	require := require.New(t)
 	db, d := testDbAndDomain(t, logger)
+	d.CompressCfg = seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: false}
+	//d.CompressCfg = seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}
+
+	//{"no_comp", seg.Cfg{WordLvl: seg.CompressNone, PageLvl: false}},
+	//{"only_word_lvl", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 0, PageLvl: false}},
+	//{"only_page_lvl", seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}},
+	//{"both", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}},
+
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
@@ -723,7 +737,7 @@ func TestNewSegStreamReader(t *testing.T) {
 	keyCount := 1000
 	valSize := 4
 
-	fpath := generateKV(t, t.TempDir(), length.Addr, valSize, keyCount, logger, seg.CompressNone)
+	fpath := generateKV(t, t.TempDir(), length.Addr, valSize, keyCount, logger, seg.Cfg{})
 	dec, err := seg.NewDecompressor(fpath)
 	require.NoError(t, err)
 
@@ -1146,12 +1160,12 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer sf.CleanupOnError()
 	c.Close()
 
-	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
+	g := dc.dataReader(sf.valuesDecomp)
 	g.Reset(0)
 	var words []string
 	for g.HasNext() {
-		w, _ := g.Next(nil)
-		words = append(words, string(w))
+		k, v, _, _, _ := g.Next2(nil, nil)
+		words = append(words, string(k), string(v))
 	}
 	require.Equal(t, []string{"key1", string(preval1), "key2", string(preval2), "key3" + string(l), string(preval3)}, words)
 	// Check index
@@ -1203,7 +1217,6 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	writer := dc.NewWriter()
 	defer writer.Close()
 
-	defer func(t time.Time) { fmt.Printf("domain_test.go:1217: %s\n", time.Since(t)) }(time.Now())
 	var prev []byte
 	for i = 0; i < len(vals); i++ {
 
@@ -1229,7 +1242,6 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer dc.Close()
 
-	defer func(t time.Time) { fmt.Printf("domain_test.go:1243: %s\n", time.Since(t)) }(time.Now())
 	ctx := context.Background()
 	ps := background.NewProgressSet()
 	for step := uint64(0); step < uint64(len(vals))/d.aggregationStep; step++ {
@@ -1268,8 +1280,6 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		dc.Close()
 	}
-
-	defer func(t time.Time) { fmt.Printf("domain_test.go:1283: %s\n", time.Since(t)) }(time.Now())
 
 	dc = d.BeginFilesRo()
 	defer dc.Close()
@@ -2545,7 +2555,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		lastFile := findFile(st, en)
 		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
 
-		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.Compression)
+		lf := dc.dataReader(lastFile.decompressor)
 
 		shortenedKey, found := dc.findShortenedKey([]byte(key), lf, lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())

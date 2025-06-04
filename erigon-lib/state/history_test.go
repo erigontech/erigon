@@ -113,8 +113,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotNil(t, sf)
 			defer sf.CleanupOnError()
 
-			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.Compression)
-			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+			efReader := h.InvertedIndex.dataReader(sf.efHistoryDecomp)
+			hReader := h.dataReader(sf.historyDecomp)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -123,8 +123,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			var keyBuf, valBuf, hValBuf []byte
 			seenKeys := make([]string, 0)
 			for efReader.HasNext() {
-				keyBuf, _ = efReader.Next(nil)
-				valBuf, _ = efReader.Next(nil)
+				keyBuf, valBuf, _, _, _ = efReader.Next2(nil, nil)
 
 				ef := multiencseq.ReadMultiEncSeq(i, valBuf)
 				efIt := ef.Iterator(0)
@@ -143,7 +142,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
 
 					require.Truef(t, hReader.HasNext(), "hReader has no more values")
-					hValBuf, _ = hReader.Next(nil)
+					_, hValBuf, _, _, _ = hReader.Next2(nil, nil)
 					if updates[vi].value == nil {
 						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
 					} else {
@@ -233,11 +232,12 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+
+		gh := h.dataReader(sf.historyDecomp)
 		gh.Reset(0)
 		for gh.HasNext() {
-			w, _ := gh.Next(nil)
-			valWords = append(valWords, string(w))
+			k, v, _, _, _ := gh.Next2(nil, nil)
+			valWords = append(valWords, string(k), string(v))
 		}
 		require.Equal([]string{"", "value1.1", "", "value2.1", "value2.2", ""}, valWords)
 		require.Equal(6, int(sf.historyIdx.KeyCount()))
@@ -267,7 +267,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+		gh = h.dataReader(sf.historyDecomp)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
@@ -279,7 +279,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 					continue
 				}
 				gh.Reset(offset)
-				w, _ := gh.Next(nil)
+				_, w, _, _, _ := gh.Next2(nil, nil)
 				require.Equal(valWords[vi], string(w))
 				vi++
 			}

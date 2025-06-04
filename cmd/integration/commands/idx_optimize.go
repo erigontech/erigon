@@ -127,7 +127,7 @@ var idxOptimize = &cobra.Command{
 			}
 			defer idxInput.Close()
 
-			idxOutput, err := seg.NewCompressor(ctx, "optimizoor", dirs.SnapIdx+file.Name()+".new", tmpDir, seg.DefaultCfg, log.LvlInfo, logger)
+			idxOutput, err := seg.NewCompressor(ctx, "optimizoor", dirs.SnapIdx+file.Name()+".new", tmpDir, seg.DefaultWordLvlCfg, log.LvlInfo, logger)
 			if err != nil {
 				logger.Error("Failed to open compressor", "error", err)
 				return
@@ -200,7 +200,7 @@ var idxOptimize = &cobra.Command{
 				logger.Error("Failed to build accessor", "error", err)
 				return
 			}
-			if err := state.BuildHashMapAccessor(ctx, data, seg.CompressNone, idxPath, false, cfg, ps, logger); err != nil {
+			if err := state.BuildHashMapAccessor(ctx, data, seg.Cfg{}, idxPath, cfg, ps, logger); err != nil {
 				logger.Error("Failed to build accessor", "error", err)
 				return
 			}

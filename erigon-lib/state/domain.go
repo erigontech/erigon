@@ -25,10 +25,9 @@ import (
 	"math"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/erigontech/erigon-lib/version"
 
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -46,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (
@@ -93,9 +93,8 @@ type Domain struct {
 type domainCfg struct {
 	hist histCfg
 
-	name        kv.Domain
-	Compression seg.FileCompression
 	CompressCfg seg.Cfg
+	name        kv.Domain
 	Accessors   Accessors // list of indexes for given domain
 	valuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	largeValues bool
@@ -424,7 +423,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 							//return false
 						}
 					}
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, d.Compression); err != nil {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -697,7 +696,7 @@ type DomainRoTx struct {
 
 	d *Domain
 
-	dataReaders []*seg.Reader
+	dataReaders []*seg.PagedReader
 	btReaders   []*BtIndex
 	mapReaders  []*recsplit.IndexReader
 
@@ -741,11 +740,11 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		g := dt.reusableReader(i)
 		g.Reset(offset)
 
-		k, _ := g.Next(nil)
+		k, v, _, _, _ := g.Next2(nil, nil)
 		if !bytes.Equal(filekey, k) { // MPH false-positives protection
 			return nil, false, 0, nil
 		}
-		v, _ := g.Next(nil)
+		//v, _ := g.Next(nil)
 		return v, true, 0, nil
 	}
 	return nil, false, 0, errors.New("no index defined")
@@ -773,7 +772,7 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 // Collation is the set of compressors created after aggregation
 type Collation struct {
 	HistoryCollation
-	valuesComp  *seg.Compressor
+	valuesComp  *seg.PagedWriter
 	valuesPath  string
 	valuesCount int
 }
@@ -827,18 +826,16 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 	}()
 
 	coll.valuesPath = d.kvFilePath(stepFrom, stepTo)
-	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
+	_comp, err := seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg.WordLvlCfg, log.LvlTrace, d.logger)
+	if err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 
 	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
 	// Compress files only in `merge` which ok to be slow.
-	//comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
-	compress := seg.CompressNone
-	if stepTo-stepFrom > DomainMinStepsToCompress {
-		compress = d.Compression
-	}
-	comp := seg.NewWriter(coll.valuesComp, compress)
+	forceNoCompress := stepTo-stepFrom > DomainMinStepsToCompress
+	kvWriter := d.dataWriter(_comp, forceNoCompress)
+	coll.valuesComp = kvWriter
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^stepTo)
@@ -867,16 +864,12 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 			} else {
 				v = v[8:]
 			}
-			if _, err = comp.Write(k); err != nil {
+			if err = kvWriter.Add(k, v); err != nil {
 				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
-			}
-			if _, err = comp.Write(v); err != nil {
-				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
 			}
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
-
 	sort.Slice(kvs, func(i, j int) bool {
 		return bytes.Compare(kvs[i].k, kvs[j].k) < 0
 	})
@@ -893,17 +886,16 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 		if err != nil {
 			return coll, fmt.Errorf("vt: %w", err)
 		}
-		if _, err = comp.Write(kv.k); err != nil {
+		if err = kvWriter.Add(kv.k, kv.v); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
-		if _, err = comp.Write(kv.v); err != nil {
-			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
-		}
 	}
-	// could also do key squeezing
+	if err := kvWriter.Flush(); err != nil {
+		return coll, err
+	}
 
 	closeCollation = false
-	coll.valuesCount = coll.valuesComp.Count() / 2
+	coll.valuesCount = kvWriter.Count() / 2
 	mxCollationSize.SetUint64(uint64(coll.valuesCount))
 	return coll, nil
 }
@@ -943,13 +935,15 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}()
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
-	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
+	_valComp, err := seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg.WordLvlCfg, log.LvlTrace, d.logger)
+	if err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 
 	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
 	// Compress files only in `merge` which ok to be slow.
-	comp := seg.NewWriter(coll.valuesComp, seg.CompressNone)
+	kvWriter := d.dataWriter(_valComp, true)
+	coll.valuesComp = kvWriter
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
@@ -995,36 +989,34 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			}{k[:len(k)-8], v})
 			k, v, err = valsCursor.Next()
 		} else {
-			if _, err = comp.Write(k); err != nil {
+			if err = kvWriter.Add(k, v[8:]); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
-			}
-			if _, err = comp.Write(v[8:]); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
 			}
 			k, v, err = valsCursor.(kv.CursorDupSort).NextNoDup()
 		}
 	}
-
 	sort.Slice(kvs, func(i, j int) bool {
 		return bytes.Compare(kvs[i].k, kvs[j].k) < 0
 	})
 	// check if any key is duplicated
-	for i := 1; i < len(kvs); i++ {
-		if bytes.Equal(kvs[i].k, kvs[i-1].k) {
-			return coll, fmt.Errorf("duplicate key [%x]", kvs[i].k)
+	if dbg.AssertEnabled {
+		for i := 1; i < len(kvs); i++ {
+			if bytes.Equal(kvs[i].k, kvs[i-1].k) {
+				return coll, fmt.Errorf("duplicate key [%x]", kvs[i].k)
+			}
 		}
 	}
 	for _, kv := range kvs {
-		if _, err = comp.Write(kv.k); err != nil {
+		if err = kvWriter.Add(kv.k, kv.v); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
-		if _, err = comp.Write(kv.v); err != nil {
-			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
-		}
+	}
+	if err := kvWriter.Flush(); err != nil {
+		return coll, err
 	}
 
 	closeCollation = false
-	coll.valuesCount = coll.valuesComp.Count() / 2
+	coll.valuesCount = kvWriter.Count() / 2
 	mxCollationSize.SetUint64(uint64(coll.valuesCount))
 	return coll, nil
 }
@@ -1107,12 +1099,13 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 	}
 	valuesComp.Close()
 	valuesComp = nil
-	if valuesDecomp, err = seg.NewDecompressor(collation.valuesPath); err != nil {
+	_valuesDecomp, err := seg.NewDecompressor(collation.valuesPath)
+	if err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
 	if d.Accessors.Has(AccessorHashMap) {
-		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, valuesDecomp, ps); err != nil {
+		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, d.dataReader(_valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
 		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorFilePath(stepFrom, stepTo))
@@ -1123,7 +1116,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 
 	if d.Accessors.Has(AccessorBTree) {
 		btPath := d.kvBtAccessorFilePath(stepFrom, stepTo)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(_valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
@@ -1214,7 +1207,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 
 	if d.Accessors.Has(AccessorHashMap) {
-		if err = d.buildHashMapAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
+		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
 		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorFilePath(step, step+1))
@@ -1225,7 +1218,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 
 	if d.Accessors.Has(AccessorBTree) {
 		btPath := d.kvBtAccessorFilePath(step, step+1)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
@@ -1253,7 +1246,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}, nil
 }
 
-func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
+func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.PagedReader, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Enums:              true,
@@ -1266,7 +1259,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
+	return buildHashMapAccessor(ctx, data, idxPath, cfg, ps, d.logger)
 }
 
 func (d *Domain) MissedBtreeAccessors() (l []*filesItem) {
@@ -1307,7 +1300,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			idxPath := d.kvBtAccessorFilePath(fromStep, toStep)
-			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, d.Compression, ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil
@@ -1320,7 +1313,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		item := item
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			err := d.buildHashMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
+			err := d.buildHashMapAccessor(ctx, fromStep, toStep, d.dataReader(item.decompressor), ps)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
@@ -1331,22 +1324,18 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 
 // TODO: exported for idx_optimize.go
 // TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
-func BuildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
-	return buildHashMapAccessor(ctx, d, compressed, idxPath, values, cfg, ps, logger)
+func BuildHashMapAccessor(ctx context.Context, d *seg.PagedReader, idxPath string, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+	return buildHashMapAccessor(ctx, d, idxPath, cfg, ps, logger)
 }
 
-func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildHashMapAccessor(ctx context.Context, g *seg.PagedReader, idxPath string, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	_, fileName := filepath.Split(idxPath)
-	count := d.Count()
-	if !values {
-		count = d.Count() / 2
-	}
+	count := g.Count() / 2
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
 
-	defer d.MadvSequential().DisableReadAhead()
+	defer g.MadvNormal().DisableReadAhead()
 
-	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
 	var err error
 	cfg.KeyCount = count
@@ -1362,7 +1351,11 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 		}
 	}()
 
-	var keyPos, valPos uint64
+	var buf []byte
+	_ = buf
+	//var keyPos, valPos uint64
+	var k []byte
+	var pos, nextPos, collisions uint64
 	for {
 		word := make([]byte, 0, 256)
 		if err := ctx.Err(); err != nil {
@@ -1370,24 +1363,21 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 		}
 		g.Reset(0)
 		for g.HasNext() {
-			word, valPos = g.Next(word[:0])
-			if values {
-				if err = rs.AddKey(word, valPos); err != nil {
-					return fmt.Errorf("add idx key [%x]: %w", word, err)
-				}
-			} else {
-				if err = rs.AddKey(word, keyPos); err != nil {
-					return fmt.Errorf("add idx key [%x]: %w", word, err)
-				}
+			//k, buf, nextPos = g.NextKey(nil)
+			k, _, buf, _, nextPos = g.Next2(nil, nil)
+			if err = rs.AddKey(k, pos); err != nil {
+				return fmt.Errorf("add idx key [%x]: %w", word, err)
 			}
-
-			// Skip value
-			keyPos, _ = g.Skip()
+			pos = nextPos
 
 			p.Processed.Add(1)
 		}
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
+				collisions++
+				if collisions > 10 {
+					return fmt.Errorf("probably source file has duplicated keys: %s, %s", g.FileName(), dbg.Stack())
+				}
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
@@ -1636,19 +1626,32 @@ func (dt *DomainRoTx) Close() {
 }
 
 // reusableReader - for short read-and-forget operations. Must Reset this reader before use
-func (dt *DomainRoTx) reusableReader(i int) *seg.Reader {
+func (dt *DomainRoTx) reusableReader(i int) *seg.PagedReader {
 	if dt.dataReaders == nil {
-		dt.dataReaders = make([]*seg.Reader, len(dt.files))
+		dt.dataReaders = make([]*seg.PagedReader, len(dt.files))
 	}
 	if dt.dataReaders[i] == nil {
-		dt.dataReaders[i] = dt.dataReader(i)
+		dt.dataReaders[i] = dt.dataReader(dt.files[i].src.decompressor)
 	}
 	return dt.dataReaders[i]
 }
 
 // dataReader - creating new dataReader
-func (dt *DomainRoTx) dataReader(i int) *seg.Reader {
-	return seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.Compression)
+func (dt *DomainRoTx) dataReader(f *seg.Decompressor) *seg.PagedReader { return dt.d.dataReader(f) }
+func (d *Domain) dataReader(f *seg.Decompressor) *seg.PagedReader {
+	if !strings.Contains(f.FileName(), ".kv") {
+		panic("assert: miss-use " + f.FileName())
+	}
+	return seg.NewPagedReader(seg.NewReader(f.MakeGetter(), d.CompressCfg.WordLvl), d.CompressCfg.PageSize, d.CompressCfg.PageLvl)
+}
+func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.PagedWriter {
+	if !strings.Contains(f.FileName(), ".kv") {
+		panic("assert: miss-use " + f.FileName())
+	}
+	if forceNoCompress {
+		return seg.NewPagedWriter(seg.NewWriter(f, seg.CompressNone), d.CompressCfg.PageSize, d.CompressCfg.PageLvl)
+	}
+	return seg.NewPagedWriter(seg.NewWriter(f, d.CompressCfg.WordLvl), d.CompressCfg.PageSize, d.CompressCfg.PageLvl)
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {

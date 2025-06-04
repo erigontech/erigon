@@ -18,25 +18,23 @@ package seg
 
 import (
 	"fmt"
-
-	"github.com/erigontech/erigon-lib/common/page"
 )
 
 //Reader and Writer - decorators on Getter and Compressor - which
-//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
+//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `WordLevelCompression` passed to constructor
 
 // Maybe in future will add support of io.Reader/Writer interfaces to this decorators
 // Maybe in future will merge decorators into it's parents
 
-type FileCompression uint8
+type WordLevelCompression uint8
 
 const (
-	CompressNone FileCompression = 0b0  // no compression
-	CompressKeys FileCompression = 0b1  // compress keys only
-	CompressVals FileCompression = 0b10 // compress values only
+	CompressNone WordLevelCompression = 0b0  // no compression
+	CompressKeys WordLevelCompression = 0b1  // compress keys only
+	CompressVals WordLevelCompression = 0b10 // compress values only
 )
 
-func ParseFileCompression(s string) (FileCompression, error) {
+func ParseFileCompression(s string) (WordLevelCompression, error) {
 	switch s {
 	case "none", "":
 		return CompressNone, nil
@@ -51,7 +49,8 @@ func ParseFileCompression(s string) (FileCompression, error) {
 	}
 }
 
-func (c FileCompression) String() string {
+func (c WordLevelCompression) Has(flag WordLevelCompression) bool { return c&flag != 0 }
+func (c WordLevelCompression) String() string {
 	switch c {
 	case CompressNone:
 		return "none"
@@ -68,29 +67,34 @@ func (c FileCompression) String() string {
 
 type Reader struct {
 	*Getter
-	nextValue bool            // if nextValue true then getter.Next() expected to return value
-	c         FileCompression // compressed
+	nextValue bool                 // if nextValue true then getter.Next() expected to return value
+	c         WordLevelCompression // compressed
 }
 
-func NewReader(g *Getter, c FileCompression) *Reader {
+func NewReader(g *Getter, c WordLevelCompression) *Reader {
 	return &Reader{Getter: g, c: c}
 }
 
 func (g *Reader) MatchPrefix(prefix []byte) bool {
-	if g.c&CompressKeys != 0 {
+	if g.c.Has(CompressKeys) {
 		return g.Getter.MatchPrefix(prefix)
 	}
 	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
 func (g *Reader) MatchCmp(prefix []byte) int {
-	if g.c&CompressKeys != 0 {
+	if g.c.Has(CompressKeys) {
 		return g.Getter.MatchCmp(prefix)
 	}
 	return g.Getter.MatchCmpUncompressed(prefix)
 }
 
-func (g *Reader) FileName() string { return g.Getter.FileName() }
+func (g *Reader) MadvNormal() MadvDisabler {
+	g.d.MadvNormal()
+	return g
+}
+func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
+func (g *Reader) FileName() string  { return g.Getter.FileName() }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	fl := CompressKeys
 	if g.nextValue {
@@ -100,7 +104,7 @@ func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 		g.nextValue = true
 	}
 
-	if g.c&fl != 0 {
+	if g.c.Has(fl) {
 		return g.Getter.Next(buf)
 	}
 	return g.Getter.NextUncompressed()
@@ -119,7 +123,7 @@ func (g *Reader) Skip() (uint64, int) {
 		g.nextValue = true
 	}
 
-	if g.c&fl != 0 {
+	if g.c.Has(fl) {
 		return g.Getter.Skip()
 	}
 	return g.Getter.SkipUncompressed()
@@ -128,94 +132,28 @@ func (g *Reader) Skip() (uint64, int) {
 
 type ReaderI interface {
 	Next(buf []byte) ([]byte, uint64)
+	Size() int
+	Count() int
 	Reset(offset uint64)
 	HasNext() bool
 	Skip() (uint64, int)
 	FileName() string
 	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
+	MadvNormal() MadvDisabler
+	DisableReadAhead()
 }
 
-type PagedReader struct {
-	file                   ReaderI
-	snappy                 bool
-	valuesOnCompressedPage int
-	page                   *page.Reader
-
-	currentPageOffset, nextPageOffset uint64
-}
-
-func NewPagedReader(r ReaderI, valuesOnCompressedPage int, snappy bool) *PagedReader {
-	if valuesOnCompressedPage == 0 {
-		valuesOnCompressedPage = 1
-	}
-	return &PagedReader{file: r, valuesOnCompressedPage: valuesOnCompressedPage, snappy: snappy, page: &page.Reader{}}
-}
-
-func (g *PagedReader) Reset(offset uint64) {
-	if g.valuesOnCompressedPage <= 1 {
-		g.file.Reset(offset)
-		return
-	}
-	if g.currentPageOffset == offset { // don't reset internal state in this case: likely user just iterating over all values
-		return
-	}
-
-	g.file.Reset(offset)
-	g.currentPageOffset = offset
-	g.nextPageOffset = offset
-	g.page = &page.Reader{} // TODO: optimize
-}
-func (g *PagedReader) FileName() string { return g.file.FileName() }
-func (g *PagedReader) HasNext() bool {
-	return (g.valuesOnCompressedPage > 1 && g.page.HasNext()) || g.file.HasNext()
-}
-func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
-	if g.valuesOnCompressedPage <= 1 {
-		return g.file.Next(buf)
-	}
-
-	if g.page.HasNext() {
-		_, v := g.page.Next()
-		if g.page.HasNext() {
-			return v, g.currentPageOffset
-		}
-		return v, g.nextPageOffset
-	}
-	g.currentPageOffset = g.nextPageOffset
-	var pageV []byte
-	pageV, g.nextPageOffset = g.file.Next(buf)
-	g.page.Reset(pageV, g.snappy)
-	_, v := g.page.Next()
-	return v, g.currentPageOffset
-}
-func (g *PagedReader) Next2(buf []byte) (k, v, bufOut []byte, pageOffset uint64) {
-	if g.valuesOnCompressedPage <= 1 {
-		buf, pageOffset = g.file.Next(buf)
-		return nil, buf, buf, pageOffset
-	}
-
-	if g.page.HasNext() {
-		k, v = g.page.Next()
-		return k, v, buf, g.currentPageOffset
-	}
-	g.currentPageOffset = g.nextPageOffset
-	buf, g.nextPageOffset = g.file.Next(buf[:0])
-	g.page.Reset(buf, g.snappy)
-	k, v = g.page.Next()
-	return k, v, buf, g.currentPageOffset
-}
-func (g *PagedReader) Skip() (uint64, int) {
-	v, offset := g.Next(nil)
-	return offset, len(v)
+type MadvDisabler interface {
+	DisableReadAhead()
 }
 
 type Writer struct {
 	*Compressor
 	keyWritten bool
-	c          FileCompression
+	c          WordLevelCompression
 }
 
-func NewWriter(kv *Compressor, compress FileCompression) *Writer {
+func NewWriter(kv *Compressor, compress WordLevelCompression) *Writer {
 	return &Writer{kv, false, compress}
 }
 
@@ -251,7 +189,7 @@ func (c *Writer) Close() {
 	}
 }
 
-func DetectCompressType(getter *Getter) (compressed FileCompression) {
+func DetectCompressType(getter *Getter) (compressed WordLevelCompression) {
 	keyCompressed := func() (compressed bool) {
 		defer func() {
 			if rec := recover(); rec != nil {

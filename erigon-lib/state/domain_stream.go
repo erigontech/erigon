@@ -47,7 +47,7 @@ type CursorItem struct {
 	cNonDup kv.Cursor
 
 	iter         btree2.MapIter[string, dataWithPrevStep]
-	idx          *seg.Reader
+	idx          *seg.PagedReader
 	hist         *seg.PagedReader
 	btCursor     *Cursor
 	key          []byte
@@ -401,10 +401,10 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, haveRamUpdates boo
 					if !ci1.idx.HasNext() {
 						break
 					}
-					key, _ := ci1.idx.Next(nil)
+					key, val, _, _, nextOffset := ci1.idx.Next2Copy(nil, nil)
 					if key != nil && bytes.HasPrefix(key, prefix) {
 						ci1.key = key
-						ci1.val, ci1.latestOffset = ci1.idx.Next(nil)
+						ci1.val, ci1.latestOffset = val, nextOffset
 						heap.Push(cpPtr, ci1)
 					} else {
 						ci1.idx = nil
