@@ -179,6 +179,10 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.hist.iiCfg.salt.Store(salt)
 	cfg.hist.iiCfg.dirs = dirs
+	cfg.dirtyFilesLock = &a.dirtyFilesLock
+	cfg.hist.dirtyFilesLock = &a.dirtyFilesLock
+	cfg.hist.iiCfg.dirtyFilesLock = &a.dirtyFilesLock
+
 	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
 	if err != nil {
 		return err
@@ -190,6 +194,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 	idxCfg := Schema.GetIICfg(idx)
 	idxCfg.salt.Store(salt)
 	idxCfg.dirs = dirs
+	idxCfg.dirtyFilesLock = &a.dirtyFilesLock
 
 	if ii := a.searchII(idx); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", idx)

@@ -70,8 +70,7 @@ type InvertedIndex struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visible in zero-copy way
-	dirtyFiles     *btree2.BTreeG[*filesItem]
-	dirtyFilesLock sync.Mutex
+	dirtyFiles *btree2.BTreeG[*filesItem]
 
 	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -95,6 +94,8 @@ type iiCfg struct {
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
 	Accessors Accessors
+
+	dirtyFilesLock *sync.Mutex
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {

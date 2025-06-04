@@ -81,8 +81,7 @@ type Domain struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visible in zero-copy way
-	dirtyFiles     *btree2.BTreeG[*filesItem]
-	dirtyFilesLock sync.Mutex
+	dirtyFiles *btree2.BTreeG[*filesItem]
 
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -105,7 +104,8 @@ type domainCfg struct {
 	// for commitment domain only
 	replaceKeysInValues bool
 
-	version DomainVersionTypes
+	version        DomainVersionTypes
+	dirtyFilesLock *sync.Mutex
 }
 
 func (d domainCfg) GetVersions() VersionTypes {
