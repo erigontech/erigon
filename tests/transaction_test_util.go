@@ -92,7 +92,7 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 
 		if rules.IsLondon {
 			// EIP-1559 gas fee cap
-			err = core.CheckEip1559TxfeeCap(sender, msg.FeeCap(), msg.TipCap(), nil, false /* isFree */)
+			err = core.CheckEip1559TxGasFeeCap(sender, msg.FeeCap(), msg.TipCap(), nil, false /* isFree */)
 			if err != nil {
 				return nil, nil, 0, err
 			}

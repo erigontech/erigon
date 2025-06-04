@@ -271,7 +271,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			stream.WriteNil()
 			return nil
 		}
-		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
+		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
 			return nil
 		}
@@ -544,11 +544,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			return hash, nil
 		}
 		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			return common.Hash{}, err
-		}
-
-		if !ok {
+		if err != nil || !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 			return common.Hash{}, err
 		}
