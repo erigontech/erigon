@@ -612,7 +612,7 @@ func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
 func (r *ReaderV3) SetTrace(trace bool) { r.trace = trace }
 
 func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
-	_, _, hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, address[:])
+	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
 }
 
@@ -768,14 +768,16 @@ func (r *bufferedReader) ReadAccountStorage(address common.Address, key common.H
 }
 
 func (r *bufferedReader) HasStorage(address common.Address) (bool, error) {
-	firstK, firstV, hasStorage, err := r.sd.HasPrefix(kv.StorageDomain, address[:], r.tx)
-	if err != nil {
-		return false, err
+	r.bufferedState.accountsMutex.RLock()
+	so, ok := r.bufferedState.accounts[address]
+
+	if ok && len(so.storage) > 0 {
+		// TODO - we really need to return the first key
+		// for this we need to order the list of hashes
+		return true, nil
 	}
-	if !r.discardReadList {
-		r.readLists[kv.StorageDomain.String()].Push(string(firstK), firstV)
-	}
-	return hasStorage, nil
+
+	return r.reader.HasStorage(address)
 }
 
 func (r *bufferedReader) ReadAccountCode(address common.Address) ([]byte, error) {
