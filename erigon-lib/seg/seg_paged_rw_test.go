@@ -17,7 +17,6 @@
 package seg
 
 import (
-	"bytes"
 	"fmt"
 	"testing"
 
@@ -77,6 +76,7 @@ func (w *multyBytesWriter) Bytes() [][]byte  { return w.buffer }
 func (w *multyBytesWriter) FileName() string { return "" }
 func (w *multyBytesWriter) Count() int       { return 0 }
 func (w *multyBytesWriter) Close()           {}
+func (w *multyBytesWriter) Compress() error  { return nil }
 func (w *multyBytesWriter) Reset()           { w.buffer = nil }
 
 func TestPage(t *testing.T) {
@@ -108,24 +108,24 @@ func TestPage(t *testing.T) {
 			pageNum++
 
 			require.False(p1.HasNext())
-			p1.Reset(pages[pageNum])
+			p1.Reset(pages[pageNum], false)
 		}
 	}
 }
 
 func BenchmarkName(b *testing.B) {
-	buf := bytes.NewBuffer(nil)
+	buf := &multyBytesWriter{}
 	w := NewPagedWriter(buf, 16, false)
 	for i := 0; i < 16; i++ {
 		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
 	}
-	bts := buf.Bytes()
+	bts := buf.Bytes()[0]
 
 	k := []byte{15}
 
 	b.Run("1", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			page.GetFromPage(k, bts, nil, false)
+			GetFromPage(k, bts, nil, false)
 		}
 	})
 
