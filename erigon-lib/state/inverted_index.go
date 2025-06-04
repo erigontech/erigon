@@ -267,7 +267,7 @@ func (ii *InvertedIndex) dataWriter(f *seg.Compressor) *seg.Writer {
 func (iit *InvertedIndexRoTx) dataReader(f *seg.Decompressor) *seg.Reader {
 	return iit.ii.dataReader(f)
 }
-func (iit *InvertedIndexRoTx) dataWriter(f *seg.Decompressor) *seg.Writer {
+func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor) *seg.Writer {
 	return iit.ii.dataWriter(f)
 }
 
