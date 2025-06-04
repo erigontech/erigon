@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sort"
@@ -27,6 +28,7 @@ import (
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -1587,8 +1589,8 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 			goto DB_SEARCH
 		}
 	}
-	for _, seg := range txSegs {
-		txnHashIdx := seg.Src().Index(coresnaptype.Indexes.TxnHash)
+	for _, txSeg := range txSegs {
+		txnHashIdx := txSeg.Src().Index(coresnaptype.Indexes.TxnHash)
 		startTxNum := txnHashIdx.BaseDataID()
 		endTxNum := startTxNum + txnHashIdx.KeyCount()
 		if txNum >= endTxNum {
@@ -1604,32 +1606,35 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 			// get hash now
 			elemPos := txNum - startTxNum
 			offset := txnHashIdx.OrdinalLookup(elemPos)
-			gg := seg.Src().MakeGetter()
+			gg := txSeg.Src().MakeGetter()
 			gg.Reset(offset)
 
 			if !gg.HasNext() {
-				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d): elemPos:%d, offset: %d", seg.From(), seg.To(), elemPos, offset)
+				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d): elemPos:%d, offset: %d", txSeg.From(), txSeg.To(), elemPos, offset)
 			}
-			buf, _ = gg.Next(buf[:0])
-
-			if len(buf) < 1+20 {
-				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d) bad value: elemPos:%d, offset: %d, value: %x", seg.From(), seg.To(), elemPos, offset, buf)
+			buf, _ = gg.Next(buf[:0]) // safe to call .Next on uncompressed word
+			isSystemTx := len(buf) == 0
+			if isSystemTx {
+				binary.BigEndian.PutUint64(txHash[:], txNum)
+			} else if len(buf) < 1+20 {
+				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d) bad value: elemPos:%d, offset: %d, value: %x", txSeg.From(), txSeg.To(), elemPos, offset, buf)
+			} else {
+				txRlp := buf[1+20:]
+				tx, err := types.DecodeTransaction(txRlp)
+				if err != nil {
+					return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d) bad tx decode: elemPos:%d, offset: %d, %w %s", txSeg.From(), txSeg.To(), elemPos, offset, err, hexutil.Encode(txRlp))
+				}
+				txHash = tx.Hash()
 			}
-			txRlp := buf[1+20:]
-			tx, err := types.DecodeTransaction(txRlp)
-			if err != nil {
-				return 0, false, fmt.Errorf("txnHashIdx.OrdinalLookup(%d-%d) bad tx decode: elemPos:%d, offset: %d, %w", seg.From(), seg.To(), elemPos, offset, err)
-			}
-			txHash = tx.Hash()
 		}
 
 		{
 			// use tx2BlockId index
-			txn2BlockIdx := seg.Src().Index(coresnaptype.Indexes.TxnHash2BlockNum)
+			txn2BlockIdx := txSeg.Src().Index(coresnaptype.Indexes.TxnHash2BlockNum)
 			reader := recsplit.NewIndexReader(txn2BlockIdx)
 			blockNum, ok := reader.Lookup(txHash[:])
 			if !ok {
-				return 0, false, fmt.Errorf("txn2BlockIdx.Lookup(%d-%d) bad txHash: %s, blockNumber: %d", seg.From(), seg.To(), txHash.String(), blockNum)
+				return 0, false, fmt.Errorf("txn2BlockIdx.Lookup(%d-%d) bad txHash: %s, blockNumber: %d", txSeg.From(), txSeg.To(), txHash.String(), blockNum)
 			}
 			return blockNum, true, nil
 		}

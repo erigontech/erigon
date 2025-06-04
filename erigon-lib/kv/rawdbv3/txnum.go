@@ -64,6 +64,13 @@ type TxNumsReader struct {
 type DefaultTxBlockIndex struct{}
 
 func (d *DefaultTxBlockIndex) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
+	if c == nil {
+		c, err := tx.Cursor(kv.MaxTxNum)
+		if err != nil {
+			return 0, false, err
+		}
+		defer c.Close()
+	}
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum)
 	_, v, err := c.SeekExact(k[:])
@@ -108,9 +115,34 @@ func (d *DefaultTxBlockIndex) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint
 		panic(fmt.Sprintf("block number is too big: %d", lastBlockNum))
 	}
 
+	{
+		// check genesis block
+		firstMaxTxNum, ok, err := d.MaxTxNum(tx, c, 0)
+		if err != nil {
+			return 0, false, fmt.Errorf("DefaultReadTxNumFunc first maxtxnum error: %w", err)
+		}
+		if ok {
+			if txNum <= firstMaxTxNum {
+				return 0, true, nil
+			}
+		}
+	}
+
+	_blk, err = SecondKeyC(c) // first key is always genesis; can be found in blocks...
+	if err != nil {
+		return 0, false, err
+	}
+	if len(_blk) != 8 {
+		return 0, false, fmt.Errorf("DefaultReadTxNumFunc Second: seems broken TxNum value: %x", _blk)
+	}
+	secondBlockNum := binary.BigEndian.Uint64(_blk)
+
 	blockNum = uint64(sort.Search(int(lastBlockNum+1), func(sblk int) bool {
 		if err != nil {
 			return true
+		}
+		if secondBlockNum > uint64(sblk) {
+			return false
 		}
 		var maxTxNum uint64
 		maxTxNum, ok, err = d.MaxTxNum(tx, c, uint64(sblk))
@@ -125,16 +157,13 @@ func (d *DefaultTxBlockIndex) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint
 			lt := binary.BigEndian.Uint64(_lt)
 			ft := binary.BigEndian.Uint64(_ft)
 			lb := binary.BigEndian.Uint64(_lb)
-			err = fmt.Errorf("BlockNum(%d): seems broken TxNum value: %d -> %d; db has: (%d-%d, %d-%d)", txNum, sblk, maxTxNum, fb, ft, lb, lt)
+			err = fmt.Errorf("BlockNum(%d): seems broken TxNum value: %d -> %d; db has: (%d-%d, %d-%d)", sblk, txNum, maxTxNum, fb, ft, lb, lt)
 			return true
 		}
 		return maxTxNum >= txNum
 	}))
 	if err != nil {
 		return 0, false, err
-	}
-	if blockNum > lastBlockNum {
-		return 0, false, nil
 	}
 	return blockNum, true, nil
 }
@@ -327,7 +356,11 @@ func SecondKey(tx kv.Tx, table string) ([]byte, error) {
 		return nil, err
 	}
 	defer c.Close()
-	_, _, err = c.First()
+	return SecondKeyC(c)
+}
+
+func SecondKeyC(c kv.Cursor) ([]byte, error) {
+	_, _, err := c.First()
 	if err != nil {
 		return nil, err
 	}
