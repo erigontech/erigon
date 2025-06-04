@@ -118,118 +118,6 @@ func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
 	return pagesAmount
 }
 
-func NewPagedWriter(parent CompressorI, limit int, compressionEnabled bool) *PagedWriter {
-	return &PagedWriter{parent: parent, limit: limit, compressionEnabled: compressionEnabled}
-}
-
-type CompressorI interface {
-	io.Writer
-	Compress() error
-	Count() int
-	FileName() string
-}
-type PagedWriter struct {
-	parent             CompressorI
-	i, limit           int
-	keys, vals         []byte
-	kLengths, vLengths []int
-
-	compressionBuf     []byte
-	compressionEnabled bool
-}
-
-func (c *PagedWriter) Empty() bool { return c.i == 0 }
-func (c *PagedWriter) Add(k, v []byte) (err error) {
-	if c.limit <= 1 {
-		_, err = c.parent.Write(v)
-		return err
-	}
-
-	c.i++
-	c.kLengths = append(c.kLengths, len(k))
-	c.vLengths = append(c.vLengths, len(v))
-	c.keys = append(c.keys, k...)
-	c.vals = append(c.vals, v...)
-	isFull := c.i%c.limit == 0
-	//fmt.Printf("[dbg] write: %x, %x\n", k, v)
-	if isFull {
-		//fmt.Printf("[dbg] write--\n")
-		bts := c.bytesAndReset()
-		_, err = c.parent.Write(bts)
-		return err
-	}
-	return nil
-}
-
-func (c *PagedWriter) Reset() {
-	c.i = 0
-	c.kLengths, c.vLengths = c.kLengths[:0], c.vLengths[:0]
-	c.keys, c.vals = c.keys[:0], c.vals[:0]
-}
-func (c *PagedWriter) Flush() error {
-	if c.limit <= 1 {
-		return nil
-	}
-
-	defer c.Reset()
-	if !c.Empty() {
-		bts := c.bytesAndReset()
-		_, err := c.parent.Write(bts)
-		return err
-	}
-	return nil
-}
-
-func (c *PagedWriter) bytesAndReset() []byte {
-	v := c.bytes()
-	c.Reset()
-	return v
-}
-
-func (c *PagedWriter) bytes() []byte {
-	//TODO: alignment,compress+alignment
-
-	c.keys = append(c.keys, c.vals...)
-	keysAndVals := c.keys
-
-	c.vals = growslice(c.vals[:0], 1+len(c.kLengths)*2*4)
-	for i := range c.vals {
-		c.vals[i] = 0
-	}
-	c.vals[0] = uint8(len(c.kLengths)) // first byte is amount of vals
-	lensBuf := c.vals[1:]
-	for i, l := range c.kLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
-	}
-	lensBuf = lensBuf[len(c.kLengths)*4:]
-	for i, l := range c.vLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
-	}
-
-	c.vals = append(c.vals, keysAndVals...)
-	lengthsAndKeysAndVals := c.vals
-
-	c.compressionBuf, lengthsAndKeysAndVals = compress.EncodeZstdIfNeed(c.compressionBuf, lengthsAndKeysAndVals, c.compressionEnabled)
-
-	return lengthsAndKeysAndVals
-}
-
-func (c *PagedWriter) DisableFsync() {
-	if casted, ok := c.parent.(disableFsycn); ok {
-		casted.DisableFsync()
-	}
-}
-func (c *PagedWriter) Compress() error {
-	if err := c.Flush(); err != nil {
-		return err
-	}
-	return c.parent.Compress()
-}
-
-type disableFsycn interface {
-	DisableFsync()
-}
-
 type PagedReader struct {
 	file                   ReaderI
 	snappy                 bool
@@ -309,6 +197,130 @@ func (g *PagedReader) Next2(buf []byte) (k, v, bufOut []byte, pageOffset uint64)
 func (g *PagedReader) Skip() (uint64, int) {
 	v, offset := g.Next(nil)
 	return offset, len(v)
+}
+
+func NewPagedWriter(parent CompressorI, pageSize int, compressionEnabled bool) *PagedWriter {
+	return &PagedWriter{parent: parent, pageSize: pageSize, compressionEnabled: compressionEnabled}
+}
+
+type CompressorI interface {
+	io.Writer
+	Close()
+	Compress() error
+	Count() int
+	FileName() string
+}
+type PagedWriter struct {
+	parent             CompressorI
+	pageSize           int
+	keys, vals         []byte
+	kLengths, vLengths []int
+
+	compressionBuf     []byte
+	compressionEnabled bool
+
+	pairs int
+}
+
+func (c *PagedWriter) Empty() bool { return c.pairs == 0 }
+func (c *PagedWriter) Add(k, v []byte) (err error) {
+	if c.pageSize <= 1 {
+		_, err = c.parent.Write(v)
+		return err
+	}
+
+	c.pairs++
+	c.kLengths = append(c.kLengths, len(k))
+	c.vLengths = append(c.vLengths, len(v))
+	c.keys = append(c.keys, k...)
+	c.vals = append(c.vals, v...)
+	isFull := c.pairs%c.pageSize == 0
+	//fmt.Printf("[dbg] write: %x, %x\n", k, v)
+	if isFull {
+		//fmt.Printf("[dbg] write--\n")
+		bts := c.bytesAndReset()
+		_, err = c.parent.Write(bts)
+		return err
+	}
+	return nil
+}
+
+func (c *PagedWriter) Reset() {
+	c.pairs = 0
+	c.kLengths, c.vLengths = c.kLengths[:0], c.vLengths[:0]
+	c.keys, c.vals = c.keys[:0], c.vals[:0]
+}
+func (c *PagedWriter) Flush() error {
+	if c.pageSize <= 1 {
+		return nil
+	}
+
+	defer c.Reset()
+	if !c.Empty() {
+		bts := c.bytesAndReset()
+		_, err := c.parent.Write(bts)
+		return err
+	}
+	return nil
+}
+
+func (c *PagedWriter) bytesAndReset() []byte {
+	v := c.bytes()
+	c.Reset()
+	return v
+}
+
+func (c *PagedWriter) bytes() []byte {
+	//TODO: alignment,compress+alignment
+
+	c.keys = append(c.keys, c.vals...)
+	keysAndVals := c.keys
+
+	c.vals = growslice(c.vals[:0], 1+len(c.kLengths)*2*4)
+	for i := range c.vals {
+		c.vals[i] = 0
+	}
+	c.vals[0] = uint8(len(c.kLengths)) // first byte is amount of vals
+	lensBuf := c.vals[1:]
+	for i, l := range c.kLengths {
+		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
+	}
+	lensBuf = lensBuf[len(c.kLengths)*4:]
+	for i, l := range c.vLengths {
+		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
+	}
+
+	c.vals = append(c.vals, keysAndVals...)
+	lengthsAndKeysAndVals := c.vals
+
+	c.compressionBuf, lengthsAndKeysAndVals = compress.EncodeZstdIfNeed(c.compressionBuf, lengthsAndKeysAndVals, c.compressionEnabled)
+
+	return lengthsAndKeysAndVals
+}
+
+func (c *PagedWriter) DisableFsync() {
+	if casted, ok := c.parent.(disableFsycn); ok {
+		casted.DisableFsync()
+	}
+}
+func (c *PagedWriter) Compress() error {
+	if err := c.Flush(); err != nil {
+		return err
+	}
+	return c.parent.Compress()
+}
+
+func (c *PagedWriter) Count() int {
+	if c.pageSize <= 1 {
+		return c.parent.Count()
+	}
+	return c.pairs * 2
+}
+func (c *PagedWriter) FileName() string { return c.parent.FileName() }
+func (c *PagedWriter) Close()           { c.parent.Close() }
+
+type disableFsycn interface {
+	DisableFsync()
 }
 
 // growslice ensures b has the wanted length by either expanding it to its capacity

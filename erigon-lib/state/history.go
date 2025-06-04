@@ -600,7 +600,7 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 type HistoryCollation struct {
-	historyComp   *seg.Writer
+	historyComp   *seg.PagedWriter
 	efHistoryComp *seg.Writer
 	historyPath   string
 	efHistoryPath string
@@ -623,10 +623,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	}
 
 	var (
-		historyComp   *seg.Writer
-		efHistoryComp *seg.Writer
-		txKey         [8]byte
-		err           error
+		_histComp *seg.Compressor
+		_efComp   *seg.Compressor
+		txKey     [8]byte
+		err       error
 
 		historyPath   = h.vFilePath(step, step+1)
 		efHistoryPath = h.efFilePath(step, step+1)
@@ -636,16 +636,16 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	defer func() {
 		mxCollateTookHistory.ObserveDuration(startAt)
 		if closeComp {
-			if historyComp != nil {
-				historyComp.Close()
+			if _histComp != nil {
+				_histComp.Close()
 			}
-			if efHistoryComp != nil {
-				efHistoryComp.Close()
+			if _efComp != nil {
+				_efComp.Close()
 			}
 		}
 	}()
 
-	comp, err := seg.NewCompressor(ctx, "collate hist "+h.filenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	_histComp, err = seg.NewCompressor(ctx, "collate hist "+h.filenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
@@ -659,6 +659,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	collector := etl.NewCollectorWithAllocator(h.filenameBase+".collate.hist", h.dirs.Tmp, etl.SmallSortableBuffers, h.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
+	collector.SortAndFlushInBackground(true)
 
 	for txnmb, k, err := keysCursor.Seek(txKey[:]); txnmb != nil; txnmb, k, err = keysCursor.Next() {
 		if err != nil {
@@ -695,12 +696,12 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		defer cd.Close()
 	}
 
-	efComp, err := seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 	}
 	if h.noFsync {
-		efComp.DisableFsync()
+		_efComp.DisableFsync()
 	}
 
 	var (
@@ -712,15 +713,14 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		initialized bool
 	)
-	efHistoryComp = h.InvertedIndex.dataWriter(efComp, true) // coll+build must be fast - no Compression
-	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
 	baseTxNum := step * h.aggregationStep
 	cnt := 0
 	var histKeyBuf []byte
 	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
-	historyWriter := h.dataWriter(comp)
+	historyWriter := h.dataWriter(_histComp)
+	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // coll+build must be fast - no Compression
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
 		if !initialized {
@@ -779,10 +779,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		prevEf = seqBuilder.AppendBytes(prevEf[:0])
 
-		if _, err = efHistoryComp.Write(prevKey); err != nil {
+		if _, err = invIndexWriter.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
 		}
-		if _, err = efHistoryComp.Write(prevEf); err != nil {
+		if _, err = invIndexWriter.Write(prevEf); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
 		}
 
@@ -806,14 +806,14 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		return HistoryCollation{}, fmt.Errorf("add %s history val: %w", h.filenameBase, err)
 	}
 	closeComp = false
-	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
+	mxCollationSizeHist.SetUint64(uint64(historyWriter.Count()))
 
 	return HistoryCollation{
-		efHistoryComp: efHistoryComp,
+		efHistoryComp: invIndexWriter,
 		efHistoryPath: efHistoryPath,
 		efBaseTxNum:   step * h.aggregationStep,
 		historyPath:   historyPath,
-		historyComp:   historyComp,
+		historyComp:   historyWriter,
 	}, nil
 }
 
