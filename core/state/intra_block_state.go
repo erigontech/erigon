@@ -199,6 +199,44 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
 }
 
+func (sdb *IntraBlockState) HasStorage(addr common.Address) (bool, error) {
+	so, err := sdb.getStateObject(addr)
+	if err != nil {
+		return false, err
+	}
+	if so == nil || so.selfdestructed || so.deleted {
+		return false, nil
+	}
+
+	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	if len(so.fakeStorage) > 0 {
+		for _, v := range so.fakeStorage {
+			if !v.IsZero() {
+				return true, nil
+			}
+		}
+
+		return false, nil
+	}
+
+	// If we know of at least one non-empty cached storage slot, then the object has storage
+	for _, v := range so.originStorage {
+		if !v.IsZero() {
+			return true, nil
+		}
+	}
+
+	// If we know of at least one non-empty dirty storage slot, then the object has storage
+	for _, v := range so.dirtyStorage {
+		if !v.IsZero() {
+			return true, nil
+		}
+	}
+
+	// Otherwise check in the DB
+	return sdb.stateReader.HasStorage(addr)
+}
+
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
