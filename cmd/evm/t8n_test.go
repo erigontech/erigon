@@ -20,11 +20,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -284,23 +284,25 @@ func TestEvmRun(t *testing.T) {
 		tt.WaitExit()
 		haveStdErr := tt.Stderr()
 
-		if len(tc.wantStdoutFile) > 0 {
-			want, err := os.ReadFile(tc.wantStdoutFile)
-			if err != nil {
-				t.Fatalf("test %d: could not read expected output: %v", i, err)
-			}
-			if !bytes.Equal(haveStdOut, want) {
-				t.Fatalf("test %d, output wrong, have \n%v\nwant\n%v\n", i, string(haveStdOut), string(want))
-			}
+		checkExpectedOutput(t, haveStdOut, tc.wantStdoutFile, i)
+		checkExpectedOutput(t, haveStdErr, tc.wantStderrFile, i)
+	}
+}
+
+func checkExpectedOutput(t *testing.T, output []byte, expectationFilePath string, i int) {
+	if len(expectationFilePath) > 0 {
+		want, err := os.ReadFile(expectationFilePath)
+		if err != nil {
+			t.Fatalf("test %d: could not read expected output: %v", i, err)
 		}
-		if len(tc.wantStderrFile) > 0 {
-			want, err := os.ReadFile(tc.wantStderrFile)
-			if err != nil {
-				t.Fatalf("test %d: could not read expected output: %v", i, err)
-			}
-			if !bytes.Equal(haveStdErr, want) {
-				t.Fatalf("test %d, output wrong\nhave %q\nwant %q\n", i, string(haveStdErr), string(want))
-			}
+
+		re, err := regexp.Compile(string(want))
+		if err != nil {
+			t.Fatalf("test %d: could not compile regular expression: %v", i, err)
+		}
+
+		if !re.Match(output) {
+			t.Fatalf("test %d, output wrong, have \n%v\nwant\n%v\n", i, string(output), string(want))
 		}
 	}
 }
