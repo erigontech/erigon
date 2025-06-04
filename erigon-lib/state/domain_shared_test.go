@@ -156,7 +156,6 @@ Loop:
 	k0 := make([]byte, length.Addr)
 	commitStep := 3
 
-	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
 		domains.SetTxNum(txNum)
@@ -177,7 +176,7 @@ Loop:
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
@@ -197,7 +196,7 @@ Loop:
 	for idx, d := range stateChangeset.Diffs {
 		a[idx] = d.GetDiffSet()
 	}
-	err = rwTx.Unwind(ctx, unwindTo, &a)
+	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &a)
 	require.NoError(t, err)
 
 	err = rwTx.Commit()
@@ -423,7 +422,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	commitStep := 3
 	accounts := 1
 
-	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
 		domains.SetTxNum(txNum)
@@ -455,7 +453,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
