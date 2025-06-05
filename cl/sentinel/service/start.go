@@ -123,6 +123,14 @@ func createSentinel(
 			int(cfg.BeaconConfig.MaxBlobsPerBlockElectra),
 		)...)
 
+	gossipTopics = append(
+		gossipTopics,
+		generateSubnetsTopics(
+			// TODO: Try dynamically generating the topics based on custody_group_count
+			gossip.TopicNamePrefixDataColumnSidecar,
+			int(cfg.BeaconConfig.NumberOfColumns),
+		)...)
+
 	attestationSubnetTopics := generateSubnetsTopics(
 		gossip.TopicNamePrefixBeaconAttestation,
 		int(cfg.NetworkConfig.AttestationSubnetCount),
