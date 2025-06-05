@@ -37,7 +37,6 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
-	fmt.Printf("[dbg1] tmpDir: %s\n", tmpDir)
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
 	cfg := DefaultCfg
@@ -141,7 +140,6 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
-	fmt.Printf("[dbg3] tmpDir: %s\n", tmpDir)
 	file := filepath.Join(tmpDir, "compressed2")
 	t.Name()
 	cfg := DefaultCfg
@@ -259,7 +257,6 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
-	fmt.Printf("[dbg4] tmpDir: %s\n", tmpDir)
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
 	cfg := DefaultCfg
@@ -351,7 +348,6 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
-	fmt.Printf("[dbg5] tmpDir: %s\n", tmpDir)
 
 	t.Run("uncompressed", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "unc")
@@ -580,7 +576,6 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
-	fmt.Printf("[dbg6] tmpDir: %s\n", tmpDir)
 	file := filepath.Join(tmpDir, "complex")
 	t.Name()
 	cfg := DefaultCfg

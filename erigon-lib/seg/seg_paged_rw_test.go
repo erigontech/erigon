@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
@@ -35,13 +34,11 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 	t.Helper()
 	logger, require := log.New(), require.New(t)
 	tmpDir := t.TempDir()
-	fmt.Printf("[dbg2] tmpDir: %s\n", tmpDir)
 	file := filepath.Join(tmpDir, "compressed1")
 	t.Name()
 	cfg := seg.DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 1
-	fmt.Printf("a: %v\n", cfg)
 	c, err := seg.NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(err)
 	defer c.Close()
@@ -54,11 +51,9 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 	}
 	require.NoError(p.Flush())
 	require.NoError(p.Compress())
-	time.Sleep(1)
 
 	d, err := seg.NewDecompressor(file)
 	require.NoError(err)
-	fmt.Printf("szz: %d\n", d.Size())
 	return d
 }
 
