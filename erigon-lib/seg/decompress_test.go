@@ -576,10 +576,6 @@ func TestDecompressTorrent(t *testing.T) {
 
 const N = 100
 
-var WORDS = [N][]byte{}
-var WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
-var INPUT_FLAGS = []int{}  // []byte or nil input
-
 func randWord() []byte {
 	size := rand.Intn(256) // size of the word
 	word := make([]byte, size)
@@ -589,22 +585,21 @@ func randWord() []byte {
 	return word
 }
 
-func generateRandWords() {
+func generateRandWords() (WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
+	WORDS = [N][]byte{}
+	WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
+	INPUT_FLAGS = []int{}  // []byte or nil input
+
 	for i := 0; i < N-2; i++ {
 		WORDS[i] = randWord()
 	}
 	// make sure we have at least 2 emtpy []byte
 	WORDS[N-2] = []byte{}
 	WORDS[N-1] = []byte{}
+	return
 }
 
-func clearPrevDict() {
-	WORDS = [N][]byte{}
-	WORD_FLAGS = [N]bool{}
-	INPUT_FLAGS = []int{}
-}
-
-func prepareRandomDict(t *testing.T) *Decompressor {
+func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -619,9 +614,8 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 	}
 	// c.DisableFsync()
 	defer c.Close()
-	clearPrevDict()
 	rand.Seed(time.Now().UnixNano())
-	generateRandWords()
+	WORDS, WORD_FLAGS, INPUT_FLAGS = generateRandWords()
 
 	idx := 0
 	for idx < N {
@@ -655,15 +649,14 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 	if err = c.Compress(); err != nil {
 		t.Fatal(err)
 	}
-	var d *Decompressor
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
-	return d
+	return d, WORDS, WORD_FLAGS, INPUT_FLAGS
 }
 
 func TestDecompressRandomMatchCmp(t *testing.T) {
-	d := prepareRandomDict(t)
+	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
 	defer d.Close()
 
 	if d.wordsCount != uint64(len(INPUT_FLAGS)) {
@@ -731,7 +724,7 @@ func TestDecompressRandomMatchCmp(t *testing.T) {
 }
 
 func TestDecompressRandomMatchBool(t *testing.T) {
-	d := prepareRandomDict(t)
+	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
 	defer d.Close()
 
 	if d.wordsCount != uint64(len(INPUT_FLAGS)) {
@@ -787,7 +780,7 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 }
 
 func TestDecompressRandomFastNext(t *testing.T) {
-	d := prepareRandomDict(t)
+	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
 	defer d.Close()
 
 	if d.wordsCount != uint64(len(INPUT_FLAGS)) {

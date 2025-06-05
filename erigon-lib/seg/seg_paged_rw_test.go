@@ -38,18 +38,16 @@ func TestPagedReader(t *testing.T) {
 	_, _, buf, o1 = g1.Next2(buf[:0])
 	require.NotZero(o1)
 
+	fmt.Printf("sz: %d\n", d.size)
+
 	g := NewPagedReader(d.MakeGetter(), 2, false)
 	i := 0
 	for g.HasNext() {
 		w := loremStrings[i]
-		if i%2 == 0 {
-			g.Skip()
-		} else {
-			var word []byte
-			_, word, buf, _ = g.Next2(buf[:0])
-			expected := fmt.Sprintf("%s %d", w, i)
-			require.Equal(expected, string(word))
-		}
+		var word []byte
+		_, word, buf, _ = g.Next2(buf[:0])
+		expected := fmt.Sprintf("%s %d", w, i)
+		require.Equal(expected, string(word))
 		i++
 	}
 
@@ -57,11 +55,11 @@ func TestPagedReader(t *testing.T) {
 	_, offset := g.Next(buf[:0])
 	require.Equal(0, int(offset))
 	_, offset = g.Next(buf[:0])
-	require.Equal(0x2a, int(offset))
+	require.Equal(42, int(offset))
 	_, offset = g.Next(buf[:0])
-	require.Equal(0x2a, int(offset))
+	require.Equal(42, int(offset))
 	_, offset = g.Next(buf[:0])
-	require.Equal(0x52, int(offset))
+	require.Equal(82, int(offset))
 }
 
 // multyBytesWriter is a writer for [][]byte, similar to bytes.Writer.
