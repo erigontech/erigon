@@ -143,6 +143,7 @@ func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs,
 		return err
 	}
 	defer snapshotStore.Close()
+	defer baseStore.Close()
 	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
 	logger.Info("[integrity] ValidateBorSpans: done", "err", err)
 	return err
@@ -156,6 +157,7 @@ func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir
 		return err
 	}
 	defer snapshotStore.Close()
+	defer baseStore.Close()
 	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
 	logger.Info("[integrity] ValidateBorCheckpoints: done", "err", err)
 	return err
@@ -169,6 +171,7 @@ func ValidateBorMilestones(ctx context.Context, logger log.Logger, dirs datadir.
 		return err
 	}
 	defer snapshotStore.Close()
+	defer baseStore.Close()
 	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
 	logger.Info("[integrity] ValidateBorMilestones: done", "err", err)
 	return err
