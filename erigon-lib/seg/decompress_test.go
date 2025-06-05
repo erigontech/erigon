@@ -34,6 +34,7 @@ import (
 )
 
 func prepareLoremDict(t *testing.T) *Decompressor {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -63,6 +64,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 }
 
 func TestDecompressSkip(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -89,6 +91,7 @@ func TestDecompressSkip(t *testing.T) {
 }
 
 func TestDecompressMatchOK(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -113,6 +116,7 @@ func TestDecompressMatchOK(t *testing.T) {
 }
 
 func TestDecompressMatchCmpOK(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -192,6 +196,7 @@ func TestDecompressMatchOKCondensed(t *testing.T) {
 }
 
 func TestDecompressMatchNotOK(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -215,6 +220,7 @@ func TestDecompressMatchNotOK(t *testing.T) {
 }
 
 func TestDecompressMatchPrefix(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -254,6 +260,7 @@ func TestDecompressMatchPrefix(t *testing.T) {
 }
 
 func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -284,6 +291,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 }
 
 func TestUncompressed(t *testing.T) {
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDictUncompressed(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -345,7 +353,7 @@ func TestUncompressed(t *testing.T) {
 }
 
 func TestDecompressor_OpenCorrupted(t *testing.T) {
-	t.Helper()
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger := log.New()
 	tmpDir := t.TempDir()
 
@@ -517,7 +525,6 @@ dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco la
 consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
 excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
 
-var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 func rmNewLine(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
 }

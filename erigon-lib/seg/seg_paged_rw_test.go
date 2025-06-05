@@ -31,6 +31,7 @@ import (
 )
 
 func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression bool) *seg.Decompressor {
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	t.Helper()
 	logger, require := log.New(), require.New(t)
 	tmpDir := t.TempDir()
@@ -62,14 +63,14 @@ dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco la
 consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
 excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
 
-var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 func rmNewLine(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
 }
 
 func TestPagedReader(t *testing.T) {
-	require := require.New(t)
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 
+	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, false)
 	defer d.Close()
 	g1 := seg.NewPagedReader(d.MakeGetter(), 2, false)
