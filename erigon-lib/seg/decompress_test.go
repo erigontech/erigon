@@ -262,6 +262,8 @@ func TestDecompressMatchPrefix(t *testing.T) {
 func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	t.Helper()
 	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	slices.Sort(loremStrings)
+
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
@@ -272,7 +274,6 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
-	slices.Sort(loremStrings)
 	for k, w := range loremStrings {
 		if len(w) == 0 {
 			err = c.AddUncompressedWord([]byte(w))
