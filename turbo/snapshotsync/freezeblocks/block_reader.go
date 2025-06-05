@@ -1636,7 +1636,6 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 	ran := seg.Range
 	i, j := ran.From(), ran.To()
 	query := cache.NewQuery(ran)
-	//var maxTxNum uint64
 	for i < j {
 		h := (i + j) >> 1
 		maxTxNum, ok, exhaust := query.GetValue()
@@ -1647,7 +1646,7 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 			}
 		}
 
-		if !ok {
+		if !ok && !exhaust {
 			query.SetValue(maxTxNum)
 		}
 
@@ -1665,6 +1664,7 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 	if i >= ran.To() {
 		return 0, false, fmt.Errorf("BlockReader.BlockNumber: not found block: %d in file (%d-%d), searching for %d", i, ran.From(), ran.To(), txNum)
 	}
+	//fmt.Printf("[BlockReader.BlockNumber] found block %d for txNum %d in file [%d-%d) touched file %d\n", i, txNum, ran.From(), ran.To(), count)
 
 	return uint64(i), true, nil
 }

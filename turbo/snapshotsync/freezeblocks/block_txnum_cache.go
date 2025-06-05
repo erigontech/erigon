@@ -16,7 +16,7 @@ type BlockTxNumLookupCache struct {
 func NewBlockTxNumLookupCache() *BlockTxNumLookupCache {
 	return &BlockTxNumLookupCache{
 		cache:   make(map[snapshotsync.Range][]uint64),
-		cadence: 32.0, // lookup exists every 32 blocks
+		cadence: 8.0, // lookup exists every `cadence` blocks
 	}
 }
 
