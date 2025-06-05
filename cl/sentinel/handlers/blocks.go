@@ -17,7 +17,7 @@
 package handlers
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -86,7 +86,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		return err
 	}
 
-	blockRoots := []libcommon.Hash{}
+	blockRoots := []common.Hash{}
 	for i := 0; i < req.Length(); i++ {
 		blockRoot := req.Get(i)
 		blockRoots = append(blockRoots, blockRoot)
@@ -106,7 +106,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	defer tx.Rollback()
 
 	var block *cltypes.SignedBeaconBlock
-	req.Range(func(index int, blockRoot libcommon.Hash, length int) bool {
+	req.Range(func(index int, blockRoot common.Hash, length int) bool {
 		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
 		if err != nil {
 			return false

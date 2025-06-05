@@ -22,21 +22,31 @@ package core
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
 // GasPool tracks the amount of gas available during execution of the transactions
 // in a block. The zero value is a pool with zero gas available.
 type GasPool struct {
+	mu           sync.RWMutex
 	gas, blobGas uint64
 }
 
+func NewGasPool(gas, blobGas uint64) *GasPool {
+	return &GasPool{gas: gas, blobGas: blobGas}
+}
+
 func (gp *GasPool) Reset(amount, blobGas uint64) {
+	gp.mu.Lock()
+	defer gp.mu.Unlock()
 	gp.gas = amount
 	gp.blobGas = blobGas
 }
 
 // AddGas makes gas available for execution.
 func (gp *GasPool) AddGas(amount uint64) *GasPool {
+	gp.mu.Lock()
+	defer gp.mu.Unlock()
 	if gp.gas > math.MaxUint64-amount {
 		panic("gas pool pushed above uint64")
 	}
@@ -47,6 +57,8 @@ func (gp *GasPool) AddGas(amount uint64) *GasPool {
 // SubGas deducts the given amount from the pool if enough gas is
 // available and returns an error otherwise.
 func (gp *GasPool) SubGas(amount uint64) error {
+	gp.mu.Lock()
+	defer gp.mu.Unlock()
 	if gp.gas < amount {
 		return ErrGasLimitReached
 	}
@@ -56,11 +68,15 @@ func (gp *GasPool) SubGas(amount uint64) error {
 
 // Gas returns the amount of gas remaining in the pool.
 func (gp *GasPool) Gas() uint64 {
+	gp.mu.RLock()
+	defer gp.mu.RUnlock()
 	return gp.gas
 }
 
 // AddBlobGas makes blob gas available for execution.
 func (gp *GasPool) AddBlobGas(amount uint64) *GasPool {
+	gp.mu.Lock()
+	defer gp.mu.Unlock()
 	if gp.blobGas > math.MaxUint64-amount {
 		panic("blob gas pool pushed above uint64")
 	}
@@ -71,6 +87,8 @@ func (gp *GasPool) AddBlobGas(amount uint64) *GasPool {
 // SubBlobGas deducts the given amount from the pool if enough blob gas is available and returns an
 // error otherwise.
 func (gp *GasPool) SubBlobGas(amount uint64) error {
+	gp.mu.Lock()
+	defer gp.mu.Unlock()
 	if gp.blobGas < amount {
 		return ErrBlobGasLimitReached
 	}
@@ -80,9 +98,13 @@ func (gp *GasPool) SubBlobGas(amount uint64) error {
 
 // BlobGas returns the amount of blob gas remaining in the pool.
 func (gp *GasPool) BlobGas() uint64 {
+	gp.mu.RLock()
+	defer gp.mu.RUnlock()
 	return gp.blobGas
 }
 
 func (gp *GasPool) String() string {
+	gp.mu.RLock()
+	defer gp.mu.RUnlock()
 	return fmt.Sprintf("gas: %d, blob_gas: %d", gp.gas, gp.blobGas)
 }

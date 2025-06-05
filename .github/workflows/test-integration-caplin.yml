@@ -1,4 +1,4 @@
-name: Consensus specification tests
+name: Consensus spec
 on:
   push:
     branches:
@@ -27,15 +27,15 @@ jobs:
   tests:
     strategy:
       matrix:
-        #       disable macos-11 until https://github.com/erigontech/erigon/issues/8789
-        os: [ ubuntu-22.04 ] # list of os: https://github.com/actions/virtual-environments
+        #        disable macos-15 until https://github.com/erigontech/erigon/issues/8789
+        os: [ ubuntu-24.04 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache: ${{ contains(fromJSON('[
             "refs/heads/release/2.60",
             "refs/heads/release/2.61",
@@ -52,14 +52,14 @@ jobs:
   tests-windows:
     strategy:
       matrix:
-        os: [ windows-2022 ]
+        os: [ windows-2025 ]
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache: ${{ contains(fromJSON('[
             "refs/heads/release/2.60",
             "refs/heads/release/2.61",

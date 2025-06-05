@@ -18,7 +18,6 @@ package txpoolcfg
 
 import (
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -42,7 +41,6 @@ type Config struct {
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txns) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
 	BlobPriceBump       uint64 //Price bump percentage to replace an existing 4844 blob txn (type-3)
-	OverridePragueTime  *big.Int
 
 	// regular batch tasks processing
 	SyncToNewPeersEvery    time.Duration
@@ -57,6 +55,9 @@ type Config struct {
 	MdbxWriteMap    bool
 
 	NoGossip bool // this mode doesn't broadcast any txns, and if receive remote-txn - skip it
+
+	// Account Abstraction
+	AllowAA bool
 }
 
 var DefaultConfig = Config{
@@ -118,6 +119,8 @@ const (
 	NoAuthorizations     DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
 	GasLimitTooHigh      DiscardReason = 33 // Gas limit is too high
 	ErrAuthorityReserved DiscardReason = 34 // EIP-7702 transaction with authority already reserved
+	InvalidAA            DiscardReason = 35 // Invalid RIP-7560 transaction
+	ErrGetCode           DiscardReason = 36 // Error getting code during AA validation
 )
 
 func (r DiscardReason) String() string {
@@ -192,6 +195,10 @@ func (r DiscardReason) String() string {
 		return "blob_versioned_hashes, blobs, commitments and proofs must have equal number"
 	case ErrAuthorityReserved:
 		return "EIP-7702 transaction with authority already reserved"
+	case InvalidAA:
+		return "RIP-7560 transaction failed validation"
+	case ErrGetCode:
+		return "error getting account code during RIP-7560 validation"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}

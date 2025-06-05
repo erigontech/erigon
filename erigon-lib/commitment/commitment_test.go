@@ -41,7 +41,7 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 		row[i].hashLen = 32
 		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
-		require.EqualValues(tb, row[i].hashLen, n)
+		require.Equal(tb, row[i].hashLen, n)
 
 		th := rand.Intn(120)
 		switch {
@@ -57,7 +57,7 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 			n, err = rand.Read(row[i].extension[:th])
 			row[i].extLen = n
 			require.NoError(tb, err)
-			require.EqualValues(tb, th, n)
+			require.Equal(tb, th, n)
 		}
 		bm |= uint16(1 << i)
 	}
@@ -68,7 +68,7 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	t.Parallel()
 	row, bm := generateCellRow(t, 16)
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
@@ -80,24 +80,24 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	bmg := NewHexBranchMerger(8192)
 	res, err := bmg.Merge(enc, enc)
 	require.NoError(t, err)
-	require.EqualValues(t, enc, res)
+	require.Equal(t, enc, res)
 
 	tm, am, origins, err := res.decodeCells()
 	require.NoError(t, err)
-	require.EqualValues(t, tm, am)
-	require.EqualValues(t, bm, am)
+	require.Equal(t, tm, am)
+	require.Equal(t, bm, am)
 
 	i := 0
 	for _, c := range origins {
 		if c == nil {
 			continue
 		}
-		require.EqualValues(t, row[i].extLen, c.extLen)
-		require.EqualValues(t, row[i].extension, c.extension)
-		require.EqualValues(t, row[i].accountAddrLen, c.accountAddrLen)
-		require.EqualValues(t, row[i].accountAddr, c.accountAddr)
-		require.EqualValues(t, row[i].storageAddrLen, c.storageAddrLen)
-		require.EqualValues(t, row[i].storageAddr, c.storageAddr)
+		require.Equal(t, row[i].extLen, c.extLen)
+		require.Equal(t, row[i].extension, c.extension)
+		require.Equal(t, row[i].accountAddrLen, c.accountAddrLen)
+		require.Equal(t, row[i].accountAddr, c.accountAddr)
+		require.Equal(t, row[i].storageAddrLen, c.storageAddrLen)
+		require.Equal(t, row[i].storageAddr, c.storageAddr)
 		i++
 	}
 }
@@ -152,7 +152,7 @@ func TestDecodeBranchWithLeafHashes(t *testing.T) {
 		}
 	}
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
@@ -213,7 +213,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 		return row[nibble], nil
 	}
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(t, err)
 
@@ -229,11 +229,11 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 		return key[:4], nil
 	})
 	require.NoError(t, err)
-	require.Truef(t, len(replaced) < len(enc), "replaced expected to be shorter than original enc")
+	require.Lessf(t, len(replaced), len(enc), "replaced expected to be shorter than original enc")
 
 	keyI := 0
 	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		require.EqualValues(t, oldKeys[keyI][:4], key[:4])
+		require.Equal(t, oldKeys[keyI][:4], key[:4])
 		defer func() { keyI++ }()
 		return oldKeys[keyI], nil
 	})
@@ -262,7 +262,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 		return row[nibble], nil
 	}
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(t, err)
 
@@ -278,11 +278,11 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 		return nil, nil
 	})
 	require.NoError(t, err)
-	require.EqualValuesf(t, len(enc), len(replaced), "replaced expected to be equal to origin (since no replacements were made)")
+	require.Lenf(t, replaced, len(enc), "replaced expected to be equal to origin (since no replacements were made)")
 
 	keyI := 0
 	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		require.EqualValues(t, oldKeys[keyI][:4], key[:4])
+		require.Equal(t, oldKeys[keyI][:4], key[:4])
 		defer func() { keyI++ }()
 		return oldKeys[keyI], nil
 	})
@@ -309,7 +309,6 @@ func TestNewUpdates(t *testing.T) {
 		ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.tree)
-		require.NotNil(t, ut.keccak)
 		require.Nil(t, ut.keys)
 		require.Equal(t, ModeUpdate, ut.mode)
 	})
@@ -317,7 +316,6 @@ func TestNewUpdates(t *testing.T) {
 	t.Run("ModeDirect", func(t *testing.T) {
 		ut := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
-		require.NotNil(t, ut.keccak)
 		require.NotNil(t, ut.keys)
 		require.Equal(t, ModeDirect, ut.mode)
 	})
@@ -383,20 +381,20 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	i := 0
 	// keyHasherNoop is used so ordering is going by plainKey
 	err := utUpdate.HashSort(context.Background(), func(hk, pk []byte, upd *Update) error {
-		require.EqualValues(t, sortedUniqUpds[i].key, pk)
-		require.EqualValues(t, sortedUniqUpds[i].val, upd.Storage[:upd.StorageLen])
+		require.Equal(t, sortedUniqUpds[i].key, pk)
+		require.Equal(t, sortedUniqUpds[i].val, upd.Storage[:upd.StorageLen])
 		i++
 		return nil
 	})
 	require.NoError(t, err)
-	require.EqualValues(t, len(uniqUpds), i)
+	require.Equal(t, len(uniqUpds), i)
 
 	i = 0
 	err = utDirect.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
-		require.EqualValues(t, sortedUniqUpds[i].key, pk)
+		require.Equal(t, sortedUniqUpds[i].key, pk)
 		i++
 		return nil
 	})
 	require.NoError(t, err)
-	require.EqualValues(t, len(uniqUpds), i)
+	require.Equal(t, len(uniqUpds), i)
 }

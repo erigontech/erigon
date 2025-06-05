@@ -139,7 +139,7 @@ func TestUnionPairs(t *testing.T) {
 		it2 := stream.PairsWithError(12)
 		keys, _, err := stream.ToArrayKV(stream.UnionKV(it, it2, -1))
 		require.Equal("expected error at iteration: 10", err.Error())
-		require.Equal(10, len(keys))
+		require.Len(keys, 10)
 	})
 }
 
@@ -147,28 +147,38 @@ func TestIntersect(t *testing.T) {
 	t.Run("intersect", func(t *testing.T) {
 		s1 := stream.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 := stream.Array[uint64]([]uint64{2, 3, 7})
-		s3 := stream.Intersect[uint64](s1, s2, -1)
+		s3 := stream.Intersect[uint64](s1, s2, order.Asc, -1)
 		res, err := stream.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{3, 7}, res)
 
 		s1 = stream.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 = stream.Array[uint64]([]uint64{2, 3, 7})
-		s3 = stream.Intersect[uint64](s1, s2, 1)
+		s3 = stream.Intersect[uint64](s1, s2, order.Asc, 1)
 		res, err = stream.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{3}, res)
 	})
+
+	t.Run("intersect Desc", func(t *testing.T) {
+		s1 := stream.Array[uint64]([]uint64{7, 6, 5, 4, 3, 1})
+		s2 := stream.Array[uint64]([]uint64{7, 3, 2})
+		s3 := stream.Intersect[uint64](s1, s2, order.Desc, -1)
+		res, err := stream.ToArray[uint64](s3)
+		require.NoError(t, err)
+		require.Equal(t, []uint64{7, 3}, res)
+	})
+
 	t.Run("empty left", func(t *testing.T) {
 		s1 := stream.EmptyU64
 		s2 := stream.Array[uint64]([]uint64{2, 3, 7, 8})
-		s3 := stream.Intersect[uint64](s1, s2, -1)
+		s3 := stream.Intersect[uint64](s1, s2, order.Asc, -1)
 		res, err := stream.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
 		s2 = stream.Array[uint64]([]uint64{2, 3, 7, 8})
-		s3 = stream.Intersect[uint64](nil, s2, -1)
+		s3 = stream.Intersect[uint64](nil, s2, order.Asc, -1)
 		res, err = stream.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
@@ -176,13 +186,13 @@ func TestIntersect(t *testing.T) {
 	t.Run("empty right", func(t *testing.T) {
 		s1 := stream.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 := stream.EmptyU64
-		s3 := stream.Intersect[uint64](s1, s2, -1)
+		s3 := stream.Intersect[uint64](s1, s2, order.Asc, -1)
 		res, err := stream.ToArray[uint64](s3)
 		require.NoError(t, err)
-		require.Nil(t, nil, res)
+		require.Nil(t, res)
 
 		s1 = stream.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
-		s3 = stream.Intersect[uint64](s1, nil, -1)
+		s3 = stream.Intersect[uint64](s1, nil, order.Asc, -1)
 		res, err = stream.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
@@ -190,12 +200,12 @@ func TestIntersect(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		s1 := stream.EmptyU64
 		s2 := stream.EmptyU64
-		s3 := stream.Intersect[uint64](s1, s2, -1)
+		s3 := stream.Intersect[uint64](s1, s2, order.Asc, -1)
 		res, err := stream.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
-		s3 = stream.Intersect[uint64](nil, nil, -1)
+		s3 = stream.Intersect[uint64](nil, nil, order.Asc, -1)
 		res, err = stream.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)

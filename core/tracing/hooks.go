@@ -22,12 +22,11 @@ package tracing
 import (
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon/core/types"
-
-	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // OpContext provides the context at which the opcode is being
@@ -35,36 +34,36 @@ import (
 type OpContext interface {
 	MemoryData() []byte
 	StackData() []uint256.Int
-	Caller() libcommon.Address
-	Address() libcommon.Address
+	Caller() common.Address
+	Address() common.Address
 	CallValue() *uint256.Int
 	CallInput() []byte
 	Code() []byte
-	CodeHash() libcommon.Hash
+	CodeHash() common.Hash
 }
 
 // IntraBlockState gives tracers access to the whole state.
 type IntraBlockState interface {
-	GetBalance(libcommon.Address) *uint256.Int
-	GetNonce(libcommon.Address) uint64
-	GetCode(libcommon.Address) []byte
-	GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int)
-	Exist(libcommon.Address) bool
+	GetBalance(common.Address) (uint256.Int, error)
+	GetNonce(common.Address) (uint64, error)
+	GetCode(common.Address) ([]byte, error)
+	GetState(addr common.Address, key common.Hash, value *uint256.Int) error
+	Exist(common.Address) (bool, error)
 	GetRefund() uint64
 }
 
 // VMContext provides the context for the EVM execution.
 type VMContext struct {
-	Coinbase    libcommon.Address
+	Coinbase    common.Address
 	BlockNumber uint64
 	Time        uint64
-	Random      *libcommon.Hash
+	Random      *common.Hash
 	// Effective txn gas price
 	GasPrice        *uint256.Int
 	ChainConfig     *chain.Config
 	IntraBlockState IntraBlockState
 
-	TxHash libcommon.Hash
+	TxHash common.Hash
 }
 
 // BlockEvent is emitted upon tracing an incoming block.
@@ -84,13 +83,13 @@ type (
 	// TxStartHook is called before the execution of a transaction starts.
 	// Call simulations don't come with a valid signature. `from` field
 	// to be used for address of the caller.
-	TxStartHook = func(vm *VMContext, txn types.Transaction, from libcommon.Address)
+	TxStartHook = func(vm *VMContext, txn types.Transaction, from common.Address) // i think txn should be message, we can get rid of `ToTransaction` in callargs (api.go)
 
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
 
 	// EnterHook is invoked when the processing of a message starts.
-	EnterHook = func(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte)
+	EnterHook = func(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte)
 
 	// ExitHook is invoked when the processing of a message ends.
 	// `revert` is true when there was an error during the execution.
@@ -147,16 +146,16 @@ type (
 	*/
 
 	// BalanceChangeHook is called when the balance of an account changes.
-	BalanceChangeHook = func(addr libcommon.Address, prev, new *uint256.Int, reason BalanceChangeReason)
+	BalanceChangeHook = func(addr common.Address, prev, new uint256.Int, reason BalanceChangeReason)
 
 	// NonceChangeHook is called when the nonce of an account changes.
-	NonceChangeHook = func(addr libcommon.Address, prev, new uint64)
+	NonceChangeHook = func(addr common.Address, prev, new uint64)
 
 	// CodeChangeHook is called when the code of an account changes.
-	CodeChangeHook = func(addr libcommon.Address, prevCodeHash libcommon.Hash, prevCode []byte, codeHash libcommon.Hash, code []byte)
+	CodeChangeHook = func(addr common.Address, prevCodeHash common.Hash, prevCode []byte, codeHash common.Hash, code []byte)
 
 	// StorageChangeHook is called when the storage of an account changes.
-	StorageChangeHook = func(addr libcommon.Address, slot *libcommon.Hash, prev, new uint256.Int)
+	StorageChangeHook = func(addr common.Address, slot common.Hash, prev, new uint256.Int)
 
 	// LogHook is called when a log is emitted.
 	LogHook = func(log *types.Log)
@@ -184,6 +183,7 @@ type Hooks struct {
 	OnCodeChange    CodeChangeHook
 	OnStorageChange StorageChangeHook
 	OnLog           LogHook
+	Flush           func(tx types.Transaction)
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful

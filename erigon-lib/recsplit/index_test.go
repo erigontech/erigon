@@ -46,6 +46,7 @@ func TestReWriteIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rs.Close()
 	for i := 0; i < 100; i++ {
 		if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
 			t.Fatal(err)
@@ -86,12 +87,12 @@ func TestForwardCompatibility(t *testing.T) {
 	t.Run("features_are_optional", func(t *testing.T) {
 		var features Features
 		err := onlyKnownFeatures(features)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("allow_known", func(t *testing.T) {
 		features := No | Enums
 		err := onlyKnownFeatures(features)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, No|Enums, features) //no side-effects
 	})
 	t.Run("disallow_unknown", func(t *testing.T) {

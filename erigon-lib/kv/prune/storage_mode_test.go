@@ -20,24 +20,79 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-	prune, err := Get(tx)
-	assert.NoError(t, err)
-	assert.Equal(t, Mode{true, Distance(math.MaxUint64), Distance(math.MaxUint64), Experiments{}}, prune)
+	t.Run("default", func(t *testing.T) {
+		_, tx := memdb.NewTestTx(t)
+		prune, err := Get(tx)
+		assert.NoError(t, err)
+		assert.Equal(t, DefaultMode, prune)
+	})
 
-	err = setIfNotExist(tx, Mode{true, Distance(1), Distance(2), Experiments{}})
-	assert.NoError(t, err)
+	t.Run("setIfNotExist", func(t *testing.T) {
+		_, tx := memdb.NewTestTx(t)
+		prune, err := Get(tx)
+		assert.NoError(t, err)
+		assert.Equal(t, DefaultMode, prune)
 
-	prune, err = Get(tx)
-	assert.NoError(t, err)
-	assert.Equal(t, Mode{true, Distance(1), Distance(2), Experiments{}}, prune)
+		err = setIfNotExist(tx, FullMode)
+		assert.NoError(t, err)
+
+		prune, err = Get(tx)
+		assert.NoError(t, err)
+		assert.Equal(t, FullMode, prune)
+	})
+}
+
+func TestParseCLIMode(t *testing.T) {
+	t.Run("full", func(t *testing.T) {
+		mode, err := FromCli(fullModeStr, 0, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, FullMode, mode)
+
+		assert.Equal(t, "full", mode.String())
+	})
+	t.Run("archive", func(t *testing.T) {
+		mode, err := FromCli(archiveModeStr, 0, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, ArchiveMode, mode)
+		assert.Equal(t, archiveModeStr, mode.String())
+	})
+	t.Run("archive_override", func(t *testing.T) {
+		exp := ArchiveMode
+		exp.Blocks = Distance(100500)
+		exp.History = Distance(400500)
+
+		mode, err := FromCli(archiveModeStr, exp.History.toValue(), exp.Blocks.toValue())
+		assert.NoError(t, err)
+		assert.Equal(t, exp, mode)
+		assert.Equal(t, "archive --prune.distance=400500 --prune.distance.blocks=100500", mode.String())
+	})
+	t.Run("minimal", func(t *testing.T) {
+		mode, err := FromCli(minimalModeStr, 0, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, MinimalMode, mode)
+		assert.Equal(t, minimalModeStr, mode.String())
+	})
+	t.Run("minimal_override", func(t *testing.T) {
+		_, err := FromCli(minimalModeStr, 1, 2)
+		assert.ErrorIs(t, err, ErrDistanceOnlyForArchive)
+	})
+	t.Run("garbage", func(t *testing.T) {
+		_, err := FromCli("garb", 1, 2)
+		assert.ErrorIs(t, err, ErrUnknownPruneMode)
+	})
+	t.Run("empty", func(t *testing.T) {
+		mode, err := FromCli("", 0, 0)
+		assert.NoError(t, err)
+
+		assert.Equal(t, DefaultMode, mode)
+		assert.Equal(t, "archive", mode.String())
+	})
 }
 
 var distanceTests = []struct {

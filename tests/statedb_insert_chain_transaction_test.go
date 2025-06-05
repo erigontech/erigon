@@ -27,24 +27,23 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/turbo/stages/mock"
-
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/tests/contracts"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := libcommon.Address{1}
+	to := common.Address{1}
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -88,7 +87,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := m.DB.BeginRw(context.Background())
+	tx, err := m.DB.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -128,7 +127,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := libcommon.Address{1}
+	to := common.Address{1}
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -172,7 +171,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -205,7 +204,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := libcommon.Address{1}
+	to := common.Address{1}
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -246,7 +245,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -279,7 +278,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	data := getGenesis(big.NewInt(3000))
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := libcommon.Address{1}
+	to := common.Address{1}
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -320,7 +319,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -353,7 +352,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	data := getGenesis(big.NewInt(3000))
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := libcommon.Address{1}
+	to := common.Address{1}
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -394,7 +393,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -427,9 +426,9 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := libcommon.Address{1}
+	to := common.Address{1}
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
@@ -450,7 +449,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -480,7 +479,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal("should fail")
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -506,7 +505,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -532,9 +531,9 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := libcommon.Address{1}
+	to := common.Address{1}
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
@@ -560,7 +559,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -586,7 +585,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -628,9 +627,9 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := libcommon.Address{1}
+	to := common.Address{1}
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
@@ -660,7 +659,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -687,7 +686,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -733,9 +732,9 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := libcommon.Address{1}
+	to := common.Address{1}
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
@@ -765,7 +764,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -791,7 +790,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -834,7 +833,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 type initialData struct {
 	keys         []*ecdsa.PrivateKey
-	addresses    []libcommon.Address
+	addresses    []common.Address
 	transactOpts []*bind.TransactOpts
 	genesisSpec  *types.Genesis
 }
@@ -850,7 +849,7 @@ func getGenesis(funds ...*big.Int) initialData {
 	keys[1], _ = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 	keys[2], _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 
-	addresses := make([]libcommon.Address, 0, len(keys))
+	addresses := make([]common.Address, 0, len(keys))
 	transactOpts := make([]*bind.TransactOpts, 0, len(keys))
 	allocs := types.GenesisAlloc{}
 	for _, key := range keys {
@@ -929,13 +928,13 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool)
 
-func getBlockTx(from libcommon.Address, to libcommon.Address, amount *uint256.Int) blockTx {
+func getBlockTx(from common.Address, to common.Address, amount *uint256.Int) blockTx {
 	return func(block *core.BlockGen, _ bind.ContractBackend) (types.Transaction, bool) {
 		return types.NewTransaction(block.TxNonce(from), to, amount, 21000, new(uint256.Int), nil), false
 	}
 }
 
-func getBlockDeployTestContractTx(transactOpts *bind.TransactOpts, contractAddress *libcommon.Address, eipContract *contracts.Testcontract) blockTx {
+func getBlockDeployTestContractTx(transactOpts *bind.TransactOpts, contractAddress *common.Address, eipContract *contracts.Testcontract) blockTx {
 	return func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool) {
 		contractAddressRes, tx, eipContractRes, err := contracts.DeployTestcontract(transactOpts, backend)
 		if err != nil {

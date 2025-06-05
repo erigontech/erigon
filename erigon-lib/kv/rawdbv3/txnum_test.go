@@ -64,7 +64,7 @@ func TestName(t *testing.T) {
 
 		ok, _, err := TxNums.FindBlockNum(tx, 101)
 		require.NoError(err)
-		require.Equal(false, ok)
+		require.False(ok)
 		return nil
 	})
 	require.NoError(err)

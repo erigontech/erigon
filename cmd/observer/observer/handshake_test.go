@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -41,7 +41,7 @@ func TestHandshake(t *testing.T) {
 	ctx := context.Background()
 	hello, status, err := Handshake(ctx, node.IP(), node.TCP(), node.Pubkey(), myPrivateKey)
 
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.NotNil(t, hello)
 	assert.Equal(t, uint64(5), hello.Version)
 	assert.NotEmpty(t, hello.ClientID)

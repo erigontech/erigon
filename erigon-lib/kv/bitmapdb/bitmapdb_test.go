@@ -36,8 +36,8 @@ func TestCutLeft(t *testing.T) {
 		if bm.GetCardinality() > 0 {
 			require.True(t, lftSz > N-256 && lftSz < N+256)
 		} else {
-			require.True(t, lft.GetSerializedSizeInBytes() > 0)
-			require.True(t, lftSz < N+256)
+			require.Positive(t, lft.GetSerializedSizeInBytes())
+			require.Less(t, lftSz, N+256)
 		}
 	}
 
@@ -52,20 +52,20 @@ func TestCutLeft(t *testing.T) {
 		if bm.GetCardinality() > 0 {
 			require.True(t, lftSz > N-256 && lftSz < N+256)
 		} else {
-			require.True(t, lft.GetSerializedSizeInBytes() > 0)
-			require.True(t, lftSz < N+256)
+			require.Positive(t, lft.GetSerializedSizeInBytes())
+			require.Less(t, lftSz, N+256)
 		}
 	}
 
 	bm = roaring.New()
 	bm.Add(1)
 	lft := bitmapdb.CutLeft(bm, N)
-	require.True(t, lft.GetSerializedSizeInBytes() > 0)
-	require.True(t, lft.GetCardinality() == 1)
-	require.True(t, bm.GetCardinality() == 0)
+	require.Positive(t, lft.GetSerializedSizeInBytes())
+	require.Equal(t, uint64(1), lft.GetCardinality())
+	require.Zero(t, bm.GetCardinality())
 
 	bm = roaring.New()
 	lft = bitmapdb.CutLeft(bm, N)
-	require.True(t, lft == nil)
-	require.True(t, bm.GetCardinality() == 0)
+	require.Nil(t, lft)
+	require.Zero(t, bm.GetCardinality())
 }

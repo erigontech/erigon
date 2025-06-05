@@ -22,19 +22,19 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func init() {
@@ -55,7 +55,7 @@ func DeployChildChainSender(ctx context.Context, deployerName string) (context.C
 		return nil, err
 	}
 
-	receiverAddress, _ := scenarios.Param[libcommon.Address](ctx, "rootReceiverAddress")
+	receiverAddress, _ := scenarios.Param[common.Address](ctx, "rootReceiverAddress")
 
 	waiter, cancel := blocks.BlockWaiter(ctx, contracts.DeploymentChecker)
 	defer cancel()
@@ -124,7 +124,7 @@ func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTrans
 	sender, _ := scenarios.Param[*contracts.ChildSender](ctx, "childSender")
 
 	receiver, _ := scenarios.Param[*contracts.RootReceiver](ctx, "rootReceiver")
-	receiverAddress, _ := scenarios.Param[libcommon.Address](ctx, "rootReceiverAddress")
+	receiverAddress, _ := scenarios.Param[common.Address](ctx, "rootReceiverAddress")
 
 	receivedChan := make(chan *contracts.RootReceiverReceived)
 	receiverSubscription, err := receiver.WatchReceived(&bind.WatchOpts{}, receivedChan)
@@ -146,11 +146,11 @@ func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTrans
 	heimdall := services.Heimdall(ctx)
 	proofGenerator := services.ProofGenerator(ctx)
 
-	var sendTxHashes []libcommon.Hash
+	var sendTxHashes []common.Hash
 	var lastTxBlockNum *big.Int
-	var receiptTopic libcommon.Hash
+	var receiptTopic common.Hash
 
-	zeroHash := libcommon.Hash{}
+	zeroHash := common.Hash{}
 
 	for i := 0; i < numberOfTransfers; i++ {
 		amount := accounts.EtherAmount(float64(minTransfer))
@@ -215,16 +215,16 @@ func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTrans
 					return fmt.Errorf("Failed unpack log args: %w", err)
 				}
 
-				recceiverAddressValue, ok := values[0].(libcommon.Address)
+				recceiverAddressValue, ok := values[0].(common.Address)
 
 				if !ok {
-					return fmt.Errorf("Unexpected arg type: expected: %T, got %T", libcommon.Address{}, values[0])
+					return fmt.Errorf("Unexpected arg type: expected: %T, got %T", common.Address{}, values[0])
 				}
 
-				sender, ok := values[1].(libcommon.Address)
+				sender, ok := values[1].(common.Address)
 
 				if !ok {
-					return fmt.Errorf("Unexpected arg type: expected: %T, got %T", libcommon.Address{}, values[0])
+					return fmt.Errorf("Unexpected arg type: expected: %T, got %T", common.Address{}, values[0])
 				}
 
 				sentAmount, ok := values[1].(*big.Int)

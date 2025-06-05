@@ -8,19 +8,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/nat"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
+	"github.com/erigontech/erigon-p2p/sentry"
+	"github.com/erigontech/erigon/params"
 )
 
 var (
@@ -29,6 +30,7 @@ var (
 
 type TxMessage struct {
 	MessageID sentryproto.MessageId
+	Payload   []byte
 }
 
 type p2pClient struct {
@@ -50,16 +52,17 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:      ":30307",
-		AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307},
-		ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
-		MaxPeers:        32,
-		MaxPendingPeers: 1000,
-		NAT:             nat.Any(),
-		NoDiscovery:     true,
-		Name:            "p2p-mock",
-		NodeDatabase:    "dev/nodes/eth67",
-		PrivateKey:      privateKey,
+		ListenAddr:         ":30307",
+		AllowedPorts:       []uint{30303, 30304, 30305, 30306, 30307},
+		ProtocolVersion:    []uint{direct.ETH68, direct.ETH67},
+		MaxPeers:           32,
+		MaxPendingPeers:    1000,
+		NAT:                nat.Any(),
+		NoDiscovery:        true,
+		Name:               "p2p-mock",
+		NodeDatabase:       "dev/nodes/eth67",
+		PrivateKey:         privateKey,
+		LookupBootnodeURLs: params.BootnodeURLsByGenesisHash,
 	}
 
 	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(
@@ -87,7 +90,12 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		return nil, nil, err
 	}
 
-	if cfg.StaticNodes, err = utils.ParseNodesFromURLs([]string{resp.Result.Enode}); err != nil {
+	if cfg.StaticNodes, err = enode.ParseNodesFromURLs([]string{resp.Result.Enode}); err != nil {
+		return nil, nil, err
+	}
+
+	ready, err := p.notifyWhenReady()
+	if err != nil {
 		return nil, nil, err
 	}
 
@@ -98,11 +106,11 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.MustFromDecimal(strconv.Itoa(resp.Result.Protocols.Eth.Difficulty))),
 		BestHash: gointerfaces.ConvertHashToH256(
-			[32]byte(libcommon.FromHex(resp.Result.Protocols.Eth.Genesis)),
+			[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
 		),
 		ForkData: &sentryproto.Forks{
 			Genesis: gointerfaces.ConvertHashToH256(
-				[32]byte(libcommon.FromHex(resp.Result.Protocols.Eth.Genesis)),
+				[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
 			),
 		},
 	})
@@ -125,11 +133,6 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 
 	gotTxCh := make(chan TxMessage, txChanSize)
 	errCh := make(chan error)
-
-	ready, err := p.notifyWhenReady()
-	if err != nil {
-		return nil, nil, err
-	}
 
 	go p.serve(conn, gotTxCh, errCh)
 	<-ready
@@ -196,6 +199,7 @@ func (p *p2pClient) serve(conn sentryproto.Sentry_MessagesClient, gotTxCh chan<-
 
 		gotTxCh <- TxMessage{
 			MessageID: req.Id,
+			Payload:   req.Data,
 		}
 	}
 }

@@ -19,7 +19,7 @@ package solid
 import (
 	"encoding/json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -42,7 +42,7 @@ type ListSSZ[T EncodableHashableSSZ] struct {
 	// an always newly created object
 	bytesPerElement int
 	// We can keep hash_tree_root result cached
-	root libcommon.Hash
+	root common.Hash
 }
 
 func NewDynamicListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
@@ -109,7 +109,7 @@ func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) (err error) {
 	} else {
 		l.list, err = ssz.DecodeDynamicList[T](buf, 0, uint32(len(buf)), uint64(l.limit), version)
 	}
-	l.root = libcommon.Hash{}
+	l.root = common.Hash{}
 	return
 }
 
@@ -125,7 +125,7 @@ func (l *ListSSZ[T]) EncodingSizeSSZ() (size int) {
 }
 
 func (l *ListSSZ[T]) HashSSZ() ([32]byte, error) {
-	if (l.root != libcommon.Hash{}) {
+	if (l.root != common.Hash{}) {
 		return l.root, nil
 	}
 	var err error
@@ -159,17 +159,17 @@ func (l *ListSSZ[T]) Len() int {
 
 func (l *ListSSZ[T]) Append(obj T) {
 	l.list = append(l.list, obj)
-	l.root = libcommon.Hash{}
+	l.root = common.Hash{}
 }
 
 func (l *ListSSZ[T]) Clear() {
 	l.list = nil
-	l.root = libcommon.Hash{}
+	l.root = common.Hash{}
 }
 
 func (l *ListSSZ[T]) Truncate(length int) {
 	l.list = l.list[:length]
-	l.root = libcommon.Hash{}
+	l.root = common.Hash{}
 }
 
 func (l *ListSSZ[T]) Cut(length int) {
@@ -178,7 +178,7 @@ func (l *ListSSZ[T]) Cut(length int) {
 	} else {
 		l.list = l.list[length:]
 	}
-	l.root = libcommon.Hash{}
+	l.root = common.Hash{}
 }
 
 func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
@@ -207,7 +207,7 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 		limit:           l.limit,
 		static:          l.static,
 		bytesPerElement: l.bytesPerElement,
-		root:            libcommon.Hash(libcommon.CopyBytes(l.root[:])),
+		root:            common.Hash(common.CopyBytes(l.root[:])),
 	}
 	copy(cpy.list, l.list)
 	return cpy

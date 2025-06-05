@@ -26,20 +26,20 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon/heimdallsim"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-//go:embed testdata/v1-000000-000500-borevents.seg
+//go:embed testdata/v1.0-000000-000500-borevents.seg
 var events []byte
 
-//go:embed testdata/v1-000500-001000-borevents.seg
+//go:embed testdata/v1.0-000500-001000-borevents.seg
 var events2 []byte
 
-//go:embed testdata/v1-000000-000500-borspans.seg
+//go:embed testdata/v1.0-000000-000500-borspans.seg
 var spans []byte
 
 func createFiles(dataDir string) error {
@@ -49,19 +49,19 @@ func createFiles(dataDir string) error {
 		return err
 	}
 
-	destFile := filepath.Join(destPath, "v1-000000-000500-borevents.seg")
+	destFile := filepath.Join(destPath, "v1.0-000000-000500-borevents.seg")
 	err = os.WriteFile(destFile, events, 0755)
 	if err != nil {
 		return err
 	}
 
-	destFile = filepath.Join(destPath, "v1-000500-001000-borevents.seg")
+	destFile = filepath.Join(destPath, "v1.0-000500-001000-borevents.seg")
 	err = os.WriteFile(destFile, events2, 0755)
 	if err != nil {
 		return err
 	}
 
-	destFile = filepath.Join(destPath, "v1-000000-000500-borspans.seg")
+	destFile = filepath.Join(destPath, "v1.0-000000-000500-borspans.seg")
 	err = os.WriteFile(destFile, spans, 0755)
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func TestSimulatorEvents(t *testing.T) {
 		t.Skip("fix me on win")
 	}
 
-	// the number of events included in v1-000000-000500-borevents.seg
+	// the number of events included in v1.0-000000-000500-borevents.seg
 	eventsCount := 100
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -103,24 +103,24 @@ func TestSimulatorEvents(t *testing.T) {
 	sim := setup(t, ctx, []uint64{1_000_000})
 
 	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 100)
-	assert.NoError(t, err)
-	assert.Equal(t, eventsCount, len(res))
+	require.NoError(t, err)
+	assert.Len(t, res, eventsCount)
 
 	resLimit, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 2)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(resLimit))
+	require.NoError(t, err)
+	assert.Len(t, resLimit, 2)
 	assert.Equal(t, res[:2], resLimit)
 
 	resStart, err := sim.FetchStateSyncEvents(ctx, 10, time.Now(), 5)
-	assert.NoError(t, err)
-	assert.Equal(t, 5, len(resStart))
+	require.NoError(t, err)
+	assert.Len(t, resStart, 5)
 	assert.Equal(t, uint64(10), resStart[0].ID)
 	assert.Equal(t, res[9:14], resStart)
 
 	lastTime := res[len(res)-1].Time
 	resTime, err := sim.FetchStateSyncEvents(ctx, 0, lastTime.Add(-1*time.Second), 100)
-	assert.NoError(t, err)
-	assert.Equal(t, eventsCount-1, len(resTime))
+	require.NoError(t, err)
+	assert.Len(t, resTime, eventsCount-1)
 	assert.Equal(t, res[:len(res)-1], resTime)
 }
 
@@ -136,20 +136,20 @@ func TestSimulatorSpans(t *testing.T) {
 
 	// should have the final span from first iteration
 	span, err := sim.FetchLatestSpan(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, heimdall.SpanIdAt(100_000), span.Id)
 	assert.Equal(t, uint64(96_256), span.StartBlock)
 	assert.Equal(t, uint64(102_655), span.EndBlock)
 
 	// get the last span
 	span2, err := sim.FetchSpan(ctx, uint64(heimdall.SpanIdAt(100_000)))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, span, span2)
 
 	// check if we are in the next iteration
 	sim.Next()
 	span3, err := sim.FetchLatestSpan(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, heimdall.SpanIdAt(205_055), span3.Id)
 	assert.Equal(t, uint64(198_656), span3.StartBlock)
 	assert.Equal(t, uint64(205_055), span3.EndBlock)
@@ -161,7 +161,7 @@ func TestSimulatorSpans(t *testing.T) {
 	// move to next iteration (should be +1 block since we have no more iterations defined)
 	sim.Next()
 	span5, err := sim.FetchLatestSpan(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, heimdall.SpanIdAt(205_056), span5.Id)
 	assert.Equal(t, uint64(205_056), span5.StartBlock)
 	assert.Equal(t, uint64(211_455), span5.EndBlock)

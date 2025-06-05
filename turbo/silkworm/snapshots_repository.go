@@ -8,12 +8,12 @@ import (
 
 	silkworm_go "github.com/erigontech/silkworm-go"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/state"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -176,9 +176,9 @@ func (r *SnapshotsRepository) updateState(stateTx *state.AggregatorRoTx) error {
 	for i := 0; i < len(iiRanges); i++ {
 		iiRanges[i] = mergeRange
 	}
-	ranges := state.NewRangesV3(allDomainRanges, iiRanges)
+	ranges := state.NewRanges(allDomainRanges, iiRanges)
 
-	allFiles, err := stateTx.StaticFilesInRange(&ranges)
+	allFiles, err := stateTx.FilesInRange(&ranges)
 	if err != nil {
 		return err
 	}

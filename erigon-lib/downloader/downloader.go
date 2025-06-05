@@ -923,7 +923,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 
-						if completionTime != nil {
+						if completionTime != nil { //nolint
 							if !stat.ModTime().Equal(*completionTime) {
 								checking[t.Name()] = struct{}{}
 
@@ -2444,7 +2444,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 			}
 		} else {
 			if ff.Type == nil {
-				panic(fmt.Sprintf("nil ptr after parsing file: %s", name))
+				return fmt.Errorf("nil ptr after parsing file: %s", name)
 			}
 			if !d.cfg.SnapshotConfig.Seedable(ff) {
 				return nil
@@ -2703,7 +2703,6 @@ func (d *Downloader) Close() {
 	if err := d.pieceCompletionDB.Close(); err != nil {
 		d.logger.Warn("[snapshots] pieceCompletionDB.close", "err", err)
 	}
-	d.logger.Info("[snapshots] closing db")
 	d.db.Close()
 	d.logger.Info("[snapshots] downloader stopped")
 }
@@ -2897,4 +2896,12 @@ func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
 	defer d.lock.RUnlock()
 
 	return d.completedTorrents
+}
+
+// Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http. Only
+// do this if you have a single instance.
+func (d *Downloader) HandleTorrentClientStatus() {
+	http.HandleFunc("/downloaderTorrentClientStatus", func(w http.ResponseWriter, r *http.Request) {
+		d.torrentClient.WriteStatus(w)
+	})
 }

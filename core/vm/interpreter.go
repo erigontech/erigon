@@ -23,39 +23,33 @@ import (
 	"fmt"
 	"hash"
 	"slices"
-	"sync"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/stack"
 )
 
 // Config are the configuration options for the Interpreter
 type Config struct {
-	Debug         bool      // Enables debugging
-	Tracer        EVMLogger // Opcode logger
-	NoRecursion   bool      // Disables call, callcode, delegate call and create
-	NoBaseFee     bool      // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
-	SkipAnalysis  bool      // Whether we can skip jumpdest analysis based on the checked history
-	TraceJumpDest bool      // Print transaction hashes where jumpdest analysis was useful
-	NoReceipts    bool      // Do not calculate receipts
-	ReadOnly      bool      // Do no perform any block finalisation
-	StatelessExec bool      // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
-	RestoreState  bool      // Revert all changes made to the state (useful for constant system calls)
+	Tracer        *tracing.Hooks
+	JumpDestCache *JumpDestCache
+	NoRecursion   bool // Disables call, callcode, delegate call and create
+	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
+	SkipAnalysis  bool // Whether we can skip jumpdest analysis based on the checked history
+	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
+	NoReceipts    bool // Do not calculate receipts
+	ReadOnly      bool // Do no perform any block finalisation
+	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
+	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 
-}
-
-var pool = sync.Pool{
-	New: func() any {
-		return NewMemory()
-	},
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -79,8 +73,55 @@ type Interpreter interface {
 // but not transients like pc and gas
 type ScopeContext struct {
 	Memory   *Memory
-	Stack    *stack.Stack
+	Stack    *Stack
 	Contract *Contract
+}
+
+// MemoryData returns the underlying memory slice. Callers must not modify the contents
+// of the returned data.
+func (ctx *ScopeContext) MemoryData() []byte {
+	if ctx.Memory == nil {
+		return nil
+	}
+	return ctx.Memory.Data()
+}
+
+// StackData returns the stack data. Callers must not modify the contents
+// of the returned data.
+func (ctx *ScopeContext) StackData() []uint256.Int {
+	if ctx.Stack == nil {
+		return nil
+	}
+	return ctx.Stack.data
+}
+
+// Caller returns the current caller.
+func (ctx *ScopeContext) Caller() common.Address {
+	return ctx.Contract.Caller()
+}
+
+// Address returns the address where this scope of execution is taking place.
+func (ctx *ScopeContext) Address() common.Address {
+	return ctx.Contract.Address()
+}
+
+// CallValue returns the value supplied with this call.
+func (ctx *ScopeContext) CallValue() *uint256.Int {
+	return ctx.Contract.Value()
+}
+
+// CallInput returns the input/calldata with this call. Callers must not modify
+// the contents of the returned data.
+func (ctx *ScopeContext) CallInput() []byte {
+	return ctx.Contract.Input
+}
+
+func (ctx *ScopeContext) Code() []byte {
+	return ctx.Contract.Code
+}
+
+func (ctx *ScopeContext) CodeHash() common.Hash {
+	return ctx.Contract.CodeHash
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -105,8 +146,8 @@ type VM struct {
 	evm *EVM
 	cfg Config
 
-	hasher    keccakState    // Keccak256 hasher instance shared across opcodes
-	hasherBuf libcommon.Hash // Keccak256 hasher result array shared across opcodes
+	hasher    keccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -127,6 +168,8 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.ChainRules().IsBhilai:
+		jt = &bhilaiInstructionSet
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
@@ -191,9 +234,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.returnData = nil
 
 	var (
-		op          OpCode // current opcode
-		mem         = pool.Get().(*Memory)
-		locStack    = stack.New()
+		op          OpCode        // current opcode
+		mem         = NewMemory() // bound memory
+		locStack    = New()
 		callContext = &ScopeContext{
 			Memory:   mem,
 			Stack:    locStack,
@@ -210,9 +253,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		gasCopy uint64 // for Tracer to log gas remaining before execution
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
+		debug   = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
+		trace   = dbg.TraceInstructions && in.evm.intraBlockState.Trace()
 	)
-
-	mem.Reset()
 
 	contract.Input = input
 
@@ -226,16 +269,17 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.depth++
 	defer func() {
 		// first: capture data/memory/state/depth/etc... then clenup them
-		if in.cfg.Debug && err != nil {
-			if !logged {
-				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
-			} else {
-				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
+		if debug && err != nil {
+			if !logged && in.cfg.Tracer.OnOpcode != nil {
+				in.cfg.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+			}
+			if logged && in.cfg.Tracer.OnFault != nil {
+				in.cfg.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.depth, VMErrorFromErr(err))
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
-		pool.Put(mem)
-		stack.ReturnNormalStack(locStack)
+		mem.free()
+		ReturnNormalStack(locStack)
 		if restoreReadonly {
 			in.readOnly = false
 		}
@@ -247,12 +291,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
 	steps := 0
+
 	for {
 		steps++
-		if steps%1000 == 0 && in.evm.Cancelled() {
+		if steps%5000 == 0 && in.evm.Cancelled() {
 			break
 		}
-		if in.cfg.Debug {
+		if debug {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 		}
@@ -262,17 +307,18 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		operation := in.jt[op]
 		cost = operation.constantGas // For tracing
 		// Validate stack
-		if sLen := locStack.Len(); sLen < operation.numPop {
+		if sLen := locStack.len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
-		if !contract.UseGas(cost, tracing.GasChangeIgnored) {
+		if !contract.UseGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
+
+		// All ops with a dynamic memory usage also has a dynamic gas cost.
+		var memorySize uint64
 		if operation.dynamicGas != nil {
-			// All ops with a dynamic memory usage also has a dynamic gas cost.
-			var memorySize uint64
 			// calculate the new memory size and expand the memory to fit
 			// the operation
 			// Memory check needs to be done prior to evaluating the dynamic gas portion,
@@ -296,21 +342,38 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
-			if !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
+			if !contract.UseGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
-			// Do tracing before memory expansion
-			if in.cfg.Debug {
-				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
+		}
+
+		// Do tracing before memory expansion
+		if in.cfg.Tracer != nil {
+			if in.cfg.Tracer.OnGasChange != nil {
+				in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+			}
+			if in.cfg.Tracer.OnOpcode != nil {
+				in.cfg.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
 				logged = true
 			}
-			if memorySize > 0 {
-				mem.Resize(memorySize)
-			}
-		} else if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
-			logged = true
 		}
+
+		// TODO - move this to a trace & set in the worker
+		if trace {
+			var str string
+			if operation.string != nil {
+				str = operation.string(*pc, callContext)
+			} else {
+				str = op.String()
+			}
+
+			fmt.Printf("(%d.%d) %5d %5d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, cost, str)
+		}
+
+		if memorySize > 0 {
+			mem.Resize(memorySize)
+		}
+
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 
@@ -324,7 +387,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		err = nil // clear stop token error
 	}
 
-	ret = append(ret, res...)
+	ret = res
 	return
 }
 

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 
@@ -56,12 +57,12 @@ var (
 )
 
 type DecryptionKeysValidator struct {
-	config         Config
+	config         shuttercfg.Config
 	slotCalculator SlotCalculator
 	eonTracker     EonTracker
 }
 
-func NewDecryptionKeysValidator(config Config, sc SlotCalculator, et EonTracker) DecryptionKeysValidator {
+func NewDecryptionKeysValidator(config shuttercfg.Config, sc SlotCalculator, et EonTracker) DecryptionKeysValidator {
 	return DecryptionKeysValidator{
 		config:         config,
 		slotCalculator: sc,
@@ -263,7 +264,7 @@ func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) (Eo
 	return eon, nil
 }
 
-func NewDecryptionKeysExtendedValidator(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
+func NewDecryptionKeysExtendedValidator(logger log.Logger, config shuttercfg.Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
 	dkv := NewDecryptionKeysValidator(config, sc, et)
 	validator := func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {

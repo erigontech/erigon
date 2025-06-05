@@ -35,8 +35,8 @@ Param(
         "rpctest",
         "sentry",
         "state",
-        "test",
-        "test-integration",
+        "test-short",
+        "test-all",
         "txpool",
         "all"
     )]
@@ -397,7 +397,7 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
   Error !
   Directory $MyContext.Directory does not seem to be a properly cloned Erigon repository
   Please clone it using 
-  git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
+  git clone -j8 https://github.com/erigontech/erigon.git
 
 "@
     exit 1
@@ -519,10 +519,10 @@ if ($BuildTarget -eq "db-tools") {
     # Clear go cache
     go.exe clean -cache
 
-} elseif ($BuildTarget -eq "test") {
-    Write-Host " Running tests ..."
+} elseif ($BuildTarget -eq "test-short") {
+    Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) -p 2 -tags=e4 ./..."
+    $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
@@ -533,10 +533,10 @@ if ($BuildTarget -eq "db-tools") {
         Remove-Item Env:\GODEBUG
     }
 
-} elseif ($BuildTarget -eq "test-integration") {
-    Write-Host " Running integration tests ..."
+} elseif ($BuildTarget -eq "test-all") {
+    Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) -p 2 --timeout 130m -tags=e4 ./..."
+    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"

@@ -77,14 +77,22 @@ func (g *RequestGenerator) debugTraceBlockByNumber(blockNum uint64) string {
 	return fmt.Sprintf(template, blockNum, g.reqID.Add(1))
 }
 
-func (g *RequestGenerator) debugTraceTransaction(hash string) string {
-	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
-	return fmt.Sprintf(template, hash, g.reqID.Add(1))
+func (g *RequestGenerator) debugTraceTransaction(hash string, additionalParams string) string {
+	if additionalParams != "" {
+		additionalParams = ", {" + additionalParams + "}"
+	}
+	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"%s],"id":%d}`
+	return fmt.Sprintf(template, hash, additionalParams, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getTransactionReceipt(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getTransactionReceipt","params":["%s"],"id":%d}`
 	return fmt.Sprintf(template, hash, g.reqID.Add(1))
+}
+
+func (g *RequestGenerator) getBlockReceipts(bn uint64) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getBlockReceipts","params":["0x%x"],"id":%d}`
+	return fmt.Sprintf(template, bn, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getBalance(miner common.Address, bn uint64) string {
@@ -244,6 +252,11 @@ func (g *RequestGenerator) traceFilterTo(prevBn uint64, bn uint64, account commo
 func (g *RequestGenerator) traceReplayTransaction(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"trace_replayTransaction","params":["%s", ["trace", "stateDiff"]],"id":%d}`
 	return fmt.Sprintf(template, hash, g.reqID.Add(1))
+}
+
+func (g *RequestGenerator) traceTransaction(hash string) string {
+	const template = `{"jsonrpc":"2.0","method":"trace_transaction","params":["%s"],"id":%d}`
+	return fmt.Sprintf(template, hash, g.reqID.Load())
 }
 
 func (g *RequestGenerator) ethCall(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {

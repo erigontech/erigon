@@ -19,11 +19,13 @@ package cltypes
 import (
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestEth1Header(t *testing.T) {
@@ -35,21 +37,21 @@ func TestEth1Header(t *testing.T) {
 	header.Capella()
 	header.Deneb()
 	// Create sample data
-	parentHash := libcommon.Hash{}
-	feeRecipient := libcommon.Address{}
-	stateRoot := libcommon.Hash{}
-	receiptsRoot := libcommon.Hash{}
+	parentHash := common.Hash{}
+	feeRecipient := common.Address{}
+	stateRoot := common.Hash{}
+	receiptsRoot := common.Hash{}
 	logsBloom := types.Bloom{}
-	prevRandao := libcommon.Hash{}
+	prevRandao := common.Hash{}
 	blockNumber := uint64(10)
 	gasLimit := uint64(20)
 	gasUsed := uint64(30)
 	time := uint64(40)
 	extra := solid.NewExtraData()
 	baseFeePerGas := [32]byte{}
-	blockHash := libcommon.Hash{}
-	transactionsRoot := libcommon.Hash{}
-	withdrawalsRoot := libcommon.Hash{}
+	blockHash := common.Hash{}
+	transactionsRoot := common.Hash{}
+	withdrawalsRoot := common.Hash{}
 	blobGasUsed := uint64(50)
 	excessBlobGas := uint64(60)
 
@@ -77,10 +79,10 @@ func TestEth1Header(t *testing.T) {
 
 	// Test EncodeSSZ and DecodeSSZ
 	encodedData, err := header.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	decodedHeader := &Eth1Header{}
 	err = decodedHeader.DecodeSSZ(encodedData, int(version))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, header, decodedHeader)
 
 	// Test EncodingSizeSSZ
@@ -90,6 +92,6 @@ func TestEth1Header(t *testing.T) {
 
 	// Test HashSSZ
 	root, err := header.HashSSZ()
-	assert.NoError(t, err)
-	assert.Equal(t, libcommon.HexToHash("0x9170a25a0980f07bcb9af2a52ff915262763e0e6a2df26aa205b967bd462a6d3"), libcommon.Hash(root))
+	require.NoError(t, err)
+	assert.Equal(t, common.HexToHash("0x9170a25a0980f07bcb9af2a52ff915262763e0e6a2df26aa205b967bd462a6d3"), common.Hash(root))
 }

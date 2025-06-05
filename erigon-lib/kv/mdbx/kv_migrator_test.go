@@ -20,7 +20,6 @@ package mdbx_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -59,20 +58,20 @@ func TestBucketCRUD(t *testing.T) {
 		uniquness[dbi] = true
 	}
 
-	require.True(migrator.ExistsBucket(normalBucket))
-	require.True(errors.Is(migrator.DropBucket(normalBucket), kv.ErrAttemptToDeleteNonDeprecatedBucket))
+	require.True(migrator.ExistsTable(normalBucket))
+	require.ErrorIs(migrator.DropTable(normalBucket), kv.ErrAttemptToDeleteNonDeprecatedBucket)
 
-	require.False(migrator.ExistsBucket(deprecatedBucket))
-	require.NoError(migrator.CreateBucket(deprecatedBucket))
-	require.True(migrator.ExistsBucket(deprecatedBucket))
+	require.False(migrator.ExistsTable(deprecatedBucket))
+	require.NoError(migrator.CreateTable(deprecatedBucket))
+	require.True(migrator.ExistsTable(deprecatedBucket))
 
 	if deprecatedBucket != "none" {
-		require.NoError(migrator.DropBucket(deprecatedBucket))
-		require.False(migrator.ExistsBucket(deprecatedBucket))
+		require.NoError(migrator.DropTable(deprecatedBucket))
+		require.False(migrator.ExistsTable(deprecatedBucket))
 	}
 
-	require.NoError(migrator.CreateBucket(deprecatedBucket))
-	require.True(migrator.ExistsBucket(deprecatedBucket))
+	require.NoError(migrator.CreateTable(deprecatedBucket))
+	require.True(migrator.ExistsTable(deprecatedBucket))
 
 	c, err := tx.RwCursor(deprecatedBucket)
 	require.NoError(err)
@@ -82,9 +81,9 @@ func TestBucketCRUD(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
-	buckets, err := migrator.ListBuckets()
+	buckets, err := migrator.ListTables()
 	require.NoError(err)
-	require.True(len(buckets) > 10)
+	require.Greater(len(buckets), 10)
 
 	// check thad buckets have unique DBI's
 	uniquness = map[kv.DBI]bool{}

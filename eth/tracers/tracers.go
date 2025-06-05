@@ -24,29 +24,28 @@ import (
 	"encoding/json"
 	"errors"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/tracing"
 )
 
 // Context contains some contextual infos for a transaction execution that is not
 // available from within the EVM object.
 type Context struct {
-	BlockHash libcommon.Hash // Hash of the block the txn is contained within (zero if dangling txn or call)
-	TxIndex   int            // Index of the transaction within a block (zero if dangling txn or call)
-	TxHash    libcommon.Hash // Hash of the transaction being traced (zero if dangling call)
+	BlockHash common.Hash // Hash of the block the txn is contained within (zero if dangling txn or call)
+	TxIndex   int         // Index of the transaction within a block (zero if dangling txn or call)
+	TxHash    common.Hash // Hash of the transaction being traced (zero if dangling call)
 }
 
 // Tracer interface extends vm.EVMLogger and additionally
 // allows collecting the tracing result.
-type Tracer interface {
-	vm.EVMLogger
-	GetResult() (json.RawMessage, error)
+type Tracer struct {
+	*tracing.Hooks
+	GetResult func() (json.RawMessage, error)
 	// Stop terminates execution of the tracer at the first opportune moment.
-	Stop(err error)
+	Stop func(err error)
 }
 
-type lookupFunc func(string, *Context, json.RawMessage) (Tracer, error)
+type lookupFunc func(string, *Context, json.RawMessage) (*Tracer, error)
 
 var (
 	lookups []lookupFunc
@@ -66,7 +65,7 @@ func RegisterLookup(wildcard bool, lookup lookupFunc) {
 
 // New returns a new instance of a tracer, by iterating through the
 // registered lookups.
-func New(code string, ctx *Context, cfg json.RawMessage) (Tracer, error) {
+func New(code string, ctx *Context, cfg json.RawMessage) (*Tracer, error) {
 	for _, lookup := range lookups {
 		if tracer, err := lookup(code, ctx, cfg); err == nil {
 			return tracer, nil

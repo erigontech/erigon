@@ -20,18 +20,17 @@ import (
 	"sort"
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
 )
 
 // TestTxPool is a mock transaction pool that blindly accepts all transactions.
 // Its goal is to get around setting up a valid statedb for the balance and nonce
 // checks.
 type TestTxPool struct {
-	pool map[libcommon.Hash]types.Transaction // Hash map of collected transactions
+	pool map[common.Hash]types.Transaction // Hash map of collected transactions
 
 	txFeed event.Feed   // Notification feed to allow waiting for inclusion
 	lock   sync.RWMutex // Protects the transaction pool
@@ -40,13 +39,13 @@ type TestTxPool struct {
 // NewTestTxPool creates a mock transaction pool.
 func NewTestTxPool() *TestTxPool {
 	return &TestTxPool{
-		pool: make(map[libcommon.Hash]types.Transaction),
+		pool: make(map[common.Hash]types.Transaction),
 	}
 }
 
 // Has returns an indicator whether txpool has a transaction
 // cached with the given hash.
-func (p *TestTxPool) Has(hash libcommon.Hash) bool {
+func (p *TestTxPool) Has(hash common.Hash) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -55,7 +54,7 @@ func (p *TestTxPool) Has(hash libcommon.Hash) bool {
 
 // Get retrieves the transaction from local txpool with given
 // txn hash.
-func (p *TestTxPool) Get(hash libcommon.Hash) types.Transaction {
+func (p *TestTxPool) Get(hash common.Hash) types.Transaction {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -89,7 +88,7 @@ func (p *TestTxPool) Pending() (types.TransactionsGroupedBySender, error) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
-	batches := make(map[libcommon.Address]types.Transactions)
+	batches := make(map[common.Address]types.Transactions)
 	for _, txn := range p.pool {
 		from, _ := txn.Sender(*types.LatestSignerForChainID(nil))
 		batches[from] = append(batches[from], txn)
@@ -103,11 +102,11 @@ func (p *TestTxPool) Pending() (types.TransactionsGroupedBySender, error) {
 }
 
 // Content returns all the transactions known to the pool
-func (p *TestTxPool) Content() (map[libcommon.Address]types.Transactions, map[libcommon.Address]types.Transactions) {
+func (p *TestTxPool) Content() (map[common.Address]types.Transactions, map[common.Address]types.Transactions) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
-	batches := make(map[libcommon.Address]types.Transactions)
+	batches := make(map[common.Address]types.Transactions)
 	for _, txn := range p.pool {
 		from, _ := txn.Sender(*types.LatestSignerForChainID(nil))
 		batches[from] = append(batches[from], txn)

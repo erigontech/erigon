@@ -24,6 +24,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof" //nolint:gosec
+
+	"github.com/felixge/fgprof"
+
 	"os"
 	"path/filepath"
 
@@ -39,10 +42,20 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/fdlimit"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var (
+	vmTraceFlag = cli.StringFlag{
+		Name:  "vmtrace",
+		Usage: "Set the provider tracer",
+	}
+
+	vmTraceJsonConfigFlag = cli.StringFlag{
+		Name:  "vmtrace.jsonconfig",
+		Usage: "Set the config of the tracer",
+	}
 	//nolint
 	vmoduleFlag = cli.StringFlag{
 		Name:  "vmodule",
@@ -91,7 +104,7 @@ var (
 // Flags holds all command-line flags required for debugging.
 var Flags = []cli.Flag{
 	&pprofFlag, &pprofAddrFlag, &pprofPortFlag,
-	&cpuprofileFlag, &traceFlag,
+	&cpuprofileFlag, &traceFlag, &vmTraceFlag, &vmTraceJsonConfigFlag,
 }
 
 // SetupCobra sets up logging, profiling and tracing for cobra commands
@@ -186,9 +199,22 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 	return logger
 }
 
+// SetupTracerCtx performs the tracing setup according to the parameters
+// containted in the given urfave context.
+func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
+	tracerName := ctx.String(vmTraceFlag.Name)
+	if tracerName == "" {
+		return nil, nil
+	}
+
+	cfg := ctx.String(vmTraceJsonConfigFlag.Name)
+
+	return tracers.New(tracerName, &tracers.Context{}, []byte(cfg))
+}
+
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
-func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, *http.ServeMux, error) {
+func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetFlagsFromConfigFile(ctx); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -197,16 +223,20 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, *http
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx("erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	tracer, err := SetupTracerCtx(ctx)
+	if err != nil {
+		return logger, tracer, nil, nil, err
+	}
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
-			return logger, nil, nil, err
+			return logger, tracer, nil, nil, err
 		}
 	}
 
 	if cpuFile := ctx.String(cpuprofileFlag.Name); cpuFile != "" {
 		if err := Handler.StartCPUProfile(cpuFile); err != nil {
-			return logger, nil, nil, err
+			return logger, tracer, nil, nil, err
 		}
 	}
 	pprofEnabled := ctx.Bool(pprofFlag.Name)
@@ -230,11 +260,11 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, *http
 			metricsMux = StartPProf(address, metricsMux)
 		} else {
 			pprofMux := StartPProf(address, nil)
-			return logger, metricsMux, pprofMux, nil
+			return logger, tracer, metricsMux, pprofMux, nil
 		}
 	}
 
-	return logger, metricsMux, nil, nil
+	return logger, tracer, metricsMux, nil, nil
 }
 
 func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
@@ -250,6 +280,7 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 		pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		pprofMux.Handle("/debug/fgprof", fgprof.Handler())
 
 		pprofServer := &http.Server{
 			Addr:    address,

@@ -30,25 +30,28 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/kv/prune"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/txnprovider/shutter"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
-var BorDefaultMinerGasPrice = big.NewInt(25 * params.GWei)
+var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
+var BorDefaultMinerGasLimit uint64 = 45_000_000
+
+var DefaultMinerGasLimit uint64 = 36_000_000
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -91,8 +94,7 @@ var Defaults = Config{
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
-		GasLimit: 36_000_000,
-		GasPrice: big.NewInt(params.GWei),
+		GasPrice: big.NewInt(common.GWei),
 		Recommit: 3 * time.Second,
 	},
 	TxPool:      txpoolcfg.DefaultConfig,
@@ -212,7 +214,7 @@ type Config struct {
 
 	// Transaction pool options
 	TxPool  txpoolcfg.Config
-	Shutter shutter.Config
+	Shutter shuttercfg.Config
 
 	// Gas Price Oracle options
 	GPO gaspricecfg.Config
@@ -235,15 +237,14 @@ type Config struct {
 	// Heimdall waypoint recording active
 	WithHeimdallWaypointRecording bool
 	// Use polygon checkpoint sync in preference to POW downloader
-	PolygonSync      bool
-	PolygonSyncStage bool
+	PolygonSync bool
 
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
 	InternalCL bool
 
-	OverridePragueTime *big.Int `toml:",omitempty"`
+	OverrideOsakaTime *big.Int `toml:",omitempty"`
 
 	// Embedded Silkworm support
 	SilkwormExecution            bool
@@ -262,6 +263,9 @@ type Config struct {
 	// PoS Single Slot finality
 	PolygonPosSingleSlotFinality        bool
 	PolygonPosSingleSlotFinalityBlockAt uint64
+
+	// Account Abstraction
+	AllowAA bool
 }
 
 type Sync struct {
@@ -282,4 +286,6 @@ type Sync struct {
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
+	KeepExecutionProofs      bool
+	PersistReceiptsCacheV2   bool
 }

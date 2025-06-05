@@ -6,17 +6,18 @@ import (
 	"math/big"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/txnprovider/shutter"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -41,7 +42,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Clique                              params.ConsensusSnapshotConfig
 		Aura                                chain.AuRaConfig
 		TxPool                              txpoolcfg.Config
-		Shutter                             shutter.Config
+		Shutter                             shuttercfg.Config
 		GPO                                 gaspricecfg.Config
 		RPCGasCap                           uint64  `toml:",omitempty"`
 		RPCTxFeeCap                         float64 `toml:",omitempty"`
@@ -51,10 +52,9 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		WithHeimdallMilestones              bool
 		WithHeimdallWaypointRecording       bool
 		PolygonSync                         bool
-		PolygonSyncStage                    bool
 		Ethstats                            string
 		InternalCL                          bool
-		OverridePragueTime                  *big.Int `toml:",omitempty"`
+		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
 		SilkwormExecution                   bool
 		SilkwormRpcDaemon                   bool
 		SilkwormSentry                      bool
@@ -99,10 +99,9 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.WithHeimdallMilestones = c.WithHeimdallMilestones
 	enc.WithHeimdallWaypointRecording = c.WithHeimdallWaypointRecording
 	enc.PolygonSync = c.PolygonSync
-	enc.PolygonSyncStage = c.PolygonSyncStage
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
-	enc.OverridePragueTime = c.OverridePragueTime
+	enc.OverrideOsakaTime = c.OverrideOsakaTime
 	enc.SilkwormExecution = c.SilkwormExecution
 	enc.SilkwormRpcDaemon = c.SilkwormRpcDaemon
 	enc.SilkwormSentry = c.SilkwormSentry
@@ -141,7 +140,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Clique                              *params.ConsensusSnapshotConfig
 		Aura                                *chain.AuRaConfig
 		TxPool                              *txpoolcfg.Config
-		Shutter                             *shutter.Config
+		Shutter                             *shuttercfg.Config
 		GPO                                 *gaspricecfg.Config
 		RPCGasCap                           *uint64  `toml:",omitempty"`
 		RPCTxFeeCap                         *float64 `toml:",omitempty"`
@@ -151,10 +150,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		WithHeimdallMilestones              *bool
 		WithHeimdallWaypointRecording       *bool
 		PolygonSync                         *bool
-		PolygonSyncStage                    *bool
 		Ethstats                            *string
 		InternalCL                          *bool
-		OverridePragueTime                  *big.Int `toml:",omitempty"`
+		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
 		SilkwormExecution                   *bool
 		SilkwormRpcDaemon                   *bool
 		SilkwormSentry                      *bool
@@ -258,17 +256,14 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.PolygonSync != nil {
 		c.PolygonSync = *dec.PolygonSync
 	}
-	if dec.PolygonSyncStage != nil {
-		c.PolygonSyncStage = *dec.PolygonSyncStage
-	}
 	if dec.Ethstats != nil {
 		c.Ethstats = *dec.Ethstats
 	}
 	if dec.InternalCL != nil {
 		c.InternalCL = *dec.InternalCL
 	}
-	if dec.OverridePragueTime != nil {
-		c.OverridePragueTime = dec.OverridePragueTime
+	if dec.OverrideOsakaTime != nil {
+		c.OverrideOsakaTime = dec.OverrideOsakaTime
 	}
 	if dec.SilkwormExecution != nil {
 		c.SilkwormExecution = *dec.SilkwormExecution

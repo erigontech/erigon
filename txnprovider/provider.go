@@ -22,7 +22,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type TxnProvider interface {

@@ -84,10 +84,11 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
-	&utils.RpcMaxGetProofRewindBlockCount,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
+	&utils.KeepExecutionProofsFlag,
+
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,
 	&HTTPIdleTimeoutFlag,
@@ -137,6 +138,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DeveloperPeriodFlag,
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
+	&utils.PersistReceiptsV2Flag,
 	&utils.FakePoWFlag,
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
@@ -151,6 +153,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MinerNotifyFlag,
 	&utils.MinerGasLimitFlag,
 	&utils.MinerEtherbaseFlag,
+	&utils.MinerGasPriceFlag,
 	&utils.MinerExtraDataFlag,
 	&utils.MinerNoVerfiyFlag,
 	&utils.MinerSigningKeyFileFlag,
@@ -171,9 +174,9 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithHeimdallMilestones,
 	&utils.WithHeimdallWaypoints,
 	&utils.PolygonSyncFlag,
-	&utils.PolygonSyncStageFlag,
+	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
-	&utils.OverridePragueFlag,
+	&utils.OverrideOsakaFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,
@@ -227,6 +230,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinValidatorMonitorFlag,
 	&utils.CaplinCustomConfigFlag,
 	&utils.CaplinCustomGenesisFlag,
+	&utils.CaplinUseEngineApiFlag,
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
@@ -245,4 +249,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.PolygonPosSingleSlotFinalityFlag,
 	&utils.PolygonPosSingleSlotFinalityBlockAtFlag,
 	&utils.GDBMeFlag,
+
+	&utils.ExperimentalConcurrentCommitmentFlag,
 }

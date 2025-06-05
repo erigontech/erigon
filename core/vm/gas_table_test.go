@@ -22,16 +22,15 @@ package vm_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"strconv"
 	"testing"
-	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
@@ -40,13 +39,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core/vm"
-
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -104,7 +100,10 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	dirs, logger := datadir.New(t.TempDir()), log.New()
+	salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	agg, err := state3.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -136,24 +135,24 @@ func TestEIP2200(t *testing.T) {
 			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
 			defer tx.Rollback()
 
-			r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 			s := state.New(r)
 
-			address := libcommon.BytesToAddress([]byte("contract"))
+			address := common.BytesToAddress([]byte("contract"))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
-			s.SetState(address, &libcommon.Hash{}, *uint256.NewInt(uint64(tt.original)))
+			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), w)
+			_ = s.CommitBlock(chain.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) error {
+				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
+				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 					return nil
 				},
 			}
-			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, params.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
+			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
-			_, gas, err := vmenv.Call(vm.AccountRef(libcommon.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
+			_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
@@ -184,39 +183,29 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	for i, tt := range createGasTests {
-		address := libcommon.BytesToAddress([]byte("contract"))
+		address := common.BytesToAddress([]byte("contract"))
 
-		tx, err := db.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
-
-		var stateReader state.StateReader
-		var stateWriter state.StateWriter
-		var txc wrap.TxContainer
-		txc.Tx = tx
-
-		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
-		fmt.Printf("init tx %x\n", eface[1])
-
-		domains, err := state3.NewSharedDomains(txc.Tx, log.New())
+		domains, err := state3.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
-		txc.Doms = domains
 
-		//stateReader = rpchelper.NewLatestStateReader(domains)
-		stateReader = rpchelper.NewLatestDomainStateReader(domains)
-		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
+		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
+		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, nil, 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code))
-		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), stateWriter)
+		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
-			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) (bool, error) { return true, nil },
-			Transfer: func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) error {
+			CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
+			Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 				return nil
 			},
 		}
@@ -225,17 +214,17 @@ func TestCreateGas(t *testing.T) {
 			config.ExtraEips = []int{3860}
 		}
 
-		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, params.TestChainConfig, config)
+		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
 
 		var startGas uint64 = math.MaxUint64
-		_, gas, err := vmenv.Call(vm.AccountRef(libcommon.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
+		_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}
 		if gasUsed := startGas - gas; gasUsed != tt.gasUsed {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
-		tx.Rollback()
 		domains.Close()
 	}
+	tx.Rollback()
 }

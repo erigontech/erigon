@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/background"
@@ -17,7 +18,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 )
 
 type Merger struct {
@@ -52,7 +52,7 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 			}
 			aggFrom := r.To() - span
 			toMerge = append(toMerge, NewRange(aggFrom, r.To()))
-			for currentRanges[i].From() > aggFrom {
+			for i >= 0 && currentRanges[i].From() > aggFrom {
 				i--
 			}
 			break
@@ -99,9 +99,11 @@ func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileI
 			ext := filepath.Ext(f)
 			withoutExt := f[:len(f)-len(ext)]
 			_ = os.Remove(withoutExt + ".idx")
+			_ = os.Remove(withoutExt + ".idx.torrent")
 			isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 			if isTxnType {
 				_ = os.Remove(withoutExt + "-to-block.idx")
+				_ = os.Remove(withoutExt + "-to-block.idx.torrent")
 			}
 		}
 	}()
@@ -145,6 +147,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 	if len(mergeRanges) == 0 {
 		return nil
 	}
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -233,7 +236,20 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 	// delete old sub segments
 	for enum, delSegs := range out {
 		dirtySegments := snapshots.dirty[enum]
+		inDirtySegments := in[enum]
+
 		for _, delSeg := range delSegs {
+			skip := false
+			for _, inDSeg := range inDirtySegments {
+				if inDSeg.from == delSeg.from && inDSeg.to == delSeg.to {
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+
 			dirtySegments.Delete(delSeg)
 			delSeg.canDelete.Store(true)
 		}

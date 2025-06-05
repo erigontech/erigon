@@ -20,21 +20,19 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
-
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/turbo/services"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 type TrieCfg struct {
-	db                kv.RwDB
+	db                kv.TemporalRwDB
 	checkRoot         bool
 	badBlockHalt      bool
 	tmpDir            string
@@ -46,7 +44,7 @@ type TrieCfg struct {
 	agg       *state.Aggregator
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.Aggregator) TrieCfg {
+func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -57,17 +55,16 @@ func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, t
 		hd:                hd,
 
 		historyV3: historyV3,
-		agg:       agg,
 	}
 }
 
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
-func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (libcommon.Hash, error) {
+func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (common.Hash, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
-	rh, err := state.RebuildCommitmentFiles(ctx, cfg.agg, cfg.db, &txNumsReader, log.New())
+	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New())
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
-	return libcommon.BytesToHash(rh), err
+	return common.BytesToHash(rh), err
 }

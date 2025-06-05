@@ -19,7 +19,7 @@ package cltypes_test
 import (
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/stretchr/testify/require"
 
@@ -44,20 +44,20 @@ var testBlockRangeRequest = &cltypes.BeaconBlocksByRangeRequest{
 var testStatus = &cltypes.Status{
 	FinalizedEpoch: 666,
 	HeadSlot:       94,
-	HeadRoot:       libcommon.HexToHash("a"),
-	FinalizedRoot:  libcommon.HexToHash("bbba"),
+	HeadRoot:       common.HexToHash("a"),
+	FinalizedRoot:  common.HexToHash("bbba"),
 }
 
 var testHeader = &cltypes.BeaconBlockHeader{
 	Slot:          2,
 	ProposerIndex: 24,
-	ParentRoot:    libcommon.HexToHash("a"),
-	Root:          libcommon.HexToHash("d"),
-	BodyRoot:      libcommon.HexToHash("ad"),
+	ParentRoot:    common.HexToHash("a"),
+	Root:          common.HexToHash("d"),
+	BodyRoot:      common.HexToHash("ad"),
 }
 
 var testBlockRoot = &cltypes.Root{
-	Root: libcommon.HexToHash("a"),
+	Root: common.HexToHash("a"),
 }
 
 var testLightClientUpdatesByRange = &cltypes.LightClientUpdatesByRangeRequest{

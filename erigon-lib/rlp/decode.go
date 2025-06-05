@@ -211,6 +211,8 @@ func makeDecoder(typ reflect.Type, tags tags) (dec decoder, err error) {
 		return decodeDecoder, nil
 	case isUint(kind):
 		return decodeUint, nil
+	case isInt(kind):
+		return decodeInt, nil
 	case kind == reflect.Bool:
 		return decodeBool, nil
 	case kind == reflect.String:
@@ -242,6 +244,16 @@ func decodeUint(s *Stream, val reflect.Value) error {
 		return wrapStreamError(err, val.Type())
 	}
 	val.SetUint(num)
+	return nil
+}
+
+func decodeInt(s *Stream, val reflect.Value) error {
+	typ := val.Type()
+	num, err := s.uint(typ.Bits())
+	if err != nil {
+		return wrapStreamError(err, val.Type())
+	}
+	val.SetInt(int64(num))
 	return nil
 }
 
@@ -311,7 +323,7 @@ func makeListDecoder(typ reflect.Type, tag tags) (decoder, error) {
 		}
 		return decodeByteSlice, nil
 	}
-	etypeinfo := cachedTypeInfo1(etype, tags{})
+	etypeinfo := theTC.infoWhileGenerating(etype, tags{})
 	if etypeinfo.decoderErr != nil {
 		return nil, etypeinfo.decoderErr
 	}
@@ -490,7 +502,7 @@ func zeroFields(structval reflect.Value, fields []field) {
 // makePtrDecoder creates a decoder that decodes into the pointer's element type.
 func makePtrDecoder(typ reflect.Type, tag tags) (decoder, error) {
 	etype := typ.Elem()
-	etypeinfo := cachedTypeInfo1(etype, tags{})
+	etypeinfo := theTC.infoWhileGenerating(etype, tags{})
 	switch {
 	case etypeinfo.decoderErr != nil:
 		return nil, etypeinfo.decoderErr

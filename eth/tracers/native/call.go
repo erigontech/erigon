@@ -27,9 +27,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -41,46 +43,46 @@ func init() {
 }
 
 type callLog struct {
-	Index   uint64            `json:"index"`
-	Address libcommon.Address `json:"address"`
-	Topics  []libcommon.Hash  `json:"topics"`
-	Data    hexutil.Bytes     `json:"data"`
+	Index   uint64         `json:"index"`
+	Address common.Address `json:"address"`
+	Topics  []common.Hash  `json:"topics"`
+	Data    hexutil.Bytes  `json:"data"`
 }
 
 type callFrame struct {
-	Type     vm.OpCode         `json:"-"`
-	From     libcommon.Address `json:"from"`
-	Gas      uint64            `json:"gas"`
-	GasUsed  uint64            `json:"gasUsed"`
-	To       libcommon.Address `json:"to,omitempty" rlp:"optional"`
-	Input    []byte            `json:"input" rlp:"optional"`
-	Output   []byte            `json:"output,omitempty" rlp:"optional"`
-	Error    string            `json:"error,omitempty" rlp:"optional"`
-	Revertal string            `json:"revertReason,omitempty"`
-	Calls    []callFrame       `json:"calls,omitempty" rlp:"optional"`
-	Logs     []callLog         `json:"logs,omitempty" rlp:"optional"`
+	Type     vm.OpCode      `json:"-"`
+	From     common.Address `json:"from"`
+	Gas      uint64         `json:"gas"`
+	GasUsed  uint64         `json:"gasUsed"`
+	To       common.Address `json:"to,omitempty" rlp:"optional"`
+	Input    []byte         `json:"input" rlp:"optional"`
+	Output   []byte         `json:"output,omitempty" rlp:"optional"`
+	Error    string         `json:"error,omitempty" rlp:"optional"`
+	Revertal string         `json:"revertReason,omitempty"`
+	Calls    []callFrame    `json:"calls,omitempty" rlp:"optional"`
+	Logs     []callLog      `json:"logs,omitempty" rlp:"optional"`
 	// Placed at end on purpose. The RLP will be decoded to 0 instead of
 	// nil if there are non-empty elements after in the struct.
 	Value *big.Int `json:"value,omitempty" rlp:"optional"`
 }
 
-func (f callFrame) TypeString() string {
+func (f *callFrame) TypeString() string {
 	return f.Type.String()
 }
 
-func (f callFrame) failed() bool {
+func (f *callFrame) failed() bool {
 	return len(f.Error) > 0
 }
 
 func (f *callFrame) processOutput(output []byte, err error) {
-	output = libcommon.CopyBytes(output)
+	output = common.CopyBytes(output)
 	if err == nil {
 		f.Output = output
 		return
 	}
 	f.Error = err.Error()
 	if f.Type == vm.CREATE || f.Type == vm.CREATE2 {
-		f.To = libcommon.Address{}
+		f.To = common.Address{}
 	}
 	if !errors.Is(err, vm.ErrExecutionReverted) || len(output) == 0 {
 		return
@@ -104,10 +106,10 @@ type callFrameMarshaling struct {
 }
 
 type callTracer struct {
-	noopTracer
 	callstack   []callFrame
 	config      callTracerConfig
 	gasLimit    uint64
+	depth       int
 	interrupt   uint32 // Atomic flag to signal execution interruption
 	reason      error  // Textual reason for the interruption
 	logIndex    uint64
@@ -129,7 +131,7 @@ type callTracerConfig struct {
 
 // newCallTracer returns a native go tracer which tracks
 // call frames of a tx, and implements vm.EVMLogger.
-func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
+func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
 	config := defaultCallTracerConfig()
 	if cfg != nil {
 		if err := json.Unmarshal(cfg, &config); err != nil {
@@ -138,11 +140,22 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, e
 	}
 	// First callframe contains txn context info
 	// and is populated on start and end.
-	return &callTracer{callstack: make([]callFrame, 1), config: config}, nil
+	t := &callTracer{callstack: make([]callFrame, 0, 1), config: config}
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart: t.OnTxStart,
+			OnTxEnd:   t.OnTxEnd,
+			OnEnter:   t.OnEnter,
+			OnExit:    t.OnExit,
+			OnLog:     t.OnLog,
+		},
+		GetResult: t.GetResult,
+		Stop:      t.Stop,
+	}, nil
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.precompiles = append(t.precompiles, precompile)
 	if precompile && !t.config.IncludePrecompiles {
 		return
@@ -152,7 +165,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcom
 		Type:  vm.CALL,
 		From:  from,
 		To:    to,
-		Input: libcommon.CopyBytes(input),
+		Input: common.CopyBytes(input),
 		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
@@ -174,55 +187,11 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	t.callstack[0].processOutput(output, err)
 }
 
-// CaptureState implements the EVMLogger interface to trace a single step of VM execution.
-func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-	// Only logs need to be captured via opcode processing
-	if !t.config.WithLog {
-		return
-	}
-	// Avoid processing nested calls when only caring about top call
-	if t.config.OnlyTopCall && depth > 0 {
-		return
-	}
-	// on-error `stackData[stackSize-2]` will contain error data instead of logs.
-	if err != nil {
-		return
-	}
-	// Skip if tracing was interrupted
-	if atomic.LoadUint32(&t.interrupt) > 0 {
-		return
-	}
-	switch op {
-	case vm.LOG0, vm.LOG1, vm.LOG2, vm.LOG3, vm.LOG4:
-		size := int(op - vm.LOG0)
-
-		stack := scope.Stack
-		stackData := stack.Data
-		stackSize := len(stackData)
-		if stackSize < 2 {
-			return
-		}
-		// Don't modify the stack
-		mStart := stackData[stackSize-1]
-		mSize := stackData[stackSize-2]
-		topics := make([]libcommon.Hash, size)
-		dataStart := stackSize - 3
-		for i := 0; i < size && dataStart-i >= 0; i++ {
-			topic := stackData[dataStart-i]
-			topics[i] = libcommon.Hash(topic.Bytes32())
-		}
-
-		data := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
-		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutil.Bytes(data), Index: t.logIndex}
-		t.logIndex++
-		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, log)
-	}
-}
-
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	t.depth = depth
 	t.precompiles = append(t.precompiles, precompile)
-	if t.config.OnlyTopCall {
+	if t.config.OnlyTopCall && depth > 0 {
 		return
 	}
 	if precompile && !t.config.IncludePrecompiles {
@@ -234,21 +203,30 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 	}
 
 	call := callFrame{
-		Type:  typ,
+		Type:  vm.OpCode(typ),
 		From:  from,
 		To:    to,
-		Input: libcommon.CopyBytes(input),
+		Input: common.CopyBytes(input),
 		Gas:   gas,
 	}
 	if value != nil {
 		call.Value = value.ToBig()
 	}
+
+	if depth == 0 {
+		call.Gas = t.gasLimit
+	}
 	t.callstack = append(t.callstack, call)
 }
 
-// CaptureExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if depth == 0 {
+		t.captureEnd(output, gasUsed, err, reverted)
+		return
+	}
+
+	t.depth = depth - 1
+
 	if t.config.OnlyTopCall {
 		return
 	}
@@ -276,20 +254,32 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
-func (t *callTracer) CaptureTxStart(gasLimit uint64) {
-	t.gasLimit = gasLimit
+func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
+	if len(t.callstack) != 1 {
+		return
+	}
+	t.callstack[0].processOutput(output, err)
+}
+
+func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+	t.gasLimit = tx.GetGasLimit()
 	t.logIndex = 0
 	t.logGaps = make(map[uint64]int)
 }
 
-func (t *callTracer) CaptureTxEnd(restGas uint64) {
+func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	// Error happened during tx validation.
+	if err != nil {
+		return
+	}
+
 	if len(t.callstack) == 0 {
 		// can happen if top-level is a call to precompile
 		// and includePrecompiles is false
 		return
 	}
 
-	t.callstack[0].GasUsed = t.gasLimit - restGas
+	t.callstack[0].GasUsed = receipt.GasUsed
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
 		clearFailedLogs(&t.callstack[0], false, t.logGaps)
@@ -297,6 +287,23 @@ func (t *callTracer) CaptureTxEnd(restGas uint64) {
 	}
 	t.logIndex = 0
 	t.logGaps = nil
+}
+
+func (t *callTracer) OnLog(log *types.Log) {
+	// Only logs need to be captured via opcode processing
+	if !t.config.WithLog {
+		return
+	}
+	// Avoid processing nested calls when only caring about top call
+	if t.config.OnlyTopCall && t.depth > 0 {
+		return
+	}
+	// Skip if tracing was interrupted
+	if atomic.LoadUint32(&t.interrupt) > 0 {
+		return
+	}
+	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: t.logIndex})
+	t.logIndex++
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any

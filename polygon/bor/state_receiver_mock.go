@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 
 	rlp "github.com/erigontech/erigon-lib/rlp"
-	consensus "github.com/erigontech/erigon/consensus"
+	consensus "github.com/erigontech/erigon/execution/consensus"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -19,10 +19,10 @@ package bor
 import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 )
 
 type FakeBor struct {

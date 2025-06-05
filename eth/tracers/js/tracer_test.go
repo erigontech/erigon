@@ -30,36 +30,26 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
-	"github.com/erigontech/erigon/params"
 )
 
 type account struct{}
 
-func (account) SubBalance(amount *big.Int)                             {}
-func (account) AddBalance(amount *big.Int)                             {}
-func (account) SetAddress(libcommon.Address)                           {}
-func (account) Value() *big.Int                                        { return nil }
-func (account) SetBalance(*big.Int)                                    {}
-func (account) SetNonce(uint64)                                        {}
-func (account) Balance() *uint256.Int                                  { return &uint256.Int{} }
-func (account) Address() libcommon.Address                             { return libcommon.Address{} }
-func (account) SetCode(libcommon.Hash, []byte)                         {}
-func (account) ForEachStorage(cb func(key, value libcommon.Hash) bool) {}
-
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }
-func (*dummyStatedb) GetBalance(addr libcommon.Address) (*uint256.Int, error) {
-	return &uint256.Int{}, nil
-}
+func (account) SubBalance(amount *big.Int)                          {}
+func (account) AddBalance(amount *big.Int)                          {}
+func (account) SetAddress(common.Address)                           {}
+func (account) Value() *big.Int                                     { return nil }
+func (account) SetBalance(*big.Int)                                 {}
+func (account) SetNonce(uint64)                                     {}
+func (account) Balance() *uint256.Int                               { return &uint256.Int{} }
+func (account) Address() common.Address                             { return common.Address{} }
+func (account) SetCode(common.Hash, []byte)                         {}
+func (account) ForEachStorage(cb func(key, value common.Hash) bool) {}
 
 type vmContext struct {
 	blockCtx evmtypes.BlockContext
@@ -70,26 +60,26 @@ func testCtx() *vmContext {
 	return &vmContext{blockCtx: evmtypes.BlockContext{BlockNumber: 1}, txCtx: evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}}
 }
 
-func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, contractCode []byte) (json.RawMessage, error) {
-	c := vm.NewJumpDestCache()
+func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, contractCode []byte) (json.RawMessage, error) {
+	c := vm.NewJumpDestCache(16)
 	var (
-		env             = vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, chaincfg, vm.Config{Debug: true, Tracer: tracer})
+		env             = vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, state.New(state.NewNoopReader()), chaincfg, vm.Config{Tracer: tracer.Hooks})
 		gasLimit uint64 = 31000
 		startGas uint64 = 10000
 		value           = uint256.NewInt(0)
-		contract        = vm.NewContract(account{}, libcommon.Address{}, value, startGas, false /* skipAnalysis */, c)
+		contract        = vm.NewContract(account{}, common.Address{}, value, startGas, false /* skipAnalysis */, c)
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 	if contractCode != nil {
 		contract.Code = contractCode
 	}
 
-	tracer.CaptureTxStart(gasLimit)
-	tracer.CaptureStart(env, contract.Caller(), contract.Address(), false /* precompile */, false /* create */, []byte{}, startGas, value, []byte{} /* code */)
+	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, common.Address{}, nil, gasLimit, nil, nil), contract.Caller())
+	tracer.OnEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, []byte{}, startGas, value, contractCode)
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
-	tracer.CaptureEnd(ret, startGas-contract.Gas, err)
+	tracer.OnExit(0, ret, startGas-contract.Gas, err, true)
 	// Rest gas assumes no refund
-	tracer.CaptureTxEnd(contract.Gas)
+	tracer.OnTxEnd(&types.Receipt{GasUsed: gasLimit - contract.Gas}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +93,7 @@ func TestTracer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ret, err := runTrace(tracer, testCtx(), params.TestChainConfig, contract)
+		ret, err := runTrace(tracer, testCtx(), chain.TestChainConfig, contract)
 		if err != nil {
 			return nil, err.Error() // Stringify to allow comparison without nil checks
 		}
@@ -161,7 +151,7 @@ func TestTracer(t *testing.T) {
 		}, {
 			code:     "{res: [], step: function(log) { if (log.op.toString() === 'STOP') { this.res.push(log.memory.slice(5, 1025 * 1024)) } }, fault: function() {}, result: function() { return this.res }}",
 			want:     "",
-			fail:     "tracer reached limit for padding memory slice: end 1049600, memorySize 32 at step (<eval>:1:83(23))    in server-side tracer function 'step'",
+			fail:     "reached limit for padding memory slice: 1049568 at step (<eval>:1:83(23))    in server-side tracer function 'step'",
 			contract: []byte{byte(vm.PUSH1), byte(0xff), byte(vm.PUSH1), byte(0x00), byte(vm.MSTORE8), byte(vm.STOP)},
 		}, { // tests ctx.coinbase
 			code: "{lengths: [], step: function(log) { }, fault: function() {}, result: function(ctx) { var coinbase = ctx.coinbase; return toAddress(coinbase); }}",
@@ -175,6 +165,10 @@ func TestTracer(t *testing.T) {
 }
 
 func TestHalt(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	timeout := errors.New("stahp")
 	tracer, err := newJsTracer("{step: function() { while(1); }, result: function() { return null; }, fault: function(){}}", nil, nil)
 	if err != nil {
@@ -184,26 +178,27 @@ func TestHalt(t *testing.T) {
 		time.Sleep(1 * time.Second)
 		tracer.Stop(timeout)
 	}()
-	if _, err = runTrace(tracer, testCtx(), params.TestChainConfig, nil); !strings.Contains(err.Error(), "stahp") {
+	if _, err = runTrace(tracer, testCtx(), chain.TestChainConfig, nil); !strings.Contains(err.Error(), "stahp") {
 		t.Errorf("Expected timeout error, got %v", err)
 	}
 }
 
 func TestHaltBetweenSteps(t *testing.T) {
-	c := vm.NewJumpDestCache()
+	c := vm.NewJumpDestCache(16)
 	tracer, err := newJsTracer("{step: function() {}, fault: function() {}, result: function() { return null; }}", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(1)}, state.New(state.NewNoopReader()), chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
 	scope := &vm.ScopeContext{
-		Contract: vm.NewContract(&account{}, libcommon.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */, c),
+		Contract: vm.NewContract(&account{}, common.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */, c),
 	}
-	tracer.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 0, uint256.NewInt(0), []byte{} /* code */)
-	tracer.CaptureState(0, 0, 0, 0, scope, nil, 0, nil)
+	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil), common.Address{})
+	tracer.OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, false, []byte{}, 0, uint256.NewInt(0), []byte{})
+	tracer.OnOpcode(0, 0, 0, 0, scope, nil, 0, nil)
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
-	tracer.CaptureState(0, 0, 0, 0, scope, nil, 0, nil)
+	tracer.OnOpcode(0, 0, 0, 0, scope, nil, 0, nil)
 
 	if _, err := tracer.GetResult(); !strings.Contains(err.Error(), timeout.Error()) {
 		t.Errorf("Expected timeout error, got %v", err)
@@ -219,9 +214,10 @@ func TestNoStepExec(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
-		tracer.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 1000, uint256.NewInt(0), []byte{} /* code */)
-		tracer.CaptureEnd(nil, 0, nil)
+		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, state.New(state.NewNoopReader()), chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
+		tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil), common.Address{})
+		tracer.OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, false, []byte{}, 1000, uint256.NewInt(0), []byte{})
+		tracer.OnExit(0, nil, 0, nil, false)
 		ret, err := tracer.GetResult()
 		if err != nil {
 			t.Fatal(err)
@@ -275,7 +271,7 @@ func TestIsPrecompile(t *testing.T) {
 }
 
 func TestEnterExit(t *testing.T) {
-	c := vm.NewJumpDestCache()
+	c := vm.NewJumpDestCache(16)
 	// test that either both or none of enter() and exit() are defined
 	if _, err := newJsTracer("{step: function() {}, fault: function() {}, result: function() { return null; }, enter: function() {}}", new(tracers.Context), nil); err == nil {
 		t.Fatal("tracer creation should've failed without exit() definition")
@@ -289,10 +285,10 @@ func TestEnterExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := &vm.ScopeContext{
-		Contract: vm.NewContract(&account{}, libcommon.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */, c),
+		Contract: vm.NewContract(&account{}, common.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */, c),
 	}
-	tracer.CaptureEnter(vm.CALL, scope.Contract.Caller(), scope.Contract.Address(), false, false, []byte{}, 1000, new(uint256.Int), []byte{})
-	tracer.CaptureExit([]byte{}, 400, nil)
+	tracer.OnEnter(1, byte(vm.CALL), scope.Contract.Caller(), scope.Contract.Address(), false, []byte{}, 1000, new(uint256.Int), []byte{})
+	tracer.OnExit(1, []byte{}, 400, nil, false)
 
 	have, err := tracer.GetResult()
 	if err != nil {

@@ -159,7 +159,7 @@ func TestGetPeers(t *testing.T) {
 	peerStats.AddOrUpdatePeer("test3", mockInboundUpdMsg)
 
 	peers := peerStats.GetPeers()
-	require.Equal(t, 3, len(peers))
+	require.Len(t, peers, 3)
 	require.True(t, peers["test1"].Equal(mockInboundPeerStats))
 }
 

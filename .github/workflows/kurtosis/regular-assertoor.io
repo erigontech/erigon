@@ -4,13 +4,15 @@ participants_matrix:
       el_image: test/erigon:current
   cl:
     - cl_type: lighthouse
-      cl_image: sigp/lighthouse:v6.0.0
-    - cl_type: nimbus
-      cl_image: statusim/nimbus-eth2:multiarch-v24.11.0
+      cl_image: sigp/lighthouse:v7.0.1
+    - cl_type: teku
+      cl_image: consensys/teku:develop
 network_params:
   #electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
+  seconds_per_slot: 2
+
 additional_services:
   - assertoor
 assertoor_params:

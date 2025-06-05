@@ -97,3 +97,9 @@ func (d *DiagnosticClient) clearConnection() {
 	defer d.mu.Unlock()
 	d.conn = nil
 }
+
+func (d *DiagnosticClient) Connected() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.conn != nil
+}

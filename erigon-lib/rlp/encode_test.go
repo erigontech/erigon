@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -287,7 +288,8 @@ var encTests = []encTest{
 	{val: simplestruct{A: 3, B: "foo"}, output: "C50383666F6F"},
 	{val: &recstruct{5, nil}, output: "C205C0"},
 	{val: &recstruct{5, &recstruct{4, &recstruct{3, nil}}}, output: "C605C404C203C0"},
-	{val: &intField{X: 3}, error: "rlp: type int is not RLP-serializable (struct field rlp.intField.X)"},
+	{val: &intField{X: -3}, error: "rlp: type reflect.Value -ve values are not RLP-serializable"},
+	{val: &intField{X: 3}, output: "C103"},
 
 	// struct tag "-"
 	{val: &ignoredField{A: 1, B: 2, C: 3}, output: "C20103"},
@@ -514,7 +516,7 @@ func BenchmarkEncodeBigInts(b *testing.B) {
 
 func TestStringLen56(t *testing.T) {
 	str := hexutil.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
-	require.Equal(t, 56, len(str))
+	require.Len(t, str, 56)
 
 	strLen := StringLen(str)
 	assert.Equal(t, 56+2, strLen)
@@ -524,8 +526,8 @@ func TestStringLen56(t *testing.T) {
 
 	dataPos, dataLen, err := ParseString(encoded, 0)
 	require.NoError(t, err)
-	assert.Equal(t, dataPos, 2)
-	assert.Equal(t, dataLen, 56)
+	assert.Equal(t, 2, dataPos)
+	assert.Equal(t, 56, dataLen)
 }
 
 // Any buffer of 32 bytes or more should be fine for EncodeUint256.
@@ -568,4 +570,36 @@ func TestEncodeUint256Random(t *testing.T) {
 			assert.Equal(t, i, uint256.NewInt(0).SetBytes(decoded))
 		})
 	}
+}
+
+func BenchmarkEncodeConcurrentInterface(b *testing.B) {
+	type struct1 struct {
+		A string
+		B *big.Int
+		C [20]byte
+	}
+	value := []interface{}{
+		uint(999),
+		&struct1{A: "hello", B: big.NewInt(0xFFFFFFFF)},
+		[10]byte{1, 2, 3, 4, 5, 6},
+		[]string{"yeah", "yeah", "yeah"},
+	}
+
+	var wg sync.WaitGroup
+	for cpu := 0; cpu < runtime.NumCPU(); cpu++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			var buffer bytes.Buffer
+			for i := 0; i < b.N; i++ {
+				buffer.Reset()
+				err := Encode(&buffer, value)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

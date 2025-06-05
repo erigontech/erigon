@@ -22,11 +22,11 @@ import (
 	"math"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/contracts"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
@@ -47,7 +47,7 @@ func main() {
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	cb := contracts.NewJsonRpcBackend(*elUrlFlag, logger)
-	valRegAddr := libcommon.HexToAddress(*valRegAddrFlag)
+	valRegAddr := common.HexToAddress(*valRegAddrFlag)
 	valReg, err := shuttercontracts.NewValidatorRegistry(valRegAddr, cb)
 	if err != nil {
 		panic(err)
@@ -94,7 +94,7 @@ func checkStaticRegistrationMessageFields(
 	logger log.Logger,
 	msg *shutter.AggregateRegistrationMessage,
 	chainID uint64,
-	validatorRegistryAddress libcommon.Address,
+	validatorRegistryAddress common.Address,
 ) bool {
 	if msg.Version != shutter.AggregateValidatorRegistrationMessageVersion &&
 		msg.Version != shutter.LegacyValidatorRegistrationMessageVersion {

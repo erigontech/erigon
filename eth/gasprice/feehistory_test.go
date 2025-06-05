@@ -29,11 +29,14 @@ import (
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
 
 func TestFeeHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	overMaxQuery := make([]float64, 101)
 	for i := 0; i < 101; i++ {

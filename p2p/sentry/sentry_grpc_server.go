@@ -40,7 +40,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -52,13 +52,11 @@ import (
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core/forkid"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/dnsdisc"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/params"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/dnsdisc"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/forkid"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
 const (
@@ -275,18 +273,14 @@ func ConvertH512ToPeerID(h512 *proto_types.H512) [64]byte {
 
 func makeP2PServer(
 	p2pConfig p2p.Config,
-	genesisHash libcommon.Hash,
+	genesisHash common.Hash,
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
-	var urls []string
-	chainConfig := params.ChainConfigByGenesisHash(genesisHash)
-	if chainConfig != nil {
-		urls = params.BootnodeURLsOfChain(chainConfig.ChainName)
-	}
 	if len(p2pConfig.BootstrapNodes) == 0 {
-		bootstrapNodes, err := utils.ParseNodesFromURLs(urls)
+		urls := p2pConfig.LookupBootnodeURLs(genesisHash)
+		bootstrapNodes, err := enode.ParseNodesFromURLs(urls)
 		if err != nil {
-			return nil, fmt.Errorf("bad option %s: %w", utils.BootnodesFlag.Name, err)
+			return nil, fmt.Errorf("bad bootnodes option: %w", err)
 		}
 		p2pConfig.BootstrapNodes = bootstrapNodes
 		p2pConfig.BootstrapNodesV5 = bootstrapNodes
@@ -301,7 +295,7 @@ func handShake(
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
-) (*libcommon.Hash, *p2p.PeerError) {
+) (*common.Hash, *p2p.PeerError) {
 	// Send out own handshake in a new thread
 	errChan := make(chan *p2p.PeerError, 2)
 	resultChan := make(chan *eth.StatusPacket, 1)
@@ -391,7 +385,7 @@ func runPeer(
 				peerPrinted = true
 			}
 		}
-		if err := libcommon.Stopped(ctx.Done()); err != nil {
+		if err := common.Stopped(ctx.Done()); err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.runPeer: context stopped")
 		}
 		if err := peerInfo.RemoveReason(); err != nil {
@@ -771,7 +765,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 	}, ss.logger)
 }
 
-func (ss *GrpcServer) getBlockHeaders(ctx context.Context, bestHash libcommon.Hash, peerID [64]byte) error {
+func (ss *GrpcServer) getBlockHeaders(ctx context.Context, bestHash common.Hash, peerID [64]byte) error {
 	b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
 		RequestId: rand.Uint64(), // nolint: gosec
 		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
@@ -1003,10 +997,10 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 	return reply, nil
 }
 
-func (ss *GrpcServer) startP2PServer(genesisHash libcommon.Hash) (*p2p.Server, error) {
+func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
 		if len(ss.p2p.DiscoveryDNS) == 0 {
-			if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
+			if url := ss.p2p.LookupDNSNetwork(genesisHash, "all"); url != "" {
 				ss.p2p.DiscoveryDNS = []string{url}
 			}
 
@@ -1139,8 +1133,7 @@ func (ss *GrpcServer) PeerById(_ context.Context, req *proto_sentry.PeerByIdRequ
 	return &proto_sentry.PeerByIdReply{Peer: rpcPeer}, nil
 }
 
-// setupDiscovery creates the node discovery source for the `eth` and `snap`
-// protocols.
+// setupDiscovery creates the node discovery source for the `eth` protocol.
 func setupDiscovery(urls []string) (enode.Iterator, error) {
 	if len(urls) == 0 {
 		return nil, nil
