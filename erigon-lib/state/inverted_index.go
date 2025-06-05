@@ -843,8 +843,8 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
-	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
-	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.ii.aggregationStep
+	maxStepInFiles := iit.files.EndTxNum() / iit.aggStep
+	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.aggStep
 	return maxStepInFiles < maxStepInDB
 }
 
@@ -1298,16 +1298,13 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
-	if iit.ii.aggregationStep != iit.aggStep {
-		panic(fmt.Sprintf("assert: aggStep field is idfferent %d, %d", iit.ii.aggregationStep, iit.aggStep))
-	}
 	fst, _ := kv.FirstKey(tx, iit.ii.keysTable)
 	if len(fst) > 0 {
-		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.ii.aggregationStep)
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.aggStep)
 	}
 	lst, _ := kv.LastKey(tx, iit.ii.keysTable)
 	if len(lst) > 0 {
-		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.ii.aggregationStep)
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.aggStep)
 	}
 	if to == 0 {
 		to = from

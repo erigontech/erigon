@@ -642,10 +642,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	fromStep, toStep := startTxNum/iit.ii.aggregationStep, endTxNum/iit.ii.aggregationStep
+	fromStep, toStep := startTxNum/iit.aggStep, endTxNum/iit.aggStep
 
 	datPath := iit.ii.efFilePath(fromStep, toStep)
-	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, iit.ii.CompressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
+	if comp, err = seg.NewCompressor(ctx, iit.ii.filenameBase+".ii.merge", datPath, iit.ii.dirs.Tmp, iit.ii.CompressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", iit.ii.filenameBase, err)
 	}
 	if iit.ii.noFsync {
