@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package seg_test
+package seg
 
 import (
 	"context"
@@ -24,27 +24,26 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
 )
 
-func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression bool) *seg.Decompressor {
+func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression bool) *Decompressor {
 	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	t.Helper()
 	logger, require := log.New(), require.New(t)
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed1")
 	t.Name()
-	cfg := seg.DefaultCfg
+	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 1
-	c, err := seg.NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(err)
 	defer c.Close()
 
-	p := seg.NewPagedWriter(seg.NewWriter(c, seg.CompressNone), pageSize, pageCompression)
+	p := NewPagedWriter(NewWriter(c, CompressNone), pageSize, pageCompression)
 	for k, w := range loremStrings {
 		key := fmt.Sprintf("key %d", k)
 		val := fmt.Sprintf("%s %d", w, k)
@@ -53,18 +52,9 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 	require.NoError(p.Flush())
 	require.NoError(p.Compress())
 
-	d, err := seg.NewDecompressor(file)
+	d, err := NewDecompressor(file)
 	require.NoError(err)
 	return d
-}
-
-const lorem = `lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
-dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
-consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
-excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
-
-func rmNewLine(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
 }
 
 func TestPagedReader(t *testing.T) {
@@ -73,7 +63,7 @@ func TestPagedReader(t *testing.T) {
 	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, false)
 	defer d.Close()
-	g1 := seg.NewPagedReader(d.MakeGetter(), 2, false)
+	g1 := NewPagedReader(d.MakeGetter(), 2, false)
 	var buf []byte
 	_, _, buf, o1 := g1.Next2(buf[:0])
 	require.Zero(o1)
@@ -82,7 +72,7 @@ func TestPagedReader(t *testing.T) {
 	_, _, buf, o1 = g1.Next2(buf[:0])
 	require.NotZero(o1)
 
-	g := seg.NewPagedReader(d.MakeGetter(), 2, false)
+	g := NewPagedReader(d.MakeGetter(), 2, false)
 	i := 0
 	for g.HasNext() {
 		w := loremStrings[i]
@@ -123,7 +113,7 @@ func (w *multyBytesWriter) Reset()           { w.buffer = nil }
 func TestPage(t *testing.T) {
 	buf, require := &multyBytesWriter{}, require.New(t)
 	sampling := 2
-	w := seg.NewPagedWriter(buf, sampling, false)
+	w := NewPagedWriter(buf, sampling, false)
 	for i := 0; i < sampling+1; i++ {
 		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
 		require.NoError(w.Add([]byte(k), []byte(v)))
@@ -131,14 +121,14 @@ func TestPage(t *testing.T) {
 	require.NoError(w.Flush())
 	pages := buf.Bytes()
 	pageNum := 0
-	p1 := &seg.Page{}
+	p1 := &Page{}
 	p1.Reset(pages[0], false)
 
 	iter := 0
 	for i := 0; i < sampling+1; i++ {
 		iter++
 		expectK, expectV := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
-		v, _ := seg.GetFromPage([]byte(expectK), pages[pageNum], nil, false)
+		v, _ := GetFromPage([]byte(expectK), pages[pageNum], nil, false)
 		require.Equal(expectV, string(v), i)
 		require.True(p1.HasNext())
 		k, v := p1.Next()
@@ -156,7 +146,7 @@ func TestPage(t *testing.T) {
 
 func BenchmarkName(b *testing.B) {
 	buf := &multyBytesWriter{}
-	w := seg.NewPagedWriter(buf, 16, false)
+	w := NewPagedWriter(buf, 16, false)
 	for i := 0; i < 16; i++ {
 		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
 	}
@@ -166,7 +156,7 @@ func BenchmarkName(b *testing.B) {
 
 	b.Run("1", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			seg.GetFromPage(k, bts, nil, false)
+			GetFromPage(k, bts, nil, false)
 		}
 	})
 
