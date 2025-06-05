@@ -209,7 +209,7 @@ func ExecV3(ctx context.Context,
 ) (execErr error) {
 	inMemExec := txc.Doms != nil
 	// TODO: e35 doesn't support parallel-exec yet
-	parallel = true //nolint
+	parallel = false //nolint
 
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
