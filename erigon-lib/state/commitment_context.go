@@ -65,10 +65,8 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 func (sdc *SharedDomainsCommitmentContext) Close() {
 	sdc.updates.Close()
 	for i := range sdc.subTtx {
-		if sdc.subTtx[i] == nil {
-			if sdc.subTtx[i].roTtx != nil {
-				sdc.subTtx[i].roTtx.Rollback()
-			}
+		if sdc.subTtx[i] != nil {
+			sdc.subTtx[i].roTtx.Rollback()
 		}
 	}
 }
