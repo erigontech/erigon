@@ -118,7 +118,7 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 
 	h := History{
 		histCfg:       cfg,
-		dirtyFiles:    btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:    btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visibleFiles: []visibleFile{},
 	}
 
