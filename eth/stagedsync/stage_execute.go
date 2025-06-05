@@ -297,6 +297,10 @@ func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *libstate.Shar
 		return err
 	}
 
+	//_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment")
+	//if err != nil {
+	//	return err
+	//}
 	if err := sd.Flush(ctx, tx); err != nil {
 		return err
 	}
