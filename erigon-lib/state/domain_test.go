@@ -1094,7 +1094,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, d := testDbAndDomain(t, log.New())
+
+	maxTx := uint64(10000)
+	db, d := testDbAndDomainOfStep(t, maxTx, log.New())
 	ctx := context.Background()
 	defer d.Close()
 
@@ -1103,8 +1105,6 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer tx.Rollback()
 	dc := d.BeginFilesRo()
 	defer dc.Close()
-	maxTx := uint64(10000)
-	d.aggregationStep = maxTx
 
 	writer := dc.NewWriter()
 	defer writer.Close()

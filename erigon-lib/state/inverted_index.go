@@ -488,15 +488,15 @@ func (w *InvertedIndexBufferedWriter) close() {
 }
 
 func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
-	if iit.ii.aggregationStep != iit.aggStep2 {
-		panic(fmt.Sprintf("assert: %d %d", iit.ii.aggregationStep, iit.aggStep2))
+	if iit.ii.aggregationStep != iit.aggStep {
+		panic(fmt.Sprintf("assert: %d %d", iit.ii.aggregationStep, iit.aggStep))
 	}
 	w := &InvertedIndexBufferedWriter{
 		name:            iit.name,
 		discard:         discard,
 		tmpdir:          tmpdir,
 		filenameBase:    iit.ii.filenameBase,
-		aggregationStep: iit.aggStep2,
+		aggregationStep: iit.aggStep,
 
 		indexKeysTable: iit.ii.keysTable,
 		indexTable:     iit.ii.valuesTable,
@@ -518,12 +518,12 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		}
 	}
 	return &InvertedIndexRoTx{
-		ii:       ii,
-		visible:  ii._visible,
-		files:    files,
-		aggStep2: ii.aggregationStep,
-		name:     ii.name,
-		salt:     ii.salt.Load(),
+		ii:      ii,
+		visible: ii._visible,
+		files:   files,
+		aggStep: ii.aggregationStep,
+		name:    ii.name,
+		salt:    ii.salt.Load(),
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -592,8 +592,8 @@ type InvertedIndexRoTx struct {
 
 	// TODO: retrofit recent optimization in main and reenable the next line
 	// ef *multiencseq.SequenceBuilder // re-usable
-	salt     *uint32
-	aggStep2 uint64
+	salt    *uint32
+	aggStep uint64
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -1298,8 +1298,8 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
-	if iit.ii.aggregationStep != iit.aggStep2 {
-		panic(fmt.Sprintf("assert: aggStep field is idfferent %d, %d", iit.ii.aggregationStep, iit.aggStep2))
+	if iit.ii.aggregationStep != iit.aggStep {
+		panic(fmt.Sprintf("assert: aggStep field is idfferent %d, %d", iit.ii.aggregationStep, iit.aggStep))
 	}
 	fst, _ := kv.FirstKey(tx, iit.ii.keysTable)
 	if len(fst) > 0 {

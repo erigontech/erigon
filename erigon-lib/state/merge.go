@@ -219,8 +219,8 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 //
 // 0-2,2-3: nothing to merge
 func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRange {
-	if iit.ii.aggregationStep != iit.aggStep2 {
-		panic(fmt.Sprintf("assert: aggStep field is idfferent %d, %d", iit.ii.aggregationStep, iit.aggStep2))
+	if iit.ii.aggregationStep != iit.aggStep {
+		panic(fmt.Sprintf("assert: aggStep field is idfferent %d, %d", iit.ii.aggregationStep, iit.aggStep))
 	}
 	var minFound bool
 	var startTxNum, endTxNum uint64
