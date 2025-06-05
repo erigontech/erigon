@@ -19,8 +19,10 @@ package datadir
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/gofrs/flock"
@@ -195,5 +197,38 @@ func CopyFile(from, to string) error {
 		os.Remove(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
+	return nil
+}
+
+func (d Dirs) RenameNewVersions() error {
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !d.IsDir() && strings.HasPrefix(d.Name(), "v1.0-") {
+				newName := strings.Replace(d.Name(), "v1.0-", "v1-", 1)
+				oldPath := path
+				newPath := filepath.Join(filepath.Dir(path), newName)
+
+				if err := os.Rename(oldPath, newPath); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
