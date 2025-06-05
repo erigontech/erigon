@@ -288,6 +288,11 @@ func (p *ConcurrentPatriciaHashed) Reset() {
 	}
 }
 
+func (p *ConcurrentPatriciaHashed) ResetMountContext(ctx PatriciaContext, i uint) {
+	p.mounts[i].ResetContext(ctx)
+	p.ctx[i] = ctx
+}
+
 // Set context for state IO
 func (p *ConcurrentPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	p.root.ctx = ctx

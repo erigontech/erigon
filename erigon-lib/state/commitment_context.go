@@ -29,6 +29,8 @@ type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
 	mainTtx       *TrieContext
 
+	subTtx [16]*TrieContext
+
 	updates      *commitment.Updates
 	patriciaTrie commitment.Trie
 	justRestored atomic.Bool // set to true when commitment trie was just restored from snapshot
@@ -62,6 +64,11 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 
 func (sdc *SharedDomainsCommitmentContext) Close() {
 	sdc.updates.Close()
+	for i := range sdc.subTtx {
+		if sdc.subTtx[i] == nil {
+			sdc.subTtx[i].roTtx.Rollback()
+		}
+	}
 }
 
 func (sdc *SharedDomainsCommitmentContext) Reset() {
@@ -105,6 +112,21 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expected
 	}
 
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetTxn(tx kv.TemporalTx, i uint) {
+	trieCtx := &TrieContext{
+		roTtx:  tx,
+		getter: sdc.sharedDomains.AsGetter(tx),
+		putter: sdc.sharedDomains.AsPutDel(tx),
+
+		stepSize: sdc.sharedDomains.StepSize(),
+	}
+	sdc.subTtx[i] = trieCtx
+	// sdc.patriciaTrie.ResetContext(trieCtx)
+	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
+		sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed).ResetMountContext(trieCtx, i)
+	}
 }
 
 // Evaluates commitment for gathered updates.
