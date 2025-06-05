@@ -134,6 +134,7 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 	if h.version.AccessorVI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
 	}
+	h.InvertedIndex.name = h.name
 
 	return &h, nil
 }

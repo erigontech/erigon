@@ -758,6 +758,10 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	return txs, receipts, nil, nil
 }
 
+func (c *AuRa) TxDependencies(h *types.Header) [][]int {
+	return nil
+}
+
 func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, header *types.Header, syscall consensus.SystemCall) []unAssembledHeader {
 	// commit_block -> aura.build_finality
 	_, _, ok := e.zoomToAfter(chain, er, validators, header.ParentHash, syscall)

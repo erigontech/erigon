@@ -321,6 +321,8 @@ func (p *TxPool) start(ctx context.Context) error {
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
+	sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
+
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
 	coreTx, err := coreDB.BeginTemporalRo(ctx)
@@ -354,6 +356,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	pendingPre := p.pending.Len()
 	defer func() {
+
 		p.logger.Debug("[txpool] New block", "block", block,
 			"unwound", len(unwindTxns.Txns), "mined", len(minedTxns.Txns), "blockBaseFee", baseFee,
 			"pending-pre", pendingPre, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(),
@@ -1874,6 +1877,9 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
 // for a given senderID
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, blockGasLimit uint64, logger log.Logger) {
+
+	sendSenderInfoUpdateToDiagnostics(senderID, senderNonce, senderBalance, blockGasLimit)
+
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
@@ -2646,4 +2652,89 @@ func sendChangeBatchEventToDiagnostics(pool string, event string, orderHashes []
 	diagnostics.Send(diagnostics.PoolChangeBatchEvent{
 		Changes: toRemoveBatch,
 	})
+}
+
+func sendSenderInfoUpdateToDiagnostics(senderID uint64, senderNonce uint64, senderBalance uint256.Int, blockGasLimit uint64) {
+	if !diagnostics.Client().Connected() {
+		return
+	}
+
+	// Send sender info update to diagnostics
+	diagnostics.Send(diagnostics.SenderInfoUpdate{
+		SenderId:      senderID,
+		SenderNonce:   senderNonce,
+		SenderBalance: senderBalance,
+		BlockGasLimit: blockGasLimit,
+	})
+}
+
+func sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns TxnSlots, blockNum uint64, blkTime uint64) {
+	if !diagnostics.Client().Connected() {
+		return
+	}
+
+	blockUpdate := diagnostics.BlockUpdate{
+		MinedTxns:       []diagnostics.DiagTxn{},
+		UnwoundTxns:     []diagnostics.DiagTxn{},
+		UnwoundBlobTxns: []diagnostics.DiagTxn{},
+		BlockNum:        blockNum,
+		BlkTime:         blkTime,
+	}
+
+	minedDiagTxns := make([]diagnostics.DiagTxn, 0)
+	unwindDiagTxns := make([]diagnostics.DiagTxn, 0)
+	unwindBlobDiagTxns := make([]diagnostics.DiagTxn, 0)
+
+	for _, txn := range minedTxns.Txns {
+		minedDiagTxns = append(minedDiagTxns, diagnostics.DiagTxn{
+			IDHash:              hex.EncodeToString(txn.IDHash[:]),
+			SenderID:            txn.SenderID,
+			Size:                txn.Size,
+			Creation:            txn.Creation,
+			DataLen:             txn.DataLen,
+			AccessListAddrCount: txn.AccessListAddrCount,
+			AccessListStorCount: txn.AccessListStorCount,
+			BlobHashes:          txn.BlobHashes,
+			IsLocal:             false,
+			RLP:                 txn.Rlp,
+		})
+	}
+
+	for _, txn := range unwindTxns.Txns {
+		unwindDiagTxns = append(unwindDiagTxns, diagnostics.DiagTxn{
+			IDHash:              hex.EncodeToString(txn.IDHash[:]),
+			SenderID:            txn.SenderID,
+			Size:                txn.Size,
+			Creation:            txn.Creation,
+			DataLen:             txn.DataLen,
+			AccessListAddrCount: txn.AccessListAddrCount,
+			AccessListStorCount: txn.AccessListStorCount,
+			BlobHashes:          txn.BlobHashes,
+			IsLocal:             false,
+			RLP:                 txn.Rlp,
+		})
+	}
+
+	for _, txn := range unwindBlobTxns.Txns {
+		unwindBlobDiagTxns = append(unwindBlobDiagTxns, diagnostics.DiagTxn{
+			IDHash:              hex.EncodeToString(txn.IDHash[:]),
+			SenderID:            txn.SenderID,
+			Size:                txn.Size,
+			Creation:            txn.Creation,
+			DataLen:             txn.DataLen,
+			AccessListAddrCount: txn.AccessListAddrCount,
+			AccessListStorCount: txn.AccessListStorCount,
+			BlobHashes:          txn.BlobHashes,
+			IsLocal:             false,
+			RLP:                 txn.Rlp,
+		})
+	}
+
+	blockUpdate.MinedTxns = minedDiagTxns
+	blockUpdate.UnwoundTxns = unwindDiagTxns
+	blockUpdate.UnwoundBlobTxns = unwindBlobDiagTxns
+	blockUpdate.BlockNum = blockNum
+	blockUpdate.BlkTime = blkTime
+
+	diagnostics.Send(blockUpdate)
 }
