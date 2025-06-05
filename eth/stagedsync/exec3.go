@@ -781,8 +781,8 @@ Loop:
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
-					"block", outputBlockNum.GetValueUint64(), "txNum", inputTxNum,
-					"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
+					"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
+					"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
 					"flush+commitment", t1, "tx.commit", t2, "prune", t3)
 			default:
 			}

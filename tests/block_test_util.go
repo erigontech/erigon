@@ -141,7 +141,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 		return err
 	}
 
-	tx, err := m.DB.BeginRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	if err != nil {
 		return err
 	}
