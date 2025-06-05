@@ -30,12 +30,11 @@ import (
 )
 
 func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression bool) *Decompressor {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	t.Helper()
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger, require := log.New(), require.New(t)
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed1")
-	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 1
