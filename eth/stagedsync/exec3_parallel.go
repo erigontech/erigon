@@ -46,7 +46,7 @@ Can understand if txn failed or OutOfGas - then revert all changes.
 Each parallel-worker have own IntraBlockState.
 IntraBlockState does commit changes to lower-abstraction-level by method `ibs.MakeWriteSet()`
 
-- StateWriterBufferedV3 - txs which executed by parallel workers can conflict with each-other.
+- StateWriterBuffered - txs which executed by parallel workers can conflict with each-other.
 This writer does accumulate updates and then send them to conflict-resolution.
 Until conflict-resolution succeed - none of execution updates must pass to lower-abstraction-level.
 Object TxTask it's just set of small buffers (readset + writeset) for each transaction.
@@ -930,10 +930,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	maxValidated := be.validateTasks.maxComplete()
 
 	var applyResult txResult
-	var stateWriter *state.StateWriterBufferedV3
+	var stateWriter *state.StateWriterBuffered
 
 	if be.finalizeTasks.minPending() != -1 {
-		stateWriter = state.NewStateWriterBufferedV3(pe.rs, nil)
+		stateWriter = state.NewStateWriterBuffered(pe.rs, nil)
 		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
 
 		applyResult = txResult{
@@ -1340,7 +1340,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						return nil, fmt.Errorf("can't finalize block: %w", err)
 					}
 
-					stateWriter := state.NewStateWriterBufferedV3(pe.rs, nil)
+					stateWriter := state.NewStateWriterBuffered(pe.rs, nil)
 
 					if err = ibs.MakeWriteSet(pe.cfg.chainConfig.Rules(result.BlockNumber(), result.BlockTime()), stateWriter); err != nil {
 						return nil, err
