@@ -465,9 +465,11 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
+	fmt.Println("flushDiffSet", len(sd.pastChangesAccumulator))
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
+		fmt.Println("flushDiffSet", blockNum, blockHash)
 		if err := WriteDiffSet(tx, blockNum, blockHash, changeset); err != nil {
 			return err
 		}

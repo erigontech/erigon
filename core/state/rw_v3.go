@@ -74,6 +74,7 @@ func (rs *StateV3) applyState(roTx kv.Tx, txNum uint64, writeLists map[string]*s
 			}
 
 			for i, key := range list.Keys {
+				fmt.Printf("applyState: Write: %x", key)
 				if list.Vals[i] == nil {
 					if err := domains.DomainDel(domain, roTx, []byte(key), txNum, nil, 0); err != nil {
 						return err
@@ -319,8 +320,8 @@ func (s *StateV3Buffered) WithDomains(domains *state.SharedDomains) *StateV3Buff
 	}
 }
 
-// StateWriterBuffered - used by parallel workers to accumulate updates and then send them to conflict-resolution.
-type StateWriterBuffered struct {
+// BufferedWriter - used by parallel workers to accumulate updates and then send them to conflict-resolution.
+type BufferedWriter struct {
 	rs           *StateV3Buffered
 	trace        bool
 	writeLists   map[string]*state.KvList
@@ -332,8 +333,8 @@ type StateWriterBuffered struct {
 	txNum        uint64
 }
 
-func NewStateWriterBuffered(rs *StateV3Buffered, accumulator *shards.Accumulator) *StateWriterBuffered {
-	return &StateWriterBuffered{
+func NewBufferedWriter(rs *StateV3Buffered, accumulator *shards.Accumulator) *BufferedWriter {
+	return &BufferedWriter{
 		rs:          rs,
 		writeLists:  newWriteList(),
 		accumulator: accumulator,
@@ -341,13 +342,13 @@ func NewStateWriterBuffered(rs *StateV3Buffered, accumulator *shards.Accumulator
 	}
 }
 
-func (w *StateWriterBuffered) SetTxNum(ctx context.Context, txNum uint64) {
+func (w *BufferedWriter) SetTxNum(ctx context.Context, txNum uint64) {
 	w.txNum = txNum
 	w.rs.domains.SetTxNum(txNum)
 }
-func (w *StateWriterBuffered) SetTx(tx kv.Tx) {}
+func (w *BufferedWriter) SetTx(tx kv.Tx) {}
 
-func (w *StateWriterBuffered) ResetWriteSet() {
+func (w *BufferedWriter) ResetWriteSet() {
 	w.writeLists = newWriteList()
 	w.accountPrevs = nil
 	w.accountDels = nil
@@ -355,17 +356,17 @@ func (w *StateWriterBuffered) ResetWriteSet() {
 	w.codePrevs = nil
 }
 
-func (w *StateWriterBuffered) WriteSet() map[string]*state.KvList {
+func (w *BufferedWriter) WriteSet() map[string]*state.KvList {
 	return w.writeLists
 }
 
-func (w *StateWriterBuffered) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+func (w *BufferedWriter) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
-func (w *StateWriterBuffered) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (w *BufferedWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	//if w.trace {
-	fmt.Printf("StateWriterBuffered: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+	fmt.Printf("BufferedWriter: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	//}
 	value := accounts.SerialiseV3(account)
 	if w.accumulator != nil {
@@ -392,7 +393,7 @@ func (w *StateWriterBuffered) UpdateAccountData(address common.Address, original
 	return nil
 }
 
-func (w *StateWriterBuffered) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *BufferedWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
@@ -413,7 +414,7 @@ func (w *StateWriterBuffered) UpdateAccountCode(address common.Address, incarnat
 	return nil
 }
 
-func (w *StateWriterBuffered) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (w *BufferedWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
@@ -427,7 +428,7 @@ func (w *StateWriterBuffered) DeleteAccount(address common.Address, original *ac
 	return nil
 }
 
-func (w *StateWriterBuffered) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -457,7 +458,7 @@ func (w *StateWriterBuffered) WriteAccountStorage(address common.Address, incarn
 	return nil
 }
 
-func (w *StateWriterBuffered) CreateContract(address common.Address) error {
+func (w *BufferedWriter) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
