@@ -108,19 +108,16 @@ func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() 
 
 func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.aggStep }
 func (ht *HistoryRoTx) FirstStepNotInFiles() uint64 {
-	return ht.files.EndTxNum() / ht.h.aggregationStep
+	return ht.files.EndTxNum() / ht.aggStep
 }
 func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
-	return iit.files.EndTxNum() / iit.ii.aggregationStep
+	return iit.files.EndTxNum() / iit.aggStep
 }
 
 // findMergeRange
 // make merge determenistic across nodes: even if Node has much small files - do earliest-first merges
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
-	if dt.d.aggregationStep != dt.aggStep {
-		panic(fmt.Sprintf("assert: aggStep field is idfferent %d, %d", dt.d.aggregationStep, dt.aggStep))
-	}
 	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
 
 	r := DomainRanges{
@@ -136,29 +133,19 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := spanStep * dt.aggStep
 		fromTxNum := item.endTxNum - span
-		if fromTxNum < item.startTxNum {
-			if !r.values.needMerge || fromTxNum < r.values.from {
-				r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
-			}
+		if fromTxNum >= item.startTxNum {
+			continue
+		}
+		if r.values.needMerge && fromTxNum >= r.values.from { //skip small files inside `span`
+			continue
 		}
 
-		//if fromTxNum >= item.startTxNum {
-		//	continue
-		//}
-		//if r.values.needMerge && fromTxNum >= r.values.from { //skip small files inside `span`
-		//	continue
-		//}
-		//
-		//r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
+		r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 	}
 	return r
 }
 
 func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
-	if ht.h.aggregationStep != ht.aggStep {
-		panic(fmt.Sprintf("assert: aggStep field is idfferent %d, %d", ht.h.aggregationStep, ht.aggStep))
-	}
-
 	var r HistoryRanges
 	mr := ht.iit.findMergeRange(maxEndTxNum, maxSpan)
 	r.index = *mr
@@ -167,31 +154,23 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		endStep := item.endTxNum / ht.h.aggregationStep
+		endStep := item.endTxNum / ht.aggStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := min(spanStep*ht.h.aggregationStep, maxSpan)
+		span := min(spanStep*ht.aggStep, maxSpan)
 		startTxNum := item.endTxNum - span
 
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
 		if foundSuperSet {
 			r.history = MergeRange{from: startTxNum, to: item.endTxNum}
-		} else if startTxNum < item.startTxNum {
-			if !r.history.needMerge || startTxNum < r.history.from {
-				r.history = MergeRange{"", true, startTxNum, item.endTxNum}
-			}
+			continue
 		}
-
-		//if foundSuperSet {
-		//	r.history = MergeRange{from: startTxNum, to: item.endTxNum}
-		//	continue
-		//}
-		//if startTxNum >= item.startTxNum {
-		//	continue
-		//}
-		//if r.history.needMerge && startTxNum >= r.history.from {
-		//	continue
-		//}
-		//r.history = MergeRange{"", true, startTxNum, item.endTxNum}
+		if startTxNum >= item.startTxNum {
+			continue
+		}
+		if r.history.needMerge && startTxNum >= r.history.from {
+			continue
+		}
+		r.history = MergeRange{"", true, startTxNum, item.endTxNum}
 	}
 
 	if r.history.needMerge && r.index.needMerge {
@@ -237,29 +216,17 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 			minFound = false
 			startTxNum = start
 			endTxNum = item.endTxNum
-		} else if start < item.startTxNum {
-			if !minFound || start < startTxNum {
-				minFound = true
-				startTxNum = start
-				endTxNum = item.endTxNum
-			}
+			continue
 		}
-		//
-		//if foundSuperSet {
-		//	minFound = false
-		//	startTxNum = start
-		//	endTxNum = item.endTxNum
-		//	continue
-		//}
-		//if start >= item.startTxNum {
-		//	continue
-		//}
-		//if minFound && start >= startTxNum {
-		//	continue
-		//}
-		//minFound = true
-		//startTxNum = start
-		//endTxNum = item.endTxNum
+		if start >= item.startTxNum {
+			continue
+		}
+		if minFound && start >= startTxNum {
+			continue
+		}
+		minFound = true
+		startTxNum = start
+		endTxNum = item.endTxNum
 	}
 	return &MergeRange{iit.name.String(), minFound, startTxNum, endTxNum}
 }
@@ -908,7 +875,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.filenameBase, err)
 		}
 		historyIn = newFilesItem(r.history.from, r.history.to, ht.aggStep)
-		historyIn = newFilesItem(r.history.from, r.history.to, ht.h.aggregationStep)
 		historyIn.decompressor = decomp
 		historyIn.index = index
 
