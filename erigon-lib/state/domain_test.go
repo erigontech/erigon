@@ -840,9 +840,8 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	logger := log.New()
 	keysCount, txCount := uint64(16), uint64(64)
 
-	db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomainOfStep(t, 16, logger)
 	ctx := context.Background()
-	d.aggregationStep = 16
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -1183,18 +1182,15 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
 	t.Parallel()
 
-	db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomainOfStep(t, 20, log.New())
 	defer db.Close()
 	defer d.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-
-	d.aggregationStep = 20
 
 	keys, vals := generateInputData(t, 8, 4, 100)
 	keys = keys[:20]
@@ -2056,13 +2052,11 @@ func TestDomain_Unwind(t *testing.T) {
 
 	t.Parallel()
 
-	db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomainOfStep(t, 16, log.New())
 	defer d.Close()
 	defer db.Close()
 	ctx := context.Background()
 
-	d.aggregationStep = 16
-	//maxTx := uint64(float64(d.aggregationStep) * 1.5)
 	maxTx := d.aggregationStep - 2
 	currTx := maxTx - 1
 	diffSetMap := map[uint64][]kv.DomainEntryDiff{}
@@ -2320,8 +2314,6 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		ctx := context.Background()
 
-		d.aggregationStep = stepSize
-
 		dc := d.BeginFilesRo()
 		defer dc.Close()
 		tx, err := db.BeginRw(ctx)
@@ -2400,11 +2392,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 	}
 
 	t.Run("simple history inside 1step", func(t *testing.T) {
-		db, d := testDbAndDomain(t, log.New())
-		defer db.Close()
-		defer d.Close()
-
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(13), uint64(17)
+		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
 		dc := d.BeginFilesRo()
@@ -2415,11 +2404,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 	})
 
 	t.Run("simple history between 2 steps", func(t *testing.T) {
-		db, d := testDbAndDomain(t, log.New())
-		defer db.Close()
-		defer d.Close()
-
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(8), uint64(17)
+		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
 		dc := d.BeginFilesRo()
@@ -2430,11 +2416,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 	})
 
 	t.Run("simple prune whole step", func(t *testing.T) {
-		db, d := testDbAndDomain(t, log.New())
-		defer db.Close()
-		defer d.Close()
-
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(10)
+		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
 		ctx := context.Background()
@@ -2473,11 +2456,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 	})
 
 	t.Run("simple history discard", func(t *testing.T) {
-		db, d := testDbAndDomain(t, log.New())
-		defer db.Close()
-		defer d.Close()
-
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(20)
+		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
 		writeOneKey(t, d, db, 2*stepSize, stepSize)
 
 		dc := d.BeginFilesRo()
