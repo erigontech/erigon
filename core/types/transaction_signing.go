@@ -87,6 +87,43 @@ func MakeSignerArb(config *chain.Config, blockNumber, blockTime, arbosVersion ui
 	return &signer
 }
 
+func NewLondonSigner(chainID *big.Int) *Signer {
+	var signer Signer
+	signer.unprotected = true
+	if chainID == nil {
+		return &signer
+	}
+	chainId, overflow := uint256.FromBig(chainID)
+	if overflow {
+		panic("chainID higher than 2^256-1")
+	}
+	signer.chainID.Set(chainId)
+	signer.chainIDMul.Mul(chainId, u256.Num2)
+	signer.protected = true
+	signer.accessList = true
+	signer.dynamicFee = true
+	return &signer
+}
+
+func NewCancunSigner(chainID *big.Int) *Signer {
+	var signer Signer
+	signer.unprotected = true
+	if chainID == nil {
+		return &signer
+	}
+	chainId, overflow := uint256.FromBig(chainID)
+	if overflow {
+		panic("chainID higher than 2^256-1")
+	}
+	signer.chainID.Set(chainId)
+	signer.chainIDMul.Mul(chainId, u256.Num2)
+	signer.protected = true
+	signer.accessList = true
+	signer.dynamicFee = true
+	signer.blob = true
+	return &signer
+}
+
 // MakeSigner returns a Signer based on the given chain config and block number.
 func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Signer {
 	ignoredVersion := uint64(0)
