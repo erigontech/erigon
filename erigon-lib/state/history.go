@@ -972,13 +972,13 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 }
 
 func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
-	if !strings.HasSuffix(f.FileName(), ".v") {
+	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
 func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
-	if !strings.HasSuffix(f.FileName(), ".v") {
+	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
 	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), h.historyValuesOnCompressedPage, true)

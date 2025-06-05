@@ -1648,13 +1648,13 @@ func (dt *DomainRoTx) reusableReader(i int) *seg.Reader {
 }
 
 func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
-	if !strings.HasSuffix(f.FileName(), ".kv") {
+	if !strings.Contains(f.FileName(), ".kv") {
 		panic("assert: miss-use " + f.FileName())
 	}
 	return seg.NewReader(f.MakeGetter(), d.Compression)
 }
 func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
-	if !strings.HasSuffix(f.FileName(), ".kv") {
+	if !strings.Contains(f.FileName(), ".kv") {
 		panic("assert: miss-use " + f.FileName())
 	}
 	if forceNoCompress {
