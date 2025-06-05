@@ -64,6 +64,7 @@ type callLog struct {
 	Address common.Address `json:"address"`
 	Topics  []common.Hash  `json:"topics"`
 	Data    hexutil.Bytes  `json:"data"`
+        Position hexutil.Uint   `json:"position"`
 }
 
 // callTrace is the result of a callTracer run.
