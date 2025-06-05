@@ -222,7 +222,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas.SetFromBig(args.MaxFeePerBlobGas.ToInt())
+			maxFeePerBlobGas = uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt())
 		}
 	}
 	value := new(uint256.Int)
