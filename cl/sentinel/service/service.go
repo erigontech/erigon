@@ -133,6 +133,11 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 				return nil, errors.New("subnetId is required for beacon attestation")
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameBeaconAttestation(*msg.SubnetId))
+		case gossip.IsTopicDataColumnSidecar(msg.Name):
+			if msg.SubnetId == nil {
+				return nil, errors.New("subnetId is required for data column sidecar")
+			}
+			subscription = manager.GetMatchingSubscription(gossip.TopicNameDataColumnSidecar(*msg.SubnetId))
 		default:
 			return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
 		}
