@@ -16,7 +16,11 @@
 
 package snaptype
 
-import "github.com/erigontech/erigon-lib/version"
+import (
+	"fmt"
+
+	"github.com/erigontech/erigon-lib/version"
+)
 
 var (
 	BeaconBlocks = snapType{
@@ -45,6 +49,7 @@ func IsCaplinType(t Enum) bool {
 
 	for _, ct := range CaplinSnapshotTypes {
 		if t == ct.Enum() {
+			fmt.Println("voila")
 			return true
 		}
 	}
