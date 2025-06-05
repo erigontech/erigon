@@ -369,7 +369,16 @@ func sequencingBatchStep(
 			select {
 			case <-blockTimer.C:
 				if !batchState.isAnyRecovery() {
-					break OuterLoopTransactions
+					// no transactions or the block seal time is equal to the empty block seal time
+					// break here to avoid log noise
+					if len(batchState.blockState.builtBlockElements.transactions) > 0 ||
+						cfg.zk.SequencerBlockSealTime == cfg.zk.SequencerEmptyBlockSealTime {
+						break OuterLoopTransactions
+					} else {
+						log.Info(fmt.Sprintf("[%s] Block timeout reached with no transactions processed", logPrefix))
+						blockTimer.Stop()
+						blockTimer.Reset(cfg.zk.SequencerBlockSealTime)
+					}
 				}
 			default:
 			}
@@ -377,6 +386,8 @@ func sequencingBatchStep(
 			select {
 			case <-emptyBlockTimer.C:
 				if len(batchState.blockState.builtBlockElements.transactions) == 0 && !batchState.isAnyRecovery() {
+					log.Info(fmt.Sprintf("[%s] Empty block timeout reached with no transactions processed", logPrefix))
+					emptyBlockTimer.Stop()
 					break OuterLoopTransactions
 				}
 			default:

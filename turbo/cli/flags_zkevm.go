@@ -101,6 +101,9 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		if err != nil {
 			panic(fmt.Sprintf("could not parse sequencer empty block seal time timeout value %s", sequencerEmptyBlockSealTimeVal))
 		}
+		if sequencerEmptyBlockSealTime < sequencerBlockSealTime {
+			panic(fmt.Sprintf("sequencer empty block seal time (%s) must be greater than or equal to sequencer block seal time (%s)", sequencerEmptyBlockSealTime, sequencerBlockSealTime))
+		}
 	}
 
 	sequencerBatchSealTimeVal := ctx.String(utils.SequencerBatchSealTime.Name)
