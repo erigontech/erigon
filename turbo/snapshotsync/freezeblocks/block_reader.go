@@ -1543,8 +1543,9 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 
 func TxBlockIndexFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.TxBlockIndex {
 	return &txBlockIndexWithBlockReader{
-		r:   r,
-		ctx: ctx,
+		r:     r,
+		ctx:   ctx,
+		cache: NewBlockTxNumLookupCache(),
 	}
 }
 
