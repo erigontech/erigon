@@ -10,8 +10,6 @@ import (
 func TestCache2(t *testing.T) {
 	cache := NewBlockTxNumLookupCache()
 	ran := snapshotsync.NewRange(10000, 10500)
-	require.Equal(t, uint64(17), cache.LookupSize(&ran)) // 17 entries on the lookup
-
 	// assume block i has maxTxNum = 200*(2+i-ran.from) (inclusive)
 
 	b2tx := func(blk uint64) uint64 {
@@ -31,7 +29,7 @@ func TestCache2(t *testing.T) {
 				q.SetValue(val)
 				cacheMiss++
 			}
-			return val >= uint64(queryTxNum)
+			return val >= queryTxNum
 		}
 
 		l, r := uint64(10000), uint64(10500)

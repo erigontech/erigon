@@ -1666,5 +1666,5 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 	}
 	//fmt.Printf("[BlockReader.BlockNumber] found block %d for txNum %d in file [%d-%d) touched file %d\n", i, txNum, ran.From(), ran.To(), count)
 
-	return uint64(i), true, nil
+	return i, true, nil
 }
