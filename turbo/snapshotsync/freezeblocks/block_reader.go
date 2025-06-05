@@ -1549,8 +1549,9 @@ func TxBlockIndexFromBlockReader(ctx context.Context, r services.FullBlockReader
 }
 
 type txBlockIndexWithBlockReader struct {
-	r   services.FullBlockReader
-	ctx context.Context
+	r     services.FullBlockReader
+	ctx   context.Context
+	cache *BlockTxNumLookupCache
 }
 
 func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
@@ -1574,90 +1575,95 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum u
 }
 
 func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
-	// search in snapshots
-	// using txNum, find block range where snapshot can be
-	// Idea 1:
-	// then bin search on the block.seg file...
-
-	// Idea 2:
-	// then use txnHashIdx + transactions.seg to find the txHash
-	// then use txHash and txn2BlockId index to return blockNum..
-	// Idea 2.1:
-	// alternate way to do this was to enable Enums=true in txn2BlockId index...
-	// then we get directly get blocNum from txNum... (without touch txs.seg)
-	// not going ahead with this, because: https://github.com/erigontech/erigon/pull/15398#pullrequestreview-2895771186
-
 	var buf []byte
+	var b *types.BodyForStorage
 	view := t.r.Snapshots().(*RoSnapshots).View()
 	defer view.Close()
 
-	txSegs := view.Txs()
-	if len(txSegs) > 0 {
-		txnHashIdx := txSegs[len(txSegs)-1].Src().Index(coresnaptype.Indexes.TxnHash)
-		endTxNum := txnHashIdx.BaseDataID() + txnHashIdx.KeyCount()
-		if endTxNum <= txNum {
-			goto DB_SEARCH
-		}
-	}
-	for _, txSeg := range txSegs {
-		txnHashIdx := txSeg.Src().Index(coresnaptype.Indexes.TxnHash)
-		startTxNum := txnHashIdx.BaseDataID()
-		endTxNum := startTxNum + txnHashIdx.KeyCount()
-		if txNum >= endTxNum {
-			continue
-		}
-		if txNum < startTxNum {
-			break
-		}
-		// bin search on bodies.seg
-		bfrom, bto := txSeg.From(), txSeg.To()
-		blockSeg, ok := view.BodiesSegment(bfrom)
-		if !ok {
-			return 0, false, fmt.Errorf("BlockReader.BlockNumber: found txSeg, but no blockSeg: %d-%d", bfrom, bto)
-		}
-		var b *types.BodyForStorage
-		count := 0
-		blockNum = uint64(sort.Search(int(bto), func(i int) bool {
-			if err != nil {
-				return true
-			}
-			if uint64(i) < bfrom {
-				return false
-			}
-			count++
-			b, buf, err = bodyForStorageFromSnapshot(uint64(i), blockSeg, buf)
-			if err != nil {
-				return true
-			}
-			if b == nil {
-				err = fmt.Errorf("BlockReader.BlockNumber: empty block: %d in file bodies.seg(%d-%d)", i, bfrom, bto)
-				return true
-			}
-
-			fmt.Println("BlockReader.BlockNumber: ", b.BaseTxnID.U64()+uint64(b.TxCount)-1, txNum)
-
-			return b.BaseTxnID.U64()+uint64(b.TxCount)-1 >= txNum
-		}))
-
-		fmt.Printf("searching for txNum=%d in bodies.seg(%d-%d) gives readcnt=%d\n", txNum, bfrom/1000, bto/1000, count)
-
+	getMaxTxNum := func(i int, seg *snapshotsync.VisibleSegment) (uint64, error) {
+		b, buf, err = bodyForStorageFromSnapshot(uint64(i), seg, buf)
 		if err != nil {
-			return 0, false, err
+			return 0, err
+		}
+		if b == nil {
+			return 0, fmt.Errorf("BlockReader.BlockNumber: empty block: %d in file bodies.seg(%d-%d)", i, seg.From(), seg.To())
+		}
+		return b.BaseTxnID.U64() + uint64(b.TxCount) - 1, nil
+	}
+
+	// find the file
+	bodies := view.Bodies()
+	cache := t.cache
+	blockIndex := sort.Search(len(bodies), func(i int) bool {
+		if err != nil {
+			return true
+		}
+		seg := bodies[i]
+		ran := seg.Range
+		query := cache.NewQuery(ran)
+		maxTxNum, ok := query.Last()
+		if !ok {
+			maxTxNum, err = getMaxTxNum(int(ran.To())-1, seg)
+			if err != nil {
+				return true
+			}
+			query.SetLast(maxTxNum)
 		}
 
-		return blockNum, true, nil
-	}
+		return maxTxNum >= txNum
+	})
 
-DB_SEARCH:
-	blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(tx, txNum)
 	if err != nil {
-		return
-	}
-	r := t.r
-	if ok || r == nil {
-		return
+		return 0, false, err
 	}
 
-	return 0, false, nil
+	if blockIndex == len(bodies) {
+		// not in snapshots
+		blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(tx, txNum)
+		if err != nil {
+			return
+		}
+		r := t.r
+		if ok || r == nil {
+			return
+		}
 
+		return 0, false, nil
+	}
+
+	seg := bodies[blockIndex]
+	ran := seg.Range
+	i, j := ran.From(), ran.To()
+	query := cache.NewQuery(ran)
+	//var maxTxNum uint64
+	for i < j {
+		h := (i + j) >> 1
+		maxTxNum, ok, exhaust := query.GetValue()
+		if exhaust || !ok {
+			maxTxNum, err = getMaxTxNum(int(h), seg)
+			if err != nil {
+				return 0, false, err
+			}
+		}
+
+		if !ok {
+			query.SetValue(maxTxNum)
+		}
+
+		if maxTxNum >= txNum {
+			// left
+			j = h
+			query.Left()
+		} else {
+			// right
+			i = h + 1
+			query.Right()
+		}
+	}
+	// should find the block
+	if i >= ran.To() {
+		return 0, false, fmt.Errorf("BlockReader.BlockNumber: not found block: %d in file (%d-%d), searching for %d", i, ran.From(), ran.To(), txNum)
+	}
+
+	return uint64(i), true, nil
 }
