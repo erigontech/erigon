@@ -37,6 +37,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
+	fmt.Printf("[dbg1] tmpDir: %s\n", tmpDir)
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
 	cfg := DefaultCfg
@@ -59,33 +60,6 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
-	return d
-}
-
-func prepareLoremDictOnPagedWriter(t *testing.T, sampling int, pageCompression bool) *Decompressor {
-	t.Helper()
-	logger, require := log.New(), require.New(t)
-	tmpDir := t.TempDir()
-	file := filepath.Join(tmpDir, "compressed")
-	t.Name()
-	cfg := DefaultCfg
-	cfg.MinPatternScore = 1
-	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
-	require.NoError(err)
-	defer c.Close()
-
-	p := NewPagedWriter(NewWriter(c, CompressNone), sampling, pageCompression)
-	for k, w := range loremStrings {
-		key := fmt.Sprintf("key %d", k)
-		val := fmt.Sprintf("%s %d", w, k)
-		require.NoError(p.Add([]byte(key), []byte(val)))
-	}
-	require.NoError(p.Flush())
-	require.NoError(p.Compress())
-
-	d, err := NewDecompressor(file)
-	require.NoError(err)
 	return d
 }
 
@@ -167,6 +141,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
+	fmt.Printf("[dbg3] tmpDir: %s\n", tmpDir)
 	file := filepath.Join(tmpDir, "compressed2")
 	t.Name()
 	cfg := DefaultCfg
@@ -284,6 +259,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
+	fmt.Printf("[dbg4] tmpDir: %s\n", tmpDir)
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
 	cfg := DefaultCfg
@@ -375,6 +351,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
+	fmt.Printf("[dbg5] tmpDir: %s\n", tmpDir)
 
 	t.Run("uncompressed", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "unc")
@@ -603,6 +580,7 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
+	fmt.Printf("[dbg6] tmpDir: %s\n", tmpDir)
 	file := filepath.Join(tmpDir, "complex")
 	t.Name()
 	cfg := DefaultCfg
