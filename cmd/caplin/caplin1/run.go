@@ -320,6 +320,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
+	dataColumnSidecarService := services.NewDataColumnSidecarService(beaconConfig, ethClock, forkChoice, syncedDataManager)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, false)
@@ -334,7 +335,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	// Create the gossip manager
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, networkConfig, ethClock, emitters, committeeSub,
-		blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService,
+		blockService, blobService, dataColumnSidecarService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService,
 		attestationService, voluntaryExitService, blsToExecutionChangeService, proposerSlashingService)
 	{ // start ticking forkChoice
 		go func() {

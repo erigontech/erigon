@@ -58,6 +58,7 @@ type GossipManager struct {
 	// Services for processing messages from the network
 	blockService                 services.BlockService
 	blobService                  services.BlobSidecarsService
+	dataColumnSidecarService     services.DataColumnSidecarService
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService
 	syncContributionService      services.SyncContributionService
 	aggregateAndProofService     services.AggregateAndProofService
@@ -78,6 +79,7 @@ func NewGossipReceiver(
 	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
 	blockService services.BlockService,
 	blobService services.BlobSidecarsService,
+	dataColumnSidecarService services.DataColumnSidecarService,
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionService services.SyncContributionService,
 	aggregateAndProofService services.AggregateAndProofService,
@@ -96,6 +98,7 @@ func NewGossipReceiver(
 		committeeSub:                 comitteeSub,
 		blockService:                 blockService,
 		blobService:                  blobService,
+		dataColumnSidecarService:     dataColumnSidecarService,
 		syncCommitteeMessagesService: syncCommitteeMessagesService,
 		syncContributionService:      syncContributionService,
 		aggregateAndProofService:     aggregateAndProofService,
@@ -238,6 +241,13 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			defer log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 			// The background checks above are enough for now.
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
+		case gossip.IsTopicDataColumnSidecar(data.Name):
+			// decode sidecar
+			dataColumnSidecar := &cltypes.DataColumnSidecar{}
+			if err := dataColumnSidecar.DecodeSSZ(data.Data, int(version)); err != nil {
+				return err
+			}
+			return g.dataColumnSidecarService.ProcessMessage(ctx, data.SubnetId, dataColumnSidecar)
 		case gossip.IsTopicSyncCommittee(data.Name):
 			obj := &services.SyncCommitteeMessageForGossip{
 				Receiver:             copyOfPeerData(data),
@@ -318,7 +328,10 @@ func (g *GossipManager) Start(ctx context.Context) {
 
 	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
 		// Skip processing the received data if the node is not ready to process operations.
-		if !g.isReadyToProcessOperations() && data.Name != gossip.TopicNameBeaconBlock && !gossip.IsTopicBlobSidecar(data.Name) {
+		if !g.isReadyToProcessOperations() &&
+			data.Name != gossip.TopicNameBeaconBlock &&
+			!gossip.IsTopicBlobSidecar(data.Name) &&
+			!gossip.IsTopicDataColumnSidecar(data.Name) {
 			return
 		}
 		select {
