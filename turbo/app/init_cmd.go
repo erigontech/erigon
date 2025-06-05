@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"os"
 	"runtime/pprof"
+	"strconv"
 
 	"github.com/urfave/cli/v2"
 
@@ -101,7 +102,7 @@ func initGenesis(cliCtx *cli.Context) error {
 	// Use streaming for files larger than 100MB
 	if fileInfo.Size() > 100*1024*1024 {
 		logger.Info("Using streaming JSON parser for large genesis file", "size", fileInfo.Size())
-		if err := decodeGenesisStreaming(file, genesis); err != nil {
+		if err := decodeGenesisStreaming(file, genesis, logger); err != nil {
 			utils.Fatalf("invalid genesis file: %v", err)
 		}
 	} else {
@@ -110,13 +111,13 @@ func initGenesis(cliCtx *cli.Context) error {
 		}
 	}
 	// TODO:DEBUG:record final allocation profile
-	if allocFile, err := os.Create("initgenesis_alloc_final.prof"); err == nil {
-		pprof.Lookup("allocs").WriteTo(allocFile, 0)
-		allocFile.Close()
-		logger.Info("Allocation profile saved", "stage", "final", "file", "initgenesis_alloc_final.prof")
-	}
-	//TODO: just test json decode to save time
-	return nil
+	// if allocFile, err := os.Create("initgenesis_alloc_final.prof"); err == nil {
+	// 	pprof.Lookup("allocs").WriteTo(allocFile, 0)
+	// 	allocFile.Close()
+	// 	logger.Info("Allocation profile saved", "stage", "final", "file", "initgenesis_alloc_final.prof")
+	// }
+	// //TODO: just test json decode to save time
+	// return nil
 
 	// Open and initialise both full and light databases
 	stack, err := MakeNodeWithDefaultConfig(cliCtx, logger)
@@ -152,7 +153,7 @@ func initGenesis(cliCtx *cli.Context) error {
 }
 
 // decodeGenesisStreaming decodes a large genesis file using streaming to reduce memory usage
-func decodeGenesisStreaming(r io.Reader, genesis *types.Genesis) error {
+func decodeGenesisStreaming(r io.Reader, genesis *types.Genesis, logger log.Logger) error {
 	// Create a buffered reader for efficient reading
 	bufReader := bufio.NewReaderSize(r, 1024*1024) // 1MB buffer
 
@@ -252,7 +253,7 @@ func decodeGenesisStreaming(r io.Reader, genesis *types.Genesis) error {
 
 		case "alloc":
 			// Parse the alloc section with streaming
-			if err := parseAllocStreaming(decoder, genesis.Alloc); err != nil {
+			if err := parseAllocStreaming(decoder, genesis.Alloc, logger); err != nil {
 				return fmt.Errorf("failed to parse alloc: %w", err)
 			}
 
@@ -278,7 +279,7 @@ func decodeGenesisStreaming(r io.Reader, genesis *types.Genesis) error {
 }
 
 // parseAllocStreaming parses the alloc section of genesis file entry by entry
-func parseAllocStreaming(decoder *json.Decoder, alloc types.GenesisAlloc) error {
+func parseAllocStreaming(decoder *json.Decoder, alloc types.GenesisAlloc, logger log.Logger) error {
 	// Expect opening brace
 	token, err := decoder.Token()
 	if err != nil {
@@ -302,25 +303,22 @@ func parseAllocStreaming(decoder *json.Decoder, alloc types.GenesisAlloc) error 
 		}
 
 		// Parse address
-		var addr common.Address
-		if has0xPrefix(addrStr) {
-			addr = common.HexToAddress(addrStr)
-		} else {
-			addr = common.HexToAddress("0x" + addrStr)
-		}
+		addr := common.HexToAddress(addrStr)
 
-		// Decode the account
-		var account types.GenesisAccount
-		if err := decoder.Decode(&account); err != nil {
+		// Parse the account manually to avoid reflection
+		account, err := parseGenesisAccountStreaming(decoder, logger)
+		if err != nil {
 			return err
 		}
 
 		alloc[addr] = account
 
-		// TODO:GC Force garbage collection periodically to keep memory usage low
-		// if len(alloc)%10000 == 0 {
-		// 	runtime.GC()
-		// }
+		// TODO:Force garbage collection periodically to keep memory usage low during large genesis parsing
+		if len(alloc)%1000000 == 0 {
+			logger.Info("Processed accounts", "count", len(alloc))
+			// Uncomment the line below if memory usage is still too high
+			// runtime.GC()
+		}
 	}
 
 	// Expect closing brace
@@ -341,27 +339,159 @@ func has0xPrefix(str string) bool {
 
 // Helper functions for parsing hex values
 func parseUint64(s string) uint64 {
-	if s == "" || s == "0x0" {
+	if s == "" {
 		return 0
 	}
-	// Remove 0x prefix if present
-	if has0xPrefix(s) {
-		s = s[2:]
+
+	// Use the same logic as math.ParseUint64
+	if len(s) >= 2 && (s[:2] == "0x" || s[:2] == "0X") {
+		v, err := strconv.ParseUint(s[2:], 16, 64)
+		if err != nil {
+			return 0
+		}
+		return v
 	}
-	var val uint64
-	fmt.Sscanf(s, "%x", &val)
-	return val
+
+	v, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 func parseBigInt(s string) *big.Int {
-	if s == "" || s == "0x0" {
+	if s == "" {
+		return new(big.Int)
+	}
+
+	// Use the same logic as math.ParseBig256
+	var bigint *big.Int
+	var ok bool
+	if len(s) >= 2 && (s[:2] == "0x" || s[:2] == "0X") {
+		bigint, ok = new(big.Int).SetString(s[2:], 16)
+	} else {
+		bigint, ok = new(big.Int).SetString(s, 10)
+	}
+	if !ok {
 		return big.NewInt(0)
 	}
-	// Remove 0x prefix if present
-	if has0xPrefix(s) {
-		s = s[2:]
+	return bigint
+}
+
+// parseGenesisAccountStreaming parses a GenesisAccount manually to avoid reflection
+func parseGenesisAccountStreaming(decoder *json.Decoder, logger log.Logger) (types.GenesisAccount, error) {
+	// Expect opening brace
+	token, err := decoder.Token()
+	if err != nil {
+		logger.Error("Error reading opening brace for account", "error", err)
+		return types.GenesisAccount{}, err
 	}
-	val := new(big.Int)
-	val.SetString(s, 16)
-	return val
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		logger.Error("Expected '{' for account", "got", token)
+		return types.GenesisAccount{}, fmt.Errorf("expected '{' for account, got %v", token)
+	}
+
+	var account types.GenesisAccount
+
+	// Process each field in the account object
+	for decoder.More() {
+		// Read field name
+		token, err := decoder.Token()
+		if err != nil {
+			logger.Error("Error reading field name token", "error", err)
+			return types.GenesisAccount{}, err
+		}
+
+		fieldName, ok := token.(string)
+		if !ok {
+			logger.Error("Expected field name", "got_type", fmt.Sprintf("%T", token), "value", token)
+			return types.GenesisAccount{}, fmt.Errorf("expected field name, got %T", token)
+		}
+
+		// Handle each field
+		switch fieldName {
+		case "balance":
+			var balance interface{}
+			if err := decoder.Decode(&balance); err != nil {
+				logger.Error("Failed to decode balance field", "error", err)
+				return types.GenesisAccount{}, fmt.Errorf("failed to decode balance: %w", err)
+			}
+			// Handle both string and number formats
+			switch v := balance.(type) {
+			case string:
+				account.Balance = parseBigInt(v)
+			case float64:
+				account.Balance = big.NewInt(int64(v))
+			default:
+				logger.Error("Unexpected balance type", "type", fmt.Sprintf("%T", v), "value", v)
+				return types.GenesisAccount{}, fmt.Errorf("unexpected balance type: %T", v)
+			}
+
+		case "nonce":
+			var nonce interface{}
+			if err := decoder.Decode(&nonce); err != nil {
+				logger.Error("Failed to decode nonce field", "error", err)
+				return types.GenesisAccount{}, fmt.Errorf("failed to decode nonce: %w", err)
+			}
+			// Handle both string and number formats
+			switch v := nonce.(type) {
+			case string:
+				account.Nonce = parseUint64(v)
+			case float64:
+				account.Nonce = uint64(v)
+			default:
+				account.Nonce = 0 // Default to 0 if not provided or invalid
+			}
+
+		case "code":
+			var code string
+			if err := decoder.Decode(&code); err != nil {
+				logger.Error("Failed to decode code field", "error", err)
+				return types.GenesisAccount{}, fmt.Errorf("failed to decode code: %w", err)
+			}
+			account.Code = common.FromHex(code)
+
+		case "constructor":
+			var constructor string
+			if err := decoder.Decode(&constructor); err != nil {
+				logger.Error("Failed to decode constructor field", "error", err)
+				return types.GenesisAccount{}, fmt.Errorf("failed to decode constructor: %w", err)
+			}
+			account.Constructor = common.FromHex(constructor)
+
+		case "storage":
+			// Initialize storage if needed
+			if account.Storage == nil {
+				account.Storage = make(map[common.Hash]common.Hash)
+			}
+
+			// Directly decode to account.Storage to avoid intermediate allocations
+			// common.Hash implements json.Unmarshaler, so JSON decoder can handle it directly
+			if err := decoder.Decode(&account.Storage); err != nil {
+				logger.Error("Failed to decode storage field", "error", err)
+				return types.GenesisAccount{}, fmt.Errorf("failed to decode storage: %w", err)
+			}
+
+		default:
+			// Skip unknown fields
+			var skip json.RawMessage
+			if err := decoder.Decode(&skip); err != nil {
+				logger.Error("Failed to skip unknown field", "field", fieldName, "error", err)
+				return types.GenesisAccount{}, fmt.Errorf("failed to skip field %s: %w", fieldName, err)
+			}
+		}
+	}
+
+	// Expect closing brace
+	token, err = decoder.Token()
+	if err != nil {
+		logger.Error("Error reading closing brace for account", "error", err)
+		return types.GenesisAccount{}, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '}' {
+		logger.Error("Expected '}' for account", "got", token)
+		return types.GenesisAccount{}, fmt.Errorf("expected '}' for account, got %v", token)
+	}
+
+	return account, nil
 }
