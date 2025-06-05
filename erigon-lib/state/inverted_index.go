@@ -488,12 +488,15 @@ func (w *InvertedIndexBufferedWriter) close() {
 }
 
 func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
+	if iit.ii.aggregationStep != iit.aggStep2 {
+		panic(fmt.Sprintf("assert: %d %d", iit.ii.aggregationStep, iit.aggStep2))
+	}
 	w := &InvertedIndexBufferedWriter{
 		name:            iit.name,
 		discard:         discard,
 		tmpdir:          tmpdir,
 		filenameBase:    iit.ii.filenameBase,
-		aggregationStep: iit.aggStep,
+		aggregationStep: iit.aggStep2,
 
 		indexKeysTable: iit.ii.keysTable,
 		indexTable:     iit.ii.valuesTable,
@@ -515,12 +518,12 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		}
 	}
 	return &InvertedIndexRoTx{
-		ii:      ii,
-		visible: ii._visible,
-		files:   files,
-		aggStep: ii.aggregationStep,
-		name:    ii.name,
-		salt:    ii.salt.Load(),
+		ii:       ii,
+		visible:  ii._visible,
+		files:    files,
+		aggStep2: ii.aggregationStep,
+		name:     ii.name,
+		salt:     ii.salt.Load(),
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -589,8 +592,8 @@ type InvertedIndexRoTx struct {
 
 	// TODO: retrofit recent optimization in main and reenable the next line
 	// ef *multiencseq.SequenceBuilder // re-usable
-	salt    *uint32
-	aggStep uint64
+	salt     *uint32
+	aggStep2 uint64
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -840,8 +843,8 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
-	maxStepInFiles := iit.files.EndTxNum() / iit.aggStep
-	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.aggStep
+	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
+	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.ii.aggregationStep
 	return maxStepInFiles < maxStepInDB
 }
 
@@ -1295,13 +1298,16 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	if iit.ii.aggregationStep != iit.aggStep2 {
+		panic(fmt.Sprintf("assert: aggStep field is idfferent %d, %d", iit.ii.aggregationStep, iit.aggStep2))
+	}
 	fst, _ := kv.FirstKey(tx, iit.ii.keysTable)
 	if len(fst) > 0 {
-		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.aggStep)
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.ii.aggregationStep)
 	}
 	lst, _ := kv.LastKey(tx, iit.ii.keysTable)
 	if len(lst) > 0 {
-		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.aggStep)
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.ii.aggregationStep)
 	}
 	if to == 0 {
 		to = from
