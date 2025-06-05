@@ -19,8 +19,7 @@ package rpctest
 import (
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
 )
 
@@ -43,10 +42,10 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 	fmt.Printf("Last block: %d\n", lastBlock)
 	// Go back 256 blocks
 	bn := uint64(lastBlock) - 256
-	page := libcommon.Hash{}.Bytes()
+	page := common.Hash{}.Bytes()
 
 	for len(page) > 0 {
-		accRangeTG := make(map[libcommon.Address]state.DumpAccount)
+		accRangeTG := make(map[common.Address]state.DumpAccount)
 		var sr DebugAccountRange
 
 		res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
@@ -67,11 +66,11 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 		for address, dumpAcc := range accRangeTG {
 			var proof EthGetProof
 
-			var storageList []libcommon.Hash
+			var storageList []common.Hash
 			// And now with the storage, if present
 			if len(dumpAcc.Storage) > 0 {
 				for key := range dumpAcc.Storage {
-					storageList = append(storageList, libcommon.HexToHash(key))
+					storageList = append(storageList, common.HexToHash(key))
 					if len(storageList) > 100 {
 						break
 					}

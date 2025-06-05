@@ -29,9 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethutils"
@@ -40,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -144,8 +142,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	engine := api.engine()
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, txNumsReader, tx, int(txIndex))
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api._txNumReader, tx, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +175,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 
 	if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-		tracer.OnTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
+		tracer.OnTxEnd(&types.Receipt{GasUsed: result.GasUsed}, nil)
 	}
 	return result, nil
 }

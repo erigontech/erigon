@@ -24,8 +24,7 @@ import (
 	"os"
 	"path/filepath"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
 )
 
@@ -59,7 +58,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
-	accounts := make(map[libcommon.Address]struct{})
+	accounts := make(map[common.Address]struct{})
 	prevBn := blockFrom
 	storageCounter := 0
 	for bn := blockFrom; bn <= blockTo; bn++ {
@@ -100,10 +99,10 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 				storageCounter++
 				if storageCounter == 100 {
 					storageCounter = 0
-					nextKey := &libcommon.Hash{}
-					nextKeyG := &libcommon.Hash{}
-					sm := make(map[libcommon.Hash]storageEntry)
-					smg := make(map[libcommon.Hash]storageEntry)
+					nextKey := &common.Hash{}
+					nextKeyG := &common.Hash{}
+					sm := make(map[common.Hash]storageEntry)
+					smg := make(map[common.Hash]storageEntry)
 					for nextKey != nil {
 						var sr DebugStorageRange
 						res = reqGen.Erigon("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, txn.To, *nextKey), &sr)
@@ -163,11 +162,11 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			}
 
 			var trace EthTxTrace
-			res = reqGen.Erigon("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash), &trace)
+			res = reqGen.Erigon("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash, ""), &trace)
 			resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not trace transaction (Erigon) %s: %v\n", txn.Hash, res.Err)
-				print(client, routes[Erigon], reqGen.debugTraceTransaction(txn.Hash))
+				print(client, routes[Erigon], reqGen.debugTraceTransaction(txn.Hash, ""))
 			}
 
 			if trace.Error != nil {
@@ -176,10 +175,10 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 
 			if needCompare {
 				var traceg EthTxTrace
-				res = reqGen.Geth("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash), &traceg)
+				res = reqGen.Geth("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash, ""), &traceg)
 				resultsCh <- res
 				if res.Err != nil {
-					print(client, routes[Geth], reqGen.debugTraceTransaction(txn.Hash))
+					print(client, routes[Geth], reqGen.debugTraceTransaction(txn.Hash, ""))
 					return fmt.Errorf("Could not trace transaction (geth) %s: %v\n", txn.Hash, res.Err)
 				}
 				if traceg.Error != nil {
@@ -263,15 +262,15 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			}
 			fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
 
-			page := libcommon.Hash{}.Bytes()
-			pageGeth := libcommon.Hash{}.Bytes()
+			page := common.Hash{}.Bytes()
+			pageGeth := common.Hash{}.Bytes()
 
-			var accRangeErigon map[libcommon.Address]state.DumpAccount
-			var accRangeGeth map[libcommon.Address]state.DumpAccount
+			var accRangeErigon map[common.Address]state.DumpAccount
+			var accRangeGeth map[common.Address]state.DumpAccount
 
 			for len(page) > 0 {
-				accRangeErigon = make(map[libcommon.Address]state.DumpAccount)
-				accRangeGeth = make(map[libcommon.Address]state.DumpAccount)
+				accRangeErigon = make(map[common.Address]state.DumpAccount)
+				accRangeGeth = make(map[common.Address]state.DumpAccount)
 				var sr DebugAccountRange
 
 				res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)

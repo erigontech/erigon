@@ -25,19 +25,21 @@ import (
 	"io"
 	"math/bits"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 const (
@@ -202,12 +204,12 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		blobPos := dataPos
 		for blobPos < dataPos+dataLen {
-			blobPos, err = rlp.StringOfLen(payload, blobPos, fixedgas.BlobSize)
+			blobPos, err = rlp.StringOfLen(payload, blobPos, params.BlobSize)
 			if err != nil {
 				return 0, fmt.Errorf("%w: blob: %s", ErrParseTxn, err) //nolint
 			}
-			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+fixedgas.BlobSize])
-			blobPos += fixedgas.BlobSize
+			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+params.BlobSize])
+			blobPos += params.BlobSize
 		}
 		if blobPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in blobs", ErrParseTxn)
@@ -473,7 +475,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		p = dataPos + dataLen
 	}
 	if slot.Type == SetCodeTxnType {
-		slot.Authorities = make([]*common.Address, 0)
+		slot.AuthAndNonces = make([]AuthAndNonce, 0)
 		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
@@ -515,9 +517,9 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 
 			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
 			if err != nil {
-				return 0, fmt.Errorf("%w: recover authorization signer: %s", ErrParseTxn, err) //nolint
+				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
-			slot.Authorities = append(slot.Authorities, authority)
+			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{authority.String(), auth.Nonce})
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
@@ -812,6 +814,11 @@ func getData(payload []byte, p int) ([]byte, int, error) {
 	return payload[dataPos : dataPos+dataLen], dataPos + dataLen, nil
 }
 
+type AuthAndNonce struct {
+	authority string
+	nonce     uint64
+}
+
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues
 type TxnSlot struct {
@@ -840,7 +847,7 @@ type TxnSlot struct {
 	Commitments []gokzg4844.KZGCommitment
 	Proofs      []gokzg4844.KZGProof
 
-	Authorities []*common.Address // Indexed authorization signers for EIP-7702 txns (type-4)
+	AuthAndNonces []AuthAndNonce // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
 
 	// RIP-7560: account abstraction
 	SenderAddress, Paymaster, Deployer                               *common.Address
@@ -860,6 +867,20 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		return nil
 	}
 
+	var paymasterData, deployerData, paymaster, deployer []byte
+	if tx.PaymasterData != nil {
+		paymasterData = tx.PaymasterData
+	}
+	if tx.DeployerData != nil {
+		deployerData = tx.DeployerData
+	}
+	if tx.Paymaster != nil {
+		paymaster = tx.Paymaster.Bytes()
+	}
+	if tx.Deployer != nil {
+		deployer = tx.Deployer.Bytes()
+	}
+
 	return &typesproto.AccountAbstractionTransaction{
 		Nonce:                       tx.Nonce,
 		ChainId:                     tx.ChainID.Bytes(),
@@ -869,10 +890,10 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		SenderAddress:               tx.SenderAddress.Bytes(),
 		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,
-		Paymaster:                   tx.Paymaster.Bytes(),
-		PaymasterData:               tx.PaymasterData,
-		Deployer:                    tx.Deployer.Bytes(),
-		DeployerData:                tx.DeployerData,
+		Paymaster:                   paymaster,
+		PaymasterData:               paymasterData,
+		Deployer:                    deployer,
+		DeployerData:                deployerData,
 		BuilderFee:                  tx.BuilderFee.Bytes(),
 		ValidationGasLimit:          tx.ValidationGasLimit,
 		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,

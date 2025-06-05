@@ -8,9 +8,13 @@ on:
     - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
   workflow_dispatch:     # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sync-from-scratch-test:
-    runs-on: [self-hosted, qa]
+    runs-on: [self-hosted, qa, long-running]
     timeout-minutes: 740  # 12 hours plus 20 minutes
     strategy:
       fail-fast: false
@@ -22,6 +26,7 @@ jobs:
       TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 43200 # 12 hours
       CHAIN: ${{ matrix.chain }}
+      ERIGON_ASSERT: true
 
     steps:
     - name: Check out repository
@@ -54,7 +59,7 @@ jobs:
         test_exit_status=$?
         
         # Save the subsection reached status
-        echo "::set-output name=test_executed::true"
+        echo "test_executed=true" >> "$GITHUB_OUTPUT"
         
         # Check test runner script exit status
         if [ $test_exit_status -eq 0 ]; then

@@ -5,6 +5,7 @@
 #   git config --global core.excludesfile ~/.gitignore_global
 
 /tmp
+**/temp/
 */**/*un~
 */**/*.test
 *un~
@@ -75,7 +76,8 @@ go.work*
 
 docker-compose.*.yml
 .env
-coverage.out
+coverage-test.out
+coverage-test-all.out
 
 dist
 __debug_bin

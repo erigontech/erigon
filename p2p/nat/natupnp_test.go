@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package nat
 
 import (
@@ -34,7 +32,12 @@ import (
 )
 
 func TestUPNP_DDWRT(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	// TODO: Failing on Mac: https://github.com/erigontech/erigon/issues/15104
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		t.Skipf("disabled to avoid firewall prompt")
 	}
 

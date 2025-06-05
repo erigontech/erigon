@@ -33,10 +33,9 @@ import (
 
 	"github.com/goccy/go-json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
@@ -76,8 +75,8 @@ func (ethash *Ethash) Seal(chain consensus.ChainHeaderReader, block *types.Block
 const remoteSealerTimeout = 1 * time.Second
 
 type remoteSealer struct {
-	works        map[libcommon.Hash]*types.BlockWithReceipts
-	rates        map[libcommon.Hash]hashrate
+	works        map[common.Hash]*types.BlockWithReceipts
+	rates        map[common.Hash]hashrate
 	currentBlock *types.Block
 	currentWork  [4]string
 	notifyCtx    context.Context
@@ -106,15 +105,15 @@ type sealTask struct {
 // mineResult wraps the pow solution parameters for the specified block.
 type mineResult struct {
 	nonce     types.BlockNonce
-	mixDigest libcommon.Hash
-	hash      libcommon.Hash
+	mixDigest common.Hash
+	hash      common.Hash
 
 	errc chan error
 }
 
 // hashrate wraps the hash rate submitted by the remote sealer.
 type hashrate struct {
-	id   libcommon.Hash
+	id   common.Hash
 	ping time.Time
 	rate uint64
 
@@ -135,8 +134,8 @@ func startRemoteSealer(ethash *Ethash, urls []string, noverify bool) *remoteSeal
 		notifyURLs:   urls,
 		notifyCtx:    ctx,
 		cancelNotify: cancel,
-		works:        make(map[libcommon.Hash]*types.BlockWithReceipts),
-		rates:        make(map[libcommon.Hash]hashrate),
+		works:        make(map[common.Hash]*types.BlockWithReceipts),
+		rates:        make(map[common.Hash]hashrate),
 		workCh:       make(chan *sealTask),
 		fetchWorkCh:  make(chan *sealWork),
 		submitWorkCh: make(chan *mineResult),
@@ -233,8 +232,8 @@ func (s *remoteSealer) makeWork(blockWithReceipts *types.BlockWithReceipts) {
 	block := blockWithReceipts.Block
 	hash := s.ethash.SealHash(block.Header())
 	s.currentWork[0] = hash.Hex()
-	s.currentWork[1] = libcommon.BytesToHash(SeedHash(block.NumberU64())).Hex()
-	s.currentWork[2] = libcommon.BytesToHash(new(big.Int).Div(two256, block.Difficulty()).Bytes()).Hex()
+	s.currentWork[1] = common.BytesToHash(SeedHash(block.NumberU64())).Hex()
+	s.currentWork[2] = common.BytesToHash(new(big.Int).Div(two256, block.Difficulty()).Bytes()).Hex()
 	s.currentWork[3] = hexutil.EncodeBig(block.Number())
 
 	// Trace the seal work fetched by remote sealer.
@@ -287,7 +286,7 @@ func (s *remoteSealer) sendNotification(ctx context.Context, url string, json []
 // submitWork verifies the submitted pow solution, returning
 // whether the solution was accepted or not (not can be both a bad pow as well as
 // any other error, like no pending work or stale mining result).
-func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest libcommon.Hash, sealhash libcommon.Hash) bool {
+func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash, sealhash common.Hash) bool {
 	if s.currentBlock == nil {
 		s.ethash.config.Log.Warn("Pending work without block", "sealhash", sealhash)
 		return false
@@ -306,7 +305,7 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest libcommon.Ha
 	start := time.Now()
 	if !s.noverify {
 		if err := s.ethash.verifySeal(header, true); err != nil {
-			s.ethash.config.Log.Warn("Invalid proof-of-work submitted", "sealhash", sealhash, "elapsed", libcommon.PrettyDuration(time.Since(start)), "err", err)
+			s.ethash.config.Log.Warn("Invalid proof-of-work submitted", "sealhash", sealhash, "elapsed", common.PrettyDuration(time.Since(start)), "err", err)
 			return false
 		}
 	}
@@ -315,7 +314,7 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest libcommon.Ha
 		s.ethash.config.Log.Warn("Ethash result channel is empty, submitted mining result is rejected")
 		return false
 	}
-	s.ethash.config.Log.Trace("Verified correct proof-of-work", "sealhash", sealhash, "elapsed", libcommon.PrettyDuration(time.Since(start)))
+	s.ethash.config.Log.Trace("Verified correct proof-of-work", "sealhash", sealhash, "elapsed", common.PrettyDuration(time.Since(start)))
 
 	// Solutions seems to be valid, return to the miner and notify acceptance.
 	solution := block.Block.WithSeal(header)

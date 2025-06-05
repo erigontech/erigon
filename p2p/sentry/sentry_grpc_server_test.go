@@ -25,23 +25,21 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/forkid"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/forkid"
 )
 
-func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash libcommon.Hash) *GrpcServer {
+func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.Hash) *GrpcServer {
 	s := &GrpcServer{
 		ctx: context.Background(),
 	}
@@ -99,14 +97,14 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			SpuriousDragonBlock:   big.NewInt(2),
 			ByzantiumBlock:        big.NewInt(3),
 		}
-		dbNoFork, _  = temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-		dbProFork, _ = temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+		dbNoFork  = temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+		dbProFork = temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 
 		gspecNoFork  = &types.Genesis{Config: configNoFork}
 		gspecProFork = &types.Genesis{Config: configProFork}
 
-		genesisNoFork  = core.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
-		genesisProFork = core.MustCommitGenesis(gspecProFork, dbProFork, datadir.New(t.TempDir()), log.Root())
+		genesisNoFork  = rawdb.MustCommitGenesisWithoutState(gspecNoFork, dbNoFork)
+		genesisProFork = rawdb.MustCommitGenesisWithoutState(gspecProFork, dbProFork)
 	)
 
 	var s1, s2 *GrpcServer
@@ -184,6 +182,15 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	}
 }
 
+func emptyBootnodeURL(genesis common.Hash) []string {
+	return []string{}
+
+}
+
+func mainnetDNSNetwork(genesis common.Hash, protocol string) string {
+	return "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@" + protocol + ".mainnet.ethdisco.net"
+}
+
 func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -192,10 +199,10 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	}()
 
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
-	dbNoFork, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
-	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
-	ss := &GrpcServer{p2p: &p2p.Config{}}
+	genesisNoFork := rawdb.MustCommitGenesisWithoutState(gspecNoFork, dbNoFork)
+	ss := &GrpcServer{p2p: &p2p.Config{LookupBootnodeURLs: emptyBootnodeURL, LookupDNSNetwork: mainnetDNSNetwork}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{
 		ForkData: &proto_sentry.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},

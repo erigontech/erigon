@@ -25,7 +25,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -33,7 +32,9 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/networkid"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -50,7 +51,7 @@ import (
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
-	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	s, err := initial_state.GetGenesisState(networkid.MainnetChainID)
 	require.NoError(t, err)
 	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
 }
@@ -61,8 +62,8 @@ func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltype
 		out = append(out, cltypes.NewBlobSidecar(
 			uint64(i),
 			&cltypes.Blob{byte(i)},
-			libcommon.Bytes48{byte(i)},
-			libcommon.Bytes48{byte(i)},
+			common.Bytes48{byte(i)},
+			common.Bytes48{byte(i)},
 			blockHeader,
 			solid.NewHashVector(cltypes.CommitmentBranchSize),
 		))
@@ -132,7 +133,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		return
 	}
 
-	reqData := libcommon.CopyBytes(reqBuf.Bytes())
+	reqData := common.CopyBytes(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRangeProtocolV1))
 	require.NoError(t, err)
 
@@ -254,7 +255,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		return
 	}
 
-	reqData := libcommon.CopyBytes(reqBuf.Bytes())
+	reqData := common.CopyBytes(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRootProtocolV1))
 	require.NoError(t, err)
 

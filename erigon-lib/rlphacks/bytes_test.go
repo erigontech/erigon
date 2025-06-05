@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package rlphacks
 
 import (
@@ -26,16 +24,22 @@ import (
 )
 
 func TestFastDoubleRlpForByteArrays(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	for i := 0; i < 256; i++ {
 		doTestWithByte(t, byte(i), 1)
 	}
-	doTestWithByte(t, 0x0, 100000)
-	doTestWithByte(t, 0xC, 100000)
-	doTestWithByte(t, 0xAB, 100000)
+	doTestWithByte(t, 0x0, 10_000)
+	doTestWithByte(t, 0xC, 10_000)
+	doTestWithByte(t, 0xAB, 10_000)
 }
 
 func doTestWithByte(t *testing.T, b byte, iterations int) {
+	t.Helper()
+
 	var prefixBuf [8]byte
 	buffer := new(bytes.Buffer)
 

@@ -923,7 +923,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 
-						if completionTime != nil {
+						if completionTime != nil { //nolint
 							if !stat.ModTime().Equal(*completionTime) {
 								checking[t.Name()] = struct{}{}
 
@@ -2896,4 +2896,12 @@ func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
 	defer d.lock.RUnlock()
 
 	return d.completedTorrents
+}
+
+// Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http. Only
+// do this if you have a single instance.
+func (d *Downloader) HandleTorrentClientStatus() {
+	http.HandleFunc("/downloaderTorrentClientStatus", func(w http.ResponseWriter, r *http.Request) {
+		d.torrentClient.WriteStatus(w)
+	})
 }

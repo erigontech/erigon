@@ -25,12 +25,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/log/v3"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -201,7 +201,7 @@ func (s *Service) Run(ctx context.Context) error {
 			// we've reached the tip
 			s.reachedTip.Store(true)
 			s.signalFetchedEvents()
-			if err := libcommon.Sleep(ctx, time.Second); err != nil {
+			if err := common.Sleep(ctx, time.Second); err != nil {
 				return err
 			}
 
@@ -305,7 +305,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 	)
 
 	blockNumToEventId := make(map[uint64]uint64)
-	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
+	eventTxnToBlockNum := make(map[common.Hash]uint64)
 	processedBlocks := make([]ProcessedBlockInfo, 0, 1+len(blocks)/int(s.borConfig.CalculateSprintLength(from)))
 	for _, block := range blocks {
 		// check if block is start of span and > 0
@@ -430,7 +430,7 @@ func (s *Service) Events(ctx context.Context, blockNum uint64) ([]*types.Message
 	return s.reader.Events(ctx, blockNum)
 }
 
-func (s *Service) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+func (s *Service) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
 	return s.reader.EventTxnLookup(ctx, borTxHash)
 }
 

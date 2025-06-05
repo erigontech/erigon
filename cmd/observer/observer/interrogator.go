@@ -26,13 +26,12 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/forkid"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 	"github.com/erigontech/erigon/cmd/observer/utils"
-	"github.com/erigontech/erigon/core/forkid"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p/enode"
 )
 
 type DiscV4Transport interface {
@@ -105,7 +104,7 @@ func (interrogator *Interrogator) Run(ctx context.Context) (*InterrogationResult
 	// We need to wait until Server sends a Pong reply to that.
 	// The remote side is waiting for this Pong no longer than v4_udp.respTimeout.
 	// If we don't wait, the ENRRequest/FindNode might fail due to errUnknownNode.
-	if err := libcommon.Sleep(ctx, 500*time.Millisecond); err != nil {
+	if err := common.Sleep(ctx, 500*time.Millisecond); err != nil {
 		return nil, NewInterrogationError(InterrogationErrorCtxCancelled, err)
 	}
 
@@ -177,7 +176,7 @@ func (interrogator *Interrogator) Run(ctx context.Context) (*InterrogationResult
 			peersByID[node.ID()] = node
 		}
 
-		if err := libcommon.Sleep(ctx, 1*time.Second); err != nil {
+		if err := common.Sleep(ctx, 1*time.Second); err != nil {
 			return nil, NewInterrogationError(InterrogationErrorCtxCancelled, err)
 		}
 	}

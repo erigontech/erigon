@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
@@ -43,13 +43,13 @@ var (
 // Definitions of SignedBlindedBeaconBlock
 // SignedBlindedBeaconBlock contains a signature and a BlindedBeaconBlock.
 type SignedBlindedBeaconBlock struct {
-	Signature libcommon.Bytes96   `json:"signature"`
+	Signature common.Bytes96      `json:"signature"`
 	Block     *BlindedBeaconBlock `json:"message"`
 }
 
 func NewSignedBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *SignedBlindedBeaconBlock {
 	return &SignedBlindedBeaconBlock{
-		Signature: libcommon.Bytes96{},
+		Signature: common.Bytes96{},
 		Block:     NewBlindedBeaconBlock(beaconCfg, version),
 	}
 }
@@ -124,8 +124,8 @@ func (b *SignedBlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals 
 type BlindedBeaconBlock struct {
 	Slot          uint64             `json:"slot,string"`
 	ProposerIndex uint64             `json:"proposer_index,string"`
-	ParentRoot    libcommon.Hash     `json:"parent_root"`
-	StateRoot     libcommon.Hash     `json:"state_root"`
+	ParentRoot    common.Hash        `json:"parent_root"`
+	StateRoot     common.Hash        `json:"state_root"`
 	Body          *BlindedBeaconBody `json:"body"`
 }
 
@@ -189,7 +189,7 @@ func (b *BlindedBeaconBlock) GetSlot() uint64 {
 	return b.Slot
 }
 
-func (b *BlindedBeaconBlock) GetParentRoot() libcommon.Hash {
+func (b *BlindedBeaconBlock) GetParentRoot() common.Hash {
 	return b.ParentRoot
 }
 
@@ -200,11 +200,11 @@ func (b *BlindedBeaconBlock) GetBody() GenericBeaconBody {
 // Definitions of BlindedBeaconBody
 type BlindedBeaconBody struct {
 	// A byte array used for randomness in the beacon chain
-	RandaoReveal libcommon.Bytes96 `json:"randao_reveal"`
+	RandaoReveal common.Bytes96 `json:"randao_reveal"`
 	// Data related to the Ethereum 1.0 chain
 	Eth1Data *Eth1Data `json:"eth1_data"`
 	// A byte array used to customize validators' behavior
-	Graffiti libcommon.Hash `json:"graffiti"`
+	Graffiti common.Hash `json:"graffiti"`
 	// A list of slashing events for validators who included invalid blocks in the chain
 	ProposerSlashings *solid.ListSSZ[*ProposerSlashing] `json:"proposer_slashings"`
 	// A list of slashing events for validators who included invalid attestations in the chain
@@ -244,9 +244,9 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 	}
 
 	return &BlindedBeaconBody{
-		RandaoReveal:       libcommon.Bytes96{},
+		RandaoReveal:       common.Bytes96{},
 		Eth1Data:           NewEth1Data(),
-		Graffiti:           libcommon.Hash{},
+		Graffiti:           common.Hash{},
 		ProposerSlashings:  solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416),
 		AttesterSlashings:  solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing),
 		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation),
@@ -451,7 +451,7 @@ func (b *BlindedBeaconBody) GetPayloadHeader() (*Eth1Header, error) {
 	return b.ExecutionPayload, nil
 }
 
-func (b *BlindedBeaconBody) GetRandaoReveal() libcommon.Bytes96 {
+func (b *BlindedBeaconBody) GetRandaoReveal() common.Bytes96 {
 	return b.RandaoReveal
 }
 

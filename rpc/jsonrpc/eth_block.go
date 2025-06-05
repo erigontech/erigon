@@ -25,20 +25,18 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	borrawdb "github.com/erigontech/erigon/polygon/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -90,7 +88,6 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	defer func(start time.Time) { log.Trace("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 	stateBlockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, stateBlockNumberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
@@ -103,7 +100,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, txNumsReader, stateBlockNumber+1, 0, chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber+1, 0, api._txNumReader)
 		if err != nil {
 			return nil, err
 		}
@@ -169,8 +166,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 
-	bundleHash := cryptopool.NewLegacyKeccak256()
-	defer cryptopool.ReturnToPoolKeccak256(bundleHash)
+	bundleHash := crypto.NewKeccakState()
+	defer crypto.ReturnToPool(bundleHash)
 
 	results := make([]map[string]interface{}, 0, len(txs))
 	for _, txn := range txs {
@@ -192,7 +189,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		txHash := txn.Hash().String()
 		jsonResult := map[string]interface{}{
 			"txHash":  txHash,
-			"gasUsed": result.UsedGas,
+			"gasUsed": result.GasUsed,
 		}
 		bundleHash.Write(txn.Hash().Bytes())
 		if result.Err != nil {
@@ -244,7 +241,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 				borTxHash = possibleBorTxnHash
 			}
 		} else {
-			borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
+			borTx = borrawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
 			if borTx != nil {
 				borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
 			}
@@ -310,7 +307,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 				borTxHash = possibleBorTxnHash
 			}
 		} else {
-			borTx = rawdb.ReadBorTransactionForBlock(tx, number)
+			borTx = borrawdb.ReadBorTransactionForBlock(tx, number)
 			if borTx != nil {
 				borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
 			}

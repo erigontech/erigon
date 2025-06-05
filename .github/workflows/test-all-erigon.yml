@@ -1,0 +1,135 @@
+name: All tests
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main 
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  schedule:
+    - cron: '20 16 * * *' # daily at 16:20 UTC
+  workflow_dispatch:
+
+jobs:
+  # 
+  # This first job is used to determine if changes are within out-of-scope dirs or files (in such case the tests are not run because they would be meaningless)
+  # NOTE: this logic is needed because the simple 'paths-ignore:' doesn't work since this workflow is set as a mandatory/required check for this repo
+  # - '**/.github/workflows/**' is currently commented to avoid unintended freeze in case of concurrent changes outside the excluded paths (further development will be done in due course)
+  # 
+  source-of-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_files: ${{ steps.filter.outputs.changed_files }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for changes within out-of-scope dirs or files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            changed_files:
+              - 'dashboards/**'
+              # - '**/.github/workflows/**'
+              - '**/.github/workflows/backups-dashboards.yml'
+
+  tests-mac-linux:
+    needs: source-of-changes
+    strategy:
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+          # - ubuntu-latest-erigontests-large
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Declare runners
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: |
+          set +x
+          echo "I am being served by this runner: $RUNNER_NAME"
+          
+      - name: Checkout code
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        uses: actions/checkout@v4
+        
+      - name: Update submodules
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: git submodule update --init --recursive --force
+        
+      - name: Setup Go environment
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: ${{ contains(fromJSON('["refs/heads/main","refs/heads/release/3.0","refs/heads/release/2.61"]'), github.ref) }}
+          
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
+        run: sudo apt update && sudo apt install build-essential
+        
+      - name: Run all tests on ${{ matrix.os }}
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: GOGC=80 make test-all-race
+
+      - name: SonarCloud
+        if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
+        uses: SonarSource/sonarcloud-github-action@v2.3.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
+
+      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
+        if: needs.source-of-changes.outputs.changed_files == 'true'
+        run: echo "This check does not make sense for changes within out-of-scope directories"
+
+
+  tests-windows:
+    needs: source-of-changes
+    strategy:
+      matrix:
+        os: [ windows-2025 ]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code on ${{ matrix.os }}
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        uses: actions/checkout@v4
+        
+      - name: Setup Go environment on ${{ matrix.os }}
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Cache Chocolatey packages
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\ProgramData\chocolatey\lib\mingw
+            C:\ProgramData\chocolatey\lib\cmake
+          key: chocolatey-${{ matrix.os }}
+          
+      - name: Install dependencies on ${{ matrix.os }}
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: |
+          choco upgrade mingw -y --no-progress --version 13.2.0
+
+      - name: Run all tests on ${{ matrix.os }}
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: .\wmake.ps1 test-all
+
+      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
+        if: needs.source-of-changes.outputs.changed_files == 'true'
+        run: echo "This check does not make sense for changes within out-of-scope directories"

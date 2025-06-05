@@ -22,20 +22,23 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"math/bits"
 	"sort"
+	"strconv"
 	"strings"
 	"unsafe"
 
+	"github.com/google/btree"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/google/btree"
-	"github.com/holiman/uint256"
 )
 
 var (
@@ -118,11 +121,18 @@ const (
 	// VariantHexPatriciaTrie used as default commitment approach
 	VariantHexPatriciaTrie TrieVariant = "hex-patricia-hashed"
 	// VariantBinPatriciaTrie - Experimental mode with binary key representation
-	VariantBinPatriciaTrie TrieVariant = "bin-patricia-hashed"
+	VariantBinPatriciaTrie       TrieVariant = "bin-patricia-hashed"
+	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
 func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
 	switch tv {
+	case VariantConcurrentHexPatricia:
+		root := NewHexPatriciaHashed(length.Addr, nil)
+		trie := NewConcurrentPatriciaHashed(root, nil)
+		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
+		// tree.SetConcurrentCommitment(true) // first run always sequential
+		return trie, tree
 	case VariantBinPatriciaTrie:
 		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
 		//fn := func(key []byte) []byte { return hexToBin(key) }
@@ -173,6 +183,7 @@ type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
+	metrics   *Metrics
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -180,6 +191,10 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 		buf:    bytes.NewBuffer(make([]byte, sz)),
 		merger: NewHexBranchMerger(sz / 2),
 	}
+}
+
+func (be *BranchEncoder) setMetrics(metrics *Metrics) {
+	be.metrics = metrics
 }
 
 func (be *BranchEncoder) CollectUpdate(
@@ -208,10 +223,13 @@ func (be *BranchEncoder) CollectUpdate(
 			return 0, err
 		}
 	}
-	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
+	// fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
+	}
+	if be.metrics != nil {
+		be.metrics.updateBranch.Add(1)
 	}
 	mxTrieBranchesUpdated.Inc()
 	return lastNibble, nil
@@ -232,12 +250,9 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
-	var encoded [2]byte
+	var encoded [4]byte
 	binary.BigEndian.PutUint16(encoded[:], touchMap)
-	if _, err := be.buf.Write(encoded[:]); err != nil {
-		return nil, 0, err
-	}
-	binary.BigEndian.PutUint16(encoded[:], afterMap)
+	binary.BigEndian.PutUint16(encoded[2:], afterMap)
 	if _, err := be.buf.Write(encoded[:]); err != nil {
 		return nil, 0, err
 	}
@@ -755,6 +770,8 @@ func ParseTrieVariant(s string) TrieVariant {
 	switch s {
 	case "bin":
 		trieVariant = VariantBinPatriciaTrie
+	case "hex-parallel":
+		trieVariant = VariantConcurrentHexPatricia
 	case "hex":
 		fallthrough
 	default:
@@ -886,7 +903,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) (*BranchStat
 				switch tv {
 				case VariantBinPatriciaTrie:
 					stat.ExtSize += uint64(c.extLen)
-				case VariantHexPatriciaTrie:
+				case VariantHexPatriciaTrie, VariantConcurrentHexPatricia:
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++
@@ -949,11 +966,25 @@ func ParseCommitmentMode(s string) Mode {
 
 type Updates struct {
 	hasher keyHasher
-	keys   map[string]struct{}
-	etl    *etl.Collector
-	tree   *btree.BTreeG[*KeyUpdate]
+	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
+	etl    *etl.Collector            // all-in-one collector
+	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
 	mode   Mode
 	tmpdir string
+
+	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
+	nibbles       [16]*etl.Collector
+}
+
+// Should be called right after updates initialisation. Otherwise could lost some data
+func (t *Updates) SetConcurrentCommitment(b bool) {
+	t.sortPerNibble = b
+	t.initCollector()
+}
+
+// SetConcurrentCommitment returns true if updates are sorted per nibble
+func (t *Updates) IsConcurrentCommitment() bool {
+	return t.sortPerNibble
 }
 
 type keyHasher func(key []byte) []byte
@@ -974,6 +1005,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	}
 	return t
 }
+
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
 	if t.mode == ModeDirect && t.keys == nil {
@@ -986,12 +1018,28 @@ func (t *Updates) SetMode(m Mode) {
 }
 
 func (t *Updates) initCollector() {
+	if t.sortPerNibble {
+		for i := 0; i < len(t.nibbles); i++ {
+			if t.nibbles[i] != nil {
+				t.nibbles[i].Close()
+				t.nibbles[i] = nil
+			}
+
+			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+			t.nibbles[i].SortAndFlushInBackground(true)
+		}
+		if t.etl != nil {
+			t.etl.Close()
+			t.etl = nil
+		}
+		return
+	}
+
 	if t.etl != nil {
 		t.etl.Close()
 		t.etl = nil
 	}
-	t.etl = etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
-	t.etl.LogLvl(log.LvlDebug)
+	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
 }
 
@@ -1030,7 +1078,15 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := toBytesZeroCopy(key)
-			if err := t.etl.Collect(t.hasher(keyBytes), keyBytes); err != nil {
+			hashedKey := t.hasher(keyBytes)
+
+			var err error
+			if !t.sortPerNibble {
+				err = t.etl.Collect(hashedKey, keyBytes)
+			} else {
+				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
+			}
+			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
 			t.keys[key] = struct{}{}
@@ -1063,10 +1119,10 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	}
 	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
 		if len(acc.CodeHash.Bytes()) == 0 {
-			copy(c.update.CodeHash[:], EmptyCodeHash)
+			c.update.CodeHash = empty.CodeHash
 		} else {
 			c.update.Flags |= CodeUpdate
-			copy(c.update.CodeHash[:], acc.CodeHash.Bytes())
+			c.update.CodeHash = acc.CodeHash
 		}
 	}
 }
@@ -1087,10 +1143,10 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 		if c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
 		}
-		copy(c.update.CodeHash[:], EmptyCodeHash)
+		c.update.CodeHash = empty.CodeHash
 		return
 	}
-	copy(c.update.CodeHash[:], ecrypto.Keccak256(code))
+	copy(c.update.CodeHash[:], crypto.Keccak256(code))
 }
 
 func (t *Updates) Close() {
@@ -1103,6 +1159,13 @@ func (t *Updates) Close() {
 	}
 	if t.etl != nil {
 		t.etl.Close()
+	}
+	if t.sortPerNibble {
+		for i := 0; i < len(t.nibbles); i++ {
+			if t.nibbles[i] != nil {
+				t.nibbles[i].Close()
+			}
+		}
 	}
 }
 
@@ -1207,7 +1270,7 @@ func (u *Update) Reset() {
 	u.Balance.Clear()
 	u.Nonce = 0
 	u.StorageLen = 0
-	u.CodeHash = EmptyCodeHashArray
+	u.CodeHash = empty.CodeHash
 }
 
 func (u *Update) Merge(b *Update) {

@@ -24,10 +24,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
@@ -37,7 +38,7 @@ var _ txnprovider.TxnProvider = (*Pool)(nil)
 
 type Pool struct {
 	logger                  log.Logger
-	config                  Config
+	config                  shuttercfg.Config
 	baseTxnProvider         txnprovider.TxnProvider
 	blockListener           *BlockListener
 	blockTracker            *BlockTracker
@@ -51,7 +52,7 @@ type Pool struct {
 
 func NewPool(
 	logger log.Logger,
-	config Config,
+	config shuttercfg.Config,
 	baseTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,

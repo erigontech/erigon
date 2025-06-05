@@ -21,24 +21,22 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-var latestTag = libcommon.BytesToHash([]byte("latest"))
+var latestTag = common.BytesToHash([]byte("latest"))
 
 var ErrWrongTag = fmt.Errorf("listStorageKeys wrong block tag or number: must be '%s' ('latest')", latestTag)
 
 // ParityAPI the interface for the parity_ RPC commands
 type ParityAPI interface {
-	ListStorageKeys(ctx context.Context, account libcommon.Address, quantity int, offset *hexutil.Bytes, blockNumber rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
+	ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumber rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 }
 
 // ParityAPIImpl data structure to store things needed for parity_ commands
@@ -56,7 +54,7 @@ func NewParityAPIImpl(base *BaseAPI, db kv.TemporalRoDB) *ParityAPIImpl {
 }
 
 // ListStorageKeys implements parity_listStorageKeys. Returns all storage keys of the given address
-func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon.Address, quantity int, offset *hexutil.Bytes, blockNumberOrTag rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
+func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumberOrTag rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
 	if err := api.checkBlockNumber(blockNumberOrTag); err != nil {
 		return nil, err
 	}
@@ -73,10 +71,9 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 	} else if a == nil {
 		return nil, errors.New("acc not found")
 	}
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	bn := rawdb.ReadCurrentBlockNumber(tx)
-	minTxNum, err := txNumsReader.Min(tx, *bn)
+	minTxNum, err := api._txNumReader.Min(tx, *bn)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +93,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		if err != nil {
 			return nil, err
 		}
-		keys = append(keys, libcommon.CopyBytes(k[20:]))
+		keys = append(keys, common.CopyBytes(k[20:]))
 	}
 	return keys, nil
 }

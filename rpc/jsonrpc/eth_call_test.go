@@ -27,9 +27,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -37,19 +38,16 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func TestEstimateGas(t *testing.T) {
@@ -59,8 +57,8 @@ func TestEstimateGas(t *testing.T) {
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
 	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 		From: &from,
 		To:   &to,
@@ -73,12 +71,12 @@ func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, rpc.BlockNumberOrHashWithHash(libcommon.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true), nil); err != nil {
+	}, rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true), nil); err != nil {
 		if fmt.Sprintf("%v", err) != "hash 3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b is not currently canonical" {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -112,7 +110,7 @@ func TestGetProof(t *testing.T) {
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
 
 	key := func(b byte) hexutil.Bytes {
-		result := libcommon.Hash{}
+		result := common.Hash{}
 		result[31] = b
 		return result.Bytes()
 	}
@@ -120,7 +118,7 @@ func TestGetProof(t *testing.T) {
 	tests := []struct {
 		name        string
 		blockNum    uint64
-		addr        libcommon.Address
+		addr        common.Address
 		storageKeys []hexutil.Bytes
 		stateVal    uint64
 		expectedErr string
@@ -137,7 +135,7 @@ func TestGetProof(t *testing.T) {
 		},
 		{
 			name:     "currentBlockNoAccount",
-			addr:     libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
+			addr:     common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
 			blockNum: 3,
 		},
 		{
@@ -163,7 +161,7 @@ func TestGetProof(t *testing.T) {
 		},
 		{
 			name:        "currentBlockNoAccountMissingState",
-			addr:        libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
+			addr:        common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
 			blockNum:    3,
 			stateVal:    0,
@@ -172,7 +170,7 @@ func TestGetProof(t *testing.T) {
 		// 	name:        "olderBlockWithState",
 		// 	addr:        contractAddr,
 		// 	blockNum:    2,
-		// 	storageKeys: []libcommon.Hash{key(1), key(5), key(9), key(13)},
+		// 	storageKeys: []common.Hash{key(1), key(5), key(9), key(13)},
 		// 	stateVal:    1,
 		// },
 		// {
@@ -209,11 +207,11 @@ func TestGetProof(t *testing.T) {
 			err = trie.VerifyAccountProof(header.Root, proof)
 			require.NoError(t, err)
 
-			require.Equal(t, len(tt.storageKeys), len(proof.StorageProof))
+			require.Len(t, proof.StorageProof, len(tt.storageKeys))
 			for _, storageKey := range tt.storageKeys {
 				found := false
 				for _, storageProof := range proof.StorageProof {
-					var proofKeyHash, storageKeyHash libcommon.Hash
+					var proofKeyHash, storageKeyHash common.Hash
 					proofKeyHash.SetBytes(hexutil.FromHex(storageProof.Key))
 					storageKeyHash.SetBytes(uint256.NewInt(0).SetBytes(storageKey).Bytes())
 					if proofKeyHash != storageKeyHash {
@@ -500,7 +498,7 @@ func contractInvocationData(val byte) []byte {
 	return hexutil.MustDecode(fmt.Sprintf("0x%x00000000000000000000000000000000000000000000000000000000000000%02x", contractFuncSelector, val))
 }
 
-func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Address, libcommon.Address) {
+func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address) {
 	var (
 		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -508,14 +506,14 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 		bankFunds   = big.NewInt(1e9)
 		contract    = hexutil.MustDecode(contractHexString)
 		gspec       = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
 	m := mock.MockWithGenesis(t, gspec, bankKey, false)
 	db := m.DB
 
-	var contractAddr libcommon.Address
+	var contractAddr common.Address
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
@@ -548,7 +546,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	}
 	defer tx.Rollback()
 
-	stateReader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, "")
+	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st := state.New(stateReader)
 	require.NoError(t, err)
@@ -556,7 +554,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
 
-	stateReader, err = rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 2, 0, "")
+	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
 	require.NoError(t, err)
@@ -569,7 +567,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 
 func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	ctx := context.Background()
-	logger := testlog.Logger(t, log.LvlCrit)
+	//logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 
@@ -581,8 +579,8 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSetDeprecated, "", pruneTo, logEvery, ctx)
 	require.NoError(t, err)
 
-	err = rawdb.PruneTable(tx, kv.ReceiptsCache, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
-	require.NoError(t, err)
+	//err = rawdb.PruneTable(tx, kv.RCacheDomain, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
+	//require.NoError(t, err)
 
 	err = tx.Commit()
 	require.NoError(t, err)

@@ -22,16 +22,15 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/dataflow"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/adapter"
@@ -49,7 +48,7 @@ type BodiesCfg struct {
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
-	chanConfig      chain.Config
+	chanConfig      *chain.Config
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 }
@@ -57,7 +56,7 @@ type BodiesCfg struct {
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem),
 	blockPropagator adapter.BlockPropagator, timeout int,
-	chanConfig chain.Config,
+	chanConfig *chain.Config,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 ) BodiesCfg {
@@ -103,13 +102,6 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 	}
 	defer cfg.bd.ClearBodyCache()
 	var headerProgress, bodyProgress uint64
-
-	if cfg.chanConfig.Bor != nil {
-		headerProgress, err = stages.GetStageProgress(tx, stages.BorHeimdall)
-		if err != nil {
-			return err
-		}
-	}
 
 	if headerProgress == 0 {
 		headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
@@ -327,7 +319,7 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 	}
 
 	if stopped {
-		return libcommon.ErrStopped
+		return common.ErrStopped
 	}
 	if bodyProgress > s.BlockNumber+16 {
 		blocks := bodyProgress - s.BlockNumber
@@ -372,14 +364,14 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 
 	logger.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix),
 		"block_num", committed,
-		"delivery/sec", libcommon.ByteCount(uint64(speed)),
-		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
+		"delivery/sec", common.ByteCount(uint64(speed)),
+		"wasted/sec", common.ByteCount(uint64(wastedSpeed)),
 		"remaining", remaining,
 		"delivered", totalDelivered,
 		"blk/sec", totalDelivered/uint64(logInterval/time.Second),
-		"cache", libcommon.ByteCount(uint64(bodyCacheSize)),
-		"alloc", libcommon.ByteCount(m.Alloc),
-		"sys", libcommon.ByteCount(m.Sys),
+		"cache", common.ByteCount(uint64(bodyCacheSize)),
+		"alloc", common.ByteCount(m.Alloc),
+		"sys", common.ByteCount(m.Sys),
 	)
 }
 
@@ -398,8 +390,8 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 	logger.Info(fmt.Sprintf("[%s] Writing bodies", logPrefix),
 		"block_num", committed,
 		"remaining", remaining,
-		"alloc", libcommon.ByteCount(m.Alloc),
-		"sys", libcommon.ByteCount(m.Sys),
+		"alloc", common.ByteCount(m.Alloc),
+		"sys", common.ByteCount(m.Sys),
 	)
 }
 

@@ -22,39 +22,38 @@ package logger
 import (
 	"sort"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM
 // contract execution touches.
-type accessList map[libcommon.Address]accessListSlots
+type accessList map[common.Address]accessListSlots
 
 // accessListSlots is an accumulator for the set of storage slots within a single
 // contract that an EVM contract execution touches.
-type accessListSlots map[libcommon.Hash]struct{}
+type accessListSlots map[common.Hash]struct{}
 
 // newAccessList creates a new accessList.
 func newAccessList() accessList {
-	return make(map[libcommon.Address]accessListSlots)
+	return make(map[common.Address]accessListSlots)
 }
 
 // addAddress adds an address to the accesslist.
-func (al accessList) addAddress(address libcommon.Address) {
+func (al accessList) addAddress(address common.Address) {
 	// Set address if not previously present
 	if _, present := al[address]; !present {
-		al[address] = make(map[libcommon.Hash]struct{})
+		al[address] = make(map[common.Hash]struct{})
 	}
 }
 
 // addSlot adds a storage slot to the accesslist.
-func (al accessList) addSlot(address libcommon.Address, slot libcommon.Hash) {
+func (al accessList) addSlot(address common.Address, slot common.Hash) {
 	// Set address if not previously present
 	al.addAddress(address)
 
@@ -108,7 +107,7 @@ func (al accessList) Equal(other accessList) bool {
 func (al accessList) accessList() types.AccessList {
 	acl := make(types.AccessList, 0, len(al))
 	for addr, slots := range al {
-		tuple := types.AccessTuple{Address: addr, StorageKeys: []libcommon.Hash{}}
+		tuple := types.AccessTuple{Address: addr, StorageKeys: []common.Hash{}}
 		for slot := range slots {
 			tuple.StorageKeys = append(tuple.StorageKeys, slot)
 		}
@@ -121,7 +120,7 @@ func (al accessList) accessList() types.AccessList {
 func (al accessList) accessListSorted() types.AccessList {
 	acl := make(types.AccessList, 0, len(al))
 	for addr, slots := range al {
-		storageKeys := make([]libcommon.Hash, 0, len(slots))
+		storageKeys := make([]common.Hash, 0, len(slots))
 		for slot := range slots {
 			storageKeys = append(storageKeys, slot)
 		}
@@ -139,11 +138,11 @@ func (al accessList) accessListSorted() types.AccessList {
 // AccessListTracer is a tracer that accumulates touched accounts and storage
 // slots into an internal set.
 type AccessListTracer struct {
-	excl               map[libcommon.Address]struct{} // Set of account to exclude from the list
-	list               accessList                     // Set of accounts and storage slots touched
-	state              evmtypes.IntraBlockState       // State for nonce calculation of created contracts
-	createdContracts   map[libcommon.Address]struct{} // Set of all addresses of contracts created during txn execution
-	usedBeforeCreation map[libcommon.Address]struct{} // Set of all contract addresses first used before creation
+	excl               map[common.Address]struct{} // Set of account to exclude from the list
+	list               accessList                  // Set of accounts and storage slots touched
+	state              *state.IntraBlockState      // State for nonce calculation of created contracts
+	createdContracts   map[common.Address]struct{} // Set of all addresses of contracts created during txn execution
+	usedBeforeCreation map[common.Address]struct{} // Set of all contract addresses first used before creation
 }
 
 // NewAccessListTracer creates a new tracer that can generate AccessLists.
@@ -151,8 +150,8 @@ type AccessListTracer struct {
 // the resulting accesslist.
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
-func NewAccessListTracer(acl types.AccessList, exclude map[libcommon.Address]struct{}, state evmtypes.IntraBlockState) *AccessListTracer {
-	excl := make(map[libcommon.Address]struct{})
+func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState) *AccessListTracer {
+	excl := make(map[common.Address]struct{})
 	if exclude != nil {
 		excl = exclude
 	}
@@ -169,8 +168,8 @@ func NewAccessListTracer(acl types.AccessList, exclude map[libcommon.Address]str
 		excl:               excl,
 		list:               list,
 		state:              state,
-		createdContracts:   make(map[libcommon.Address]struct{}),
-		usedBeforeCreation: make(map[libcommon.Address]struct{}),
+		createdContracts:   make(map[common.Address]struct{}),
+		usedBeforeCreation: make(map[common.Address]struct{}),
 	}
 }
 
@@ -186,7 +185,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 	op := vm.OpCode(opcode)
 	if (op == vm.SLOAD || op == vm.SSTORE) && stackLen >= 1 {
 		addr := scope.Address()
-		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
+		slot := common.Hash(stackData[stackLen-1].Bytes32())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addSlot(addr, slot)
 			if _, ok := a.createdContracts[addr]; !ok {
@@ -195,7 +194,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		}
 	}
 	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
-		addr := libcommon.Address(stackData[stackLen-1].Bytes20())
+		addr := common.Address(stackData[stackLen-1].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 			if _, ok := a.createdContracts[addr]; !ok {
@@ -204,7 +203,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		}
 	}
 	if (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE) && stackLen >= 5 {
-		addr := libcommon.Address(stackData[stackLen-2].Bytes20())
+		addr := common.Address(stackData[stackLen-2].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 			if _, ok := a.createdContracts[addr]; !ok {
@@ -250,12 +249,12 @@ func (a *AccessListTracer) AccessListSorted() types.AccessList {
 }
 
 // CreatedContracts returns the set of all addresses of contracts created during txn execution.
-func (a *AccessListTracer) CreatedContracts() map[libcommon.Address]struct{} {
+func (a *AccessListTracer) CreatedContracts() map[common.Address]struct{} {
 	return a.createdContracts
 }
 
 // UsedBeforeCreation returns for a given address whether it was first used before creation.
-func (a *AccessListTracer) UsedBeforeCreation(addr libcommon.Address) bool {
+func (a *AccessListTracer) UsedBeforeCreation(addr common.Address) bool {
 	_, contained := a.usedBeforeCreation[addr]
 	return contained
 }

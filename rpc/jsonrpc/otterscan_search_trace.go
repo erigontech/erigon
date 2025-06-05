@@ -23,16 +23,14 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
@@ -75,8 +73,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, nil
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, blockNum, 0, chainConfig.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return false, nil, err
 	}
@@ -90,12 +87,8 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 	ibs := state.New(cachedReader)
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return api._blockReader.Header(ctx, dbtx, hash, number)
 	}
 	engine := api.engine()
 
@@ -112,7 +105,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 			return false, nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(idx)
+		ibs.SetTxContext(blockNum, idx)
 
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 
@@ -136,7 +129,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		}
 
 		if tracer != nil && tracer.TracingHooks().OnTxEnd != nil {
-			tracer.TracingHooks().OnTxEnd(&types.Receipt{GasUsed: res.UsedGas}, nil)
+			tracer.TracingHooks().OnTxEnd(&types.Receipt{GasUsed: res.GasUsed}, nil)
 		}
 		_ = ibs.FinalizeTx(rules, cachedWriter)
 

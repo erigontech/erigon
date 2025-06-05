@@ -23,8 +23,10 @@ import (
 	"io"
 	"sort"
 	"strconv"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/common"
 )
@@ -42,7 +44,21 @@ const (
 	BufIOSize = 128 * 4096
 )
 
-var BufferOptimalSize = 256 * datasize.MB /*  var because we want to sometimes change it from tests or command-line flags */
+var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
+
+// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
+var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
+var SmallSortableBuffers = NewAllocator(&sync.Pool{
+	New: func() interface{} {
+		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
+	},
+})
+var etlLargeBufRAM = BufferOptimalSize
+var LargeSortableBuffers = NewAllocator(&sync.Pool{
+	New: func() interface{} {
+		return NewSortableBuffer(etlLargeBufRAM).Prealloc(1_024, int(etlLargeBufRAM/32))
+	},
+})
 
 type Buffer interface {
 	// Put does copy `k` and `v`
@@ -51,7 +67,7 @@ type Buffer interface {
 	Len() int
 	Reset()
 	SizeLimit() int
-	Prealloc(predictKeysAmount, predictDataAmount int)
+	Prealloc(predictKeysAmount, predictDataAmount int) Buffer
 	Write(io.Writer) error
 	Sort()
 	CheckFlushSize() bool
@@ -78,6 +94,7 @@ type sortableBuffer struct {
 	offsets     []int
 	lens        []int
 	data        []byte
+	size        int
 	optimalSize int
 }
 
@@ -97,11 +114,10 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	b.data = append(b.data, k...)
 	b.offsets = append(b.offsets, len(b.data))
 	b.data = append(b.data, v...)
+	b.size += lk + lv + 32 // size = len(b.data) + 8*len(b.offsets) + 8*len(b.lens)
 }
 
-func (b *sortableBuffer) Size() int {
-	return len(b.data) + 8*len(b.offsets) + 8*len(b.lens)
-}
+func (b *sortableBuffer) Size() int { return b.size }
 
 func (b *sortableBuffer) Len() int {
 	return len(b.offsets) / 2
@@ -151,16 +167,19 @@ func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
 	return keyBuf, valBuf
 }
 
-func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) {
+func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.lens = make([]int, 0, predictKeysAmount)
 	b.offsets = make([]int, 0, predictKeysAmount)
 	b.data = make([]byte, 0, predictDataSize)
+	b.size = 0
+	return b
 }
 
 func (b *sortableBuffer) Reset() {
 	b.offsets = b.offsets[:0]
 	b.lens = b.lens[:0]
 	b.data = b.data[:0]
+	b.size = 0
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
@@ -247,9 +266,10 @@ func (b *appendSortableBuffer) Reset() {
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }
-func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) {
+func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount)
 	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
+	return b
 }
 
 func (b *appendSortableBuffer) Write(w io.Writer) error {
@@ -344,9 +364,10 @@ func (b *oldestEntrySortableBuffer) Reset() {
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }
-func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) {
+func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount)
 	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
+	return b
 }
 
 func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {
@@ -382,7 +403,7 @@ func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func getBufferByType(tp int, size datasize.ByteSize, prevBuf Buffer) Buffer {
+func getBufferByType(tp int, size datasize.ByteSize) Buffer {
 	switch tp {
 	case SortableSliceBuffer:
 		return NewSortableBuffer(size)

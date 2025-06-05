@@ -17,15 +17,14 @@
 package misc
 
 import (
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 )
 
-func ApplyBeaconRootEip4788(parentBeaconBlockRoot *libcommon.Hash, syscall consensus.SystemCall, tracer *tracing.Hooks) {
+func ApplyBeaconRootEip4788(parentBeaconBlockRoot *common.Hash, syscall consensus.SystemCall, tracer *tracing.Hooks) {
 	if tracer != nil && tracer.OnSystemCallStart != nil {
 		tracer.OnSystemCallStart()
 	}

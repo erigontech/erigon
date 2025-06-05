@@ -32,13 +32,17 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/mclock"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/netutil"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/netutil"
 )
 
 // This test checks that dynamic dials are launched from discovery results.
 func TestDialSchedDynDial(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	t.Parallel()
 
 	config := dialConfig{
@@ -234,6 +238,10 @@ func TestDialSchedStaticDial(t *testing.T) {
 
 // This test checks that removing static nodes stops connecting to them.
 func TestDialSchedRemoveStatic(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	config := dialConfig{
@@ -292,6 +300,10 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 
 // This test checks that past dials are not retried for some time.
 func TestDialSchedHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	t.Parallel()
 
 	config := dialConfig{
