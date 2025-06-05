@@ -561,10 +561,12 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
 		s.logger.Debug("[IDENTITY] Could not load sync subnet", "err", err)
 	}
+	cgc := s.cfg.BeaconConfig.CustodyRequirement // temporarily hardcoded
 	metadata = &cltypes.Metadata{
-		SeqNumber: s.listener.LocalNode().Seq(),
-		Attnets:   [8]byte(subnetField),
-		Syncnets:  (*[1]byte)(syncnetField),
+		SeqNumber:         s.listener.LocalNode().Seq(),
+		Attnets:           [8]byte(subnetField),
+		Syncnets:          (*[1]byte)(syncnetField),
+		CustodyGroupCount: &cgc,
 	}
 	return
 }

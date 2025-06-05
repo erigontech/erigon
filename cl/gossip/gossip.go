@@ -37,6 +37,7 @@ const (
 	TopicNamePrefixBlobSidecar       = "blob_sidecar_%d"
 	TopicNamePrefixBeaconAttestation = "beacon_attestation_%d"
 	TopicNamePrefixSyncCommittee     = "sync_committee_%d"
+	TopicNamePrefixDataColumnSidecar = "data_column_sidecar_%d"
 )
 
 func TopicNameBlobSidecar(d uint64) string {
@@ -51,8 +52,16 @@ func TopicNameSyncCommittee(d int) string {
 	return fmt.Sprintf(TopicNamePrefixSyncCommittee, d)
 }
 
+func TopicNameDataColumnSidecar(d uint64) string {
+	return fmt.Sprintf(TopicNamePrefixDataColumnSidecar, d)
+}
+
 func IsTopicBlobSidecar(d string) bool {
 	return strings.Contains(d, "blob_sidecar_")
+}
+
+func IsTopicDataColumnSidecar(d string) bool {
+	return strings.Contains(d, "data_column_sidecar_")
 }
 
 func IsTopicSyncCommittee(d string) bool {
