@@ -66,9 +66,9 @@ func GetCustodyGroups(nodeId enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 	return custodyGroups, nil
 }
 
-// GetColumnsForCustodyGroup returns the column indices that belong to a given custody group.
+// ComputeColumnsForCustodyGroup returns the column indices that belong to a given custody group.
 // This function is re-entrant and thread-safe.
-func GetColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, error) {
+func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, error) {
 	numberOfCustodyGroups := clparams.GetBeaconConfig().NumberOfCustodyGroups
 	numberOfColumns := clparams.GetBeaconConfig().NumberOfColumns
 
