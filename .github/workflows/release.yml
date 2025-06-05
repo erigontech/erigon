@@ -90,6 +90,7 @@ jobs:
       - name: Run some commands, get commit id
         id: getCommitId
         run: |
+          cd erigon
           mkdir $GITHUB_WORKSPACE/build-arm64 $GITHUB_WORKSPACE/build-amd64 $GITHUB_WORKSPACE/build-amd64v2
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
