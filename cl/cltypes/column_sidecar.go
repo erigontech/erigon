@@ -132,20 +132,30 @@ func (*ColumnSidecarsByRangeRequest) Clone() clonable.Clonable {
 	return &ColumnSidecarsByRangeRequest{}
 }
 
+// DataColumnsByRootIdentifier is the request for getting a range of column sidecars by root identifier.
 type DataColumnsByRootIdentifier struct {
 	BlockRoot common.Hash
-	Columns   solid.ListSSZUint64
+	Columns   *solid.ListSSZUint64
 }
 
 func (d *DataColumnsByRootIdentifier) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, d.BlockRoot, &d.Columns)
+	if d.Columns == nil {
+		d.Columns = solid.NewListSSZUint64([]uint64{})
+	}
+	return ssz2.MarshalSSZ(buf, d.BlockRoot, d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, &d.BlockRoot, &d.Columns)
+	if d.Columns == nil {
+		d.Columns = solid.NewListSSZUint64([]uint64{})
+	}
+	return ssz2.UnmarshalSSZ(buf, 0, &d.BlockRoot, d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) EncodingSizeSSZ() int {
+	if d.Columns == nil {
+		d.Columns = solid.NewListSSZUint64([]uint64{})
+	}
 	return 32 + d.Columns.EncodingSizeSSZ()
 }
 
