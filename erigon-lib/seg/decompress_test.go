@@ -74,17 +74,15 @@ func prepareLoremDictOnPagedWriter(t *testing.T, sampling int, pageCompression b
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(err)
 	defer c.Close()
-	wr := NewWriter(c, CompressNone)
-	defer wr.Close()
 
-	p := NewPagedWriter(wr, sampling, pageCompression)
+	p := NewPagedWriter(NewWriter(c, CompressNone), sampling, pageCompression)
 	for k, w := range loremStrings {
 		key := fmt.Sprintf("key %d", k)
 		val := fmt.Sprintf("%s %d", w, k)
 		require.NoError(p.Add([]byte(key), []byte(val)))
 	}
 	require.NoError(p.Flush())
-	require.NoError(wr.Compress())
+	require.NoError(p.Compress())
 
 	d, err := NewDecompressor(file)
 	require.NoError(err)
