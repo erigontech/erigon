@@ -69,12 +69,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.APP_REPO }}
-          fetch-depth: 1
+          fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
-
-      - name: Checkout git tags
-        run: cd erigon; git fetch --depth=1 origin +refs/tags/*:refs/tags/*
 
       - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
