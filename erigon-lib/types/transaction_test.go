@@ -764,7 +764,7 @@ func TestV1BlobTxnUnwrap(t *testing.T) {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
 	wrappedBlobTx := BlobTxWrapper{}
-	blockTxRlp2, _ := MakeBlobTxnRlp()
+	blockTxRlp2, _ := MakeV1WrappedBlobTxnRlp()
 	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(blockTxRlp2[1:]), 0))
 	if err != nil {
 		t.Errorf("long rlp decoding failed: %v", err)
