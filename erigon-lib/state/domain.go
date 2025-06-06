@@ -1781,12 +1781,12 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, uint64, bool, e
 	var found bool
 	var err error
 
-	//if traceGetLatest == dt.name {
-	defer func() {
-		fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
-			dt.name.String(), key, v, found, foundStep, dt.files.EndTxNum()/dt.aggStep)
-	}()
-	//}
+	if traceGetLatest == dt.name {
+		defer func() {
+			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
+				dt.name.String(), key, v, found, foundStep, dt.files.EndTxNum()/dt.aggStep)
+		}()
+	}
 
 	v, foundStep, found, err = dt.getLatestFromDb(key, roTx)
 	if err != nil {
