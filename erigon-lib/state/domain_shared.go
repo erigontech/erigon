@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -465,8 +466,8 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
-	fmt.Println("flushDiffSet", len(sd.pastChangesAccumulator))
-	if len(sd.pastChangesAccumulator)==0 {
+	fmt.Println("flushDiffSet", len(sd.pastChangesAccumulator), dbg.Stack())
+	if len(sd.pastChangesAccumulator) == 0 {
 		fmt.Println("empty")
 	}
 	for key, changeset := range sd.pastChangesAccumulator {
