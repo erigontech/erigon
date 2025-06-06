@@ -18,9 +18,11 @@ import (
 )
 
 type PeerDas interface {
+	InitSelfNodeId(nodeId enode.ID)
 	DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
 	IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error)
 	CustodyGroupCount() uint64
+	DataRecoverAndPrune(ctx context.Context) error
 }
 
 type peerdas struct {
@@ -34,12 +36,10 @@ type peerdas struct {
 }
 
 func NewPeerDas(
-	nodeId enode.ID,
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
 	columnStorage blob_storage.DataCloumnStorage) PeerDas {
 	p := &peerdas{
-		nodeId:            nodeId,
 		rpc:               rpc,
 		beaconConfig:      beaconConfig,
 		columnStorage:     columnStorage,
@@ -49,12 +49,16 @@ func NewPeerDas(
 	return p
 }
 
+func (d *peerdas) InitSelfNodeId(nodeId enode.ID) {
+	d.nodeId = nodeId
+}
+
 func (d *peerdas) CustodyGroupCount() uint64 {
 	return d.custodyGroupCount.Load()
 }
 
 func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
-	existingColumns, err := d.columnStorage.GetExistingColumnIndex(ctx, blockRoot)
+	existingColumns, err := d.columnStorage.ExistingColumnIndex(ctx, blockRoot)
 	if err != nil {
 		return false, err
 	}
@@ -69,6 +73,11 @@ func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (b
 	}
 
 	return len(custodyColumns) == 0, nil
+}
+
+func (d *peerdas) DataRecoverAndPrune(ctx context.Context) error {
+	// TODO: implement data recovery and pruning
+	return nil
 }
 
 func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
@@ -154,8 +163,9 @@ mainloop:
 			if len(result.sidecars) == 0 {
 				continue
 			}
-			// stop sending request and process the result
+			// stop sending request
 			stopChan <- struct{}{}
+			// process the result
 			for _, sidecar := range result.sidecars {
 				blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
 				if err != nil {
@@ -216,7 +226,6 @@ mainloop:
 				break mainloop
 			}
 			go requestColumnSidecars(r)
-
 		}
 	}
 
@@ -283,7 +292,7 @@ func (d *peerdas) getExpectedColumnIndex(
 	blockRoot common.Hash,
 	custodyColumns map[CustodyIndex]bool,
 ) ([]uint64, error) {
-	existingColumns, err := d.columnStorage.GetExistingColumnIndex(ctx, blockRoot)
+	existingColumns, err := d.columnStorage.ExistingColumnIndex(ctx, blockRoot)
 	if err != nil {
 		return nil, err
 	}

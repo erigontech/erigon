@@ -82,7 +82,8 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
-	require.NoError(t, sentinel.Start())
+	_, err = sentinel.Start()
+	require.NoError(t, err)
 	h := sentinel.host
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/3202"
@@ -187,7 +188,8 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
-	require.NoError(t, sentinel.Start())
+	_, err = sentinel.Start()
+	require.NoError(t, err)
 	h := sentinel.host
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5021"
@@ -297,7 +299,8 @@ func TestSentinelStatusRequest(t *testing.T) {
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
-	require.NoError(t, sentinel.Start())
+	_, err = sentinel.Start()
+	require.NoError(t, err)
 	h := sentinel.host
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5001"
