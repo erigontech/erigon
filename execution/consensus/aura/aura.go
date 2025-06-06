@@ -709,7 +709,7 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 		return err
 	}
 	for _, r := range rewards {
-		state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+		state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
 	}
 	return nil
 }
@@ -756,6 +756,10 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	}
 
 	return txs, receipts, nil, nil
+}
+
+func (c *AuRa) TxDependencies(h *types.Header) [][]int {
+	return nil
 }
 
 func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, header *types.Header, syscall consensus.SystemCall) []unAssembledHeader {

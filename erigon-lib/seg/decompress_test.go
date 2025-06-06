@@ -30,16 +30,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func prepareLoremDict(t *testing.T) *Decompressor {
 	t.Helper()
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
@@ -63,36 +62,8 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	return d
 }
 
-func prepareLoremDictOnPagedWriter(t *testing.T, sampling int, pageCompression bool) *Decompressor {
-	t.Helper()
-	logger, require := log.New(), require.New(t)
-	tmpDir := t.TempDir()
-	file := filepath.Join(tmpDir, "compressed")
-	t.Name()
-	cfg := DefaultCfg
-	cfg.MinPatternScore = 1
-	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
-	require.NoError(err)
-	defer c.Close()
-	wr := NewWriter(c, CompressNone)
-	defer wr.Close()
-
-	p := page.NewWriter(wr, sampling, pageCompression)
-	for k, w := range loremStrings {
-		key := fmt.Sprintf("key %d", k)
-		val := fmt.Sprintf("%s %d", w, k)
-		require.NoError(p.Add([]byte(key), []byte(val)))
-	}
-	require.NoError(p.Flush())
-	require.NoError(wr.Compress())
-
-	d, err := NewDecompressor(file)
-	require.NoError(err)
-	return d
-}
-
 func TestDecompressSkip(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -118,46 +89,8 @@ func TestDecompressSkip(t *testing.T) {
 	require.Equal(t, 16, int(offset))
 }
 
-func TestPagedReader(t *testing.T) {
-	d := prepareLoremDictOnPagedWriter(t, 2, false)
-	defer d.Close()
-	require := require.New(t)
-	g1 := NewPagedReader(d.MakeGetter(), 2, false)
-	var buf []byte
-	_, _, buf, o1 := g1.Next2(buf[:0])
-	require.Zero(o1)
-	_, _, buf, o1 = g1.Next2(buf[:0])
-	require.Zero(o1)
-	_, _, buf, o1 = g1.Next2(buf[:0])
-	require.NotZero(o1)
-
-	g := NewPagedReader(d.MakeGetter(), 2, false)
-	i := 0
-	for g.HasNext() {
-		w := loremStrings[i]
-		if i%2 == 0 {
-			g.Skip()
-		} else {
-			var word []byte
-			_, word, buf, _ = g.Next2(buf[:0])
-			expected := fmt.Sprintf("%s %d", w, i)
-			require.Equal(expected, string(word))
-		}
-		i++
-	}
-
-	g.Reset(0)
-	_, offset := g.Next(buf[:0])
-	require.Equal(0, int(offset))
-	_, offset = g.Next(buf[:0])
-	require.Equal(0x2a, int(offset))
-	_, offset = g.Next(buf[:0])
-	require.Equal(0x2a, int(offset))
-	_, offset = g.Next(buf[:0])
-	require.Equal(0x52, int(offset))
-}
-
 func TestDecompressMatchOK(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -182,6 +115,7 @@ func TestDecompressMatchOK(t *testing.T) {
 }
 
 func TestDecompressMatchCmpOK(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -210,7 +144,6 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed2")
-	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
@@ -261,6 +194,7 @@ func TestDecompressMatchOKCondensed(t *testing.T) {
 }
 
 func TestDecompressMatchNotOK(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -284,6 +218,7 @@ func TestDecompressMatchNotOK(t *testing.T) {
 }
 
 func TestDecompressMatchPrefix(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -324,17 +259,18 @@ func TestDecompressMatchPrefix(t *testing.T) {
 
 func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	t.Helper()
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	slices.Sort(loremStrings)
+
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
-	slices.Sort(loremStrings)
 	for k, w := range loremStrings {
 		if len(w) == 0 {
 			err = c.AddUncompressedWord([]byte(w))
@@ -353,6 +289,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 }
 
 func TestUncompressed(t *testing.T) {
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDictUncompressed(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -414,7 +351,7 @@ func TestUncompressed(t *testing.T) {
 }
 
 func TestDecompressor_OpenCorrupted(t *testing.T) {
-	t.Helper()
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger := log.New()
 	tmpDir := t.TempDir()
 
@@ -586,7 +523,6 @@ dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco la
 consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
 excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
 
-var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 func rmNewLine(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
 }
@@ -618,10 +554,6 @@ func TestDecompressTorrent(t *testing.T) {
 
 const N = 100
 
-var WORDS = [N][]byte{}
-var WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
-var INPUT_FLAGS = []int{}  // []byte or nil input
-
 func randWord() []byte {
 	size := rand.Intn(256) // size of the word
 	word := make([]byte, size)
@@ -631,27 +563,25 @@ func randWord() []byte {
 	return word
 }
 
-func generateRandWords() {
+func generateRandWords() (WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
+	WORDS = [N][]byte{}
+	WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
+	INPUT_FLAGS = []int{}  // []byte or nil input
+
 	for i := 0; i < N-2; i++ {
 		WORDS[i] = randWord()
 	}
 	// make sure we have at least 2 emtpy []byte
 	WORDS[N-2] = []byte{}
 	WORDS[N-1] = []byte{}
+	return
 }
 
-func clearPrevDict() {
-	WORDS = [N][]byte{}
-	WORD_FLAGS = [N]bool{}
-	INPUT_FLAGS = []int{}
-}
-
-func prepareRandomDict(t *testing.T) *Decompressor {
+func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "complex")
-	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
@@ -661,9 +591,8 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 	}
 	// c.DisableFsync()
 	defer c.Close()
-	clearPrevDict()
 	rand.Seed(time.Now().UnixNano())
-	generateRandWords()
+	WORDS, WORD_FLAGS, INPUT_FLAGS = generateRandWords()
 
 	idx := 0
 	for idx < N {
@@ -697,15 +626,14 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 	if err = c.Compress(); err != nil {
 		t.Fatal(err)
 	}
-	var d *Decompressor
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
-	return d
+	return d, WORDS, WORD_FLAGS, INPUT_FLAGS
 }
 
 func TestDecompressRandomMatchCmp(t *testing.T) {
-	d := prepareRandomDict(t)
+	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
 	defer d.Close()
 
 	if d.wordsCount != uint64(len(INPUT_FLAGS)) {
@@ -773,7 +701,7 @@ func TestDecompressRandomMatchCmp(t *testing.T) {
 }
 
 func TestDecompressRandomMatchBool(t *testing.T) {
-	d := prepareRandomDict(t)
+	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
 	defer d.Close()
 
 	if d.wordsCount != uint64(len(INPUT_FLAGS)) {
@@ -829,7 +757,7 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 }
 
 func TestDecompressRandomFastNext(t *testing.T) {
-	d := prepareRandomDict(t)
+	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
 	defer d.Close()
 
 	if d.wordsCount != uint64(len(INPUT_FLAGS)) {

@@ -358,8 +358,8 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if _, size, err := s.Kind(); err == nil {
-		if size == 0 {
+	if kind, _, err := s.Kind(); err == nil {
+		if kind == rlp.Byte {
 			if err := s.Decode(&txw.WrapperVersion); err != nil {
 				return err
 			}

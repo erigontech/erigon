@@ -168,34 +168,62 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-lib:
-	@cd erigon-lib && $(MAKE) test
+test-erigon-lib-short:
+	@cd erigon-lib && $(MAKE) test-short
 
 test-erigon-lib-all:
 	@cd erigon-lib && $(MAKE) test-all
 
-test-erigon-db:
-	@cd erigon-db && $(MAKE) test
+test-erigon-lib-all-race:
+	@cd erigon-lib && $(MAKE) test-all-race
+
+test-erigon-db-short:
+	@cd erigon-db && $(MAKE) test-short
 
 test-erigon-db-all:
 	@cd erigon-db && $(MAKE) test-all
 
-test-p2:
-	@cd p2p && $(MAKE) test
+test-erigon-db-all-race:
+	@cd erigon-db && $(MAKE) test-all-race
+
+test-p2-short:
+	@cd p2p && $(MAKE) test-short
 
 test-p2p-all:
 	@cd p2p && $(MAKE) test-all
 
+test-p2p-all-race:
+	@cd p2p && $(MAKE) test-all-race
+
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
-## test:                      run short tests with a 10m timeout
-test: test-erigon-lib test-erigon-db test-p2
-	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out | grep -v '=== CONT ' | grep -v '=== RUN' | grep -v '=== PAUSE' | grep -v 'PASS: '
+## test-short:                run short tests with a 10m timeout
+test-short: test-erigon-lib-short test-erigon-db-short test-p2-short
+	@{ \
+		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
 
 ## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all test-erigon-db-all test-p2p-all
-	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race | grep -v '=== CONT ' | grep -v '=== RUN' | grep -v '=== PAUSE' | grep -v 'PASS: '
+	@{ \
+		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
+
+## test-all-race:             run all tests with the race flag
+test-all-race: test-erigon-lib-all-race test-erigon-db-all-race test-p2p-all-race
+	@{ \
+		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
@@ -234,21 +262,26 @@ define run_suite
 endef
 
 hive-local:
+	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
-	rm -rf "hive-local-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
-	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
+	rm -rf "temp/hive-local-$(SHORT_COMMIT)" && mkdir "temp/hive-local-$(SHORT_COMMIT)"
+	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
 
-	cd "hive-local-$(SHORT_COMMIT)/hive" && \
-	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
-	cd "hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
-	cd "hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,cancun)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && \
+	$(if $(filter Darwin,$(UNAME)), \
+		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
+		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
+	)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,cancun)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
@@ -256,11 +289,15 @@ eest-hive:
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
-	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+	$(if $(filter Darwin,$(UNAME)), \
+		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
+		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
+	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.3.0/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor

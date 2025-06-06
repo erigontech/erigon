@@ -1158,7 +1158,7 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, seg.CompressNone)
+		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
 		if err != nil {
 			return err
 		}
