@@ -231,7 +231,7 @@ var snapshotCommand = cli.Command{
 				return dirs.RenameNewVersions()
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
-		}, 
+		},
 		{
 			Name:    "rm-state-snapshots",
 			Aliases: []string{"rm-state-segments", "rm-state"},
