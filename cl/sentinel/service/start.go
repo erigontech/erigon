@@ -32,6 +32,7 @@ import (
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-p2p/enode"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -87,7 +88,7 @@ func createSentinel(
 	indiciesDB kv.RwDB,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
-	logger log.Logger) (*sentinel.Sentinel, error) {
+	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		context.Background(),
 		cfg,
@@ -99,10 +100,11 @@ func createSentinel(
 		forkChoiceReader,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := sent.Start(); err != nil {
-		return nil, err
+	localNode, err := sent.Start()
+	if err != nil {
+		return nil, nil, err
 	}
 	gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
@@ -170,7 +172,7 @@ func createSentinel(
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 	}
-	return sent, nil
+	return sent, localNode, nil
 }
 
 func StartSentinelService(
@@ -181,9 +183,9 @@ func StartSentinelService(
 	srvCfg *ServerConfig,
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
-	logger log.Logger) (sentinelrpc.SentinelClient, error) {
+	logger log.Logger) (sentinelrpc.SentinelClient, *enode.LocalNode, error) {
 	ctx := context.Background()
-	sent, err := createSentinel(
+	sent, localNode, err := createSentinel(
 		cfg,
 		blockReader,
 		blobStorage,
@@ -193,7 +195,7 @@ func StartSentinelService(
 		logger,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
@@ -203,7 +205,7 @@ func StartSentinelService(
 	server := NewSentinelServer(ctx, sent, logger)
 	go StartServe(server, srvCfg, srvCfg.Creds)
 
-	return direct.NewSentinelClientDirect(server), nil
+	return direct.NewSentinelClientDirect(server), localNode, nil
 }
 
 func StartServe(
