@@ -384,8 +384,8 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, haveRamUpdates boo
 					}
 				}
 			case FILE_CURSOR:
-				indexList := dt.d.Accessors
-				if indexList.Has(AccessorBTree) {
+				accessors := dt.d.Accessors
+				if accessors.Has(AccessorBTree) {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
@@ -396,7 +396,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, haveRamUpdates boo
 						ci1.btCursor.Close()
 					}
 				}
-				if indexList.Has(AccessorHashMap) {
+				if accessors.Has(AccessorHashMap) {
 					ci1.idx.Reset(ci1.latestOffset)
 					if !ci1.idx.HasNext() {
 						break
