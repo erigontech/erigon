@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -43,7 +44,7 @@ import (
 // This is the range in which we sanity check and potentially fix the canonical chain if it is broken.
 // a broken canonical chain is very dangerous, as it can lead to a situation where the RPC and snapshots break down.
 // better to have an hack than to regenerate all chains.
-const fixCanonicalFailsafeRange = 512
+const fixCanonicalFailsafeRange = 16
 
 const startPruneFrom = 1024
 
@@ -496,10 +497,20 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	status := execution.ExecutionStatus_Success
 
 	if headHash != blockHash {
+		blockHashBlockNum, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+
 		status = execution.ExecutionStatus_BadBlock
 		validationError = "headHash and blockHash mismatch"
 		if log {
-			e.logger.Warn("bad forkchoice", "head", headHash, "hash", blockHash)
+			headNum := "unknown"
+			if headNumber != nil {
+				headNum = strconv.FormatUint(*headNumber, 10)
+			}
+			hashBlockNum := "unknown"
+			if blockHashBlockNum != nil {
+				hashBlockNum = strconv.FormatUint(*blockHashBlockNum, 10)
+			}
+			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
 		}
 	} else {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)

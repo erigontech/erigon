@@ -108,7 +108,7 @@ func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint
 func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) error {
 	e.stateReader.SetTxNum(txNum)
 	e.ibs.Reset()
-	e.ibs.SetTxContext(txIndex)
+	e.ibs.SetTxContext(e.blockNum, txIndex)
 
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if txn.Type() != types.AccountAbstractionTxType && err != nil {
@@ -137,9 +137,9 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 			return err
 		}
 	} else {
-		_, err = core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
+		result, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
 		if err != nil {
-			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
+			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, result.Err)
 		}
 	}
 

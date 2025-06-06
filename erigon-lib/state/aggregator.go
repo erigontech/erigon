@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
 )
 
 type Aggregator struct {
@@ -183,6 +182,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	if err != nil {
 		return err
 	}
+	a.AddDependencyBtwnHistoryII(name)
 	return nil
 }
 
@@ -237,7 +237,12 @@ func (a *Aggregator) ReloadSalt() error {
 	return nil
 }
 
-func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
+func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
+	dd := a.d[dependent]
+	if dd.disable || a.d[dependency].disable {
+		a.logger.Info("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
+		return
+	}
 	// "hard alignment":
 	// only corresponding files should be included. e.g. commitment + account -
 	// cannot have merged account visibleFile, and unmerged commitment visibleFile for same step range.
@@ -245,12 +250,37 @@ func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
 		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
 	}
 
-	a.checker.AddDependency(dependency, &DependentInfo{
-		domain:      dependent,
-		filesGetter: func() *btree.BTreeG[*filesItem] { return a.d[dependent].dirtyFiles },
-		accessors:   a.d[dependent].Accessors,
+	ue := FromDomain(dependent)
+	a.checker.AddDependency(ue, &DependentInfo{
+		entity:      ue,
+		filesGetter: func() *btree.BTreeG[*filesItem] { return dd.dirtyFiles },
+		accessors:   dd.Accessors,
 	})
-	a.d[dependency].SetDependency(a.checker)
+	dd.SetChecker(a.checker)
+}
+
+func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
+	// ii has checker on history dirtyFiles (same domain)
+	dd := a.d[domain]
+	if dd.histCfg.snapshotsDisabled || dd.histCfg.historyDisabled || dd.disable {
+		a.logger.Info("history or ii disabled, can't register dependency", "domain", domain.String())
+		return
+	}
+
+	if a.checker == nil {
+		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+	}
+
+	h := dd.History
+	ue := FromII(dd.InvertedIndex.iiCfg.name)
+	a.checker.AddDependency(ue, &DependentInfo{
+		entity: ue,
+		filesGetter: func() *btree.BTreeG[*filesItem] {
+			return h.dirtyFiles
+		},
+		accessors: h.Accessors,
+	})
+	h.InvertedIndex.SetChecker(a.checker)
 }
 
 func (a *Aggregator) EnableAllDependencies() {
@@ -749,7 +779,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		a.cleanAfterMerge(nil)
-		// TODO: add files notification here too.
 		return false, nil
 	}
 
@@ -1631,7 +1660,7 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 	if fi < 0 {
 		return nil, fmt.Errorf("file not found")
 	}
-	r := seg.NewReader(dt.files[fi].src.decompressor.MakeGetter(), dt.d.Compression)
+	r := dt.dataReader(dt.files[fi].src.decompressor)
 	return NewSegStreamReader(r, -1), nil
 }
 

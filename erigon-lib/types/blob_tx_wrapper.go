@@ -47,10 +47,11 @@ type KZGProofs []KZGProof
 type Blobs []Blob
 
 type BlobTxWrapper struct {
-	Tx          BlobTx
-	Commitments BlobKzgs
-	Blobs       Blobs
-	Proofs      KZGProofs
+	Tx             BlobTx
+	WrapperVersion byte
+	Commitments    BlobKzgs
+	Blobs          Blobs
+	Proofs         KZGProofs
 }
 
 /* Blob methods */
@@ -357,6 +358,16 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
+	if kind, _, err := s.Kind(); err == nil {
+		if kind == rlp.Byte {
+			if err := s.Decode(&txw.WrapperVersion); err != nil {
+				return err
+			}
+		}
+	} else {
+		return err
+	}
+
 	if err := txw.Blobs.DecodeRLP(s); err != nil {
 		return err
 	}
@@ -380,6 +391,9 @@ func (txw *BlobTxWrapper) EncodingSize() int {
 func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	l, _, _, _, _ := txw.Tx.payloadSize()
 	payloadSize += l + rlp.ListPrefixLen(l)
+	if txw.WrapperVersion != 0 {
+		payloadSize += 1
+	}
 	l = txw.Blobs.payloadSize()
 	payloadSize += l + rlp.ListPrefixLen(l)
 	l = txw.Commitments.payloadSize()
@@ -408,7 +422,12 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 	if _, err := w.Write(bw.Bytes()[1:]); err != nil {
 		return err
 	}
-
+	if txw.WrapperVersion != 0 {
+		b[0] = txw.WrapperVersion
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	}
 	if err := txw.Blobs.encodePayload(w, b[:], txw.Blobs.payloadSize()); err != nil {
 		return err
 	}

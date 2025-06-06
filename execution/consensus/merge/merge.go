@@ -164,11 +164,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	for _, r := range rewards {
 		switch r.Kind {
 		case consensus.RewardAuthor:
-			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
 		case consensus.RewardUncle:
-			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineUncle)
+			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineUncle)
 		default:
-			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceChangeUnspecified)
+			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceChangeUnspecified)
 		}
 	}
 
@@ -180,7 +180,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		} else {
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
-				state.AddBalance(w.Address, amountInWei, tracing.BalanceIncreaseWithdrawal)
+				state.AddBalance(w.Address, *amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}
 	}
@@ -260,6 +260,10 @@ func (s *Merge) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTi
 	return ProofOfStakeDifficulty
 }
 
+func (c *Merge) TxDependencies(h *types.Header) [][]int {
+	return nil
+}
+
 // verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
 // stock Ethereum consensus engine with EIP-3675 modifications.
 func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header) error {
@@ -281,8 +285,8 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	// Verify that the gas limit is within cap
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	if header.GasLimit > params.MaxBlockGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxBlockGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
