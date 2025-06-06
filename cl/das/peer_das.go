@@ -58,7 +58,7 @@ func (d *peerdas) CustodyGroupCount() uint64 {
 }
 
 func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
-	existingColumns, err := d.columnStorage.ExistingColumnIndex(ctx, blockRoot)
+	existingColumns, err := d.columnStorage.SavedColumnIndex(ctx, blockRoot)
 	if err != nil {
 		return false, err
 	}
@@ -292,7 +292,7 @@ func (d *peerdas) getExpectedColumnIndex(
 	blockRoot common.Hash,
 	custodyColumns map[CustodyIndex]bool,
 ) ([]uint64, error) {
-	existingColumns, err := d.columnStorage.ExistingColumnIndex(ctx, blockRoot)
+	existingColumns, err := d.columnStorage.SavedColumnIndex(ctx, blockRoot)
 	if err != nil {
 		return nil, err
 	}
