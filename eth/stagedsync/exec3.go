@@ -714,7 +714,7 @@ func ExecV3(ctx context.Context,
 	if !parallel {
 		err = func() error {
 			// Only needed by bor chains
-			shouldGenerateChangesetsForLastBlocks := false //cfg.chainConfig.Bor != nil
+			shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 			havePartialBlock := false
 
 			for ; blockNum <= maxBlockNum; blockNum++ {
