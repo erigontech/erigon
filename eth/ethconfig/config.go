@@ -177,7 +177,8 @@ type Config struct {
 	Genesis *types.Genesis `toml:",omitempty"`
 
 	// Protocol options
-	NetworkID uint64 // Network ID to use for selecting peers to connect to
+	NetworkID  uint64 // Network ID to use for selecting peers to connect to
+	ShadowFork bool
 
 	// This can be set to list of enrtree:// URLs which will be queried for
 	// for nodes to connect to.

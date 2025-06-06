@@ -970,6 +970,12 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *proto_sentry.Ou
 	msgcode, protocolVersions := ss.messageCode(req.Id)
 	if protocolVersions.Cardinality() == 0 ||
 		(msgcode != eth.NewBlockMsg &&
+			// ######################
+			// # TWEAK FOR PERFNET2 #
+			// ######################
+			msgcode != eth.GetBlockHeadersMsg &&
+			msgcode != eth.GetBlockBodiesMsg &&
+			// ######################
 			msgcode != eth.NewPooledTransactionHashesMsg && // to broadcast new local transactions
 			msgcode != eth.NewBlockHashesMsg) {
 		return reply, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)

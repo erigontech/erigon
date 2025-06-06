@@ -1307,6 +1307,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		false,
 		maxBlockBroadcastPeers,
 		false, /* disableBlockDownload */
+		false, /* shadowFork */
 		logger,
 	)
 	if err != nil {

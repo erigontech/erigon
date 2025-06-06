@@ -154,6 +154,7 @@ type MultiClient struct {
 	// disableBlockDownload is meant to be used temporarily for astrid until work to
 	// decouple sentry multi client from header and body downloading logic is done
 	disableBlockDownload bool
+	shadowFork           bool
 
 	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
@@ -174,6 +175,7 @@ func NewMultiClient(
 	logPeerInfo bool,
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
+	shadowFork bool,
 	logger log.Logger,
 ) (*MultiClient, error) {
 	// header downloader
