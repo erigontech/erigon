@@ -127,7 +127,6 @@ func PeekTransactionType(serialized []byte) (byte, error) {
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxnSlot.
 // It also performs syntactic validation of the transactions.
 // wrappedWithBlobs means that for blob (type 3) transactions the full version with blobs/commitments/proofs is expected
-// wrapperVersion
 // (see https://eips.ethereum.org/EIPS/eip-4844#networking).
 func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool, validateHash func([]byte) error) (p int, err error) {
 	if len(payload) == 0 {
