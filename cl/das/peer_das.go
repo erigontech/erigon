@@ -29,6 +29,7 @@ type peerdas struct {
 	beaconConfig  *clparams.BeaconChainConfig
 	columnStorage blob_storage.DataCloumnStorage
 
+	// cgc is expected to be dynamic value, which varies with the number of validators connecting to the beacon node
 	custodyGroupCount atomic.Uint64
 }
 
@@ -78,9 +79,8 @@ func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*
 		if err != nil {
 			return err
 		}
-
 		if request.Len() == 0 {
-			return nil
+			continue
 		}
 		wg.Add(1)
 		go func(i int) {
@@ -249,6 +249,12 @@ func (d *peerdas) composeIdentifierRequest(ctx context.Context, blocks []*cltype
 
 	ids := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestDataColumnSidecars))
 	for _, block := range blocks {
+		if block.Version() < clparams.FuluVersion {
+			continue
+		}
+		if block.Block.Body.BlobKzgCommitments.Len() == 0 {
+			continue
+		}
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
 			return nil, err
