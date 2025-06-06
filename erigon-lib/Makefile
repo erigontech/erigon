@@ -110,8 +110,11 @@ lint-mod-tidy:
 lint-deps: lintci-deps
 lint: lintci lint-mod-tidy
 
-test:
+test-short:
 	$(GOTEST_NOFUZZ) -short -coverprofile=coverage-test.out ./...
 
 test-all:
+	$(GOTEST) -coverprofile=coverage-test-all.out ./...
+
+test-all-race:
 	$(GOTEST) -coverprofile=coverage-test-all.out -race ./...
