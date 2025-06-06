@@ -318,8 +318,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
 	columnStorage := blob_storage.NewDataColumnStore(indexDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs), pruneBlobDistance, beaconConfig, ethClock)
 	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, columnStorage)
-	peerDas.InitSelfNodeId(localNode.ID())
-	forkChoice.InitPeerDas(peerDas)
+	peerDas.InitLocalNodeId(localNode.ID()) // hack init
+	forkChoice.InitPeerDas(peerDas)         // hack init
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, aggregationPool, syncedDataManager)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
