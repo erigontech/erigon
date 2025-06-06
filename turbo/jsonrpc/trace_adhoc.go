@@ -62,7 +62,7 @@ const (
 	TraceTypeVmTrace   = "vmTrace"
 )
 
-// TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
+// TraceCallParam (see SendTxArgs -- this allows optional params plus don't use MixedcaseAddress
 type TraceCallParam struct {
 	From                 *libcommon.Address `json:"from"`
 	To                   *libcommon.Address `json:"to"`
@@ -196,7 +196,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			}
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
-			// User specified 1559 gas feilds (or none), use those
+			// User specified 1559 gas fields (or none), use those
 			gasFeeCap = new(uint256.Int)
 			if args.MaxFeePerGas != nil {
 				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
@@ -222,7 +222,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas.SetFromBig(args.MaxFeePerBlobGas.ToInt())
+			maxFeePerBlobGas = uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt())
 		}
 	}
 	value := new(uint256.Int)
