@@ -79,7 +79,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = service.StartSentinelService(&sentinel.SentinelConfig{
+	_, _, err = service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:         cfg.Addr,
 		Port:           int(cfg.Port),
 		TCPPort:        cfg.ServerTcpPort,
