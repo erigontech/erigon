@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
@@ -101,6 +102,7 @@ type ForkChoiceStore struct {
 	equivocatingIndicies []byte
 	forkGraph            fork_graph.ForkGraph
 	blobStorage          blob_storage.BlobStorage
+	peerDas              das.PeerDas
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
@@ -157,6 +159,7 @@ func NewForkChoiceStore(
 	emitters *beaconevents.EventEmitter,
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
+	peerDas das.PeerDas,
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry,
 	probabilisticHeadGetter bool,
 ) (*ForkChoiceStore, error) {
@@ -251,6 +254,7 @@ func NewForkChoiceStore(
 		genesisValidatorsRoot:    anchorState.GenesisValidatorsRoot(),
 		hotSidecars:              make(map[common.Hash][]*cltypes.BlobSidecar),
 		blobStorage:              blobStorage,
+		peerDas:                  peerDas,
 		ethClock:                 ethClock,
 		optimisticStore:          optimistic.NewOptimisticStore(),
 		probabilisticHeadGetter:  probabilisticHeadGetter,
