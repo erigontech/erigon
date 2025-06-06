@@ -75,6 +75,7 @@ type BodyDownload struct {
 type BodyRequest struct {
 	BlockNums []uint64
 	Hashes    []common.Hash
+	PeerIDs   [][64]byte
 	peerID    [64]byte
 	waitUntil uint64
 }

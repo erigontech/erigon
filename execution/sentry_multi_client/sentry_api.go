@@ -19,7 +19,9 @@ package sentry_multi_client
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"math/rand"
+	"strings"
 
 	"google.golang.org/grpc"
 
@@ -60,7 +62,12 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			continue
 		}
 
-		//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
+		var blockNumsSb, blockHashesSb strings.Builder
+		for i := range req.BlockNums {
+			blockNumsSb.WriteString(fmt.Sprintf("%d,", req.BlockNums[i]))
+			blockHashesSb.WriteString(fmt.Sprintf("%x,", req.Hashes[i]))
+		}
+		cs.logger.Debug("Sending body request", "nums", blockNumsSb.String(), "hashes", blockHashesSb.String())
 		var bytes []byte
 		var err error
 		bytes, err = rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
@@ -71,22 +78,30 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			cs.logger.Error("Could not encode block bodies request", "err", err)
 			return [64]byte{}, false
 		}
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
-			MinBlock: req.BlockNums[len(req.BlockNums)-1],
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
-				Data: bytes,
-			},
-			MaxPeers: 1,
-		}
-
-		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		//outreq := proto_sentry.SendMessageByMinBlockRequest{
+		//	MinBlock: req.BlockNums[len(req.BlockNums)-1],
+		//	Data: &proto_sentry.OutboundMessageData{
+		//		Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+		//		Data: bytes,
+		//	},
+		//	MaxPeers: 1,
+		//}
+		//
+		//sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		sentPeers, err1 := cs.sentries[i].SendMessageToAll(ctx, &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+			Data: bytes,
+		}, &grpc.EmptyCallOption{})
 		if err1 != nil {
 			cs.logger.Error("Could not send block bodies request", "err", err1)
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
 			continue
+		}
+		for _, p := range sentPeers.Peers {
+			pid := sentry.ConvertH512ToPeerID(p)
+			cs.logger.Debug("body request sent to peer", "peer", hex.EncodeToString(pid[:]))
 		}
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
@@ -117,17 +132,22 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			cs.logger.Error("Could not encode header request", "err", err)
 			return [64]byte{}, false
 		}
-		minBlock := req.Number
-
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
-			MinBlock: minBlock,
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
-				Data: bytes,
-			},
-			MaxPeers: 5,
+		//minBlock := req.Number
+		//
+		//outreq := proto_sentry.SendMessageByMinBlockRequest{
+		//	MinBlock: minBlock,
+		//	Data: &proto_sentry.OutboundMessageData{
+		//		Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+		//		Data: bytes,
+		//	},
+		//	MaxPeers: 5,
+		//}
+		//sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		outreq2 := proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+			Data: bytes,
 		}
-		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		sentPeers, err1 := cs.sentries[i].SendMessageToAll(ctx, &outreq2, &grpc.EmptyCallOption{})
 		if err1 != nil {
 			cs.logger.Error("Could not send header request", "err", err1)
 			return [64]byte{}, false

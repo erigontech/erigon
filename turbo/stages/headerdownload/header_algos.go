@@ -685,7 +685,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 	if len(csHeaders) == 0 {
 		return nil, nil
 	}
-	hd.logger.Debug("[downloader] Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
+	hd.logger.Debug("[downloader] Collecting...", "from", csHeaders[0].Number, "fromHash", csHeaders[0].Hash, "to", csHeaders[len(csHeaders)-1].Number, "toHash", csHeaders[len(csHeaders)-1].Hash, "len", len(csHeaders), "fromPeer", hex.EncodeToString(peerId[:]))
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.posAnchor == nil {
