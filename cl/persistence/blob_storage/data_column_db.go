@@ -28,7 +28,7 @@ type DataCloumnStorage interface {
 	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
 	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
-	ExistingColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error)
+	SavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error)
 	//Prune() error
 }
 
@@ -190,7 +190,7 @@ func (s *dataCloumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot 
 	return err
 }
 
-func (s *dataCloumnStorageImpl) ExistingColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error) {
+func (s *dataCloumnStorageImpl) SavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error) {
 	// No need to lock the mutex here, as we are only reading from the database
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
