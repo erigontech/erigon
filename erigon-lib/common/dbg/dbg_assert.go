@@ -1,3 +1,3 @@
 package dbg
 
-var AssertEnabled = EnvBool("ASSERT", false)
+var AssertEnabled = EnvBool("ERIGON_ASSERT", false)
