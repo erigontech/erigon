@@ -27,6 +27,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -577,6 +578,7 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+	ForkableAggTx(kv.ForkableGroup) any
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes

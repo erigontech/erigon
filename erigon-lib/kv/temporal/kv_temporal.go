@@ -70,12 +70,25 @@ var ( // Compile time interface checks
 
 type DB struct {
 	kv.RwDB
-	agg *state.Aggregator
+	agg             *state.Aggregator
+	forkaggs        []*state.ForkableAgg
+	forkaggsEnabled bool
 }
 
-func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
-	return &DB{RwDB: db, agg: agg}, nil
+func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
+	tdb := &DB{RwDB: db, agg: agg}
+	if len(forkaggs) > 0 {
+		tdb.forkaggs = make([]*state.ForkableAgg, len(forkaggs))
+		for _, forkagg := range forkaggs {
+			if tdb != nil {
+				panic("forkaggs already set")
+			}
+			tdb.forkaggs[forkagg.Group()] = forkagg
+		}
+	}
+	return tdb, nil
 }
+func (db *DB) EnableForkable()           { db.forkaggsEnabled = true }
 func (db *DB) Agg() any                  { return db.agg }
 func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
@@ -88,6 +101,13 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.agg.BeginFilesRo()
+
+	if db.forkaggsEnabled {
+		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
+		for i, forkagg := range db.forkaggs {
+			tx.forkaggs[i] = forkagg.BeginTemporalTx()
+		}
+	}
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -184,6 +204,7 @@ func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
 type tx struct {
 	db               *DB
 	aggtx            *state.AggregatorRoTx
+	forkaggs         []*state.ForkableAggTemporalTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 	mu               sync.RWMutex
@@ -558,3 +579,11 @@ func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error 
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
+
+func (tx *tx) ForkableAggTx(forkable kv.ForkableGroup) any {
+	return tx.forkaggs[forkable]
+}
+
+// func (tx *RwTx) ForkableAgg(forkable kv.ForkableGroup) any {
+// 	return tx.forkaggs[forkable]
+// }

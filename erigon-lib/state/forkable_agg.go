@@ -22,6 +22,7 @@ type ForkableAgg struct {
 	db     kv.RoDB
 	dirs   datadir.Dirs
 	tmpdir string
+	group  kv.ForkableGroup
 
 	marked          []*Forkable[MarkedTxI]
 	unmarked        []*Forkable[UnmarkedTxI]
@@ -51,7 +52,7 @@ type ForkableAgg struct {
 	logger       log.Logger
 }
 
-func NewForkableAgg(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger log.Logger) *ForkableAgg {
+func NewForkableAgg(ctx context.Context, group kv.ForkableGroup, dirs datadir.Dirs, db kv.RoDB, logger log.Logger) *ForkableAgg {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &ForkableAgg{
 		db:        db,
@@ -66,6 +67,7 @@ func NewForkableAgg(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger l
 		mergeWorkers:           1,
 		compressWorkers:        1,
 		ps:                     background.NewProgressSet(),
+		group:                  group,
 
 		// marked:   ap.marked,
 		// unmarked: ap.unmarked,
@@ -108,6 +110,10 @@ func (r *ForkableAgg) SetCompressWorkers(n int) {
 
 func (r *ForkableAgg) SetMergeDisabled(disabled bool) {
 	r.mergeDisabled.Store(disabled)
+}
+
+func (r *ForkableAgg) Group() kv.ForkableGroup {
+	return r.group
 }
 
 // - "open folder"
