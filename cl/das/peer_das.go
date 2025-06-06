@@ -149,70 +149,72 @@ mainloop:
 				log.Debug("failed to download columns from peer", "pid", result.pid, "err", result.err)
 				continue
 			}
-			if len(result.sidecars) != 0 {
-				// stop sending request and process the result
-				stopChan <- struct{}{}
-				for _, sidecar := range result.sidecars {
-					blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
-					if err != nil {
-						log.Debug("failed to get block root", "err", err)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-					// check if the sidecar is expected
-					if _, ok := requestMap[blockRoot]; !ok {
-						log.Debug("received unexpected block root", "blockRoot", blockRoot)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-					if _, ok := requestMap[blockRoot][uint64(sidecar.Index)]; !ok {
-						log.Debug("received unexpected column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						continue
-					}
-					columnIndex := sidecar.Index
-					columnData := sidecar
-
-					if !VerifyDataColumnSidecar(sidecar) {
-						log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-					if !VerifyDataColumnSidecarInclusionProof(sidecar) {
-						log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-					if !VerifyDataColumnSidecarKZGProofs(sidecar) {
-						log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-
-					if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnData); err != nil {
-						log.Debug("failed to write column sidecar", "err", err)
-						continue
-					}
-					delete(requestMap[blockRoot], uint64(sidecar.Index))
-				}
-				// check if there are any remaining requests and send again if there are
-				r := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestDataColumnSidecars))
-				for blockRoot, columns := range requestMap {
-					columns := make([]uint64, 0, len(columns))
-					for column := range columns {
-						columns = append(columns, uint64(column))
-					}
-					if len(columns) > 0 {
-						r.Append(&cltypes.DataColumnsByRootIdentifier{
-							BlockRoot: blockRoot,
-							Columns:   solid.NewListSSZUint64(columns),
-						})
-					}
-				}
-				if r.Len() == 0 {
-					break mainloop
-				}
-				go requestColumnSidecars(r)
+			if len(result.sidecars) == 0 {
+				continue
 			}
+			// stop sending request and process the result
+			stopChan <- struct{}{}
+			for _, sidecar := range result.sidecars {
+				blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+				if err != nil {
+					log.Debug("failed to get block root", "err", err)
+					d.rpc.BanPeer(result.pid)
+					continue
+				}
+				// check if the sidecar is expected
+				if _, ok := requestMap[blockRoot]; !ok {
+					log.Debug("received unexpected block root", "blockRoot", blockRoot)
+					d.rpc.BanPeer(result.pid)
+					continue
+				}
+				if _, ok := requestMap[blockRoot][uint64(sidecar.Index)]; !ok {
+					log.Debug("received unexpected column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+					continue
+				}
+				columnIndex := sidecar.Index
+				columnData := sidecar
+
+				if !VerifyDataColumnSidecar(sidecar) {
+					log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+					d.rpc.BanPeer(result.pid)
+					continue
+				}
+				if !VerifyDataColumnSidecarInclusionProof(sidecar) {
+					log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+					d.rpc.BanPeer(result.pid)
+					continue
+				}
+				if !VerifyDataColumnSidecarKZGProofs(sidecar) {
+					log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+					d.rpc.BanPeer(result.pid)
+					continue
+				}
+
+				if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnData); err != nil {
+					log.Debug("failed to write column sidecar", "err", err)
+					continue
+				}
+				delete(requestMap[blockRoot], uint64(sidecar.Index))
+			}
+			// check if there are any remaining requests and send again if there are
+			r := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestDataColumnSidecars))
+			for blockRoot, columns := range requestMap {
+				columns := make([]uint64, 0, len(columns))
+				for column := range columns {
+					columns = append(columns, uint64(column))
+				}
+				if len(columns) > 0 {
+					r.Append(&cltypes.DataColumnsByRootIdentifier{
+						BlockRoot: blockRoot,
+						Columns:   solid.NewListSSZUint64(columns),
+					})
+				}
+			}
+			if r.Len() == 0 {
+				break mainloop
+			}
+			go requestColumnSidecars(r)
+
 		}
 	}
 
@@ -253,6 +255,7 @@ func (d *peerdas) composeIdentifierRequest(ctx context.Context, blocks []*cltype
 			continue
 		}
 		if block.Block.Body.BlobKzgCommitments.Len() == 0 {
+			// skip the block if it does not have any blob kzg commitments
 			continue
 		}
 		blockRoot, err := block.Block.HashSSZ()
