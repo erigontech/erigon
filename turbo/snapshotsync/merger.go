@@ -205,7 +205,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	defer snapshots.recalcVisibleFiles()
+	defer snapshots.recalcVisibleFiles(snapshots.alignMin)
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()
