@@ -193,7 +193,8 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 }
 
 const diffChunkKeyLen = 48
-const diffChunkLen = 4*1024 - 32
+const mdbxHeaderSize = 40
+const diffChunkLen = (4096 / 2) - diffChunkKeyLen - mdbxHeaderSize/2 // 2 keys per 4kb page, to avoid overflow pages
 
 type threadSafeBuf struct {
 	b []byte
