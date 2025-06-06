@@ -17,14 +17,6 @@ on:
     - cron: '20 16 * * *' # daily at 16:20 UTC
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: >-
-    ${{
-      !startsWith(github.ref, 'refs/heads/release/') &&
-      github.ref != 'refs/heads/main'
-    }}
-
 jobs:
   # 
   # This first job is used to determine if changes are within out-of-scope dirs or files (in such case the tests are not run because they would be meaningless)
