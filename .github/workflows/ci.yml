@@ -18,7 +18,7 @@ on:
 jobs:
   linux:
     concurrency:
-      group: tests-mac-linux-${{ matrix.os }}-${{ github.ref }}
+      group: ci-${{ matrix.os }}-${{ github.ref }}
       cancel-in-progress: >-
         ${{
           !startsWith(github.ref, 'refs/heads/release/') &&
@@ -70,7 +70,7 @@ jobs:
 
   win:
     concurrency:
-      group: tests-mac-linux-${{ matrix.os }}-${{ github.ref }}
+      group: ci-win-${{ matrix.os }}-${{ github.ref }}
       cancel-in-progress: >-
         ${{
           !startsWith(github.ref, 'refs/heads/release/') &&

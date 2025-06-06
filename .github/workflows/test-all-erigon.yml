@@ -105,7 +105,7 @@ jobs:
   tests-windows:
     needs: source-of-changes
     concurrency:
-      group: tests-mac-linux-${{ matrix.os }}-${{ github.ref }}
+      group: tests-windows-${{ matrix.os }}-${{ github.ref }}
       cancel-in-progress: >-
         ${{
           needs.source-of-changes.outputs.changed_files != 'true' &&
