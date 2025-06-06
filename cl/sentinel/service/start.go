@@ -128,7 +128,7 @@ func createSentinel(
 		generateSubnetsTopics(
 			// TODO: Try dynamically generating the topics based on custody_group_count
 			gossip.TopicNamePrefixDataColumnSidecar,
-			int(cfg.BeaconConfig.NumberOfColumns),
+			int(cfg.BeaconConfig.DataColumnSidecarSubnetCount),
 		)...)
 
 	attestationSubnetTopics := generateSubnetsTopics(
