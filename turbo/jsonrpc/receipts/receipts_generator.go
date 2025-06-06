@@ -193,6 +193,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("[dbg]  ReceiptAsOf: %d, %d\n", firstLogIndex, index)
 
 	receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 	if err != nil {

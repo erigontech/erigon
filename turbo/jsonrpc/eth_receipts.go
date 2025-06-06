@@ -272,7 +272,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 		for _, l := range filtered {
-			fmt.Printf("[dbg] before filter: %d, %d\n", l.Index, l.TxIndex)
+			fmt.Printf("[dbg] after filter: %d, %d\n", l.Index, l.TxIndex)
 		}
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
