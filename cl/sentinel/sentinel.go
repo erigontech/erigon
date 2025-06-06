@@ -179,7 +179,15 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
+	handlers.NewConsensusHandlers(
+		s.ctx,
+		s.blockReader,
+		s.indiciesDB,
+		s.host,
+		s.peers,
+		s.cfg.NetworkConfig,
+		localNode,
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
 
 	return net, err
 }
@@ -338,18 +346,17 @@ func (s *Sentinel) RecvGossip() <-chan *GossipMessage {
 	return s.subManager.Recv()
 }
 
-func (s *Sentinel) Start() error {
+func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	if s.started {
 		s.logger.Warn("[Sentinel] already running")
 	}
 	var err error
 	s.listener, err = s.createListener()
 	if err != nil {
-		return fmt.Errorf("failed creating sentinel listener err=%w", err)
+		return nil, fmt.Errorf("failed creating sentinel listener err=%w", err)
 	}
-
 	if err := s.connectToBootnodes(); err != nil {
-		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
+		return nil, fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
 	// Configuring handshake
 	s.host.Network().Notify(&network.NotifyBundle{
@@ -366,7 +373,7 @@ func (s *Sentinel) Start() error {
 	go s.forkWatcher()
 	go s.observeBandwidth(s.ctx)
 
-	return nil
+	return s.LocalNode(), nil
 }
 
 func (s *Sentinel) Stop() {
@@ -561,7 +568,7 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
 		s.logger.Debug("[IDENTITY] Could not load sync subnet", "err", err)
 	}
-	cgc := s.cfg.BeaconConfig.CustodyRequirement // temporarily hardcoded
+	cgc := s.cfg.BeaconConfig.CustodyRequirement
 	metadata = &cltypes.Metadata{
 		SeqNumber:         s.listener.LocalNode().Seq(),
 		Attnets:           [8]byte(subnetField),
@@ -569,6 +576,10 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 		CustodyGroupCount: &cgc,
 	}
 	return
+}
+
+func (s *Sentinel) LocalNode() *enode.LocalNode {
+	return s.listener.LocalNode()
 }
 
 func (s *Sentinel) Host() host.Host {

@@ -99,13 +99,12 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 		return err
 	}
 
-	custodyGroupCount := c.beaconConfig.NumberOfCustodyGroups
-
+	cgc := c.forkChoiceReader.GetPeerDas().CustodyGroupCount()
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
 		SeqNumber:         c.me.Seq(),
 		Attnets:           subnetField,
 		Syncnets:          &syncnetField,
-		CustodyGroupCount: &custodyGroupCount,
+		CustodyGroupCount: &cgc,
 	}, SuccessfulResponsePrefix)
 }
 

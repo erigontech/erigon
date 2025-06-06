@@ -82,8 +82,17 @@ const (
 	ResourceUnavailablePrefix = 0x02
 )
 
-func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotReader, indiciesDB kv.RoDB, host host.Host,
-	peers *peers.Pool, netCfg *clparams.NetworkConfig, me *enode.LocalNode, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, hs *handshake.HandShaker, forkChoiceReader forkchoice.ForkChoiceStorageReader, blobsStorage blob_storage.BlobStorage, enabledBlocks bool) *ConsensusHandlers {
+func NewConsensusHandlers(
+	ctx context.Context,
+	db freezeblocks.BeaconSnapshotReader,
+	indiciesDB kv.RoDB,
+	host host.Host,
+	peers *peers.Pool,
+	netCfg *clparams.NetworkConfig,
+	me *enode.LocalNode,
+	beaconConfig *clparams.BeaconChainConfig,
+	ethClock eth_clock.EthereumClock,
+	hs *handshake.HandShaker, forkChoiceReader forkchoice.ForkChoiceStorageReader, blobsStorage blob_storage.BlobStorage, enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		hs:                 hs,
