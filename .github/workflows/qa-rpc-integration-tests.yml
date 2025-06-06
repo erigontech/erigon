@@ -17,7 +17,7 @@ on:
       - ready_for_review
 
 jobs:
-  integration-test-suite:
+  mainnet-rpc-integ-tests:
     runs-on: [ self-hosted, qa, RpcSpecific ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
