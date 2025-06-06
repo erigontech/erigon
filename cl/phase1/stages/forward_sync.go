@@ -101,6 +101,34 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 	return highestProcessed - 1, err
 }
 
+func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBlockProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (err error) {
+	var denebBlocks, fuluBlocks []*cltypes.SignedBeaconBlock
+	for _, block := range blocks {
+		if block.Version() >= clparams.FuluVersion {
+			fuluBlocks = append(fuluBlocks, block)
+		} else if block.Version() >= clparams.DenebVersion {
+			denebBlocks = append(denebBlocks, block)
+		}
+	}
+
+	if len(denebBlocks) > 0 && shouldProcessBlobs(denebBlocks, cfg) {
+		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, denebBlocks)
+		if err != nil {
+			logger.Trace("[Caplin] Failed to process blobs", "err", err)
+			return err
+		}
+	}
+
+	if len(fuluBlocks) > 0 {
+		if err = cfg.peerDas.DownloadMissingColumnsByBlocks(ctx, fuluBlocks); err != nil {
+			logger.Trace("[Caplin] Failed to download missing columns", "err", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
 // It takes the highest block processed, a flag to determine if insertion is needed, and a list of signed beacon blocks as input.
 // It returns the new highest block processed and an error if any.
@@ -110,18 +138,12 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
 	})
 
-	var (
-		blockRoot common.Hash
-		st        *state.CachingBeaconState
-	)
-	newHighestBlockProcessed = highestBlockProcessed
-	if shouldProcessBlobs(blocks, cfg) {
-		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, blocks)
-		if err != nil {
-			logger.Trace("[Caplin] Failed to process blobs", "err", err)
-			return highestBlockProcessed, nil
-		}
+	if err = downloadBlobs(ctx, logger, cfg, highestBlockProcessed, blocks); err != nil {
+		return
 	}
+
+	var blockRoot common.Hash
+	newHighestBlockProcessed = highestBlockProcessed
 	// Iterate over each block in the sorted list
 	for _, block := range blocks {
 		// Compute the hash of the current block
@@ -158,6 +180,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 
 		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
+			var st *state.CachingBeaconState
 			// Perform post-processing on the block
 			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
 			if err == nil && st != nil {
