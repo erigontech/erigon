@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/service"
@@ -284,7 +285,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
-	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:                       config.CaplinDiscoveryAddr,
 		Port:                         int(config.CaplinDiscoveryPort),
 		TCPPort:                      uint(config.CaplinDiscoveryTCPPort),
@@ -315,6 +316,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
+	columnStorage := blob_storage.NewDataColumnStore(indexDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs), pruneBlobDistance, beaconConfig, ethClock)
+	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, columnStorage)
+	peerDas.InitSelfNodeId(localNode.ID())
+	forkChoice.InitPeerDas(peerDas)
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, aggregationPool, syncedDataManager)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
@@ -476,6 +481,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		emitters,
 		blobStorage,
 		attestationProducer,
+		peerDas,
 	)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 

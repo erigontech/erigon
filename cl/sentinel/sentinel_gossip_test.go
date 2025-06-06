@@ -71,7 +71,8 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	require.NoError(t, err)
 	defer sentinel1.Stop()
 
-	require.NoError(t, sentinel1.Start())
+	_, err = sentinel1.Start()
+	require.NoError(t, err)
 	h := sentinel1.host
 
 	sentinel2, err := New(ctx, &SentinelConfig{
@@ -86,7 +87,8 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	require.NoError(t, err)
 	defer sentinel2.Stop()
 
-	require.NoError(t, sentinel2.Start())
+	_, err = sentinel2.Start()
+	require.NoError(t, err)
 	h2 := sentinel2.host
 
 	sub1, err := sentinel1.SubscribeGossip(BeaconBlockSsz, time.Unix(0, math.MaxInt64))
