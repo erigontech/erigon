@@ -231,7 +231,7 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false)
+		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true)
 		Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.Len(Ranges, 3)
 		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
@@ -388,7 +388,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
 	os.Remove(filepath.Join(s.Dir(), list[15].Name()))
 
-	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
 	require.NoError(s.RemoveOverlaps())
 
 	list, err = snaptype.Segments(s.Dir())
@@ -432,7 +432,7 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	require.NoError(err)
 	require.Equal(4, len(list))
 
-	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
 	require.NoError(s.RemoveOverlaps())
 
 	list, err = snaptype.Segments(s.Dir())
@@ -500,7 +500,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.OpenFolder()
 		require.NoError(err)
 		require.NotNil(s.visible[coresnaptype.Enums.Headers])
-		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false)
+		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true)
 		// require.Equal(1, len(getSegs(coresnaptype.Enums.Headers]))
 		s.Close()
 
