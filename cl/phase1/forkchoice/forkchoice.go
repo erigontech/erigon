@@ -159,7 +159,6 @@ func NewForkChoiceStore(
 	emitters *beaconevents.EventEmitter,
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
-	peerDas das.PeerDas,
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry,
 	probabilisticHeadGetter bool,
 ) (*ForkChoiceStore, error) {
@@ -254,7 +253,6 @@ func NewForkChoiceStore(
 		genesisValidatorsRoot:    anchorState.GenesisValidatorsRoot(),
 		hotSidecars:              make(map[common.Hash][]*cltypes.BlobSidecar),
 		blobStorage:              blobStorage,
-		peerDas:                  peerDas,
 		ethClock:                 ethClock,
 		optimisticStore:          optimistic.NewOptimisticStore(),
 		probabilisticHeadGetter:  probabilisticHeadGetter,
@@ -270,6 +268,14 @@ func NewForkChoiceStore(
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 	return f, nil
+}
+
+func (f *ForkChoiceStore) InitPeerDas(peerDas das.PeerDas) {
+	f.peerDas = peerDas
+}
+
+func (f *ForkChoiceStore) GetPeerDas() das.PeerDas {
+	return f.peerDas
 }
 
 // Highest seen returns highest seen slot
