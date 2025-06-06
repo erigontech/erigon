@@ -112,8 +112,10 @@ func (d *peerdas) downloadFromPeers(ctx context.Context, request *solid.ListSSZ[
 	}
 
 	stopChan := make(chan struct{})
-	resultChan := make(chan resultData, 8)
+	resultChan := make(chan resultData, 32)
 	requestColumnSidecars := func(request *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]) {
+		// send the request in a loop with a ticker to avoid overwhelming the peer
+		// keep trying until the request is done
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -189,7 +191,7 @@ mainloop:
 					d.rpc.BanPeer(result.pid)
 					continue
 				}
-
+				// save the sidecar to the column storage
 				if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnData); err != nil {
 					log.Debug("failed to write column sidecar", "err", err)
 					continue
