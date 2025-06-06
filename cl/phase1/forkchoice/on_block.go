@@ -43,7 +43,10 @@ import (
 
 const foreseenProposers = 16
 
-var ErrEIP4844DataNotAvailable = errors.New("EIP-4844 blob data is not available")
+var (
+	ErrEIP4844DataNotAvailable = errors.New("EIP-4844 blob data is not available")
+	ErrEIP7594DataNotAvailable = errors.New("EIP-7594 blob data is not available")
+)
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.Eth1Block, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
 	expectedBlobHashes := []common.Hash{}
@@ -110,15 +113,25 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check if blob data is available
-	if block.Version() >= clparams.DenebVersion && checkDataAvaiability {
-		if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
-			if errors.Is(err, ErrEIP4844DataNotAvailable) {
+	if checkDataAvaiability {
+		if block.Version() >= clparams.FuluVersion {
+			available, err := f.peerDas.IsDataAvailable(ctx, blockRoot)
+			if err != nil {
 				return err
 			}
-			return fmt.Errorf("OnBlock: data is not available for block %x: %v", common.Hash(blockRoot), err)
-		}
-		if f.highestSeen.Load() < block.Block.Slot {
-			collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
+			if !available {
+				return fmt.Errorf("OnBlock: some column data is not available for block %x", common.Hash(blockRoot))
+			}
+		} else if block.Version() >= clparams.DenebVersion {
+			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
+				if errors.Is(err, ErrEIP4844DataNotAvailable) {
+					return err
+				}
+				return fmt.Errorf("OnBlock: data is not available for block %x: %v", common.Hash(blockRoot), err)
+			}
+			if f.highestSeen.Load() < block.Block.Slot {
+				collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
+			}
 		}
 	}
 
