@@ -22,6 +22,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -684,7 +685,18 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 	if len(csHeaders) == 0 {
 		return nil, nil
 	}
-	hd.logger.Debug("[downloader] Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
+
+	from, to := csHeaders[0], csHeaders[len(csHeaders)-1]
+	hd.logger.Debug(
+		"[downloader] Collecting...",
+		"from", from.Number,
+		"fromHash", from.Hash,
+		"to", to.Number,
+		"toHash", to.Hash,
+		"len", len(csHeaders),
+		"fromPeer", hex.EncodeToString(peerId[:]),
+	)
+
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.posAnchor == nil {

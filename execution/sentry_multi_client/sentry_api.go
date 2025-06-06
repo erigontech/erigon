@@ -18,6 +18,7 @@ package sentry_multi_client
 
 import (
 	"context"
+	"encoding/hex"
 	"math/rand"
 
 	"google.golang.org/grpc"
@@ -99,8 +100,44 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			var fromNum, toNum uint64
+			if len(req.BlockNums) > 0 {
+				fromNum, toNum = req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]
+			}
+			var fromHash, toHash common.Hash
+			if len(req.Hashes) > 0 {
+				fromHash, toHash = req.Hashes[0], req.Hashes[len(req.Hashes)-1]
+			}
+			cs.logger.Trace(
+				"body request not sent to any peers",
+				"fromNum", fromNum,
+				"fromHash", fromHash,
+				"toNum", toNum,
+				"toHash", toHash,
+			)
 			continue
 		}
+		go func() {
+			var fromNum, toNum uint64
+			if len(req.BlockNums) > 0 {
+				fromNum, toNum = req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]
+			}
+			var fromHash, toHash common.Hash
+			if len(req.Hashes) > 0 {
+				fromHash, toHash = req.Hashes[0], req.Hashes[len(req.Hashes)-1]
+			}
+			for _, p := range sentPeers.Peers {
+				pid := sentry.ConvertH512ToPeerID(p)
+				cs.logger.Trace(
+					"body request sent to peer",
+					"fromNum", fromNum,
+					"fromHash", fromHash,
+					"toNum", toNum,
+					"toHash", toHash,
+					"peer", hex.EncodeToString(pid[:]),
+				)
+			}
+		}()
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
@@ -160,8 +197,28 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			cs.logger.Trace(
+				"header request not sent to any peers",
+				"height", req.Number,
+				"hash", req.Hash,
+				"length", req.Length,
+				"reverse", req.Reverse,
+			)
 			continue
 		}
+		go func() {
+			for _, p := range sentPeers.Peers {
+				pid := sentry.ConvertH512ToPeerID(p)
+				cs.logger.Trace(
+					"header request sent to peer",
+					"height", req.Number,
+					"hash", req.Hash,
+					"length", req.Length,
+					"reverse", req.Reverse,
+					"peer", hex.EncodeToString(pid[:]),
+				)
+			}
+		}()
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
