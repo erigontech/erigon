@@ -1,53 +1,16 @@
 package entity_extras
 
+import "github.com/erigontech/erigon-lib/kv"
+
 /** custom types **/
 
-// canonical sequence number of entity (in context)
-type Num uint64
+type Num = kv.Num
+type RootNum = kv.RootNum
 
 // sequence number of entity - might contain non-canonical values
 type Id uint64
 
-// canonical sequence number of the root entity (or secondary key)
-type RootNum uint64
-
 type Bytes = []byte
-
-type EncToBytesI interface {
-	EncToBytes(enc8Bytes bool) []byte
-}
-
-func (n Num) Step(a ForkableId) uint64 {
-	return step(n, a)
-}
-
-func (n Num) Uint64() uint64 {
-	return uint64(n)
-}
-
-func (n RootNum) Step(a ForkableId) uint64 {
-	return step(n, a)
-}
-
-func (x Id) EncToBytes(x8Bytes bool) (out []byte) {
-	return EncToBytes(x, x8Bytes)
-}
-func (x Id) EncTo8Bytes() (out []byte) {
-	return EncToBytes(x, true)
-}
-func (x Num) EncToBytes(x8Bytes bool) (out []byte) {
-	return EncToBytes(x, x8Bytes)
-}
-func (x Num) EncTo8Bytes() (out []byte) {
-	return EncToBytes(x, true)
-}
-func (x RootNum) EncTo8Bytes() (out []byte) {
-	return EncToBytes(x, true)
-}
-
-func (x RootNum) Uint64() uint64 {
-	return uint64(x)
-}
 
 // file extensions
 

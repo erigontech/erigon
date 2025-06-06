@@ -225,7 +225,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 		}
 	}()
 
-	mergeFn := func(proto *ProtoForkable, vfs VisibleFiles, repo *SnapshotRepo, mergedFileToSet **filesItem) {
+	mergeFn := func(proto *ProtoForkable, vfs VisibleFiles, repo *SnapshotRepo, mergedFileToSet **FilesItem) {
 		if len(vfs) == 0 {
 			return
 		}
@@ -312,7 +312,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 // multiple invocations will build subsequent files
 func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, err error) {
 	type wrappedFilesItem struct {
-		*filesItem
+		*FilesItem
 		st CanonicityStrategy
 		id ForkableId
 	}
@@ -393,7 +393,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 	for _, df := range cfiles {
 		r.loop(func(p *ProtoForkable) error {
 			if p.a == df.id {
-				p.snaps.IntegrateDirtyFile(df.filesItem)
+				p.snaps.IntegrateDirtyFile(df.FilesItem)
 			}
 			return nil
 		})

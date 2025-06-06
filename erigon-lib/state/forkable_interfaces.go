@@ -12,7 +12,7 @@ import (
 type RootNum = ee.RootNum
 type Num = ee.Num
 type Id = ee.Id
-type EncToBytesI = ee.EncToBytesI
+type EncToBytesI = kv.EncToBytesI
 type ForkableId = ee.ForkableId
 type Bytes = ee.Bytes
 
@@ -68,7 +68,7 @@ type ForkableFilesTxI interface {
 	vfs() visibleFiles
 	GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error)
 
-	Garbage(merged *filesItem) (outs []*filesItem)
+	Garbage(merged *FilesItem) (outs []*FilesItem)
 }
 
 type ForkableDbCommonTxI interface {

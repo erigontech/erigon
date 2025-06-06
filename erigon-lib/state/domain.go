@@ -81,7 +81,7 @@ type Domain struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visible in zero-copy way
-	dirtyFiles *btree2.BTreeG[*filesItem]
+	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -131,7 +131,7 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 
 	d := &Domain{
 		domainCfg:  cfg,
-		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newDomainVisible(cfg.name, []visibleFile{}),
 	}
 
@@ -268,8 +268,8 @@ func (d *Domain) openFolder() error {
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
-	var toClose []*filesItem
-	d.dirtyFiles.Scan(func(item *filesItem) bool {
+	var toClose []*FilesItem
+	d.dirtyFiles.Scan(func(item *FilesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toClose = append(toClose, item)
 		}
@@ -286,7 +286,7 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	}
 
 	toClose = toClose[:0]
-	d.History.dirtyFiles.Scan(func(item *filesItem) bool {
+	d.History.dirtyFiles.Scan(func(item *FilesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toClose = append(toClose, item)
 		}
@@ -303,7 +303,7 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	}
 
 	toClose = toClose[:0]
-	d.History.InvertedIndex.dirtyFiles.Scan(func(item *filesItem) bool {
+	d.History.InvertedIndex.dirtyFiles.Scan(func(item *FilesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toClose = append(toClose, item)
 		}
@@ -320,7 +320,7 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	}
 }
 
-func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
+func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) {
 	if d.filenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
@@ -336,9 +336,9 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 }
 
 func (d *Domain) openDirtyFiles() (err error) {
-	invalidFileItems := make([]*filesItem, 0)
+	invalidFileItems := make([]*FilesItem, 0)
 	invalidFileItemsLock := sync.Mutex{}
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if item.decompressor == nil {
@@ -471,8 +471,8 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
 	}
-	var toClose []*filesItem
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
+	var toClose []*FilesItem
+	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
 				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
@@ -1269,11 +1269,11 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
 }
 
-func (d *Domain) MissedBtreeAccessors() (l []*filesItem) {
+func (d *Domain) MissedBtreeAccessors() (l []*FilesItem) {
 	return d.missedBtreeAccessors(d.dirtyFiles.Items())
 }
 
-func (d *Domain) missedBtreeAccessors(source []*filesItem) (l []*filesItem) {
+func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !d.Accessors.Has(AccessorBTree) {
 		return nil
 	}
@@ -1282,11 +1282,11 @@ func (d *Domain) missedBtreeAccessors(source []*filesItem) (l []*filesItem) {
 	})
 }
 
-func (d *Domain) MissedMapAccessors() (l []*filesItem) {
+func (d *Domain) MissedMapAccessors() (l []*FilesItem) {
 	return d.missedMapAccessors(d.dirtyFiles.Items())
 }
 
-func (d *Domain) missedMapAccessors(source []*filesItem) (l []*filesItem) {
+func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !d.Accessors.Has(AccessorHashMap) {
 		return nil
 	}

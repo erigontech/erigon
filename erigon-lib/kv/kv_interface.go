@@ -27,7 +27,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -578,7 +577,7 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
-	ForkableAggTx(kv.ForkableGroup) any
+	//ForkableAggTx(ForkableGroup) any
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -648,6 +647,16 @@ type TemporalRwDB interface {
 	TemporalRoDB
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
+}
+
+// forkables
+
+type MarkedForkableRoTx interface {
+}
+
+type MarkedForkableRwTx interface {
+	MarkedForkableRoTx
+	Put(num Num, hash []byte, value []byte) error
 }
 
 // ---- non-importnt utilites

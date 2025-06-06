@@ -162,7 +162,7 @@ func (a *Forkable[T]) PruneFrom() Num {
 	return a.pruneFrom
 }
 
-func (a *Forkable[T]) encTs(ts ee.EncToBytesI) []byte {
+func (a *Forkable[T]) encTs(ts kv.EncToBytesI) []byte {
 	return ts.EncToBytes(true)
 }
 
