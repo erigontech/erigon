@@ -103,6 +103,8 @@ func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*ty
 	return g.receiptCache.Get(hash)
 }
 
+var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
+
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, txNumsReader, tx, txIndex)
@@ -155,11 +157,13 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
 		return receiptFromDB, nil
 	}
+	if !rpcDisableRCache {
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-1, txnHash)
-	if err != nil {
-		return nil, err
+		//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-1, txnHash)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
 		return receiptFromDB, nil
@@ -225,13 +229,16 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return receiptsFromDB, nil
 	}
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
-	if err != nil {
-		return nil, err
-	}
-	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
-		return receiptsFromDB, nil
+	if !rpcDisableRCache {
+
+		//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		if err != nil {
+			return nil, err
+		}
+		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+			return receiptsFromDB, nil
+		}
 	}
 
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
