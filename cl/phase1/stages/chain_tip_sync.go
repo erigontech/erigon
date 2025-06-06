@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -70,6 +71,10 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	if len(blocks) == 0 {
 		return nil, nil
 	}
+
+	sort.Slice(blocks, func(i, j int) bool {
+		return blocks[i].Block.Slot < blocks[j].Block.Slot
+	})
 
 	denebBlocks := []*cltypes.SignedBeaconBlock{}
 	fuluBlocks := []*cltypes.SignedBeaconBlock{}
