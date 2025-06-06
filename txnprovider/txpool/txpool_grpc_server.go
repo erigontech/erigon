@@ -59,7 +59,7 @@ type txPool interface {
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
-	GetBlobs(blobhashes []common.Hash) (blobs [][]byte, proofs [][]byte)
+	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
 
 var _ txpool_proto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
@@ -238,7 +238,18 @@ func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpool_proto.GetBlobsRequ
 	for i := range in.BlobHashes {
 		hashes[i] = gointerfaces.ConvertH256ToHash(in.BlobHashes[i])
 	}
-	blobs, proofs := s.txPool.GetBlobs(hashes)
+	blobBundles := s.txPool.GetBlobs(hashes)
+	blobs := make([][]byte, 0)
+	proofs := make([][]byte, 0)
+	for _, bb := range blobBundles {
+		blobs = append(blobs, bb.Blob)
+		if len(bb.Proofs) == 0 {
+			proofs = append(proofs, nil)
+		}
+		for _, p := range bb.Proofs {
+			proofs = append(proofs, p[:])
+		}
+	}
 	reply := &txpool_proto.GetBlobsReply{Blobs: blobs, Proofs: proofs}
 	return reply, nil
 }

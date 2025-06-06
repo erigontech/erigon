@@ -84,14 +84,14 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	}
 	defer decompressor.Close()
 	defer decompressor.MadvSequential().DisableReadAhead()
-	r := seg.NewReader(decompressor.MakeGetter(), compression)
 
 	c, err := seg.NewCompressor(ctx, "sqeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	w := seg.NewWriter(c, compression)
+	r := a.d[domain].dataReader(decompressor)
+	w := a.d[domain].dataWriter(c, false)
 	if err := w.ReadFrom(r); err != nil {
 		return err
 	}
@@ -215,7 +215,7 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 			}
 			defer squeezedCompr.Close()
 
-			writer := seg.NewWriter(squeezedCompr, commitment.d.Compression)
+			writer := commitment.d.dataWriter(squeezedCompr, false)
 			reader := seg.NewReader(cf.decompressor.MakeGetter(), compression)
 			reader.Reset(0)
 
