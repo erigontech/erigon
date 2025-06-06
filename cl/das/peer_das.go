@@ -18,7 +18,7 @@ import (
 )
 
 type PeerDas interface {
-	InitSelfNodeId(nodeId enode.ID)
+	InitLocalNodeId(nodeId enode.ID)
 	DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
 	IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error)
 	CustodyGroupCount() uint64
@@ -49,7 +49,7 @@ func NewPeerDas(
 	return p
 }
 
-func (d *peerdas) InitSelfNodeId(nodeId enode.ID) {
+func (d *peerdas) InitLocalNodeId(nodeId enode.ID) {
 	d.nodeId = nodeId
 }
 
