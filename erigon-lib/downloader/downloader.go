@@ -1281,6 +1281,7 @@ func (d *Downloader) logProgress() {
 	haveAllMetadata := d.stats.MetadataReady == d.stats.NumTorrents
 
 	if !d.stats.AllTorrentsComplete() {
+		// TODO: Include what we're syncing.
 		log.Info(fmt.Sprintf("[%s] Syncing", prefix),
 			"file-metadata", fmt.Sprintf("%d/%d", d.stats.MetadataReady, d.stats.NumTorrents),
 			"files", fmt.Sprintf(
