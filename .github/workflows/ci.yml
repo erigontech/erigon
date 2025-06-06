@@ -15,16 +15,15 @@ on:
     
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: >-
-    ${{
-      !startsWith(github.ref, 'refs/heads/release/') &&
-      github.ref != 'refs/heads/main'
-    }}
-
 jobs:
   linux:
+    concurrency:
+      group: ci-${{ matrix.os }}-${{ github.ref }}
+      cancel-in-progress: >-
+        ${{
+          !startsWith(github.ref, 'refs/heads/release/') &&
+          github.ref != 'refs/heads/main'
+        }}
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
@@ -70,6 +69,13 @@ jobs:
         run: make test-short
 
   win:
+    concurrency:
+      group: ci-win-${{ matrix.os }}-${{ github.ref }}
+      cancel-in-progress: >-
+        ${{
+          !startsWith(github.ref, 'refs/heads/release/') &&
+          github.ref != 'refs/heads/main'
+        }}
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
