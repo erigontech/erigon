@@ -992,6 +992,7 @@ type HistoryRoTx struct {
 	files   visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
 	getters []*seg.Reader
 	readers []*recsplit.IndexReader
+	aggStep uint64
 
 	trace bool
 
@@ -1011,10 +1012,11 @@ func (h *History) BeginFilesRo() *HistoryRoTx {
 	}
 
 	return &HistoryRoTx{
-		h:     h,
-		iit:   h.InvertedIndex.BeginFilesRo(),
-		files: files,
-		trace: false,
+		h:       h,
+		iit:     h.InvertedIndex.BeginFilesRo(),
+		files:   files,
+		aggStep: h.aggregationStep,
+		trace:   false,
 	}
 }
 
