@@ -22,6 +22,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -1351,11 +1352,18 @@ func (hd *HeaderDownload) StartPoSDownloader(
 			hd.lock.Unlock()
 
 			if req != nil {
-				_, sentToPeer := headerReqSend(ctx, req)
+				receiverPeerId, sentToPeer := headerReqSend(ctx, req)
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 					hd.UpdateRetryTime(req, currentTime, 30*time.Second /* timeout */)
-					hd.logger.Debug("[downloader] Sent request", "height", req.Number)
+					hd.logger.Debug(
+						"[downloader] Sent header request",
+						"height", req.Number,
+						"hash", req.Hash,
+						"length", req.Length,
+						"reverse", req.Reverse,
+						"receiverPeerId", hex.EncodeToString(receiverPeerId[:]),
+					)
 				}
 			}
 			if len(penalties) > 0 {

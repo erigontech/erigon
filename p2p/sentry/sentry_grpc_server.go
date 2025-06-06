@@ -277,6 +277,7 @@ func makeP2PServer(
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
 	if len(p2pConfig.BootstrapNodes) == 0 {
+		//println("--- debug --- yo wtf")
 		urls := p2pConfig.LookupBootnodeURLs(genesisHash)
 		bootstrapNodes, err := enode.ParseNodesFromURLs(urls)
 		if err != nil {
@@ -1092,6 +1093,8 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {
 	counts := map[uint]int{}
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		//pid := peerInfo.ID()
+		//println(fmt.Printf("--- debug --- we have peer pid=%s, enr=%s\n", hex.EncodeToString(pid[:]), peerInfo.peer.Info().ENR))
 		counts[peerInfo.protocol]++
 		return true
 	})

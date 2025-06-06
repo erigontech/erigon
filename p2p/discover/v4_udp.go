@@ -181,6 +181,7 @@ func ListenV4(ctx context.Context, protocol string, c UDPConn, ln *enode.LocalNo
 		privateKeyGenerator: cfg.PrivateKeyGenerator,
 	}
 
+	//println(fmt.Sprintf("--- debug --- ListenV4 bootnodes=%d\n", len(cfg.Bootnodes)))
 	tab, err := newTable(t, protocol, ln.Database(), cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
 	if err != nil {
 		return nil, err

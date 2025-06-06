@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-p2p/rlpx"
 )
@@ -152,6 +153,7 @@ func (t *rlpxTransport) doProtoHandshake(our *protoHandshake) (their *protoHands
 	go func() { werr <- Send(t, handshakeMsg, our) }()
 	if their, err = readProtocolHandshake(t); err != nil {
 		<-werr // make sure the write terminates too
+		log.Debug("readProtocolHandshake failed", "err", err)
 		return nil, err
 	}
 	if err := <-werr; err != nil {
@@ -166,6 +168,7 @@ func (t *rlpxTransport) doProtoHandshake(our *protoHandshake) (their *protoHands
 func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 	msg, err := rw.ReadMsg()
 	if err != nil {
+		log.Debug("readProtocolHandshake rw.ReadMsg failed", "err", err)
 		return nil, err
 	}
 	if msg.Size > baseProtocolMaxMsgSize {
@@ -174,6 +177,7 @@ func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 	if msg.Code == discMsg {
 		// Disconnect before protocol handshake is valid according to the
 		// spec and we send it ourself if the post-handshake checks fail.
+		log.Debug("readProtocolHandshake msg.Code == discMsg", "err", err)
 		reason, _ := DisconnectMessagePayloadDecode(msg.Payload)
 		return nil, reason
 	}
@@ -214,6 +218,7 @@ func DisconnectMessagePayloadDecode(reader io.Reader) (DiscReason, error) {
 		err = rlp.DecodeBytes(data, &reasonList.Reason)
 	}
 
+	log.Debug("DisconnectMessagePayloadDecode", "reason", reasonList.Reason, "err", err)
 	return reasonList.Reason, err
 }
 

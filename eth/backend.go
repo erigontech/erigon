@@ -540,7 +540,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		go func() {
-			logEvery := time.NewTicker(90 * time.Second)
+			logEvery := time.NewTicker(15 * time.Second)
 			defer logEvery.Stop()
 
 			var logItems []interface{}

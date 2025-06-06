@@ -133,6 +133,7 @@ type callTimeout struct {
 
 // ListenV5 listens on the given connection.
 func ListenV5(ctx context.Context, protocol string, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+	//println(fmt.Printf("--- debug --- ListenV5 bootnodes=%d\n", len(cfg.Bootnodes)))
 	t, err := newUDPv5(ctx, protocol, conn, ln, cfg)
 	if err != nil {
 		return nil, err

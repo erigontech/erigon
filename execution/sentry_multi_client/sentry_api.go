@@ -18,6 +18,7 @@ package sentry_multi_client
 
 import (
 	"context"
+	"encoding/hex"
 	"math/rand"
 
 	"google.golang.org/grpc"
@@ -132,7 +133,12 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			cs.logger.Debug("header request not sent to any peers")
 			continue
+		}
+		for _, p := range sentPeers.Peers {
+			pid := sentry.ConvertH512ToPeerID(p)
+			cs.logger.Debug("header request sent to peer", "peer", hex.EncodeToString(pid[:]))
 		}
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}

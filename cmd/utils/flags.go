@@ -1182,6 +1182,13 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
 
+	//println(fmt.Sprintf("--- debug --- setBootstrapNodes: %d\n", len(nodes)))
+	//for _, n := range nodes {
+	//	pid := n.ID()
+	//	pubKey := append(n.Pubkey().X.Bytes(), n.Pubkey().Y.Bytes()...)
+	//	pubKeyStr := hex.EncodeToString(pubKey)
+	//	println(fmt.Sprintf("--- debug --- bootnode id=%s, pubkey=%s\n", hex.EncodeToString(pid[:]), pubKeyStr))
+	//}
 	cfg.BootstrapNodes = nodes
 }
 
@@ -1196,6 +1203,13 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
 
+	//println(fmt.Sprintf("--- debug --- setBootstrapNodesV5: %d\n", len(nodes)))
+	//for _, n := range nodes {
+	//	pid := n.ID()
+	//	pubKey := append(n.Pubkey().X.Bytes(), n.Pubkey().Y.Bytes()...)
+	//	pubKeyStr := hex.EncodeToString(pubKey)
+	//	println(fmt.Sprintf("--- debug --- bootnode id=%s, pubkey=%s\n", hex.EncodeToString(pid[:]), pubKeyStr))
+	//}
 	cfg.BootstrapNodesV5 = nodes
 }
 
@@ -1205,8 +1219,10 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 func GetBootnodesFromFlags(urlsStr, chain string) ([]*enode.Node, error) {
 	var urls []string
 	if urlsStr != "" {
+		//println("--- debug --- CliString2Array(urlsStr): \n" + urlsStr)
 		urls = common.CliString2Array(urlsStr)
 	} else {
+		//println("--- debug --- BootnodeURLsOfChain\n")
 		urls = params2.BootnodeURLsOfChain(chain)
 	}
 	return enode.ParseNodesFromURLs(urls)
