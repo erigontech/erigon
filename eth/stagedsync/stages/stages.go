@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-// SyncStage represents the stages of syncronisation in the Mode.StagedSync mode
+// SyncStage represents the stages of synchronization in the Mode.StagedSync mode
 // It is used to persist the information about the stage state into the database.
 // It should not be empty and should be unique.
 type SyncStage string

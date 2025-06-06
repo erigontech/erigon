@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -60,11 +61,11 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/params"
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
-	_ "github.com/erigontech/erigon-db/snaptype"      //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
+	_ "github.com/erigontech/erigon-db/snaptype" //hack
 )
 
 func main() {
@@ -90,17 +91,18 @@ var (
 	natSetting                     string
 	torrentVerbosity               int
 	downloadRateStr, uploadRateStr string
-	torrentDownloadSlots           int
-	staticPeersStr                 string
-	torrentPort                    int
-	torrentMaxPeers                int
-	torrentConnsPerFile            int
-	targetFile                     string
-	disableIPV6                    bool
-	disableIPV4                    bool
-	seedbox                        bool
-	dbWritemap                     bool
-	all                            bool
+	// How do I mark this deprecated with cobra?
+	torrentDownloadSlots int
+	staticPeersStr       string
+	torrentPort          int
+	torrentMaxPeers      int
+	torrentConnsPerFile  int
+	targetFile           string
+	disableIPV6          bool
+	disableIPV4          bool
+	seedbox              bool
+	dbWritemap           bool
+	all                  bool
 )
 
 func init() {
@@ -118,6 +120,7 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", utils.TorrentPortFlag.Value, utils.TorrentPortFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
+	// Deprecated.
 	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
@@ -216,7 +219,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err := checkChainName(ctx, dirs, chain); err != nil {
 		return err
 	}
-	torrentLogLevel, _, err := downloadercfg.Int2LogLevel(torrentVerbosity)
+	torrentLogLevel, err := downloadercfg.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
 	}
@@ -244,12 +247,26 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 			return err
 		}
 	}
-	cfg, err := downloadercfg.New(ctx, dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
+	cfg, err := downloadercfg.New(
+		ctx,
+		dirs,
+		version,
+		torrentLogLevel,
+		downloadRate,
+		uploadRate,
+		torrentPort,
+		torrentConnsPerFile,
+		staticPeers,
+		webseedsList,
+		chain,
+		dbWritemap,
+		downloadercfg.NewCfgOpts{},
+	)
 	if err != nil {
 		return err
 	}
 
-	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", 32)
+	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", runtime.NumCPU())
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -261,7 +278,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo, seedbox)
+	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
 	if err != nil {
 		return err
 	}
