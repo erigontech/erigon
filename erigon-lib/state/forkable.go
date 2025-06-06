@@ -71,7 +71,7 @@ func App_WithUpdateCanonical() AppOpts {
 
 // func App
 func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[MarkedTxI], error) {
-	a, err := create[MarkedTxI](id, Marked, valsTbl, canonicalTbl, relation, logger, options...)
+	a, err := create[MarkedTxI](id, kv.Marked, valsTbl, canonicalTbl, relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relat
 }
 
 func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[UnmarkedTxI], error) {
-	a, err := create[UnmarkedTxI](id, Unmarked, valsTbl, "", relation, logger, options...)
+	a, err := create[UnmarkedTxI](id, kv.Unmarked, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, 
 }
 
 func NewBufferedForkable(id ForkableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts) (*Forkable[BufferedTxI], error) {
-	a, err := create[BufferedTxI](id, Buffered, valsTbl, "", relation, logger, options...)
+	a, err := create[BufferedTxI](id, kv.Buffered, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func NewBufferedForkable(id ForkableId, valsTbl string, relation RootRelationI, 
 	return a, nil
 }
 
-func create[T ForkableBaseTxI](id ForkableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
+func create[T ForkableBaseTxI](id ForkableId, strategy kv.CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
 	a := &Forkable[T]{
 		ProtoForkable: NewProto(id, nil, nil, logger),
 	}

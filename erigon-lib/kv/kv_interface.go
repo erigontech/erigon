@@ -649,16 +649,6 @@ type TemporalRwDB interface {
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 }
 
-// forkables
-
-type MarkedForkableRoTx interface {
-}
-
-type MarkedForkableRwTx interface {
-	MarkedForkableRoTx
-	Put(num Num, hash []byte, value []byte) error
-}
-
 // ---- non-importnt utilites
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum

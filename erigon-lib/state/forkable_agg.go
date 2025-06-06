@@ -313,7 +313,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, err error) {
 	type wrappedFilesItem struct {
 		*FilesItem
-		st CanonicityStrategy
+		st kv.CanonicityStrategy
 		id ForkableId
 	}
 	var (
@@ -555,17 +555,17 @@ func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 
 	for i, ap := range r.marked {
 		marked = append(marked, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(Marked)
+		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Marked)
 	}
 
 	for i, ap := range r.unmarked {
 		unmarked = append(unmarked, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(Unmarked)
+		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Unmarked)
 	}
 
 	for i, ap := range r.buffered {
 		buffered = append(buffered, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(Buffered)
+		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Buffered)
 	}
 
 	return &ForkableAggTemporalTx{

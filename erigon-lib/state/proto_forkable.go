@@ -29,7 +29,7 @@ type ProtoForkable struct {
 	builders []AccessorIndexBuilder
 	snaps    *SnapshotRepo
 
-	strategy  CanonicityStrategy
+	strategy  kv.CanonicityStrategy
 	unaligned bool
 
 	logger log.Logger
@@ -252,7 +252,7 @@ func (a *ProtoForkableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (a *ProtoForkableTx) Type() CanonicityStrategy {
+func (a *ProtoForkableTx) Type() kv.CanonicityStrategy {
 	return a.a.strategy
 }
 
