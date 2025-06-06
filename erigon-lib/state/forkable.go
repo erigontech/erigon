@@ -155,6 +155,7 @@ func create[T ForkableBaseTxI](id ForkableId, strategy CanonicityStrategy, valsT
 		opt(a)
 	}
 	a.strategy = strategy
+	fmt.Println("voila")
 	return a, nil
 }
 
