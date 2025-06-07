@@ -238,11 +238,13 @@ func (s *StackStream) BufferAsString() (string, error) {
 // WriteEmptyArray writes an empty array into the underlying stream
 func (s *StackStream) WriteEmptyArray() {
 	s.stream.WriteEmptyArray()
+	s.popCommaOrField()
 }
 
 // WriteEmptyObject writes an empty object into the underlying stream
 func (s *StackStream) WriteEmptyObject() {
 	s.stream.WriteEmptyObject()
+	s.popCommaOrField()
 }
 
 // IsComplete checks if the JSON structure is currently complete without open elements

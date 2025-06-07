@@ -281,7 +281,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer codec.Close()
 	var stream jsonstream.Stream
 	if !s.disableStreaming {
-		stream = newJsonStream(w)
+		stream = jsonstream.New(w)
 	}
 	s.serveSingleRequest(ctx, codec, stream)
 }
