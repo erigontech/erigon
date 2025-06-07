@@ -630,9 +630,9 @@ func (r *ReaderV3) readAccountData(address common.Address) ([]byte, *accounts.Ac
 	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
 		return nil, nil, err
 	}
-	//if r.trace {
-	fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
-	//}
+	if r.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+	}
 	return enc, &acc, nil
 }
 
@@ -714,9 +714,9 @@ func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Acco
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if data != nil {
-		//if r.reader.trace {
-		fmt.Printf("ReadAccountData (buf) [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, data.Nonce, &data.Balance, data.CodeHash, r.reader.txNum)
-		//}
+		if r.reader.trace {
+			fmt.Printf("ReadAccountData (buf) [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, data.Nonce, &data.Balance, data.CodeHash, r.reader.txNum)
+		}
 
 		result := *data
 		return &result, nil

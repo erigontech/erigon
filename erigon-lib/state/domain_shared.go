@@ -167,7 +167,6 @@ func (sd *SharedDomains) AsGetter(tx kv.Tx) kv.TemporalGetter {
 }
 
 func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
-	fmt.Println("SetChangesetAccumulator", acc == nil, dbg.Stack())
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
 		if sd.currentChangesAccumulator == nil {
@@ -467,14 +466,9 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
-	fmt.Println("flushDiffSet", len(sd.pastChangesAccumulator), dbg.Stack())
-	if len(sd.pastChangesAccumulator) == 0 {
-		fmt.Println("empty")
-	}
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
-		fmt.Println("flushDiffSet", blockNum, blockHash)
 		if err := WriteDiffSet(tx, blockNum, blockHash, changeset); err != nil {
 			return err
 		}

@@ -898,8 +898,6 @@ func ExecV3(ctx context.Context,
 						uncommittedGas = 0
 					}
 
-					executor.LogCommitted(applyTx, commitStart)
-
 					t1 = time.Since(tt) + ts
 
 					var t2 time.Duration
@@ -912,6 +910,11 @@ func ExecV3(ctx context.Context,
 					if !execStage.CurrentSyncCycle.IsInitialCycle {
 						return nil
 					}
+
+					if !useExternalTx {
+						executor.LogCommitted(applyTx, commitStart)
+					}
+
 					logger.Info("Committed", "time", time.Since(commitStart),
 						"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
 						"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
@@ -1143,7 +1146,9 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			executor.LogCommitted(applyTx, commitStart)
+			if !useExternalTx {
+				executor.LogCommitted(applyTx, commitStart)
+			}
 		} else {
 			fmt.Printf("[dbg] mmmm... do we need action here????\n")
 		}

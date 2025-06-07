@@ -204,6 +204,23 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	rw.resetTx(chainTx)
 }
 
+func (rw *Worker) resetTxNum(txNum uint64) {
+	type resettable interface {
+		SetTxNum(txNum uint64)
+	}
+
+	if resettable, ok := rw.stateReader.(resettable); ok {
+		resettable.SetTxNum(txNum)
+	}
+
+	if resettable, ok := rw.stateWriter.(resettable); ok {
+		resettable.SetTxNum(txNum)
+	}
+
+	// - only set this if something breaks - it will not be stable with multiple parallel workers
+	//rw.rs.Domains().SetTxNum(txTask.TxNum)
+}
+
 func (rw *Worker) resetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
@@ -282,7 +299,7 @@ func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
 // like compute gas used for block and then to set state reader to continue processing on latest data.
 func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
-	if resettable, ok := reader.(interface{SetTx(kv.Tx)}); ok {
+	if resettable, ok := reader.(interface{ SetTx(kv.Tx) }); ok {
 		resettable.SetTx(rw.Tx())
 	}
 	rw.ibs = state.New(rw.stateReader)
@@ -328,9 +345,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 		callTracer = calltracer.NewCallTracer(txTask.TracingHooks())
 	}
 
-	rw.stateReader.SetTxNum(txTask.TxNum())
-	rw.stateWriter.SetTxNum(txTask.TxNum())
-	//rw.rs.Domains().SetTxNum(txTask.TxNum) - only set this if something breaks - it will not be stable with multiple parallel workers
+	rw.resetTxNum(txTask.Version().TxNum)
 
 	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
 		return &exec.TxResult{

@@ -514,9 +514,9 @@ func (d *Domain) Close() {
 func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte, prevStep uint64) error {
 	step := txNum / w.h.ii.aggregationStep
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
-	//if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
+	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("PutWithPrev(%s, txn %d, key[%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, step, k, v, preval)
-	//}
+	}
 	if err := w.h.AddPrevValue(k, txNum, preval); err != nil {
 		return err
 	}
