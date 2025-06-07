@@ -616,7 +616,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
 		if ii.disable {
-			log.Warn("[dbg] here1?", "n", ii.name)
 			continue
 		}
 
@@ -625,7 +624,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
 		dc.Close()
 		if step < firstStepNotInFiles {
-			log.Warn("[dbg] here2?", "n", ii.name, "step", step, "firstStepNotInFiles", firstStepNotInFiles)
 			continue
 		}
 
