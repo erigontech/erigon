@@ -103,6 +103,7 @@ func NewHistoricalTraceWorker(
 		background:  background,
 		stateReader: state.NewHistoryReaderV3(),
 
+		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 		vmCfg:       &vm.Config{},
 	}
