@@ -485,7 +485,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			i++
 			ci1 := heap.Pop(&cp).(*CursorItem)
-			if ci1.idx.HasNext() {
+			if ci1.domain.HasNext() {
 				ci1.key, ci1.val, _, _, _ = ci1.domain.Next2Copy(ci1.key[:0], ci1.val[:0])
 				heap.Push(&cp, ci1)
 			}
