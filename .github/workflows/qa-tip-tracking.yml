@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tip-tracking-test:
+  mainnet-tip-tracking-test:
     runs-on: [self-hosted, qa, Erigon3]
     timeout-minutes: 600
     env:

@@ -17,7 +17,7 @@ on:
       - ready_for_review
 
 jobs:
-  integration-test-suite:
+  bor-mainnet-rpc-integ-tests:
     runs-on: [ self-hosted, qa, Polygon ]
     timeout-minutes: 15
     env:
