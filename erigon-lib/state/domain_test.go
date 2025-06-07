@@ -101,14 +101,16 @@ func TestDomain_CollationBuild(t *testing.T) {
 
 	t.Parallel()
 
+	pageLvlOn := seg.PageLvlCfg{PageSize: 4, Compress: true}
+	pageLvlOff := seg.PageLvlCfg{PageSize: 0, Compress: false}
 	cases := []struct {
 		name string
 		c    seg.Cfg
 	}{
-		{"no_comp", seg.Cfg{WordLvl: seg.CompressNone, PageLvl: false}},
-		{"only_word_lvl", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 0, PageLvl: false}},
-		{"only_page_lvl", seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}},
-		{"both", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}},
+		{"no_comp", seg.Cfg{WordLvl: seg.CompressNone, PageLvl: pageLvlOff}},
+		{"only_word_lvl", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: pageLvlOff}},
+		{"only_page_lvl", seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: pageLvlOn}},
+		{"both", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: pageLvlOn}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -375,7 +377,7 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	t.Helper()
 	require := require.New(t)
 	db, d := testDbAndDomain(t, logger)
-	d.CompressCfg = seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: false}
+	d.CompressCfg = seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: seg.PageLvlCfg{PageSize: 4, Compress: false}}
 	//d.CompressCfg = seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}
 
 	//{"no_comp", seg.Cfg{WordLvl: seg.CompressNone, PageLvl: false}},
@@ -741,7 +743,7 @@ func TestNewSegStreamReader(t *testing.T) {
 	require.NoError(t, err)
 
 	defer dec.Close()
-	r := seg.NewPagedReader(seg.NewReader(dec.MakeGetter(), seg.CompressNone), 0, false)
+	r := seg.NewPagedReader(seg.NewReader(dec.MakeGetter(), seg.CompressNone), seg.PageLvlCfg{})
 
 	sr := NewSegStreamReader(r, -1)
 	require.NotNil(t, sr)

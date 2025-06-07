@@ -163,7 +163,7 @@ var Schema = SchemaGen{
 		CompressCfg: seg.Cfg{
 			WordLvl:    seg.CompressNone,
 			WordLvlCfg: DomainCompressCfg,
-			PageLvl:    false,
+			//PageLvl:    seg.PageLvlCfg{PageSize: 64, Compress: true},
 		},
 
 		Accessors: AccessorBTree | AccessorExistence,
@@ -186,8 +186,7 @@ var Schema = SchemaGen{
 		CompressCfg: seg.Cfg{
 			WordLvl:    seg.CompressNone,
 			WordLvlCfg: DomainCompressCfg,
-			PageLvl:    true,
-			PageSize:   64,
+			//PageLvl:    seg.PageLvlCfg{PageSize: 64, Compress: true},
 		},
 
 		Accessors: AccessorBTree | AccessorExistence,
@@ -210,8 +209,7 @@ var Schema = SchemaGen{
 		CompressCfg: seg.Cfg{
 			WordLvl:    seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 			WordLvlCfg: DomainCompressCfg,
-			PageLvl:    true,
-			PageSize:   64,
+			//PageLvl:    seg.PageLvlCfg{PageSize: 64, Compress: true},
 		},
 
 		Accessors:   AccessorBTree | AccessorExistence,
@@ -235,8 +233,7 @@ var Schema = SchemaGen{
 		CompressCfg: seg.Cfg{
 			WordLvl:    seg.CompressKeys,
 			WordLvlCfg: DomainCompressCfg,
-			PageLvl:    false,
-			PageSize:   16,
+			//PageLvl:    seg.PageLvlCfg{PageSize: 64, Compress: true},
 		},
 
 		Accessors:           AccessorHashMap,
@@ -261,7 +258,7 @@ var Schema = SchemaGen{
 	},
 	ReceiptDomain: domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
-		CompressCfg: seg.Cfg{WordLvl: seg.CompressNone, PageLvl: false},
+		CompressCfg: seg.Cfg{WordLvl: seg.CompressNone},
 
 		largeValues: false,
 
@@ -282,7 +279,7 @@ var Schema = SchemaGen{
 	},
 	RCacheDomain: domainCfg{
 		name: kv.RCacheDomain, valuesTable: kv.TblRCacheVals,
-		CompressCfg: seg.Cfg{WordLvl: seg.CompressNone, PageLvl: false},
+		CompressCfg: seg.Cfg{WordLvl: seg.CompressNone},
 
 		largeValues: true,
 

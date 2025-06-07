@@ -168,23 +168,22 @@ func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
 }
 
 type PagedReader struct {
-	file         ReaderI
-	isCompressed bool
-	pageSize     int
-	page         *Page
+	PageLvlCfg
+	file ReaderI
+	page *Page
 
 	currentPageOffset, nextPageOffset uint64
 }
 
-func NewPagedReader(r ReaderI, valuesOnCompressedPage int, snappy bool) *PagedReader {
-	if valuesOnCompressedPage == 0 {
-		valuesOnCompressedPage = 1
+func NewPagedReader(r ReaderI, cfg PageLvlCfg) *PagedReader {
+	if cfg.PageSize > MaxPageSize {
+		panic("assert: current `Page` implementation using 1 byte to store keys amount, means max pageSize is 256")
 	}
-	return &PagedReader{file: r, pageSize: valuesOnCompressedPage, isCompressed: snappy, page: &Page{}}
+	return &PagedReader{PageLvlCfg: cfg, file: r, page: &Page{}}
 }
 
 func (g *PagedReader) Reset(offset uint64) {
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
 		g.file.Reset(offset)
 		return
 	}
@@ -201,7 +200,7 @@ func (g *PagedReader) Reset(offset uint64) {
 	}
 }
 func (g *PagedReader) PrintPages() {
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
 		return
 	}
 	g.Reset(0)
@@ -229,7 +228,7 @@ func (g *PagedReader) FileName() string  { return g.file.FileName() }
 func (g *PagedReader) Count() int        { return g.file.Count() }
 func (g *PagedReader) Size() int         { return g.file.Size() }
 
-func (g *PagedReader) HasNextOnPage() bool { return g.pageSize > 1 && g.page.HasNext() }
+func (g *PagedReader) HasNextOnPage() bool { return g.PageSize > 1 && g.page.HasNext() }
 func (g *PagedReader) HasNextPage() bool   { return g.file.HasNext() }
 func (g *PagedReader) HasNext() bool       { return g.HasNextOnPage() || g.HasNextPage() }
 
@@ -255,12 +254,12 @@ func (g *PagedReader) NextPage() {
 	g.currentPageOffset = g.nextPageOffset
 	var pageV []byte
 	pageV, g.nextPageOffset = g.file.Next(nil)
-	g.page.Reset(pageV, g.isCompressed)
+	g.page.Reset(pageV, g.Compress)
 }
 
 func (g *PagedReader) ResetAndSeekForward(seekKey []byte, offset uint64) (k, v []byte) {
 	g.Reset(offset)
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
 		k, _ = g.file.Next(nil)
 		v, _ = g.file.Next(nil)
 		return k, v
@@ -279,7 +278,7 @@ func (g *PagedReader) ResetAndSeekForward(seekKey []byte, offset uint64) (k, v [
 }
 func (g *PagedReader) ResetAndGetOnPage(getKey []byte, offset uint64) (v []byte) {
 	g.Reset(offset)
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
 		_, _ = g.file.Skip()
 		v, _ = g.file.Next(nil)
 		return v
@@ -288,14 +287,14 @@ func (g *PagedReader) ResetAndGetOnPage(getKey []byte, offset uint64) (v []byte)
 }
 
 func (g *PagedReader) FindOnPageForHistory(key []byte, offset uint64) (v []byte) {
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
 		g.Reset(offset)
 		v, _ = g.file.Next(nil)
 		return v
 	}
 
 	g.Reset(offset)
-	for i := 0; i < g.pageSize && g.HasNext(); i++ {
+	for i := 0; i < g.PageSize && g.HasNext(); i++ {
 		k, v, _, _ := g.Next2ForHistory(nil)
 		if bytes.Equal(key, k) {
 			return v
@@ -304,7 +303,7 @@ func (g *PagedReader) FindOnPageForHistory(key []byte, offset uint64) (v []byte)
 	return
 }
 func (g *PagedReader) Next2ForHistory(buf []byte) (k, v, bufOut []byte, pageOffset uint64) {
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
 		buf, pageOffset = g.file.Next(buf)
 		return nil, buf, buf, pageOffset
 	}
@@ -322,7 +321,11 @@ func (g *PagedReader) Next2Copy(kBuf, vBuf []byte) (k, v, kBufOut, vBufOut []byt
 	return bytes.Clone(k), bytes.Clone(v), kBuf, vBuf, nextKeyOffset
 }
 func (g *PagedReader) Next2(kBuf, vBuf []byte) (k, v, kBufOut, vBufOut []byte, nextKeyOffset uint64) {
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
+		if g.NoKeysMode {
+			vBuf, nextKeyOffset = g.file.Next(vBuf[:0])
+			return nil, vBuf, kBuf, vBuf, nextKeyOffset
+		}
 		kBuf, _ = g.file.Next(kBuf[:0])
 		vBuf, nextKeyOffset = g.file.Next(vBuf[:0])
 		return kBuf, vBuf, kBuf, vBuf, nextKeyOffset
@@ -345,7 +348,7 @@ func (g *PagedReader) Next2(kBuf, vBuf []byte) (k, v, kBufOut, vBufOut []byte, n
 }
 func (g *PagedReader) Cmp(k []byte, offset uint64) (cmp int, key []byte) {
 	g.Reset(offset)
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
 		//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 		key, _ = g.file.Next(nil)
 		if k == nil {
@@ -358,7 +361,7 @@ func (g *PagedReader) Cmp(k []byte, offset uint64) (cmp int, key []byte) {
 		g.currentPageOffset = g.nextPageOffset
 		var pageBuf []byte
 		pageBuf, g.nextPageOffset = g.file.Next(pageBuf[:0])
-		g.page.Reset(pageBuf, g.isCompressed)
+		g.page.Reset(pageBuf, g.Compress)
 	}
 	if !g.page.HasNext() {
 		return -1, nil
@@ -385,7 +388,7 @@ func (g *PagedReader) Cmp(k []byte, offset uint64) (cmp int, key []byte) {
 }
 
 func (g *PagedReader) NextKey(kBuf []byte) (k, kBufOut []byte, nextKeyOffset uint64) {
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
 		kBuf, _ = g.file.Next(kBuf[:0])
 		nextKeyOffset, _ = g.file.Skip()
 		return kBuf, kBuf, nextKeyOffset
@@ -410,7 +413,7 @@ func (g *PagedReader) NextKey(kBuf []byte) (k, kBufOut []byte, nextKeyOffset uin
 }
 
 func (g *PagedReader) Skip() (uint64, int) {
-	if g.pageSize <= 1 {
+	if g.PageSize <= 1 {
 		return g.file.Skip()
 	}
 
@@ -429,21 +432,20 @@ type CompressorI interface {
 	FileName() string
 }
 
-func NewPagedWriter(parent CompressorI, pageSize int, compressionEnabled bool) *PagedWriter {
-	if pageSize > MaxPageSize {
+func NewPagedWriter(parent CompressorI, cfg PageLvlCfg) *PagedWriter {
+	if cfg.PageSize > MaxPageSize {
 		panic("assert: current `Page` implementation using 1 byte to store keys amount, means max pageSize is 256")
 	}
-	return &PagedWriter{parent: parent, pageSize: pageSize, compressionEnabled: compressionEnabled}
+	return &PagedWriter{parent: parent, PageLvlCfg: cfg}
 }
 
 type PagedWriter struct {
+	PageLvlCfg
 	parent             CompressorI
-	pageSize           int
 	keys, vals         []byte
 	kLengths, vLengths []int
 
-	compressionBuf     []byte
-	compressionEnabled bool
+	compressionBuf []byte
 
 	pairs int // words amount
 }
@@ -468,7 +470,7 @@ func (c *PagedWriter) Compress() error {
 	return c.parent.CompressWithCustomMetadata(uint64(c.pairs*2), 0)
 }
 func (c *PagedWriter) Count() int {
-	if c.pageSize <= 1 {
+	if c.PageSize <= 1 {
 		return c.parent.Count()
 	}
 	return c.pairs * 2
@@ -476,7 +478,7 @@ func (c *PagedWriter) Count() int {
 func (c *PagedWriter) FileName() string { return c.parent.FileName() }
 
 func (c *PagedWriter) AddForHistory(k, v []byte) (err error) {
-	if c.pageSize <= 1 {
+	if c.PageSize <= 1 {
 		if _, err = c.parent.Write(v); err != nil {
 			return err
 		}
@@ -488,7 +490,7 @@ func (c *PagedWriter) AddForHistory(k, v []byte) (err error) {
 	c.vLengths = append(c.vLengths, len(v))
 	c.keys = append(c.keys, k...)
 	c.vals = append(c.vals, v...)
-	isFull := c.pairs%c.pageSize == 0
+	isFull := c.pairs%c.PageSize == 0
 	if isFull {
 		return c.writePage()
 	}
@@ -505,7 +507,7 @@ func (c *PagedWriter) writePage() error {
 }
 
 func (c *PagedWriter) Add(k, v []byte) (err error) {
-	if c.pageSize <= 1 {
+	if c.PageSize <= 1 {
 		if _, err = c.parent.Write(k); err != nil {
 			return err
 		}
@@ -520,7 +522,7 @@ func (c *PagedWriter) Add(k, v []byte) (err error) {
 	c.vLengths = append(c.vLengths, len(v))
 	c.keys = append(c.keys, k...)
 	c.vals = append(c.vals, v...)
-	isFull := c.pairs%c.pageSize == 0
+	isFull := c.pairs%c.PageSize == 0
 	if isFull {
 		return c.writePage()
 	}
@@ -531,7 +533,7 @@ func (c *PagedWriter) resetPage() {
 	c.keys, c.vals = c.keys[:0], c.vals[:0]
 }
 func (c *PagedWriter) Flush() error {
-	if c.pageSize <= 1 {
+	if c.PageSize <= 1 {
 		return nil
 	}
 	defer c.resetPage()
@@ -562,7 +564,7 @@ func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
 	}
 
 	wholePage = append(wholePage, keysAndVals...)
-	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf, wholePage, c.compressionEnabled)
+	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf, wholePage, c.PageLvlCfg.Compress)
 
 	return wholePage, true
 }

@@ -974,13 +974,15 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.PagedReader {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedReader(seg.NewReader(f.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+	cfg := seg.PageLvlCfg{Compress: true, PageSize: h.historyValuesOnCompressedPage, NoKeysMode: true}
+	return seg.NewPagedReader(seg.NewReader(f.MakeGetter(), h.Compression), cfg)
 }
 func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), h.historyValuesOnCompressedPage, true)
+	cfg := seg.PageLvlCfg{Compress: true, PageSize: h.historyValuesOnCompressedPage, NoKeysMode: true}
+	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), cfg)
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {

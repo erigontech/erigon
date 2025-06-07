@@ -1181,7 +1181,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		require.NoError(tb, err)
 	}
 
-	writer := seg.NewPagedWriter(seg.NewWriter(comp, compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+	writer := seg.NewPagedWriter(seg.NewWriter(comp, compressCfg.WordLvl), compressCfg.PageLvl)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		err = writer.Add(k, v)
@@ -1205,7 +1205,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 
-	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	err = BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 

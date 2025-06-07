@@ -1696,16 +1696,16 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.PagedReader {
 	if !strings.Contains(f.FileName(), ".kv") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedReader(seg.NewReader(f.MakeGetter(), d.CompressCfg.WordLvl), d.CompressCfg.PageSize, d.CompressCfg.PageLvl)
+	return seg.NewPagedReader(seg.NewReader(f.MakeGetter(), d.CompressCfg.WordLvl), d.CompressCfg.PageLvl)
 }
 func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".kv") {
 		panic("assert: miss-use " + f.FileName())
 	}
 	if forceNoCompress {
-		return seg.NewPagedWriter(seg.NewWriter(f, seg.CompressNone), d.CompressCfg.PageSize, d.CompressCfg.PageLvl)
+		return seg.NewPagedWriter(seg.NewWriter(f, seg.CompressNone), d.CompressCfg.PageLvl)
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, d.CompressCfg.WordLvl), d.CompressCfg.PageSize, d.CompressCfg.PageLvl)
+	return seg.NewPagedWriter(seg.NewWriter(f, d.CompressCfg.WordLvl), d.CompressCfg.PageLvl)
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {

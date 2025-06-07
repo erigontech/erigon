@@ -44,8 +44,14 @@ import (
 type Cfg struct {
 	WordLvlCfg Params
 	WordLvl    WordLevelCompression
-	PageLvl    bool // Enable PageLevel-compression. Good idea to disable for small-hot files and enable for big-old
-	PageSize   int  // amount of key-value paris per page
+
+	PageLvl PageLvlCfg
+	//PageLvl bool // Enable PageLevel-compression. Good idea to disable for small-hot files and enable for big-old
+}
+type PageLvlCfg struct {
+	PageSize   int // amount of key-value paris per page
+	Compress   bool
+	NoKeysMode bool // if true: means it wrapping `Reader` which doesn't have keys (like History)
 }
 
 type Params struct {

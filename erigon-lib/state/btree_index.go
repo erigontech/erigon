@@ -334,7 +334,7 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressCfg
 	if err != nil {
 		return nil, nil, err
 	}
-	kv := seg.NewPagedReader(seg.NewReader(d.MakeGetter(), compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+	kv := seg.NewPagedReader(seg.NewReader(d.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	bt, err := OpenBtreeIndexWithDecompressor(indexPath, M, kv)
 	if err != nil {
 		d.Close()

@@ -44,7 +44,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), comp.WordLvl), comp.PageSize, comp.PageLvl)
+	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), comp.WordLvl), comp.PageLvl)
 	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), r, background.NewProgressSet(), tmp, 1, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(t, err)
 
@@ -83,7 +83,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	defer bt.Close()
 	defer kv.Close()
 
-	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	keys, err := pivotKeysFromKV(getter)
 	require.NoError(t, err)
 
@@ -159,7 +159,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	defer bt.Close()
 	defer kv.Close()
 
-	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	keys, err := pivotKeysFromKV(getter)
 	require.NoError(t, err)
 
@@ -190,7 +190,7 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressCfg seg.
 	require.NoError(tb, err)
 	defer decomp.Close()
 
-	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	err = BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 }
@@ -216,7 +216,7 @@ func TestBtree_Seek2(t *testing.T) {
 	defer bt.Close()
 	defer kv.Close()
 
-	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	keys, err := pivotKeysFromKV(getter)
 	require.NoError(t, err)
 
@@ -296,14 +296,16 @@ func TestBpsTree_Seek(t *testing.T) {
 	tmp := t.TempDir()
 
 	logger := log.New()
+	pageLvlOn := seg.PageLvlCfg{PageSize: 4, Compress: true}
+	pageLvlOff := seg.PageLvlCfg{PageSize: 0, Compress: false}
 	cases := []struct {
 		name string
 		c    seg.Cfg
 	}{
-		{"no_comp", seg.Cfg{WordLvl: seg.CompressNone, PageLvl: false}},
-		{"only_word_lvl", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 0, PageLvl: false}},
-		{"only_page_lvl", seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}},
-		{"both", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageSize: 4, PageLvl: true}},
+		{"no_comp", seg.Cfg{WordLvl: seg.CompressNone, PageLvl: pageLvlOff}},
+		{"only_word_lvl", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: pageLvlOff}},
+		{"only_page_lvl", seg.Cfg{WordLvl: seg.CompressNone, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: pageLvlOn}},
+		{"both", seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg, PageLvl: pageLvlOn}},
 	}
 	for _, tc := range cases {
 		compressCfg := tc.c
@@ -314,7 +316,7 @@ func TestBpsTree_Seek(t *testing.T) {
 			require.NoError(t, err)
 			defer kv.Close()
 
-			g := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+			g := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 			//g.PrintPages()
 			g.Reset(0)
 			ps := make([]uint64, 0, keyCount)

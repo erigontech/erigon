@@ -401,7 +401,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 				}
 				if ok {
 					compressCfg := p.DataFileCompression2()
-					r := seg.NewPagedReader(seg.NewReader(item.decompressor.MakeGetter(), compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+					r := seg.NewPagedReader(seg.NewReader(item.decompressor.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, r); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)

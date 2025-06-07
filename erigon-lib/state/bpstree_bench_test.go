@@ -30,7 +30,7 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 
 	var key []byte
 
-	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageSize, compressCfg.PageLvl)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	getter.Reset(0)
 
 	t.ResetTimer()

@@ -120,6 +120,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			// h contains all values for all keys ordered by key + txNum
 
 			var keyBuf, valBuf, hValBuf []byte
+			_ = hValBuf
 			seenKeys := make([]string, 0)
 			for efReader.HasNext() {
 				keyBuf, _ = efReader.Next(nil)
@@ -142,8 +143,9 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
 
 					require.Truef(t, hReader.HasNext(), "hReader has no more values")
-					_, hValBuf, _, _, _ = hReader.Next2Copy(nil, nil)
+					kkk, hValBuf, _, _, _ := hReader.Next2Copy(nil, nil)
 					if updates[vi].value == nil {
+						fmt.Printf("a: %x %s, %x, %s\n", hValBuf, hValBuf, kkk, kkk)
 						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
 					} else {
 						require.Equalf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
@@ -236,8 +238,8 @@ func TestHistoryCollationBuild(t *testing.T) {
 		gh := h.dataReader(sf.historyDecomp)
 		gh.Reset(0)
 		for gh.HasNext() {
-			k, v, _, _, _ := gh.Next2(nil, nil)
-			valWords = append(valWords, string(k), string(v))
+			_, v, _, _, _ := gh.Next2(nil, nil)
+			valWords = append(valWords, string(v))
 		}
 		require.Equal([]string{"", "value1.1", "", "value2.1", "value2.2", ""}, valWords)
 		require.Equal(6, int(sf.historyIdx.KeyCount()))
