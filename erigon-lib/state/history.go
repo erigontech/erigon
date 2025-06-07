@@ -1406,10 +1406,11 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		if toTxNum >= 0 && item.startTxNum >= uint64(toTxNum) {
 			break
 		}
-		g := ht.iit.dataReader(item.src.decompressor)
+		//g := ht.iit.dataReader(item.src.decompressor)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), ht.iit.ii.Compression)
 		g.Reset(0)
 		if g.HasNext() {
-			key, _, offset := g.NextKey(nil)
+			key, offset := g.Next(nil)
 			heap.Push(&s.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
 		}
 	}

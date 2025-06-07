@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 // StateAsOfIter - returns state range at given time in history
@@ -61,7 +62,8 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 			continue
 		}
 		// TODO: seek(from)
-		g := hi.hc.iit.dataReader(item.src.decompressor)
+		//g := hi.hc.iit.dataReader(item.src.decompressor)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), hi.hc.iit.ii.Compression)
 
 		idx := hi.hc.iit.statelessIdxReader(i)
 		var offset uint64
@@ -75,7 +77,7 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 		}
 		g.Reset(offset)
 		if g.HasNext() {
-			key, _, offset := g.NextKey(nil)
+			key, offset := g.Next(nil)
 			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
 		}
 	}

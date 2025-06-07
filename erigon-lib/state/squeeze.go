@@ -244,13 +244,9 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
 					}
 				}
-				if _, err = writer.Write(k); err != nil {
+				if err = writer.Add(k, v); err != nil {
 					return fmt.Errorf("write key word: %w", err)
 				}
-				if _, err = writer.Write(v); err != nil {
-					return fmt.Errorf("write value word: %w", err)
-				}
-
 				select {
 				case <-logEvery.C:
 					logger.Info("[squeeze_migration]", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
