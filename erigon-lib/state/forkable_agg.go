@@ -22,6 +22,7 @@ type ForkableAgg struct {
 	db     kv.RoDB
 	dirs   datadir.Dirs
 	tmpdir string
+	group  kv.ForkableGroup
 
 	marked          []*Forkable[MarkedTxI]
 	unmarked        []*Forkable[UnmarkedTxI]
@@ -51,7 +52,7 @@ type ForkableAgg struct {
 	logger       log.Logger
 }
 
-func NewForkableAgg(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger log.Logger) *ForkableAgg {
+func NewForkableAgg(ctx context.Context, group kv.ForkableGroup, dirs datadir.Dirs, db kv.RoDB, logger log.Logger) *ForkableAgg {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &ForkableAgg{
 		db:        db,
@@ -66,6 +67,7 @@ func NewForkableAgg(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger l
 		mergeWorkers:           1,
 		compressWorkers:        1,
 		ps:                     background.NewProgressSet(),
+		group:                  group,
 
 		// marked:   ap.marked,
 		// unmarked: ap.unmarked,
@@ -108,6 +110,10 @@ func (r *ForkableAgg) SetCompressWorkers(n int) {
 
 func (r *ForkableAgg) SetMergeDisabled(disabled bool) {
 	r.mergeDisabled.Store(disabled)
+}
+
+func (r *ForkableAgg) Group() kv.ForkableGroup {
+	return r.group
 }
 
 // - "open folder"
@@ -219,7 +225,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 		}
 	}()
 
-	mergeFn := func(proto *ProtoForkable, vfs VisibleFiles, repo *SnapshotRepo, mergedFileToSet **filesItem) {
+	mergeFn := func(proto *ProtoForkable, vfs VisibleFiles, repo *SnapshotRepo, mergedFileToSet **FilesItem) {
 		if len(vfs) == 0 {
 			return
 		}
@@ -306,8 +312,8 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 // multiple invocations will build subsequent files
 func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, err error) {
 	type wrappedFilesItem struct {
-		*filesItem
-		st CanonicityStrategy
+		*FilesItem
+		st kv.CanonicityStrategy
 		id ForkableId
 	}
 	var (
@@ -387,7 +393,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 	for _, df := range cfiles {
 		r.loop(func(p *ProtoForkable) error {
 			if p.a == df.id {
-				p.snaps.IntegrateDirtyFile(df.filesItem)
+				p.snaps.IntegrateDirtyFile(df.FilesItem)
 			}
 			return nil
 		})
@@ -549,17 +555,17 @@ func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 
 	for i, ap := range r.marked {
 		marked = append(marked, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(Marked)
+		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Marked)
 	}
 
 	for i, ap := range r.unmarked {
 		unmarked = append(unmarked, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(Unmarked)
+		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Unmarked)
 	}
 
 	for i, ap := range r.buffered {
 		buffered = append(buffered, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(Buffered)
+		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Buffered)
 	}
 
 	return &ForkableAggTemporalTx{

@@ -577,6 +577,7 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+	//ForkableAggTx(ForkableGroup) any
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
