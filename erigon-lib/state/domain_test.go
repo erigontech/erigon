@@ -741,7 +741,7 @@ func TestNewSegStreamReader(t *testing.T) {
 	require.NoError(t, err)
 
 	defer dec.Close()
-	r := seg.NewReader(dec.MakeGetter(), seg.CompressNone)
+	r := seg.NewPagedReader(seg.NewReader(dec.MakeGetter(), seg.CompressNone), 0, false)
 
 	sr := NewSegStreamReader(r, -1)
 	require.NotNil(t, sr)

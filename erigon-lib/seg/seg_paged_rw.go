@@ -406,16 +406,16 @@ func (g *PagedReader) NextKey(kBuf []byte) (k, kBufOut []byte, nextKeyOffset uin
 	if !g.page.HasNext() {
 		nextKeyOffset = g.nextPageOffset
 	}
-	return k, kBuf, nextKeyOffset
+	return common.Copy(k), kBuf, nextKeyOffset
 }
 
-//	func (g *PagedReader) Skip() (uint64, int) {
-//		v, offset := g.Next(nil)
-//		return offset, len(v)
-//	}
-func (g *PagedReader) Skip2() uint64 {
-	_, _, _, _, nextKeyOffset := g.Next2(nil, nil)
-	return nextKeyOffset
+func (g *PagedReader) Skip() (uint64, int) {
+	if g.pageSize <= 1 {
+		return g.file.Skip()
+	}
+
+	k, v, _, _, nextKeyOffset := g.Next2(nil, nil)
+	return nextKeyOffset, len(k) + len(v)
 }
 
 const MaxPageSize = 256

@@ -142,7 +142,7 @@ type ReaderI interface {
 	Count() int
 	Reset(offset uint64)
 	HasNext() bool
-	Skip() (uint64, int)
+	Skip() (nextOffset uint64, currentWordLen int)
 	FileName() string
 	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
 	MadvNormal() MadvDisabler
