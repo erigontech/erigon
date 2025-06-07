@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -561,29 +560,6 @@ func BlkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.T
 	}
 
 	stepSize := libstate.AggTx(tx).StepSize()
-	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
-}
-
-func BlkRangeToStepsOnDB(db kv.RoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	tx, err := db.BeginRo(context.Background())
-	if err != nil {
-		return 0, 0, err
-	}
-	defer tx.Rollback()
-	return BlkRangeToSteps(tx, fromBlock, toBlock, txNumsReader)
-}
-
-func BlkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
-	if err != nil {
-		return 0, 0, err
-	}
-	toTxNum, err := txNumsReader.Min(tx, toBlock)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	stepSize := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).StepSize()
 	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
 }
 
