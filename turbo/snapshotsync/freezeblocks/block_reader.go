@@ -991,6 +991,10 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *snapsho
 		}
 	}() // avoid crash because Erigon's core does many things
 
+	return bodyForStorageFromSnapshot(blockHeight, sn, buf)
+}
+
+func bodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.BodyForStorage, []byte, error) {
 	index := sn.Src().Index()
 
 	if index == nil {
@@ -1537,24 +1541,130 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 	return nil
 }
 
-func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.ReadTxNumFunc {
-	return func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
-		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(tx, c, blockNum)
+func TxBlockIndexFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.TxBlockIndex {
+	return &txBlockIndexWithBlockReader{
+		r:     r,
+		ctx:   ctx,
+		cache: NewBlockTxNumLookupCache(),
+	}
+}
+
+type txBlockIndexWithBlockReader struct {
+	r     services.FullBlockReader
+	ctx   context.Context
+	cache *BlockTxNumLookupCache
+}
+
+func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
+	maxTxNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.MaxTxNum(tx, c, blockNum)
+	if err != nil {
+		return
+	}
+	r := t.r
+	if ok || r == nil {
+		return
+	}
+	b, err := r.CanonicalBodyForStorage(t.ctx, tx, blockNum)
+	if err != nil {
+		return 0, false, err
+	}
+	if b == nil {
+		return 0, false, nil
+	}
+	ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
+	return ret, true, nil
+}
+
+func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
+	var buf []byte
+	var b *types.BodyForStorage
+	view := t.r.Snapshots().(*RoSnapshots).View()
+	defer view.Close()
+
+	getMaxTxNum := func(i int, seg *snapshotsync.VisibleSegment) (uint64, error) {
+		b, buf, err = bodyForStorageFromSnapshot(uint64(i), seg, buf)
+		if err != nil {
+			return 0, err
+		}
+		if b == nil {
+			return 0, fmt.Errorf("BlockReader.BlockNumber: empty block: %d in file bodies.seg(%d-%d)", i, seg.From(), seg.To())
+		}
+		return b.BaseTxnID.U64() + uint64(b.TxCount) - 1, nil
+	}
+
+	// find the file
+	bodies := view.Bodies()
+	cache := t.cache
+	blockIndex := sort.Search(len(bodies), func(i int) bool {
+		if err != nil {
+			return true
+		}
+		seg := bodies[i]
+		ran := seg.Range
+		query := cache.NewQuery(ran)
+		maxTxNum, ok := query.Last()
+		if !ok {
+			maxTxNum, err = getMaxTxNum(int(ran.To())-1, seg)
+			if err != nil {
+				return true
+			}
+			query.SetLast(maxTxNum)
+		}
+
+		return maxTxNum >= txNum
+	})
+
+	if err != nil {
+		return 0, false, err
+	}
+
+	if blockIndex == len(bodies) {
+		// not in snapshots
+		blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(tx, txNum)
 		if err != nil {
 			return
 		}
+		r := t.r
 		if ok || r == nil {
 			return
 		}
-		b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
-		if err != nil {
-			return 0, false, err
-		}
-		if b == nil {
-			return 0, false, nil
-		}
-		ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
-		return ret, true, nil
+
+		return 0, false, nil
 	}
 
+	seg := bodies[blockIndex]
+	ran := seg.Range
+	i, j := ran.From(), ran.To()
+	query := cache.NewQuery(ran)
+	for i < j {
+		h := (i + j) >> 1
+		maxTxNum, ok, exhaust := query.GetValue()
+		if exhaust || !ok {
+			maxTxNum, err = getMaxTxNum(int(h), seg)
+			if err != nil {
+				return 0, false, err
+			}
+		}
+
+		if !ok && !exhaust {
+			query.SetValue(maxTxNum)
+		}
+
+		if maxTxNum >= txNum {
+			// left
+			j = h
+			query.Left()
+		} else {
+			// right
+			i = h + 1
+			query.Right()
+		}
+	}
+	// should find the block
+	if i >= ran.To() {
+		return 0, false, fmt.Errorf("BlockReader.BlockNumber: not found block: %d in file (%d-%d), searching for %d", i, ran.From(), ran.To(), txNum)
+	}
+	//fmt.Printf("[BlockReader.BlockNumber] found block %d for txNum %d in file [%d-%d) touched file %d\n", i, txNum, ran.From(), ran.To(), count)
+
+	return i, true, nil
 }

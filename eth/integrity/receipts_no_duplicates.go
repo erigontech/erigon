@@ -36,7 +36,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	}
 	toBlock := stageExecProgress
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return err

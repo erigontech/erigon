@@ -182,7 +182,7 @@ func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {
 }
 
 func NewLatestStateWriter(tx kv.Tx, domains *libstate.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
-	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(tx, blockNum)
+	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), blockReader)).Min(tx, blockNum)
 	if err != nil {
 		panic(err)
 	}

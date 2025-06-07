@@ -125,7 +125,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	if nonceTxnID == 0 {
 		return nil, nil
 	}
-	ok, bn, err := api._txNumReader.FindBlockNum(tx, nonceTxnID)
+	bn, ok, err := api._txNumReader.FindBlockNum(tx, nonceTxnID)
 	if err != nil {
 		return nil, err
 	}
