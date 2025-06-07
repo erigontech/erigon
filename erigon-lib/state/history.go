@@ -387,7 +387,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
 	for iiReader.HasNext() {
-		keyBuf, valBuf, keyBuf, valBuf, _ = iiReader.Next2(keyBuf[:0], valBuf[:0]) // skip key
+		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
+		valBuf, _ = iiReader.Next(valBuf[:0])
 		cnt += multiencseq.Count(efBaseTxNum, valBuf)
 		select {
 		case <-ctx.Done():
@@ -426,7 +427,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 		valOffset = 0
 		for iiReader.HasNext() {
-			keyBuf, valBuf, keyBuf, valBuf, _ = iiReader.Next2(keyBuf[:0], valBuf[:0]) // skip key
+			keyBuf, _ = iiReader.Next(keyBuf[:0])
+			valBuf, _ = iiReader.Next(valBuf[:0])
 			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)

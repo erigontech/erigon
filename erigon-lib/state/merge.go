@@ -459,7 +459,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			key, val, _, _, _ := g.Next2Copy(nil, nil)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				domain:     g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -486,7 +486,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			i++
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if ci1.idx.HasNext() {
-				ci1.key, ci1.val, _, _, _ = ci1.idx.Next2Copy(ci1.key[:0], ci1.val[:0])
+				ci1.key, ci1.val, _, _, _ = ci1.domain.Next2Copy(ci1.key[:0], ci1.val[:0])
 				heap.Push(&cp, ci1)
 			}
 		}
@@ -621,7 +621,8 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		g := iit.dataReader(item.decompressor)
 		g.Reset(0)
 		if g.HasNext() {
-			key, val, _, _, _ := g.Next2Copy(nil, nil)
+			key, _ := g.Next(nil)
+			val, _ := g.Next(nil)
 			//fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
@@ -673,7 +674,8 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.keysTable, ci1.endTxNum, ci1.key)
 			if ci1.idx.HasNext() {
-				ci1.key, ci1.key, _, _, _ = ci1.idx.Next2Copy(ci1.key[:0], ci1.val[:0])
+				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.keysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
@@ -796,7 +798,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				if g2 == nil {
 					panic(fmt.Sprintf("for file: %s, not found corresponding file to merge", g.FileName()))
 				}
-				key, val, _, _, _ := g.Next2Copy(nil, nil)
+				key, _ := g.Next(nil)
+				val, _ := g.Next(nil)
 				heap.Push(&cp, &CursorItem{
 					t:          FILE_CURSOR,
 					idx:        g,
@@ -837,7 +840,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
 				keyCount += int(count)
 				if ci1.idx.HasNext() {
-					ci1.key, ci1.val, _, _, _ = ci1.idx.Next2Copy(ci1.key[:0], ci1.val[:0])
+					ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+					ci1.val, _ = ci1.idx.Next(ci1.val[:0])
 					heap.Push(&cp, ci1)
 				}
 			}

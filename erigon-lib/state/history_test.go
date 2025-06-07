@@ -122,7 +122,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			var keyBuf, valBuf, hValBuf []byte
 			seenKeys := make([]string, 0)
 			for efReader.HasNext() {
-				keyBuf, valBuf, _, _, _ = efReader.Next2(nil, nil)
+				keyBuf, _ = efReader.Next(nil)
+				valBuf, _ = efReader.Next(nil)
 
 				ef := multiencseq.ReadMultiEncSeq(i, valBuf)
 				efIt := ef.Iterator(0)

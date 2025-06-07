@@ -1389,6 +1389,60 @@ func buildHashMapAccessor(ctx context.Context, g *seg.PagedReader, idxPath strin
 	}
 	return nil
 }
+func buildHashMapAccessor2(ctx context.Context, g *seg.Reader, idxPath string, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+	_, fileName := filepath.Split(idxPath)
+	count := g.Count() / 2
+	p := ps.AddNew(fileName, uint64(count))
+	defer ps.Delete(p)
+
+	defer g.MadvNormal().DisableReadAhead()
+
+	var rs *recsplit.RecSplit
+	var err error
+	cfg.KeyCount = count
+	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
+		return fmt.Errorf("create recsplit: %w", err)
+	}
+	defer rs.Close()
+	rs.LogLvl(log.LvlTrace)
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("buildHashMapAccessor: %s, %s, %s", rs.FileName(), rec, dbg.Stack())
+		}
+	}()
+
+	var keyPos uint64
+	for {
+		word := make([]byte, 0, 256)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		g.Reset(0)
+		for g.HasNext() {
+			word, _ = g.Next(word[:0])
+			if err = rs.AddKey(word, keyPos); err != nil {
+				return fmt.Errorf("add idx key [%x]: %w", word, err)
+			}
+
+			// Skip value
+			keyPos, _ = g.Skip()
+
+			p.Processed.Add(1)
+		}
+		if err = rs.Build(ctx); err != nil {
+			if rs.Collision() {
+				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
+				rs.ResetNextSalt()
+			} else {
+				return fmt.Errorf("build idx: %w", err)
+			}
+		} else {
+			break
+		}
+	}
+	return nil
+}
 
 func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	if d.disable {

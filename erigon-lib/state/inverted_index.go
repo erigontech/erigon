@@ -274,11 +274,11 @@ func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, p
 	return ii.buildMapAccessor(ctx, fromStep, toStep, ii.dataReader(item.decompressor), ps)
 }
 
-func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.PagedReader {
+func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".ef") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedReader(seg.NewReader(f.MakeGetter(), ii.Compression), 0, false)
+	return seg.NewReader(f.MakeGetter(), ii.Compression)
 }
 func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompression bool) *seg.Writer {
 	if !strings.Contains(f.FileName(), ".ef") {
@@ -289,7 +289,7 @@ func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompression bool) 
 	}
 	return seg.NewWriter(f, ii.Compression)
 }
-func (iit *InvertedIndexRoTx) dataReader(f *seg.Decompressor) *seg.PagedReader {
+func (iit *InvertedIndexRoTx) dataReader(f *seg.Decompressor) *seg.Reader {
 	return iit.ii.dataReader(f)
 }
 func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompression bool) *seg.Writer {
@@ -1271,7 +1271,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	return InvertedFiles{decomp: decomp, index: index, existence: existence}, nil
 }
 
-func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.PagedReader, ps *background.ProgressSet) (err error) {
+func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) (err error) {
 	defer func() {
 		rec := recover()
 		if rec != nil {
@@ -1316,7 +1316,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, idxPath, cfg, ps, ii.logger)
+	return buildHashMapAccessor2(ctx, data, idxPath, cfg, ps, ii.logger)
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
