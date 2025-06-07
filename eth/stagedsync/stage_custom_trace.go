@@ -386,7 +386,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 
-			if cfg.ReceiptDomain {
+			if produce.ReceiptDomain {
 				if !txTask.Final {
 					var receipt *types.Receipt
 					if txTask.TxIndex >= 0 {

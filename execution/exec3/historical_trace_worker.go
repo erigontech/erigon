@@ -100,18 +100,15 @@ func NewHistoricalTraceWorker(
 		ctx:      ctx,
 		execArgs: execArgs,
 
-		stateReader: state.NewHistoryReaderV3(),
-		stateWriter: state.NewNoopWriter(),
 		background:  background,
+		stateReader: state.NewHistoryReaderV3(),
 
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, vm.Config{}),
-		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 		vmCfg:       &vm.Config{},
 	}
+	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
 	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
 	ie.ibs = state.New(ie.stateReader)
-
 	return ie
 }
 
@@ -121,7 +118,6 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 	defer func() { // convert panic to err - because it's background workers
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
-			log.Warn("[HistoricalTraceWorker]", "err", err)
 		}
 	}()
 	defer rw.LogStats()
@@ -256,9 +252,6 @@ type ExecArgs struct {
 	Dirs        datadir.Dirs
 	ChainConfig *chain.Config
 	Workers     int
-
-	ReceiptDomain     bool
-	ReGenRCacheDomain bool
 }
 
 func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
@@ -273,7 +266,6 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
-				log.Warn("[HistoricalTraceWorker]", "err", err)
 			}
 		}()
 		defer rws.Close()
@@ -283,7 +275,6 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
-				log.Warn("[StageCustomTrace]", "err", err)
 			}
 		}()
 		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, rws, logger)
@@ -297,6 +288,7 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 		return err
 	}
 	defer tx.Rollback()
+
 	applyWorker := NewHistoricalTraceWorker(consumer, nil, nil, false, ctx, cfg, logger)
 	defer applyWorker.LogStats()
 	applyWorker.ResetTx(tx)
@@ -381,9 +373,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
-	//if chainConfig.Aura != nil && cfg.Workers > 1 {
-	//	panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
-	//}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 
@@ -498,6 +487,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
 			}
+
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
@@ -544,12 +534,8 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	if b == nil {
 		return nil, nil
 	}
-	for _, txn := range b.Transactions() {
-		_ = txn.Hash()
-	}
 	return b, err
 }
-
 func BlkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
