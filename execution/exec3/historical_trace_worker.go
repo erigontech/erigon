@@ -549,6 +549,7 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	}
 	return b, err
 }
+
 func BlkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
