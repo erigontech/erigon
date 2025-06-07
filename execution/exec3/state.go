@@ -328,6 +328,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 		callTracer = calltracer.NewCallTracer(txTask.TracingHooks())
 	}
 
+	rw.stateReader.SetTxNum(txTask.TxNum())
+	rw.stateWriter.SetTxNum(txTask.TxNum())
+	//rw.rs.Domains().SetTxNum(txTask.TxNum) - only set this if something breaks - it will not be stable with multiple parallel workers
+
 	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
 		return &exec.TxResult{
 			Task: txTask,
