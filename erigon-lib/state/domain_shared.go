@@ -167,6 +167,7 @@ func (sd *SharedDomains) AsGetter(tx kv.Tx) kv.TemporalGetter {
 }
 
 func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
+	fmt.Println("SetChangesetAccumulator", acc == nil, dbg.Stack())
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
 		if sd.currentChangesAccumulator == nil {
