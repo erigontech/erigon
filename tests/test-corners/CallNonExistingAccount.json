@@ -1,0 +1,61 @@
+{
+  "01205209-auth-88": {
+    "env": {
+      "currentCoinbase": "b94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+      "currentDifficulty": "0x200000",
+      "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000200000",
+      "currentGasLimit": "0x26e1f476fe1e22",
+      "currentNumber": "0x1",
+      "currentTimestamp": "0x3e8",
+      "previousHash": "0x044852b2a670ade5407e78fb2863c51de9fcb96542a07186fe3aeda6bb8a116d",
+      "currentBaseFee": "0x10"
+    },
+    "pre": {
+      "0x00000000000000000000000000000000000000f1": {
+        "code": "0x6f",
+        "storage": {
+          "0x0000000000000000000000000000000000000000000000000000000000000000": "0x000000000000000000000000000000000000000000000000000000000000000f"
+        },
+        "balance": "0x0",
+        "nonce": "0x0"
+      },
+      "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+        "code": "0x",
+        "storage": {},
+        "balance": "0xffffffffff",
+        "nonce": "0x0"
+      }
+    },
+    "transaction": {
+      "maxFeePerGas": "0x10",
+      "maxPriorityFeePerGas": "0x10",
+      "nonce": "0x0",
+      "to": "0x1563915e194D8CfBA1943570603F7606A3115508",
+      "data": [
+        "0x179d7be60031527b08ef25a5d54860276da07027bb622ce5a337ca442295d420145654be84ac53de49"
+      ],
+      "gasLimit": [
+        "0x7a1200"
+      ],
+      "value": [
+        "0xd18b"
+      ],
+      "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8",
+      "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+    },
+    "out": "0x",
+    "post": {
+      "Prague": [
+        {
+          "hash": "0x5044a37dc5abd0ab67a1e2b4c79199eae9389c97ba61410a04da154329a20f94",
+          "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+          "indexes": {
+            "data": 0,
+            "gas": 0,
+            "value": 0
+          }
+        }
+      ]
+    }
+  }
+}

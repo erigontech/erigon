@@ -45,7 +45,7 @@ func (stx *BlobTx) GetBlobHashes() []common.Hash {
 }
 
 func (stx *BlobTx) GetBlobGas() uint64 {
-	return params.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
+	return params.GasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
 func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {

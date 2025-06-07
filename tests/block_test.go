@@ -78,6 +78,10 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
+
+	// TODO(yperbasis): re-enable after the tests are upgraded to fusaka-devnet-1
+	bt.skipLoad(`^osaka/eip7823_modexp_upper_bounds/modexp_upper_bounds/modexp_upper_bounds.json`)
+
 	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {

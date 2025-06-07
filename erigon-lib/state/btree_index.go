@@ -384,8 +384,8 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.PagedReader, ps *
 	var key []byte
 
 	var b0 [256]bool
-	for getter.HasNext() {
-		key, keyBuf, nextPos = getter.NextKey(nil)
+	for kv.HasNext() {
+		key, keyBuf, nextPos = kv.NextKey(nil)
 		keep := false
 		if !b0[key[0]] {
 			b0[key[0]] = true

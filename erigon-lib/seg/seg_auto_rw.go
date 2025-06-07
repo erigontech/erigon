@@ -130,6 +130,12 @@ func (g *Reader) Skip() (uint64, int) {
 
 }
 
+type SimpleReader interface {
+	Next(buf []byte) ([]byte, uint64)
+	Reset(offset uint64)
+	HasNext() bool
+}
+
 type ReaderI interface {
 	Next(buf []byte) ([]byte, uint64)
 	Size() int
@@ -146,7 +152,6 @@ type ReaderI interface {
 type MadvDisabler interface {
 	DisableReadAhead()
 }
-
 type Writer struct {
 	*Compressor
 	keyWritten bool

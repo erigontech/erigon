@@ -219,9 +219,9 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
 	assert.Equal(t, BlobTxnType, thinTxn.Type)
 	assert.Len(t, thinTxn.BlobHashes, 2)
-	assert.Empty(t, thinTxn.Blobs)
-	assert.Empty(t, thinTxn.Commitments)
-	assert.Empty(t, thinTxn.Proofs)
+	assert.Empty(t, thinTxn.Blobs())
+	assert.Empty(t, thinTxn.Commitments())
+	assert.Empty(t, thinTxn.Proofs())
 
 	// Now parse the same txn body, but wrapped with blobs/commitments/proofs
 	wrappedWithBlobs = true
@@ -286,15 +286,153 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, thinTxn.BlobFeeCap, fatTxn.BlobFeeCap)
 	assert.Equal(t, thinTxn.BlobHashes, fatTxn.BlobHashes)
 
-	require.Len(t, fatTxn.Blobs, 2)
-	require.Len(t, fatTxn.Commitments, 2)
-	require.Len(t, fatTxn.Proofs, 2)
-	assert.Equal(t, blob0, fatTxn.Blobs[0])
-	assert.Equal(t, blob1, fatTxn.Blobs[1])
-	assert.Equal(t, commitment0, fatTxn.Commitments[0])
-	assert.Equal(t, commitment1, fatTxn.Commitments[1])
-	assert.Equal(t, proof0, fatTxn.Proofs[0])
-	assert.Equal(t, proof1, fatTxn.Proofs[1])
+	require.Len(t, fatTxn.BlobBundles, 2)
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Blob)
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs)
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs[0])
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Commitment)
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Blob)
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs)
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs[0])
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Commitment)
+	assert.Equal(t, blob0, fatTxn.Blobs()[0])
+	assert.Equal(t, blob1, fatTxn.Blobs()[1])
+	assert.Equal(t, commitment0, fatTxn.Commitments()[0])
+	assert.Equal(t, commitment1, fatTxn.Commitments()[1])
+	assert.Equal(t, proof0, fatTxn.Proofs()[0])
+	assert.Equal(t, proof1, fatTxn.Proofs()[1])
+}
+
+func TestWrapperV1BlobTxnParsing(t *testing.T) {
+	// First parse a blob transaction body (no blobs/commitments/proofs)
+	wrappedWithBlobs := false
+	// Some arbitrary hardcoded example
+	bodyRlpHex := "f9012705078502540be4008506fc23ac008357b58494811a752c8cd697e3cb27" +
+		"279c330ed1ada745a8d7808204f7f872f85994de0b295669a9fd93d5f28d9ec85e40f4cb697b" +
+		"aef842a00000000000000000000000000000000000000000000000000000000000000003a000" +
+		"00000000000000000000000000000000000000000000000000000000000007d694bb9bc244d7" +
+		"98123fde783fcc1c72d3bb8c189413c07bf842a0c6bdd1de713471bd6cfa62dd8b5a5b42969e" +
+		"d09e26212d3377f3f8426d8ec210a08aaeccaf3873d07cef005aca28c39f8a9f8bdb1ec8d79f" +
+		"fc25afc0a4fa2ab73601a036b241b061a36a32ab7fe86c7aa9eb592dd59018cd0443adc09035" +
+		"90c16b02b0a05edcc541b4741c5cc6dd347c5ed9577ef293a62787b4510465fadbfe39ee4094"
+	bodyRlp := hexutil.MustDecodeHex(bodyRlpHex)
+
+	hasEnvelope := true
+	bodyEnvelopePrefix := hexutil.MustDecodeHex("b9012b")
+	var bodyEnvelope []byte
+	bodyEnvelope = append(bodyEnvelope, bodyEnvelopePrefix...)
+	bodyEnvelope = append(bodyEnvelope, BlobTxnType)
+	bodyEnvelope = append(bodyEnvelope, bodyRlp...)
+
+	ctx := NewTxnParseContext(*uint256.NewInt(5))
+	ctx.withSender = false
+
+	var thinTxn TxnSlot // only txn body, no blobs
+	txnType, err := PeekTransactionType(bodyEnvelope)
+	require.NoError(t, err)
+	assert.Equal(t, BlobTxnType, txnType)
+
+	p, err := ctx.ParseTransaction(bodyEnvelope, 0, &thinTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
+	require.NoError(t, err)
+	assert.Equal(t, len(bodyEnvelope), p)
+	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.Size))
+	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
+	assert.Equal(t, BlobTxnType, thinTxn.Type)
+	assert.Len(t, thinTxn.BlobHashes, 2)
+	assert.Empty(t, thinTxn.Blobs())
+	assert.Empty(t, thinTxn.Commitments())
+	assert.Empty(t, thinTxn.Proofs())
+
+	// Now parse the same txn body, but wrapped with blobs/commitments/proofs
+	wrappedWithBlobs = true
+	hasEnvelope = false
+
+	blob0 := make([]byte, params.BlobSize)
+	rand.Read(blob0)
+	blob1 := make([]byte, params.BlobSize)
+	rand.Read(blob1)
+
+	var commitment0, commitment1 gokzg4844.KZGCommitment
+	rand.Read(commitment0[:])
+	rand.Read(commitment1[:])
+
+	proofs := make([]gokzg4844.KZGProof, 0, 256)
+	for range 256 {
+		var p gokzg4844.KZGProof
+		rand.Read(p[:])
+		proofs = append(proofs, p)
+	}
+
+	wrapperRlp := hexutil.MustDecodeHex("03fa04329e")
+	wrapperRlp = append(wrapperRlp, bodyRlp...)
+	wrapperRlp = append(wrapperRlp, 0x1)
+
+	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
+	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
+	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob0...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob1...)
+
+	commitmentRlpPrefix := hexutil.MustDecodeHex("f862")
+	wrapperRlp = append(wrapperRlp, commitmentRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment1[:]...)
+
+	proofsRlpPrefix := hexutil.MustDecodeHex("f93100") // 256*(48+1)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	for _, p := range proofs {
+		wrapperRlp = append(wrapperRlp, 0xb0)
+		wrapperRlp = append(wrapperRlp, p[:]...)
+	}
+
+	var fatTxn TxnSlot // with blobs/commitments/proofs
+	txnType, err = PeekTransactionType(wrapperRlp)
+	require.NoError(t, err)
+	assert.Equal(t, BlobTxnType, txnType)
+
+	p, err = ctx.ParseTransaction(wrapperRlp, 0, &fatTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
+	require.NoError(t, err)
+	assert.Equal(t, len(wrapperRlp), p)
+	assert.Equal(t, len(wrapperRlp), int(fatTxn.Size))
+	assert.Equal(t, wrapperRlp, fatTxn.Rlp)
+	assert.Equal(t, BlobTxnType, fatTxn.Type)
+
+	assert.Equal(t, thinTxn.Value, fatTxn.Value)
+	assert.Equal(t, thinTxn.Tip, fatTxn.Tip)
+	assert.Equal(t, thinTxn.FeeCap, fatTxn.FeeCap)
+	assert.Equal(t, thinTxn.Nonce, fatTxn.Nonce)
+	assert.Equal(t, thinTxn.DataLen, fatTxn.DataLen)
+	assert.Equal(t, thinTxn.DataNonZeroLen, fatTxn.DataNonZeroLen)
+	assert.Equal(t, thinTxn.AccessListAddrCount, fatTxn.AccessListAddrCount)
+	assert.Equal(t, thinTxn.AccessListStorCount, fatTxn.AccessListStorCount)
+	assert.Equal(t, thinTxn.Gas, fatTxn.Gas)
+	assert.Equal(t, thinTxn.IDHash, fatTxn.IDHash)
+	assert.Equal(t, thinTxn.Creation, fatTxn.Creation)
+	assert.Equal(t, thinTxn.BlobFeeCap, fatTxn.BlobFeeCap)
+	assert.Equal(t, thinTxn.BlobHashes, fatTxn.BlobHashes)
+
+	require.Len(t, fatTxn.BlobBundles, 2)
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Blob)
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs)
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs[0])
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Commitment)
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Blob)
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs)
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs[0])
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Commitment)
+	assert.Equal(t, blob0, fatTxn.Blobs()[0])
+	assert.Equal(t, blob1, fatTxn.Blobs()[1])
+	assert.Equal(t, commitment0, fatTxn.Commitments()[0])
+	assert.Equal(t, commitment1, fatTxn.Commitments()[1])
+
+	fatTxnProofs := fatTxn.Proofs()
+	for i := range 256 {
+		assert.Equal(t, proofs[i], fatTxnProofs[i])
+	}
 }
 
 func TestSetCodeAuthSignatureRecover(t *testing.T) {

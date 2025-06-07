@@ -20,6 +20,7 @@
 package tests
 
 import (
+	"context"
 	context2 "context"
 	"encoding/binary"
 	"encoding/hex"
@@ -343,6 +344,12 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.Genesis
 	if err := statedb.CommitBlock(rules, w); err != nil {
 		return nil, err
 	}
+
+	_, err = domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), domains.TxNum(), "flush-commitment")
+	if err != nil {
+		return nil, err
+	}
+
 	if err := domains.Flush(context2.Background(), tx); err != nil {
 		return nil, err
 	}

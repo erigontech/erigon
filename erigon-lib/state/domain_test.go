@@ -43,7 +43,6 @@ import (
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -209,7 +208,7 @@ func testCollationBuild(t *testing.T, compressCfg seg.Cfg) {
 		require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
 		require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
-		require.Equal(t, page.WordsAmount2PagesAmount(3, d.historyValuesOnCompressedPage), c.historyComp.Count())
+		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.historyValuesOnCompressedPage), c.historyComp.Count())
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -1152,7 +1151,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
 	require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
-	require.Equal(t, page.WordsAmount2PagesAmount(int(3*maxTx), d.hist.historyValuesOnCompressedPage), c.historyComp.Count())
+	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.hist.historyValuesOnCompressedPage), c.historyComp.Count())
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())

@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
-	"github.com/erigontech/erigon-lib/seg"
 )
 
 // StateAsOfIter - returns state range at given time in history
@@ -62,7 +61,7 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 			continue
 		}
 		// TODO: seek(from)
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), hi.hc.h.Compression)
+		g := hi.hc.iit.dataReader(item.src.decompressor)
 
 		idx := hi.hc.iit.statelessIdxReader(i)
 		var offset uint64

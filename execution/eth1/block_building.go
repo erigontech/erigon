@@ -193,7 +193,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		}
 		versionedHashes, commitments, proofs, blobs := blobTx.GetBlobHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
 		lenCheck := len(versionedHashes)
-		if lenCheck != len(commitments) || lenCheck != len(proofs) || lenCheck != len(blobs) {
+		if lenCheck != len(commitments) || (lenCheck != len(proofs) && blobTx.WrapperVersion == 0) || lenCheck != len(blobs) {
 			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+
 				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
 		}

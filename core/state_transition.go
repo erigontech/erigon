@@ -334,6 +334,11 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 
+	// EIP-7825: Transaction Gas Limit Cap
+	if st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From().Hex(), st.msg.Gas())
+	}
+
 	return st.buyGas(gasBailout)
 }
 

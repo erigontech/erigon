@@ -39,7 +39,6 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	t.Name()
 	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
@@ -172,7 +171,6 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed2")
-	t.Name()
 	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
@@ -294,7 +292,6 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	t.Name()
 	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
@@ -612,7 +609,6 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "complex")
-	t.Name()
 	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2

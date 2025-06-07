@@ -417,7 +417,7 @@ func makePurifiedDomains(ctx context.Context, db kv.RwDB, files []string, dirs d
 			count++
 			if count%10_000_000 == 0 {
 				skipRatio := float64(skipped) / float64(count)
-				logger.Info(fmt.Sprintf("Indexed %dM keys, skipped %dk, in file %s. skip ratio: %.2f", count/1_000_000, skipped/1_000, baseFileName, skipRatio))
+				logger.Info(fmt.Sprintf("Indexed %dM keys, skipped %dM, in file %s. skip ratio: %.2f", count/1_000_000, skipped/1_000_000, baseFileName, skipRatio))
 			}
 		}
 

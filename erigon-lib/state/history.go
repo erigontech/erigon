@@ -382,13 +382,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer hist.MadvSequential().DisableReadAhead()
 	defer efHist.MadvSequential().DisableReadAhead()
 
-	iiReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.Compression)
+	iiReader := h.InvertedIndex.dataReader(efHist)
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
 	for iiReader.HasNext() {
-		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
-		valBuf, _ = iiReader.Next(valBuf[:0])
+		keyBuf, valBuf, keyBuf, valBuf, _ = iiReader.Next2(keyBuf[:0], valBuf[:0]) // skip key
 		cnt += multiencseq.Count(efBaseTxNum, valBuf)
 		select {
 		case <-ctx.Done():
@@ -397,7 +396,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		}
 	}
 
-	histReader := seg.NewReader(hist.MakeGetter(), h.Compression)
+	histReader := h.dataReader(hist)
 
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(efHist.Count())/2)
@@ -427,8 +426,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 		valOffset = 0
 		for iiReader.HasNext() {
-			keyBuf, _ = iiReader.Next(keyBuf[:0])
-			valBuf, _ = iiReader.Next(valBuf[:0])
+			keyBuf, valBuf, keyBuf, valBuf, _ = iiReader.Next2(keyBuf[:0], valBuf[:0]) // skip key
 			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
@@ -1408,10 +1406,10 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		if toTxNum >= 0 && item.startTxNum >= uint64(toTxNum) {
 			break
 		}
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), ht.h.Compression)
+		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
 		if g.HasNext() {
-			key, offset := g.Next(nil)
+			key, _, offset := g.NextKey(nil)
 			heap.Push(&s.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
 		}
 	}

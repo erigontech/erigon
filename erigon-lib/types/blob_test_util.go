@@ -19,6 +19,7 @@ package types
 import (
 	"fmt"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 
@@ -69,6 +70,64 @@ func MakeBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
 	wrapperRlp = append(wrapperRlp, 0xb0)
 	wrapperRlp = append(wrapperRlp, proof1[:]...)
 
+	return wrapperRlp, []gokzg4844.KZGCommitment{commitment0, commitment1}
+}
+
+func MakeV1WrappedBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
+	bodyRlp := hexutil.MustDecodeHex(testdata.BodyRlpHex)
+	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
+	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
+
+	var blob0, blob1 = gokzg4844.Blob{}, gokzg4844.Blob{}
+	copy(blob0[:], hexutil.MustDecodeHex(testdata.ValidBlob1Hex))
+	copy(blob1[:], hexutil.MustDecodeHex(testdata.ValidBlob2Hex))
+
+	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0[:], 0)
+	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1[:], 0)
+
+	ethKzgCtx := kzg.GoEthKzgCtx()
+	_, p1, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&blob0), 4)
+	if err != nil {
+		fmt.Println("error", err)
+		return nil, nil
+	}
+	_, p2, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&blob1), 4)
+	if err != nil {
+		fmt.Println("error", err)
+		return nil, nil
+	}
+	proofs := make(KZGProofs, 0, 256)
+	for _, pp := range &p1 {
+		proofs = append(proofs, (KZGProof(pp)))
+	}
+	for _, pp := range &p2 {
+		proofs = append(proofs, (KZGProof(pp)))
+	}
+
+	wrapperRlp := hexutil.MustDecodeHex("03fa04329e")
+	wrapperRlp = append(wrapperRlp, bodyRlp...)
+	wrapperRlp = append(wrapperRlp, 0x1)
+
+	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob0[:]...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob1[:]...)
+
+	commitmentRlpPrefix := hexutil.MustDecodeHex("f862")
+	wrapperRlp = append(wrapperRlp, commitmentRlpPrefix...)
+
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment1[:]...)
+
+	proofsRlpPrefix := hexutil.MustDecodeHex("f93100") // 256*(48+1)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	for _, p := range proofs {
+		wrapperRlp = append(wrapperRlp, 0xb0)
+		wrapperRlp = append(wrapperRlp, p[:]...)
+	}
 	return wrapperRlp, []gokzg4844.KZGCommitment{commitment0, commitment1}
 }
 
