@@ -354,7 +354,17 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	return a.OpenFolder()
 }
 
+func (a *Aggregator) WaitForFiles() {
+	for {
+		select {
+		case <-a.WaitForBuildAndMerge(a.ctx):
+			return
+		}
+	}
+}
+
 func (a *Aggregator) Close() {
+	a.WaitForFiles()
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
@@ -467,7 +477,10 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 			select {
 			case <-ctx.Done():
 				return
-			case <-chkEvery.C: //TODO: more reliable notification
+			case <-chkEvery.C:
+				a.logger.Trace("[agg] waiting for files",
+					"building files", a.buildingFiles.Load(),
+					"merging files", a.mergingFiles.Load())
 			}
 		}
 	}()
@@ -1547,7 +1560,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 
 		if a.snapshotBuildSema != nil {
 			//we are inside own goroutine - it's fine to block here
-			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
+			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil { //TODO: not sure if this ctx is correct
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				close(fin)
 				return //nolint
