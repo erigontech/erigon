@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	exec4 "github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -49,10 +49,10 @@ import (
 type CustomTraceCfg struct {
 	tmpdir   string
 	db       kv.TemporalRwDB
-	ExecArgs *exec4.ExecArgs
-	Produce  Produce
-}
+	ExecArgs *exec3.ExecArgs
 
+	Produce Produce
+}
 type Produce struct {
 	ReceiptDomain bool
 	RCacheDomain  bool
@@ -87,7 +87,7 @@ func NewProduce(produceList []string) Produce {
 }
 
 func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
-	execArgs := &exec4.ExecArgs{
+	execArgs := &exec3.ExecArgs{
 		ChainDB:     db,
 		BlockReader: br,
 		ChainConfig: cc,
@@ -142,7 +142,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	batchSize := uint64(50_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
 		_nextBlock := startBlock + batchSize
-		fromStep, toStep, err := exec4.BlkRangeToStepsOnDB(cfg.db, startBlock, _nextBlock, txNumsReader)
+		fromStep, toStep, err := exec3.BlkRangeToStepsOnDB(cfg.db, startBlock, _nextBlock, txNumsReader)
 		if err != nil {
 			return err
 		}
@@ -194,9 +194,9 @@ Loop:
 	return nil
 }
 
-func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec4.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := state2.AggTx(tx)
 		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
 			return err
 		}
@@ -258,19 +258,17 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec4.Ex
 	if err := agg.BuildFiles2(ctx, fromStep, toStep); err != nil {
 		return err
 	}
-	for i := 0; i < 2; i++ { // double prune - because background BuildFiles may finish while we did 1-st prune
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-			if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
-				return err
-			}
-			if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil { // prune part of retired data, before commit
-				return err
-			}
-			return nil
-		}); err != nil {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
 			return err
 		}
+		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil { // prune part of retired data, before commit
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -283,7 +281,7 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 	}
 	defer tx.Rollback()
 
-	ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	ac := state2.AggTx(tx)
 	receiptProgress := ac.HistoryProgress(domain, tx)
 	accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
 	if accProgress != receiptProgress {
@@ -297,13 +295,14 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 	return nil
 }
 
-func AssertReceipts(ctx context.Context, cfg *exec4.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
+func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
 	if !assert.Enable {
 		return
 	}
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
 	}
+
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
@@ -364,7 +363,7 @@ func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsRea
 	return fromBlock + i
 }
 
-func customTraceBatch(ctx context.Context, produce Produce, cfg *exec4.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
@@ -376,7 +375,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec4.ExecArgs,
 	prevTxNumLog := fromTxNum
 
 	var m runtime.MemStats
-	if err := exec4.CustomTraceMapReduce(fromBlock, toBlock, exec4.TraceConsumer{
+	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
 		Reduce: func(txTask *state.TxTask, tx kv.Tx) error {
 			if txTask.Error != nil {
 				return txTask.Error
@@ -389,7 +388,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec4.ExecArgs,
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 
-			if cfg.ReceiptDomain {
+			if produce.ReceiptDomain {
 				if !txTask.Final {
 					var receipt *types.Receipt
 					if txTask.TxIndex >= 0 {
@@ -495,7 +494,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec4.ExecArgs,
 
 func progressOfDomains(tx kv.Tx, produce Produce) uint64 {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
-	ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	ac := state2.AggTx(tx)
 	txNum := uint64(math.MaxUint64)
 	if produce.ReceiptDomain {
 		txNum = min(txNum, ac.HistoryProgress(kv.ReceiptDomain, tx))
@@ -520,7 +519,7 @@ func progressOfDomains(tx kv.Tx, produce Produce) uint64 {
 
 func firstStepNotInFiles(tx kv.Tx, produce Produce) uint64 {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
-	ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	ac := state2.AggTx(tx)
 	fromStep := uint64(math.MaxUint64)
 	if produce.ReceiptDomain {
 		fromStep = min(fromStep, ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles())
