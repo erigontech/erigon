@@ -143,9 +143,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
 
 					require.Truef(t, hReader.HasNext(), "hReader has no more values")
-					kkk, hValBuf, _, _, _ := hReader.Next2Copy(nil, nil)
+					_, hValBuf, _, _, _ := hReader.Next2Copy(nil, nil)
 					if updates[vi].value == nil {
-						fmt.Printf("a: %x %s, %x, %s\n", hValBuf, hValBuf, kkk, kkk)
 						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
 					} else {
 						require.Equalf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
