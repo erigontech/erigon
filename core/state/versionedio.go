@@ -410,6 +410,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 	var vr = VersionedRead{
 		Address: addr,
 		Path:    path,
+		Key:     key,
 		Version: Version{
 			TxIndex:     res.DepIdx(),
 			Incarnation: res.Incarnation(),

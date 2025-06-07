@@ -152,7 +152,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	txIncarnation := task.Version().Incarnation
-
 	// we want to force a re-read of the conbiase & burnt contract address
 	// if thay where referenced by the tx
 	delete(result.TxIn, result.Coinbase)
@@ -227,6 +226,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		vm.SetTrace(true)
 		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
 	}
+
 	// we need to flush the finalized writes to the version map so
 	// they are taken into account by subsequent transactions
 	vm.FlushVersionedWrites(ibs.VersionedWrites(true), true, tracePrefix)
@@ -742,7 +742,6 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool,
 }
 
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.Tx) (result *blockResult, err error) {
-
 	task, ok := res.Task.(*taskVersion)
 
 	if !ok {
@@ -1460,7 +1459,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tx) (blockResult *blockResult, err error) {
 	rwsIt := pe.rws.Iter()
-
 	for rwsIt.HasNext() && (blockResult == nil || !blockResult.complete) {
 		txResult := rwsIt.PopNext()
 

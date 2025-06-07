@@ -74,7 +74,6 @@ func (rs *StateV3) applyState(roTx kv.Tx, txNum uint64, writeLists map[string]*s
 			}
 
 			for i, key := range list.Keys {
-				fmt.Printf("applyState: Write: %x", key)
 				if list.Vals[i] == nil {
 					if err := domains.DomainDel(domain, roTx, []byte(key), txNum, nil, 0); err != nil {
 						return err
@@ -365,9 +364,9 @@ func (w *BufferedWriter) PrevAndDels() (map[string][]byte, map[string]*accounts.
 }
 
 func (w *BufferedWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	//if w.trace {
-	fmt.Printf("BufferedWriter: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
-	//}
+	if w.trace {
+		fmt.Printf("BufferedWriter: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+	}
 	value := accounts.SerialiseV3(account)
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
@@ -441,6 +440,7 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(address, incarnation, key, vb[32-value.ByteLen():])
 	}
+
 	w.rs.accountsMutex.Lock()
 	obj, ok := w.rs.accounts[address]
 	if !ok {
@@ -495,9 +495,9 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 }
 
 func (w *Writer) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	//if w.trace {
-	fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
-	//}
+	if w.trace {
+		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
 		if err := w.tx.DomainDel(kv.CodeDomain, address[:], w.txNum, nil, 0); err != nil {
@@ -767,9 +767,10 @@ func (r *bufferedReader) HasStorage(address common.Address) (bool, error) {
 	if ok && len(so.storage) > 0 {
 		// TODO - we really need to return the first key
 		// for this we need to order the list of hashes
+		r.bufferedState.accountsMutex.RUnlock()
 		return true, nil
 	}
-
+	r.bufferedState.accountsMutex.RUnlock()
 	return r.reader.HasStorage(address)
 }
 
