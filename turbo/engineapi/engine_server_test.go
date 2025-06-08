@@ -164,7 +164,7 @@ func TestGetBlobsV2(t *testing.T) {
 	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
 	blobsResp, err := engineServer.GetBlobsV2(ctx, blobHashes)
 	require.NoError(err)
-	require.True(blobsResp == nil) // Any one blob not found makes the whole response nil
+	require.Nil(blobsResp) // Any one blob not found makes the whole response nil
 
 	blobHashes = blobHashes[1:]
 	blobsResp, err = engineServer.GetBlobsV2(ctx, blobHashes)
