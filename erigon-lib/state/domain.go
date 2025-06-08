@@ -133,7 +133,7 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 
 	d := &Domain{
 		domainCfg:  cfg,
-		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newDomainVisible(cfg.name, []visibleFile{}),
 	}
 
