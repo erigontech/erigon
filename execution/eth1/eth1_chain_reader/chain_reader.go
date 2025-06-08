@@ -354,12 +354,17 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Ha
 	return resp.ValidationStatus, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash) (execution.ExecutionStatus, *string, common.Hash, error) {
+func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, opts ...UfcOpt) (execution.ExecutionStatus, *string, common.Hash, error) {
+	defaultOpts := ufcOpts{timeout: c.fcuTimeoutMillis}
+	for _, opt := range opts {
+		opt(&defaultOpts)
+	}
+
 	resp, err := c.executionModule.UpdateForkChoice(ctx, &execution.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizeHash),
-		Timeout:            c.fcuTimeoutMillis,
+		Timeout:            defaultOpts.timeout,
 	})
 	if err != nil {
 		return 0, nil, common.Hash{}, err
@@ -470,4 +475,16 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 	}
 	block.Withdrawals = withdrawals
 	return block, bundle, resp.Data.Requests, blockValue, nil
+}
+
+type ufcOpts struct {
+	timeout uint64
+}
+
+type UfcOpt func(*ufcOpts)
+
+func WithUfcTimeoutOverride(timeout uint64) UfcOpt {
+	return func(opts *ufcOpts) {
+		opts.timeout = timeout
+	}
 }

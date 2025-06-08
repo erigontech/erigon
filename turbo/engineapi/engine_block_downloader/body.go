@@ -18,18 +18,22 @@ package engine_block_downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/cenkalti/backoff/v4"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/dataflow"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 )
 
@@ -80,9 +84,10 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	prevProgress := bodyProgress
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
-	blockBatchSize := 500
+	blockBatchSize := int(e.syncCfg.LoopBlockLimit)
 	// We divide them in batches
 	blocksBatch := []*types.Block{}
+	var lastValidAncestor common.Hash
 
 	loopBody := func() (bool, error) {
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
@@ -144,6 +149,9 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 			if err != nil {
 				return false, err
 			}
+			if lastValidAncestor == (common.Hash{}) {
+				lastValidAncestor = header.ParentHash
+			}
 			blockHeight := header.Number.Uint64()
 			if blockHeight != nextBlock {
 				return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
@@ -152,6 +160,14 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 			if len(blocksBatch) == blockBatchSize {
 				if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
 					return false, fmt.Errorf("InsertBlock: %w", err)
+				}
+				// we need to call UFC to avoid chaindata growth when doing long backward syncs
+				finalized, err := e.ufcLargeBatch(ctx, blocksBatch, lastValidAncestor)
+				if err != nil {
+					return false, fmt.Errorf("ufcLargeBatch: %w", err)
+				}
+				if finalized != (common.Hash{}) {
+					lastValidAncestor = finalized
 				}
 				blocksBatch = blocksBatch[:0]
 			}
@@ -224,6 +240,53 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	e.logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
 
 	return nil
+}
+
+func (e *EngineBlockDownloader) ufcLargeBatch(ctx context.Context, batch []*types.Block, lastValidAncestor common.Hash) (common.Hash, error) {
+	var backOff backoff.BackOff
+	backOff = backoff.NewConstantBackOff(100 * time.Millisecond)
+	backOff = backoff.WithContext(backOff, ctx)
+	retryErr := errors.New("retry")
+	logTicker := time.NewTicker(time.Second)
+	defer logTicker.Stop()
+	op := func() (common.Hash, error) {
+		noTimeoutOpt := eth1_chain_reader.WithUfcTimeoutOverride(0)
+		finalizedIdx := len(batch) - e.finalizedDistance
+		finalized := batch[finalizedIdx].Hash()
+		head := batch[finalizedIdx+1].Hash() // needs to be at least 1 ahead of finalized and safe
+		status, _, _, err := e.chainRW.UpdateForkChoice(ctx, head, finalized, finalized, noTimeoutOpt)
+		if err != nil {
+			return common.Hash{}, backoff.Permanent(fmt.Errorf("ufcLargeBatch UpdateForkChoice: %w", err))
+		}
+		switch status {
+		case executionproto.ExecutionStatus_Busy:
+			select {
+			case <-logTicker.C:
+				e.logger.Debug("[EngineBlockDownloader] ufc busy, trying again")
+			default: // no-op
+			}
+			// retry busy
+			return common.Hash{}, retryErr
+		case executionproto.ExecutionStatus_Success:
+			return head, nil
+		case executionproto.ExecutionStatus_TooFarAway:
+			e.logger.Debug("[EngineBlockDownloader] ufcLargeBatch too far away")
+			return common.Hash{}, nil
+		case executionproto.ExecutionStatus_BadBlock:
+			e.logger.Warn("[EngineBlockDownloader] bad block in ufcLargeBatch", "block", head, "lastValidAncestor", lastValidAncestor)
+			e.hd.ReportBadHeaderPoS(head, lastValidAncestor)
+			// no retry
+			return common.Hash{}, backoff.Permanent(errors.New("bad block in ufcLargeBatch"))
+		case executionproto.ExecutionStatus_InvalidForkchoice:
+			e.logger.Warn("[EngineBlockDownloader] invalid fork choice in ufcLargeBatch", "block", head, "lastValidAncestor", lastValidAncestor)
+			e.hd.ReportBadHeaderPoS(head, lastValidAncestor)
+			// no retry
+			return common.Hash{}, backoff.Permanent(errors.New("invalid forkchoice in ufcLargeBatch"))
+		default:
+			panic(fmt.Sprintf("unknown execution status in ufcLargeBatch: %v", status))
+		}
+	}
+	return backoff.RetryWithData(op, backOff)
 }
 
 func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDelivered uint64, prevDeliveredCount, deliveredCount,

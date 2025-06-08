@@ -75,6 +75,8 @@ type EngineBlockDownloader struct {
 	timeout int
 	config  *chain.Config
 	syncCfg ethconfig.Sync
+	// blocks behind blocksBatch[last] when doing large block batch inserts
+	finalizedDistance int
 
 	// lock
 	lock sync.Mutex
@@ -91,20 +93,21 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 	var s atomic.Value
 	s.Store(headerdownload.Idle)
 	return &EngineBlockDownloader{
-		bacgroundCtx:    ctx,
-		hd:              hd,
-		bd:              bd,
-		db:              db,
-		status:          s,
-		config:          config,
-		syncCfg:         syncCfg,
-		tmpdir:          tmpdir,
-		logger:          logger,
-		blockReader:     blockReader,
-		blockPropagator: blockPropagator,
-		timeout:         timeout,
-		bodyReqSend:     bodyReqSend,
-		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
+		bacgroundCtx:      ctx,
+		hd:                hd,
+		bd:                bd,
+		db:                db,
+		status:            s,
+		config:            config,
+		syncCfg:           syncCfg,
+		tmpdir:            tmpdir,
+		logger:            logger,
+		blockReader:       blockReader,
+		blockPropagator:   blockPropagator,
+		timeout:           timeout,
+		bodyReqSend:       bodyReqSend,
+		chainRW:           eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
+		finalizedDistance: min(32*3, int(syncCfg.LoopBlockLimit)),
 	}
 }
 
