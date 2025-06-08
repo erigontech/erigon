@@ -968,6 +968,11 @@ func ExecV3(ctx context.Context,
 				}
 			}()
 
+			changeset := &libstate.StateChangeSet{}
+			if shouldGenerateChangesets && blockNum > 0 {
+				executor.domains().SetChangesetAccumulator(changeset)
+			}
+
 			for {
 				select {
 				case request := <-asyncTxChan:
@@ -977,8 +982,7 @@ func ExecV3(ctx context.Context,
 					case *txResult:
 						uncommittedGas += applyResult.gasUsed
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
-						if err := pe.rs.ApplyState4(ctx, applyTx,
-							applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
+						if err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
 							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
 							return err
@@ -1061,6 +1065,14 @@ func ExecV3(ctx context.Context,
 								pe.lastCommittedTxNum = lastBlockResult.lastTxNum
 								pe.committedGas += uncommittedGas
 								uncommittedGas = 0
+
+								executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+								if !inMemExec {
+									if err := libstate.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
+										return err
+									}
+								}
+								executor.domains().SetChangesetAccumulator(nil)
 							}
 						}
 
@@ -1072,6 +1084,10 @@ func ExecV3(ctx context.Context,
 							return nil
 						}
 
+						if shouldGenerateChangesets && blockNum > 0 {
+							changeset = &libstate.StateChangeSet{}
+							executor.domains().SetChangesetAccumulator(changeset)
+						}
 					}
 				case <-executorContext.Done():
 					err = executor.wait(ctx)
