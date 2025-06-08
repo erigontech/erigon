@@ -1269,7 +1269,7 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txNum uint64, txnHash common.Hash) (*types.Receipt, bool, error) {
 	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing values BEFORE-change*/)
 	if err != nil {
-		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txNum, err)
+		return nil, false, err
 	}
 	if !ok {
 		return nil, false, nil
@@ -1304,7 +1304,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	for txnID := _min; txnID < _max+1; txnID++ {
 		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID+1)
 		if err != nil {
-			return nil, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txnID, err)
+			return nil, err
 		}
 		if !ok {
 			continue

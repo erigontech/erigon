@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
@@ -296,7 +295,7 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 }
 
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
-	if !assert.Enable {
+	if !dbg.AssertEnabled {
 		return
 	}
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
@@ -330,15 +329,24 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 			return err
 		}
 		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
-		//fmt.Printf("[dbg.integrity] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
-		if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
-			_min, _ := txNumsReader.Min(tx, blockNum)
-			_max, _ := txNumsReader.Max(tx, blockNum)
-			err := fmt.Errorf("bad receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
-			log.Warn(err.Error())
-			return err
-			//panic(err)
+		_min, _ := txNumsReader.Min(tx, blockNum)
+		_max, _ := txNumsReader.Max(tx, blockNum)
+
+		lastSystemTxn := txNum == _max
+		empyBlock := _max-_min <= 1
+		if lastSystemTxn || empyBlock {
+			prevCumGasUsed = int(cumGasUsed)
+			prevBN = blockNum
+			continue
 		}
+
+		//duplicateInsideBlock := !blockChanged && int(cumGasUsed) == prevCumGasUsed
+		duplicateInsideBlock := int(cumGasUsed) <= prevCumGasUsed && blockNum == prevBN
+		if duplicateInsideBlock && cumGasUsed != 0 {
+			err := fmt.Errorf("assert: duplicate receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
+			return err
+		}
+
 		prevCumGasUsed = int(cumGasUsed)
 		prevBN = blockNum
 
@@ -478,7 +486,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				if prevTxNumLog > 0 {
 					dbg.ReadMemStats(&m)
 					txsPerSec := (txTask.TxNum - prevTxNumLog) / uint64(logPeriod.Seconds())
-					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", fmt.Sprintf("%dK", txTask.BlockNum/10_000), "tx/s", fmt.Sprintf("%dK", txsPerSec/1_000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", fmt.Sprintf("%dK", txTask.BlockNum/1_000), "tx/s", fmt.Sprintf("%dK", txsPerSec/1_000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				}
 				prevTxNumLog = txTask.TxNum
 			default:
