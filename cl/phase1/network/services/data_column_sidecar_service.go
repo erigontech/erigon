@@ -54,6 +54,10 @@ type seenSidecarKey struct {
 }
 
 func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
+	if s.syncDataManager.Syncing() {
+		return ErrIgnore
+	}
+
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/p2p-interface.md
 	blockHeader := msg.SignedBlockHeader.Header
 	seenKey := seenSidecarKey{
