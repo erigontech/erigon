@@ -205,8 +205,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	h := genesisState.LatestBlockHeader()
 	stateRoot, _ := h.HashSSZ()
-	genesisBlockRoot, _ := genesisState.BlockRoot()
-	log.Info("genesis state", "slot", h.Slot, "parentRoot", h.ParentRoot, "root", h.Root, "bodyRoot", h.BodyRoot, "stateRoot", common.BytesToHash(stateRoot[:]), "genesisBlockRoot", common.BytesToHash(genesisBlockRoot[:]))
+	genesisStateRoot, _ := genesisState.HashSSZ()
+	log.Info("[test] genesis state", "slot", h.Slot, "parentRoot", h.ParentRoot, "root", h.Root, "bodyRoot", h.BodyRoot, "stateRoot", common.BytesToHash(stateRoot[:]), "genesisStateRoot", common.BytesToHash(genesisStateRoot[:]))
 
 	state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconConfig, config, genesisDb)
 	if err != nil {
@@ -216,8 +216,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	h = state.LatestBlockHeader()
 	stateRoot, _ = h.HashSSZ()
-	genesisBlockRoot, _ = state.BlockRoot()
-	log.Info("state", "slot", h.Slot, "parentRoot", h.ParentRoot, "root", h.Root, "bodyRoot", h.BodyRoot, "stateRoot", common.BytesToHash(stateRoot[:]), "genesisBlockRoot", common.BytesToHash(genesisBlockRoot[:]))
+	genesisStateRoot, _ = state.HashSSZ()
+	log.Info("[test] state", "slot", h.Slot, "parentRoot", h.ParentRoot, "root", h.Root, "bodyRoot", h.BodyRoot, "stateRoot", common.BytesToHash(stateRoot[:]), "genesisStateRoot", common.BytesToHash(genesisStateRoot[:]))
 
 	pruneBlobDistance := uint64(128600)
 	if config.ArchiveBlobs || config.BlobPruningDisabled {
