@@ -1161,6 +1161,9 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			if err != nil {
 				return err
 			}
+			if len(vv) < 8 {
+				return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.filenameBase, len(vv))
+			}
 			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.filenameBase, vtx, txNum)
 			}
