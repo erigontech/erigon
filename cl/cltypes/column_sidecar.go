@@ -5,9 +5,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+)
+
+const (
+	KzgCommitmentsInclusionProofDepth = 4
+	BytesPerCell                      = 2048
 )
 
 var (
@@ -25,18 +31,45 @@ type DataColumnSidecar struct {
 	KzgCommitmentsInclusionProof solid.HashVectorSSZ            `json:"kzg_commitments_inclusion_proof"`
 }
 
+func NewDataColumnSidecar() *DataColumnSidecar {
+	d := &DataColumnSidecar{}
+	d.tryInit()
+	return d
+}
+
 func (d *DataColumnSidecar) Clone() clonable.Clonable {
 	return &DataColumnSidecar{
-		Index:             d.Index,
-		Column:            d.Column.Clone().(*solid.ListSSZ[Cell]),
-		KzgCommitments:    d.KzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment]),
-		KzgProofs:         d.KzgProofs.Clone().(*solid.ListSSZ[*KZGProof]),
-		SignedBlockHeader: d.SignedBlockHeader.Clone().(*SignedBeaconBlockHeader),
-		//KzgCommitmentsInclusionProof: d.KzgCommitmentsInclusionProof.Clone().(*solid.HashVectorSSZ),
+		Index:                        d.Index,
+		Column:                       d.Column.Clone().(*solid.ListSSZ[Cell]),
+		KzgCommitments:               d.KzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment]),
+		KzgProofs:                    d.KzgProofs.Clone().(*solid.ListSSZ[*KZGProof]),
+		SignedBlockHeader:            d.SignedBlockHeader.Clone().(*SignedBeaconBlockHeader),
+		KzgCommitmentsInclusionProof: solid.NewHashVector(KzgCommitmentsInclusionProofDepth),
+	}
+}
+
+func (d *DataColumnSidecar) tryInit() {
+	cfg := clparams.GetBeaconConfig()
+	if d.Column == nil {
+		d.Column = solid.NewStaticListSSZ[Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+	}
+	if d.KzgCommitments == nil {
+		d.KzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+	}
+	if d.KzgProofs == nil {
+		d.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+	}
+	if d.SignedBlockHeader == nil {
+		d.SignedBlockHeader = &SignedBeaconBlockHeader{}
+		d.SignedBlockHeader.Header = &BeaconBlockHeader{}
+	}
+	if d.KzgCommitmentsInclusionProof == nil {
+		d.KzgCommitmentsInclusionProof = solid.NewHashVector(KzgCommitmentsInclusionProofDepth)
 	}
 }
 
 func (d *DataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
+	d.tryInit()
 	return ssz2.UnmarshalSSZ(buf, version, d.getSchema()...)
 }
 
@@ -49,6 +82,7 @@ func (d *DataColumnSidecar) getSchema() []interface{} {
 }
 
 func (d *DataColumnSidecar) EncodingSizeSSZ() int {
+	d.tryInit()
 	return 8 + d.Column.EncodingSizeSSZ() + d.KzgCommitments.EncodingSizeSSZ() + d.KzgProofs.EncodingSizeSSZ() +
 		d.SignedBlockHeader.EncodingSizeSSZ() + d.KzgCommitmentsInclusionProof.EncodingSizeSSZ()
 }
@@ -56,8 +90,6 @@ func (d *DataColumnSidecar) EncodingSizeSSZ() int {
 func (d *DataColumnSidecar) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(d.getSchema()...)
 }
-
-const BytesPerCell = 2048
 
 type Cell [BytesPerCell]byte
 
