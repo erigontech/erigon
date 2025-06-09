@@ -87,7 +87,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
 	var lastValidAncestor common.Hash
-	blockBatchSize := int(e.syncCfg.LoopBlockLimit)
+	blockBatchSize := 500
 	blocksBatch := make([]*types.Block, 0, blockBatchSize)
 	blocksInsertedWithoutExec := 0
 
