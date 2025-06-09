@@ -221,12 +221,18 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
 		shouldInsert = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
-		startSlot    = cfg.forkChoice.HighestSeen() - 8                                     // Start forwardsync a little bit behind the highest seen slot (account for potential reorgs)
 		secsPerLog   = 30                                                                   // Interval in seconds for logging progress
 		logTicker    = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
 		downloader   = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
 		currentSlot  atomic.Uint64                                                          // Atomic variable to track the current slot
+		startSlot    = cfg.forkChoice.HighestSeen()
 	)
+	// Start forwardsync a little bit behind the highest seen slot (account for potential reorgs)
+	if startSlot < 8 {
+		startSlot = 0
+	} else {
+		startSlot = startSlot - 8
+	}
 
 	// Initialize the slot to download from the finalized checkpoint
 	currentSlot.Store(startSlot)
