@@ -293,7 +293,7 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
 	if !dbg.AssertEnabled {
-		return nil
+		return
 	}
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
@@ -326,14 +326,22 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 			return err
 		}
 		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
-		//fmt.Printf("[dbg.integrity] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
-		if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
-			_min, _ := txNumsReader.Min(tx, blockNum)
-			_max, _ := txNumsReader.Max(tx, blockNum)
-			err := fmt.Errorf("bad receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
-			log.Warn(err.Error())
+		_min, _ := txNumsReader.Min(tx, blockNum)
+		_max, _ := txNumsReader.Max(tx, blockNum)
+
+		lastSystemTxn := txNum == _max
+		empyBlock := _max-_min <= 1
+		if lastSystemTxn || empyBlock {
+			prevCumGasUsed = int(cumGasUsed)
+			prevBN = blockNum
+			continue
+		}
+
+		//duplicateInsideBlock := !blockChanged && int(cumGasUsed) == prevCumGasUsed
+		duplicateInsideBlock := int(cumGasUsed) <= prevCumGasUsed && blockNum == prevBN
+		if duplicateInsideBlock && cumGasUsed != 0 {
+			err := fmt.Errorf("assert: duplicate receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
 			return err
-			//panic(err)
 		}
 		prevCumGasUsed = int(cumGasUsed)
 		prevBN = blockNum
