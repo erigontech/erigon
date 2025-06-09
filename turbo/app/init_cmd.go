@@ -190,11 +190,16 @@ func decodeGenesisStreaming(r io.Reader, genesis *types.Genesis, logger log.Logg
 			genesis.Config = &config
 
 		case "nonce":
-			var nonce string
-			if err := decoder.Decode(&nonce); err != nil {
+			// Read the nonce value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				return fmt.Errorf("failed to decode nonce: %w", err)
 			}
-			genesis.Nonce = parseUint64(nonce)
+			nonceStr, ok := token.(string)
+			if !ok {
+				return fmt.Errorf("expected string for nonce, got %T", token)
+			}
+			genesis.Nonce = parseUint64(nonceStr)
 
 		case "timestamp":
 			var timestamp uint64
@@ -204,46 +209,76 @@ func decodeGenesisStreaming(r io.Reader, genesis *types.Genesis, logger log.Logg
 			genesis.Timestamp = timestamp
 
 		case "extraData":
-			var extraData string
-			if err := decoder.Decode(&extraData); err != nil {
+			// Read the extraData value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				return fmt.Errorf("failed to decode extraData: %w", err)
 			}
-			genesis.ExtraData = common.FromHex(extraData)
+			extraDataStr, ok := token.(string)
+			if !ok {
+				return fmt.Errorf("expected string for extraData, got %T", token)
+			}
+			genesis.ExtraData = common.FromHex(extraDataStr)
 
 		case "gasLimit":
-			var gasLimit string
-			if err := decoder.Decode(&gasLimit); err != nil {
+			// Read the gasLimit value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				return fmt.Errorf("failed to decode gasLimit: %w", err)
 			}
-			genesis.GasLimit = parseUint64(gasLimit)
+			gasLimitStr, ok := token.(string)
+			if !ok {
+				return fmt.Errorf("expected string for gasLimit, got %T", token)
+			}
+			genesis.GasLimit = parseUint64(gasLimitStr)
 
 		case "difficulty":
-			var difficulty string
-			if err := decoder.Decode(&difficulty); err != nil {
+			// Read the difficulty value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				return fmt.Errorf("failed to decode difficulty: %w", err)
 			}
-			genesis.Difficulty = parseBigInt(difficulty)
+			difficultyStr, ok := token.(string)
+			if !ok {
+				return fmt.Errorf("expected string for difficulty, got %T", token)
+			}
+			genesis.Difficulty = parseBigInt(difficultyStr)
 
 		case "mixHash":
-			var mixHash string
-			if err := decoder.Decode(&mixHash); err != nil {
+			// Read the mixHash value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				return fmt.Errorf("failed to decode mixHash: %w", err)
 			}
-			genesis.Mixhash = common.HexToHash(mixHash)
+			mixHashStr, ok := token.(string)
+			if !ok {
+				return fmt.Errorf("expected string for mixHash, got %T", token)
+			}
+			genesis.Mixhash = common.HexToHash(mixHashStr)
 
 		case "coinbase":
-			var coinbase string
-			if err := decoder.Decode(&coinbase); err != nil {
+			// Read the coinbase value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				return fmt.Errorf("failed to decode coinbase: %w", err)
 			}
-			genesis.Coinbase = common.HexToAddress(coinbase)
+			coinbaseStr, ok := token.(string)
+			if !ok {
+				return fmt.Errorf("expected string for coinbase, got %T", token)
+			}
+			genesis.Coinbase = common.HexToAddress(coinbaseStr)
 
 		case "parentHash":
-			var parentHash string
-			if err := decoder.Decode(&parentHash); err != nil {
+			// Read the parentHash value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				return fmt.Errorf("failed to decode parentHash: %w", err)
 			}
-			genesis.ParentHash = common.HexToHash(parentHash)
+			parentHashStr, ok := token.(string)
+			if !ok {
+				return fmt.Errorf("expected string for parentHash, got %T", token)
+			}
+			genesis.ParentHash = common.HexToHash(parentHashStr)
 
 		case "alloc":
 			// Parse the alloc section with streaming
@@ -422,36 +457,46 @@ func parseGenesisAccountStreaming(decoder *json.Decoder, logger log.Logger) (typ
 			}
 
 		case "nonce":
-			var nonce interface{}
-			if err := decoder.Decode(&nonce); err != nil {
+			// Read the nonce value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				logger.Error("Failed to decode nonce field", "error", err)
 				return types.GenesisAccount{}, fmt.Errorf("failed to decode nonce: %w", err)
 			}
-			// Handle both string and number formats
-			switch v := nonce.(type) {
-			case string:
-				account.Nonce = parseUint64(v)
-			case float64:
-				account.Nonce = uint64(v)
-			default:
-				account.Nonce = 0 // Default to 0 if not provided or invalid
+			nonceStr, ok := token.(string)
+			if !ok {
+				logger.Error("Expected string for nonce", "got_type", fmt.Sprintf("%T", token), "value", token)
+				return types.GenesisAccount{}, fmt.Errorf("expected string for nonce, got %T", token)
 			}
+			account.Nonce = parseUint64(nonceStr)
 
 		case "code":
-			var code string
-			if err := decoder.Decode(&code); err != nil {
+			// Read the code value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				logger.Error("Failed to decode code field", "error", err)
 				return types.GenesisAccount{}, fmt.Errorf("failed to decode code: %w", err)
 			}
-			account.Code = common.FromHex(code)
+			codeStr, ok := token.(string)
+			if !ok {
+				logger.Error("Expected string for code", "got_type", fmt.Sprintf("%T", token), "value", token)
+				return types.GenesisAccount{}, fmt.Errorf("expected string for code, got %T", token)
+			}
+			account.Code = common.FromHex(codeStr)
 
 		case "constructor":
-			var constructor string
-			if err := decoder.Decode(&constructor); err != nil {
+			// Read the constructor value as a token instead of using Decode
+			token, err := decoder.Token()
+			if err != nil {
 				logger.Error("Failed to decode constructor field", "error", err)
 				return types.GenesisAccount{}, fmt.Errorf("failed to decode constructor: %w", err)
 			}
-			account.Constructor = common.FromHex(constructor)
+			constructorStr, ok := token.(string)
+			if !ok {
+				logger.Error("Expected string for constructor", "got_type", fmt.Sprintf("%T", token), "value", token)
+				return types.GenesisAccount{}, fmt.Errorf("expected string for constructor, got %T", token)
+			}
+			account.Constructor = common.FromHex(constructorStr)
 
 		case "storage":
 			// Initialize storage if needed
