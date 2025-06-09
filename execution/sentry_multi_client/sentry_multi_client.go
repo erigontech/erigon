@@ -227,6 +227,11 @@ func NewMultiClient(
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
 		ethApiWrapper:                     receipts.NewGenerator(blockReader, engine),
+		shadowFork:                        shadowFork,
+	}
+
+	if cs.shadowFork {
+		cs.logger.Info("[sentry] shadow fork mode enabled in multi client")
 	}
 
 	return cs, nil
