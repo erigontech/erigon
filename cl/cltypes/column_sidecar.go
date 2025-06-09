@@ -94,7 +94,7 @@ func (d *DataColumnSidecar) HashSSZ() ([32]byte, error) {
 type Cell [BytesPerCell]byte
 
 func (c Cell) Clone() clonable.Clonable {
-	return &c
+	return c
 }
 
 func (c Cell) DecodeSSZ(buf []byte, version int) error {
