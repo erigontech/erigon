@@ -73,6 +73,8 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	writingBodiesLogEvery := time.NewTicker(logInterval)
+	defer writingBodiesLogEvery.Stop()
 
 	var prevDeliveredCount float64 = 0
 	var prevWastedCount float64 = 0
@@ -130,13 +132,14 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 		write := true
 		for i := uint64(0); i < toProcess; i++ {
 			select {
-			case <-logEvery.C:
+			case <-writingBodiesLogEvery.C:
 				logWritingBodies(logPrefix, bodyProgress, headerProgress, e.logger)
 			default:
 			}
 			nextBlock := requestedLow + i
 			rawBody := e.bd.GetBodyFromCache(nextBlock, write)
 			if rawBody == nil {
+				e.logger.Debug("[EngineBlockDownloader] Body not delivered", "block", nextBlock)
 				e.bd.NotDelivered(nextBlock)
 				write = false
 			}
@@ -158,6 +161,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 			}
 
 			if len(blocksBatch) == blockBatchSize {
+				e.logger.Debug("[EngineBlockDownloader] blocks batch threshold reached", "batch size", len(blocksBatch))
 				if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
 					return false, fmt.Errorf("InsertBlock: %w", err)
 				}
