@@ -100,24 +100,18 @@ func initGenesis(cliCtx *cli.Context) error {
 	}
 
 	// Use streaming for files larger than 100MB
-	if fileInfo.Size() > 100*1024*1024 {
-		logger.Info("Using streaming JSON parser for large genesis file", "size", fileInfo.Size())
-		if err := decodeGenesisStreaming(file, genesis, logger); err != nil {
-			utils.Fatalf("invalid genesis file: %v", err)
-		}
-	} else {
-		if err := json.NewDecoder(file).Decode(genesis); err != nil {
-			utils.Fatalf("invalid genesis file: %v", err)
-		}
+	logger.Info("Using streaming JSON parser for large genesis file", "size", fileInfo.Size())
+	if err := decodeGenesisStreaming(file, genesis, logger); err != nil {
+		utils.Fatalf("invalid genesis file: %v", err)
 	}
 	// TODO:DEBUG:record final allocation profile
-	// if allocFile, err := os.Create("initgenesis_alloc_final.prof"); err == nil {
-	// 	pprof.Lookup("allocs").WriteTo(allocFile, 0)
-	// 	allocFile.Close()
-	// 	logger.Info("Allocation profile saved", "stage", "final", "file", "initgenesis_alloc_final.prof")
-	// }
-	// //TODO: just test json decode to save time
-	// return nil
+	if allocFile, err := os.Create("initgenesis_alloc_final.prof"); err == nil {
+		pprof.Lookup("allocs").WriteTo(allocFile, 0)
+		allocFile.Close()
+		logger.Info("Allocation profile saved", "stage", "final", "file", "initgenesis_alloc_final.prof")
+	}
+	//TODO: just test json decode to save time
+	return nil
 
 	// Open and initialise both full and light databases
 	stack, err := MakeNodeWithDefaultConfig(cliCtx, logger)
