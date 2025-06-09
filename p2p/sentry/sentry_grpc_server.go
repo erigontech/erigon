@@ -374,14 +374,14 @@ func runPeer(
 		default:
 		}
 		if peerPrinted {
-			logger.Trace("Peer disconnected", "id", peerID, "name", peerInfo.peer.Fullname())
+			logger.Trace("Peer disconnected", "id", hex.EncodeToString(peerID[:]), "name", peerInfo.peer.Fullname())
 		}
 	}()
 
 	for {
 		if !peerPrinted {
 			if time.Now().After(printTime) {
-				logger.Trace("Peer stable", "id", peerID, "name", peerInfo.peer.Fullname())
+				logger.Trace("Peer stable", "id", hex.EncodeToString(peerID[:]), "name", peerInfo.peer.Fullname())
 				peerPrinted = true
 			}
 		}
@@ -415,7 +415,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockHeadersMsg:
@@ -425,7 +425,7 @@ func runPeer(
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetBlockBodiesMsg:
@@ -434,7 +434,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockBodiesMsg:
@@ -444,7 +444,7 @@ func runPeer(
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetReceiptsMsg:
@@ -453,7 +453,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
@@ -463,7 +463,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
@@ -473,7 +473,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			//log.Debug("NewBlockHashesMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
@@ -483,7 +483,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			//log.Debug("NewBlockMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
@@ -494,7 +494,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetPooledTransactionsMsg:
@@ -504,7 +504,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.TransactionsMsg:
@@ -514,7 +514,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.PooledTransactionsMsg:
@@ -524,14 +524,14 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case 11:
 			// Ignore
 			// TODO: Investigate why BSC peers for eth/67 send these messages
 		default:
-			logger.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
+			logger.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%v", msg.Code, hex.EncodeToString(peerID[:])))
 		}
 
 		msgType := eth.ToProto[protocol][msg.Code]
@@ -615,7 +615,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		DialCandidates: disc,
 		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 			peerID := peer.Pubkey()
-			printablePeerID := hex.EncodeToString(peerID[:])[:20]
+			printablePeerID := hex.EncodeToString(peerID[:])
 			if ss.getPeer(peerID) != nil {
 				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
 			}
