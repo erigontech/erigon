@@ -33,11 +33,12 @@ import (
 var (
 	MaxReorgDepth = EnvInt("MAX_REORG_DEPTH", 512)
 
-	doMemstat           = EnvBool("NO_MEMSTAT", true)
-	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
-	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
-	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
+	doMemstat            = EnvBool("NO_MEMSTAT", true)
+	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 40)
+	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
+	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -207,7 +208,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if memStats.Alloc < (totalMemory/100)*45 {
+	if memStats.Alloc < (totalMemory/100)*heapProfileThreshold {
 		return
 	}
 
