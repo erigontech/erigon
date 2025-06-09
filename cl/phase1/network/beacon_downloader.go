@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/net/context"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/rpc"
@@ -149,6 +150,12 @@ Loop:
 	var err error
 	blocks := atomicResp.Load().(peerAndBlocks).blocks
 	pid := atomicResp.Load().(peerAndBlocks).peerId
+
+	for _, block := range blocks {
+		blockRoot, _ := block.Block.HashSSZ()
+		log.Debug("[test] Downloaded block", "slot", block.Block.Slot, "blockRoot", common.BytesToHash(blockRoot[:]))
+	}
+
 	if highestSlotProcessed, err = f.process(f.highestSlotProcessed, blocks); err != nil {
 		f.rpc.BanPeer(pid)
 		return
