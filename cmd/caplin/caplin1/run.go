@@ -205,7 +205,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	h := genesisState.LatestBlockHeader()
 	stateRoot, _ := h.HashSSZ()
-	genesisBlockRoot, _ := genesisState.GetBlockRootAtSlot(0)
+	genesisBlockRoot, _ := genesisState.BlockRoot()
 	log.Info("genesis state", "slot", h.Slot, "parentRoot", h.ParentRoot, "root", h.Root, "bodyRoot", h.BodyRoot, "stateRoot", common.BytesToHash(stateRoot[:]), "genesisBlockRoot", common.BytesToHash(genesisBlockRoot[:]))
 
 	state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconConfig, config, genesisDb)
