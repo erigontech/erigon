@@ -210,7 +210,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	}
 
 	if newState == nil {
-		log.Debug("AddChainSegment: missing segment", "block", common.Hash(blockRoot), "slot", block.Slot)
+		log.Debug("AddChainSegment: missing segment", "block", common.Hash(blockRoot), "slot", block.Slot, "parentRoot", block.ParentRoot)
 		return nil, MissingSegment, nil
 	}
 	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().Root)
