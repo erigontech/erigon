@@ -311,6 +311,10 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				tt := time.Now()
 				t2 = time.Since(tt)
 				tt = time.Now()
+				_, err := pe.doms.ComputeCommitment(ctx, true, pe.doms.BlockNum(), pe.doms.TxNum(), "flush-commitment")
+				if err != nil {
+					return err
+				}
 
 				if err := pe.doms.Flush(ctx, tx); err != nil {
 					return err

@@ -316,17 +316,15 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		domains, err := state.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
-		domains.SetTxNum(txNum)
-
 		rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
+		domains.SetTxNum(txNum)
 		writer := state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 		for i := testStartedFromTxNum; i <= txs; i++ {
 			txNum = i
 			blockNum = txNum / blockSize
 			domains.SetTxNum(txNum)
-			domains.SetBlockNum(blockNum)
 			binary.BigEndian.PutUint64(aux[:], txNum)
 
 			n, err := rnd.Read(loc[:])

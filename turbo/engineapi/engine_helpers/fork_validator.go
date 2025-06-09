@@ -148,6 +148,10 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	start := time.Now()
 	// Flush changes to db.
 	if fv.sharedDom != nil {
+		_, err := fv.sharedDom.ComputeCommitment(context.Background(), true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment")
+		if err != nil {
+			return err
+		}
 		if err := fv.sharedDom.Flush(fv.ctx, tx); err != nil {
 			return err
 		}

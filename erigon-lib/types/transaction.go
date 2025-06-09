@@ -447,7 +447,7 @@ func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	m.gasLimit = gas
 }
 
-func (m *Message) BlobGas() uint64 { return params.BlobGasPerBlob * uint64(len(m.blobHashes)) }
+func (m *Message) BlobGas() uint64 { return params.GasPerBlob * uint64(len(m.blobHashes)) }
 
 func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 	return &m.maxFeePerBlobGas
