@@ -1545,7 +1545,7 @@ func TxBlockIndexFromBlockReader(ctx context.Context, r services.FullBlockReader
 	return &txBlockIndexWithBlockReader{
 		r:     r,
 		ctx:   ctx,
-		cache: NewBlockTxNumLookupCache(),
+		cache: NewBlockTxNumLookupCache(16),
 	}
 }
 
@@ -1580,8 +1580,10 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 	var b *types.BodyForStorage
 	view := t.r.Snapshots().(*RoSnapshots).View()
 	defer view.Close()
+	count := 0
 
 	getMaxTxNum := func(i int, seg *snapshotsync.VisibleSegment) (uint64, error) {
+		count++
 		b, buf, err = bodyForStorageFromSnapshot(uint64(i), seg, buf)
 		if err != nil {
 			return 0, err
@@ -1601,14 +1603,13 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 		}
 		seg := bodies[i]
 		ran := seg.Range
-		query := cache.NewQuery(ran)
-		maxTxNum, ok := query.Last()
+		maxTxNum, ok := cache.GetLastMaxTxNum(ran)
 		if !ok {
 			maxTxNum, err = getMaxTxNum(int(ran.To())-1, seg)
 			if err != nil {
 				return true
 			}
-			query.SetLast(maxTxNum)
+			cache.SetLastMaxTxNum(ran, maxTxNum)
 		}
 
 		return maxTxNum >= txNum
@@ -1635,36 +1636,28 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 	seg := bodies[blockIndex]
 	ran := seg.Range
 	i, j := ran.From(), ran.To()
-	query := cache.NewQuery(ran)
 	for i < j {
 		h := (i + j) >> 1
-		maxTxNum, ok, exhaust := query.GetValue()
-		if exhaust || !ok {
+		maxTxNum, ok := cache.GetMaxTxNum(ran, h)
+		if !ok {
 			maxTxNum, err = getMaxTxNum(int(h), seg)
 			if err != nil {
 				return 0, false, err
 			}
-		}
-
-		if !ok && !exhaust {
-			query.SetValue(maxTxNum)
+			_ = cache.SetMaxTxNum(ran, h, maxTxNum)
 		}
 
 		if maxTxNum >= txNum {
-			// left
 			j = h
-			query.Left()
 		} else {
-			// right
 			i = h + 1
-			query.Right()
 		}
 	}
 	// should find the block
 	if i >= ran.To() {
 		return 0, false, fmt.Errorf("BlockReader.BlockNumber: not found block: %d in file (%d-%d), searching for %d", i, ran.From(), ran.To(), txNum)
 	}
-	//fmt.Printf("[BlockReader.BlockNumber] found block %d for txNum %d in file [%d-%d) touched file %d\n", i, txNum, ran.From(), ran.To(), count)
+	fmt.Printf("[BlockReader.BlockNumber] found block %d for txNum %d in file [%d-%d) touched file %d\n", i, txNum, ran.From(), ran.To(), count)
 
 	return i, true, nil
 }

@@ -3,102 +3,135 @@ package freezeblocks
 import (
 	"math"
 	"math/bits"
+	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
-// idea is to use lookup tables to implement uniform binary search
+// BlockTxNumLookupCache implements a lookup table for partially memoized binary search
 type BlockTxNumLookupCache struct {
+	mu      sync.RWMutex
 	cache   map[snapshotsync.Range][]uint64
 	cadence float64
 }
 
-func NewBlockTxNumLookupCache() *BlockTxNumLookupCache {
+func NewBlockTxNumLookupCache(cadence int) *BlockTxNumLookupCache {
 	return &BlockTxNumLookupCache{
 		cache:   make(map[snapshotsync.Range][]uint64),
-		cadence: 16.0, // lookup exists every `cadence` blocks
+		cadence: float64(cadence),
 	}
 }
 
-func (c *BlockTxNumLookupCache) NewQuery(r snapshotsync.Range) *CacheQuery {
-	lookup, ok := c.cache[r]
-	if !ok {
-		size := c.LookupSize(&r)
-		lookup = make([]uint64, size)
-		for i := 0; i < len(lookup); i++ {
-			lookup[i] = math.MaxUint64
-		}
+// ensureLookup creates the lookup table if it doesn't exist
+func (c *BlockTxNumLookupCache) ensureLookup(r snapshotsync.Range) []uint64 {
+	// Try read lock first for common case
+	c.mu.RLock()
+	if lookup, ok := c.cache[r]; ok {
+		c.mu.RUnlock()
+		return lookup
+	}
+	c.mu.RUnlock()
+
+	// Need to create - acquire write lock
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if lookup, ok := c.cache[r]; ok {
+		return lookup
+	}
+
+	rangeLen := float64(r.To() - r.From())
+	size := 1 + (1 << bits.Len64(uint64(math.Ceil(rangeLen/c.cadence))-1))
+
+	lookup := make([]uint64, size)
+	for i := range lookup {
+		lookup[i] = math.MaxUint64 // sentinel for unset values
 	}
 
 	c.cache[r] = lookup
-
-	return NewCacheQuery(0, len(lookup)-1, bits.Len64(uint64(len(lookup))), lookup)
+	return lookup
 }
 
-func (c *BlockTxNumLookupCache) LookupSize(r *snapshotsync.Range) uint64 {
-	len := float64(r.To()) - float64(r.From())
-	return 1 + (1 << (bits.Len64(uint64(math.Ceil(len/c.cadence))) - 1))
-}
+// GetMaxTxNum retrieves the cached max transaction number for a block
+// Returns (maxTxNum, true) if cached, (0, false) if not cached
+func (c *BlockTxNumLookupCache) GetMaxTxNum(r snapshotsync.Range, blockNum uint64) (maxTxNum uint64, exists bool) {
+	lookup := c.ensureLookup(r)
 
-type CacheQuery struct {
-	l, r   int // r is inclusive
-	lookup []uint64
-	depth  int
-}
-
-func NewCacheQuery(l, r, depth int, lookup []uint64) *CacheQuery {
-	return &CacheQuery{l, r, lookup, depth}
-}
-
-func (q *CacheQuery) GetValue() (val uint64, ok bool, exhaust bool) {
-	if q.depth == 0 {
-		return 0, false, true
+	// Check if this block number maps to a cache slot
+	idx, managed := c.blockToIndex(lookup, r, blockNum)
+	if !managed {
+		return 0, false
 	}
 
-	m := (q.l + q.r) >> 1
-	if q.lookup[m] == math.MaxUint64 {
-		return 0, false, false
+	maxTxNum = atomic.LoadUint64(&lookup[idx])
+	return maxTxNum, maxTxNum != math.MaxUint64
+}
+
+// SetMaxTxNum caches the max transaction number for a block
+// Only sets if the block maps to a cache slot
+func (c *BlockTxNumLookupCache) SetMaxTxNum(r snapshotsync.Range, blockNum uint64, maxTxNum uint64) (isSet bool) {
+	lookup := c.ensureLookup(r)
+
+	// Check if this block number maps to a cache slot
+	idx, managed := c.blockToIndex(lookup, r, blockNum)
+	if !managed {
+		return false
 	}
 
-	return q.lookup[m], true, false
+	atomic.CompareAndSwapUint64(&lookup[idx], math.MaxUint64, maxTxNum)
+	return true
 }
 
-func (q *CacheQuery) SetValue(val uint64) {
-	m := (q.l + q.r) >> 1
-	q.lookup[m] = val
+// GetLastMaxTxNum retrieves the cached max transaction number for the last block in range
+func (c *BlockTxNumLookupCache) GetLastMaxTxNum(r snapshotsync.Range) (maxTxNum uint64, exists bool) {
+	lookup := c.ensureLookup(r)
+	lastIdx := len(lookup) - 1
+	maxTxNum = atomic.LoadUint64(&lookup[lastIdx])
+	return maxTxNum, maxTxNum != math.MaxUint64
 }
 
-func (q *CacheQuery) Left() {
-	if q.depth == 0 {
-		return
+// SetLastMaxTxNum caches the max transaction number for the last block in range
+func (c *BlockTxNumLookupCache) SetLastMaxTxNum(r snapshotsync.Range, maxTxNum uint64) {
+	lookup := c.ensureLookup(r)
+	lastIdx := len(lookup) - 1
+	atomic.CompareAndSwapUint64(&lookup[lastIdx], math.MaxUint64, maxTxNum)
+}
+
+// blockToIndex maps a block number to its lookup table index
+// Returns (index, true) if this block should be cached, (0, false) otherwise
+func (c *BlockTxNumLookupCache) blockToIndex(lookup []uint64, r snapshotsync.Range, blockNum uint64) (lookupIndex int, cachedByLookup bool) {
+	// Check bounds
+	if blockNum < r.From() || blockNum >= r.To() {
+		return 0, false
 	}
-	q.depth--
-	m := (q.l + q.r) >> 1
-	q.r = m
-}
 
-func (q *CacheQuery) Right() {
-	if q.depth == 0 {
-		return
+	if blockNum == r.To()-1 {
+		// we don't store r.To() but r.To()-1
+		return len(lookup) - 1, true
 	}
-	q.depth--
-	m := (q.l + q.r) >> 1
-	q.l = m + 1
-}
 
-func (q *CacheQuery) First() (uint64, bool) {
-	return q.lookup[0], q.lookup[0] != math.MaxUint64
-}
+	rangeSize := r.To() - r.From()
+	intervals := uint64(len(lookup) - 1)
+	per_interval_width := float64(rangeSize) / float64(intervals)
 
-func (q *CacheQuery) Last() (uint64, bool) {
-	len := len(q.lookup) - 1
-	return q.lookup[len], q.lookup[len] != math.MaxUint64
-}
+	offset := float64(blockNum - r.From())
 
-func (q *CacheQuery) SetFirst(val uint64) {
-	q.lookup[0] = val
-}
+	if math.Mod(offset, per_interval_width) == 0 {
+		// divisible
+		return int(offset / per_interval_width), true
+	}
 
-func (q *CacheQuery) SetLast(val uint64) {
-	q.lookup[len(q.lookup)-1] = val
+	// if offset+1 is change point causes index to increment...use it
+	// e.g. 10000-10500; cadence = 64; lookup size = 9
+	// then: per_interval_width=62.5
+	// for 10062, lookup_index = 0, lookup_index_1 = 1
+	lookup_index := int(math.Floor(offset / per_interval_width))
+	lookup_index_1 := int(math.Floor((offset + 1) / per_interval_width))
+	if lookup_index_1-lookup_index == 1 {
+		return lookup_index, true
+	}
+
+	return 0, false
 }
