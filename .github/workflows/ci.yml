@@ -15,17 +15,15 @@ on:
     
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: ${{ !contains(fromJSON('[
-      "refs/heads/release/2.60",
-      "refs/heads/release/2.61",
-      "refs/heads/release/3.0",
-      "refs/heads/main"
-    ]'), github.ref) }}
-
 jobs:
   linux:
+    concurrency:
+      group: ci-${{ matrix.os }}-${{ github.ref }}
+      cancel-in-progress: >-
+        ${{
+          !startsWith(github.ref, 'refs/heads/release/') &&
+          github.ref != 'refs/heads/main'
+        }}
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
@@ -71,6 +69,13 @@ jobs:
         run: make test-short
 
   win:
+    concurrency:
+      group: ci-win-${{ matrix.os }}-${{ github.ref }}
+      cancel-in-progress: >-
+        ${{
+          !startsWith(github.ref, 'refs/heads/release/') &&
+          github.ref != 'refs/heads/main'
+        }}
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
