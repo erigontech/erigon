@@ -214,6 +214,11 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
 
+	h = state.LatestBlockHeader()
+	stateRoot, _ = h.HashSSZ()
+	genesisBlockRoot, _ = state.BlockRoot()
+	log.Info("state", "slot", h.Slot, "parentRoot", h.ParentRoot, "root", h.Root, "bodyRoot", h.BodyRoot, "stateRoot", common.BytesToHash(stateRoot[:]), "genesisBlockRoot", common.BytesToHash(genesisBlockRoot[:]))
+
 	pruneBlobDistance := uint64(128600)
 	if config.ArchiveBlobs || config.BlobPruningDisabled {
 		pruneBlobDistance = math.MaxUint64
