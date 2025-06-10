@@ -133,7 +133,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	if creationTxnID == 0 {
 		return nil, nil
 	}
-	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
+	bn, ok, err := txNumsReader.FindBlockNum(tx, creationTxnID)
 	if err != nil {
 		return nil, err
 	}

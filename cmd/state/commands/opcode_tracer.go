@@ -582,6 +582,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	timeLastBlock := startTime
 	blockNumLastReport := blockNum
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), blockReader))
 
 	for !interrupt {
 		var block *types.Block
@@ -605,7 +606,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate, err := rpchelper.CreateHistoryStateReader(historyTx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.TODO(), blockReader)),
+		dbstate, err := rpchelper.CreateHistoryStateReader(historyTx, txNumReader,
 			block.NumberU64(), 0, chainConfig.ChainName)
 		if err != nil {
 			return err

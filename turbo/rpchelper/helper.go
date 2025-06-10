@@ -149,7 +149,7 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 	if err != nil {
 		return nil, err
 	}
-	return CreateStateReaderFromBlockNumber(ctx, tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br)), blockNumber, latest, txnIndex, stateCache, chainName)
+	return CreateStateReaderFromBlockNumber(ctx, tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, br)), blockNumber, latest, txnIndex, stateCache, chainName)
 }
 
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
@@ -187,7 +187,7 @@ func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
 }
 
 func NewLatestDomainStateWriter(domains *state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
-	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
+	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
 	if err != nil {
 		panic(err)
 	}
@@ -201,7 +201,7 @@ func NewLatestStateReader(tx kv.Tx) state.StateReader {
 }
 func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
 	domains := txc.Doms
-	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
+	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
 	if err != nil {
 		panic(err)
 	}

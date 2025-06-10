@@ -473,7 +473,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	br := m.BlockReader
-	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), br))
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), br))
 	require := require.New(t)
 	ctx := m.Ctx
 
