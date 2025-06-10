@@ -436,7 +436,7 @@ func modExpMultComplexityEip2565(x *big.Int) *big.Int {
 //
 // where is x is max(length_of_MODULUS, length_of_BASE)
 func modExpMultComplexityEip7883(x *big.Int) *big.Int {
-	if  x.Cmp(big32) > 0 {
+	if x.Cmp(big32) > 0 {
 		x = modExpMultComplexityEip2565(x)
 		return x.Lsh(x, 1) // ×2
 	}
@@ -484,7 +484,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	adjExpLen = math.BigMax(adjExpLen, big1)
 
 	// Calculate the gas cost of the operation
-	gas := new(big.Int).Set(math.BigMax(modLen, baseLen))	// max_length
+	gas := new(big.Int).Set(math.BigMax(modLen, baseLen)) // max_length
 	if c.osaka {
 		// EIP-7883: ModExp Gas Cost Increase
 		gas = modExpMultComplexityEip7883(gas /*max_length */)
