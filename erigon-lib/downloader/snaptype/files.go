@@ -93,7 +93,119 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4
 }
 
+func IsStateFileV2(name string) bool {
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	parts := strings.SplitN(base, "-", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	// check that filename w/o ext matches pattern: "<any>.<num>-<num>"
+	re := regexp.MustCompile(`^[^.]+\.\d+-\d+$`)
+	return re.MatchString(parts[1])
+}
+
 func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
+	res.Path = filepath.Join(dir, fileName)
+	res.Ext = filepath.Ext(fileName)
+	res.name = fileName
+	dirParts := strings.SplitN(fileName, "/", 2)
+	caplin := false
+	if dirParts[0] == "caplin" {
+		caplin = true
+	}
+	fileName = dirParts[(len(dirParts) - 1)]
+	if isSaltFile(fileName) {
+		typeString := "salt"
+		// format for salt files is different: salt-<type>.txt
+		res.Type, ok = ParseFileType("salt")
+		res.CaplinTypeString = typeString
+		res.TypeString = typeString
+		return res, false, true
+	}
+
+	var err error
+	res.Version, err = version.ParseVersion(fileName)
+	if err != nil {
+		return res, false, false
+	}
+
+	partsVersion := strings.SplitN(fileName, "-", 2)
+	if len(partsVersion) != 2 {
+		return res, false, false
+	}
+	croppedFileName, ok := strings.CutSuffix(partsVersion[1], res.Ext)
+	if !ok {
+		return res, false, false
+	}
+
+	isStateFile := IsStateFileV2(fileName)
+
+	if isStateFile { // accounts.24-28
+		idxDot := strings.Index(croppedFileName, ".")
+		idxDash := strings.Index(croppedFileName, "-")
+
+		if idxDot <= 0 || idxDash <= idxDot+1 || idxDash == len(croppedFileName)-1 {
+			return res, false, false
+		}
+
+		typeString := croppedFileName[:idxDot]
+		fromStr := croppedFileName[idxDot+1 : idxDash]
+		toStr := croppedFileName[idxDash+1:]
+
+		from, err := strconv.Atoi(fromStr)
+		if err != nil {
+			return res, false, false
+		}
+		to, err := strconv.Atoi(toStr)
+		if err != nil {
+			return res, false, false
+		}
+
+		res.From, res.To, res.TypeString = uint64(from), uint64(to), typeString
+		res.Type, ok = ParseFileType(typeString)
+		if ok {
+			res.CaplinTypeString = res.Type.Name()
+		}
+	} else { // 1-2-bodies
+		firstDash := strings.Index(croppedFileName, "-")
+		if firstDash <= 0 || firstDash == len(croppedFileName)-1 {
+			return res, false, false
+		}
+		secondDash := strings.Index(croppedFileName[firstDash+1:], "-")
+		if secondDash < 0 {
+			return res, false, false
+		}
+
+		secondDash += firstDash + 1
+		if secondDash == len(croppedFileName)-1 {
+			return res, false, false
+		}
+
+		fromStr := croppedFileName[:firstDash]
+		toStr := croppedFileName[firstDash+1 : secondDash]
+		typeString := croppedFileName[secondDash+1:]
+
+		from, err := strconv.Atoi(fromStr)
+		if err != nil {
+			return res, false, false
+		}
+		to, err := strconv.Atoi(toStr)
+		if err != nil {
+			return res, false, false
+		}
+		res.From, res.To, res.TypeString = uint64(from)*1_000, uint64(to)*1_000, typeString
+		res.Type, ok = ParseFileType(typeString)
+		if ok {
+			res.CaplinTypeString = res.Type.Name()
+		}
+	}
+	if caplin {
+		return res, isStateFile, true
+	}
+	return res, isStateFile, true
+}
+
+func ParseFileNameOld(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
 	res, ok = parseFileName(dir, fileName)
 	if ok {
 		return res, false, true
@@ -115,6 +227,15 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 					res.To = to
 				}
 			}
+		}
+		if len(parts) > 1 {
+			secParts := strings.Split(parts[1], "-")
+			if len(secParts) > 1 {
+				println(secParts[1])
+				res.TypeString = secParts[1]
+				res.Type, _ = ParseFileType(res.TypeString)
+			}
+
 		}
 	}
 	if strings.Contains(fileName, "caplin/") {
@@ -157,7 +278,8 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	}
 
 	var err error
-	res.Version, err = version.ParseVersion(parts[0])
+	verParts := strings.SplitN(parts[0], "/", 2)
+	res.Version, err = version.ParseVersion(verParts[len(verParts)-1])
 	if err != nil {
 		return res, false
 	}
@@ -359,6 +481,10 @@ func ParseDir(name string) (res []FileInfo, err error) {
 		res = append(res, meta)
 	}
 	slices.SortFunc(res, func(i, j FileInfo) int {
+		if i.Version == j.Version && i.From == j.From && i.To == i.To &&
+			(i.Type == nil || j.Type == nil) {
+			println(i.name, j.name, i.Type, j.Type)
+		}
 		switch {
 		case i.Version != j.Version:
 			return i.Version.Cmp(j.Version)
@@ -368,9 +494,10 @@ func ParseDir(name string) (res []FileInfo, err error) {
 
 		case i.To != j.To:
 			return cmp.Compare(i.To, j.To)
-
 		case i.Type.Enum() != j.Type.Enum():
+
 			return cmp.Compare(i.Type.Enum(), j.Type.Enum())
+
 		case i.TypeString != j.TypeString:
 			return cmp.Compare(i.TypeString, j.TypeString)
 		}
