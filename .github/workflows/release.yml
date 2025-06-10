@@ -161,11 +161,11 @@ jobs:
             echo Current directory is $(pwd) . Checksum file and archive will be created for this directory
             sha256sum * > checksums.txt
             ls -lao
-            tar cvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar.gz \
+            tar cvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar \
               --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;')/," .
 
             echo "Debug: testing archive output for linux_$(echo $dir | sed 's,linux_,,; s,_,,;'):"
-            tar -tvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar.gz
+            tar -tvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar
             echo "Debug end."
             cd -
           done
@@ -177,8 +177,8 @@ jobs:
       - name: Upload artifact -- linux/arm64
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
-          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
+          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
           retention-days: 3
           compression-level: 0
           if-no-files-found: error
@@ -186,8 +186,8 @@ jobs:
       - name: Upload artifact -- linux/amd64
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
-          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
+          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
           retention-days: 3
           compression-level: 0
           if-no-files-found: error
@@ -195,8 +195,8 @@ jobs:
       - name: Upload artifact -- linux/amd64/v2
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
-          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
+          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
           retention-days: 3
           compression-level: 0
           if-no-files-found: error
@@ -233,17 +233,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+      - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
           path: .
 
-      - name: Extract artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+      - name: Extract artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
         run: |
           pwd
-          ls -l ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
-          tar xzvf ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+          ls -l ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
+          tar xvf ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
           ls -lR
 
       - name: Fast checkout git repository erigontech/erigon-qa
@@ -322,17 +322,17 @@ jobs:
     - name: Download arm64 artifact
       uses: actions/download-artifact@v4
       with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
 
     - name: Download amd64 artifact
       uses: actions/download-artifact@v4
       with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
 
     - name: Download amd64v2 artifact
       uses: actions/download-artifact@v4
       with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
 
 
 
@@ -369,19 +369,19 @@ jobs:
     - name: Download linux/arm64 artifact
       uses: actions/download-artifact@v4
       with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
         path: dist/
 
     - name: Download linux/amd64 artifact
       uses: actions/download-artifact@v4
       with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
         path: dist/
 
     - name: Download linux/amd64v2 artifact
       uses: actions/download-artifact@v4
       with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
         path: dist/
 
     - name: Download arm64 debian package
@@ -405,6 +405,7 @@ jobs:
         GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
       run: |
         cd dist
+        for archive in *.tar; do gzip $archive; echo Artifact $archive compressed; done
         sha256sum *.tar.gz *.deb > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
         gh release create \
           --generate-notes \
