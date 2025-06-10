@@ -27,7 +27,6 @@ import (
 
 	"google.golang.org/grpc/credentials"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"golang.org/x/sync/semaphore"
@@ -203,21 +202,12 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 	}
-	h := genesisState.LatestBlockHeader()
-	stateRoot, _ := h.HashSSZ()
-	genesisStateRoot, _ := genesisState.HashSSZ()
-	log.Info("[test] genesis state", "slot", h.Slot, "parentRoot", h.ParentRoot, "root", h.Root, "bodyRoot", h.BodyRoot, "stateRoot", common.BytesToHash(stateRoot[:]), "genesisStateRoot", common.BytesToHash(genesisStateRoot[:]))
 
 	state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconConfig, config, genesisDb)
 	if err != nil {
 		return err
 	}
 	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
-
-	h = state.LatestBlockHeader()
-	stateRoot, _ = h.HashSSZ()
-	genesisStateRoot, _ = state.HashSSZ()
-	log.Info("[test] state", "slot", h.Slot, "parentRoot", h.ParentRoot, "root", h.Root, "bodyRoot", h.BodyRoot, "stateRoot", common.BytesToHash(stateRoot[:]), "genesisStateRoot", common.BytesToHash(genesisStateRoot[:]))
 
 	pruneBlobDistance := uint64(128600)
 	if config.ArchiveBlobs || config.BlobPruningDisabled {
