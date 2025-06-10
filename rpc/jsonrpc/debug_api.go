@@ -132,14 +132,14 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 
 	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		block, err1 := api.blockByHashWithSenders(ctx, tx, hash)
+		header, err1 := api.headerByHash(ctx, hash, tx)
 		if err1 != nil {
 			return state.IteratorDump{}, err1
 		}
-		if block == nil {
-			return state.IteratorDump{}, fmt.Errorf("block %s not found", hash.Hex())
+		if header == nil {
+			return state.IteratorDump{}, fmt.Errorf("header %s not found", hash.Hex())
 		}
-		blockNumber = block.NumberU64()
+		blockNumber = header.Number.Uint64()
 	}
 
 	// Determine how many results we will dump
@@ -290,26 +290,26 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	}
 	defer tx.Rollback()
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	header, err := api.headerByHash(ctx, blockHash, tx)
 	if err != nil {
 		return &AccountResult{}, err
 	}
-	if number == nil {
+	if header == nil || header.Number == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
+	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("canonical hash not found %d", *number)
+		return nil, fmt.Errorf("canonical hash not found %d", header.Number.Uint64())
 	}
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
 		return nil, errors.New("block hash is not canonical")
 	}
 
-	minTxNum, err := api._txNumReader.Min(tx, *number)
+	minTxNum, err := api._txNumReader.Min(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}

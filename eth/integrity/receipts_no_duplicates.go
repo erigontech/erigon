@@ -46,7 +46,6 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	}
 
 	ac := state.AggTx(tx)
-	//toTxNum := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
 	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
 		return err
@@ -70,13 +69,26 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		if err != nil {
 			return err
 		}
-		//_, blockNum, _ := txNumsReader.FindBlockNum(tx, txNum)
 		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
-		//fmt.Printf("[dbg] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
-		if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
-			err := fmt.Errorf("bad receipt at txnum: %d, block: %d, cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, cumGasUsed, prevCumGasUsed)
-			panic(err)
+		blockChanged := blockNum != prevBN
+		_min, _ := txNumsReader.Min(tx, blockNum)
+		_max, _ := txNumsReader.Max(tx, blockNum)
+
+		lastSystemTxn := txNum == _max
+		empyBlock := _max-_min <= 1
+		if lastSystemTxn || empyBlock {
+			prevCumGasUsed = int(cumGasUsed)
+			prevBN = blockNum
+			continue
 		}
+		_ = blockChanged
+		//duplicateInsideBlock := !blockChanged && int(cumGasUsed) == prevCumGasUsed
+		duplicateInsideBlock := int(cumGasUsed) <= prevCumGasUsed && blockNum == prevBN
+		if duplicateInsideBlock && cumGasUsed != 0 {
+			err := fmt.Errorf("assert: duplicate receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
+			return err
+		}
+
 		prevCumGasUsed = int(cumGasUsed)
 		prevBN = blockNum
 

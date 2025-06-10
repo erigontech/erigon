@@ -235,7 +235,12 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 	if err != nil {
 		return 0, err
 	}
+
+	if number == nil {
+		return 0, errors.New("header number not found")
+	}
 	return *number, nil
+
 }
 
 func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
@@ -311,7 +316,31 @@ func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumbe
 	if err != nil {
 		return nil, err
 	}
+
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(h); ok && it != nil {
+			return it.Header(), nil
+		}
+	}
 	return api._blockReader.Header(ctx, tx, h, n)
+}
+
+func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.Header(), nil
+		}
+	}
+
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	if number == nil {
+		return nil, nil
+	}
+	return api._blockReader.Header(ctx, tx, hash, *number)
 }
 
 func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {

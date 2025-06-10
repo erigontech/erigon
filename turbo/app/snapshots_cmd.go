@@ -243,6 +243,15 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
+			Name:  "reset-to-3.0",
+			Usage: "change all the snapshots to 3.0 file format",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				return dirs.RenameNewVersions()
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
 			Name:    "rm-state-snapshots",
 			Aliases: []string{"rm-state-segments", "rm-state"},
 			Action:  doRmStateSnapshots,
@@ -1158,7 +1167,7 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, seg.CompressNone)
+		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
 		if err != nil {
 			return err
 		}

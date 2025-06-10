@@ -1187,3 +1187,7 @@ func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ 
 func (e *remoteConsensusEngine) APIs(_ consensus.ChainHeaderReader) []rpc.API {
 	panic("remoteConsensusEngine.APIs not supported")
 }
+
+func (e *remoteConsensusEngine) TxDependencies(header *types.Header) [][]int {
+	panic("remoteConsensusEngine.TxDependencies not supported")
+}
