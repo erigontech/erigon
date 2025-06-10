@@ -61,11 +61,16 @@ const (
 	PendingDepositsLeafIndex               StateLeafIndex = 34
 	PendingPartialWithdrawalsLeafIndex     StateLeafIndex = 35
 	PendingConsolidationsLeafIndex         StateLeafIndex = 36
+	// Fulu
+	ProposerLookaheadLeafIndex StateLeafIndex = 37
 )
 
 const (
 	StateLeafSizeDeneb = 32
 	StateLeafSize      = 37
+	StateLeafSizeFulu  = 38
+
+	StateLeafSizeLatest = StateLeafSizeFulu
 
 	LeafInitValue  = 0
 	LeafCleanValue = 1
