@@ -40,6 +40,9 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	if b.Version() <= clparams.DenebVersion {
 		endIndex = StateLeafSizeDeneb * 32
 	}
+	if b.Version() >= clparams.FuluVersion {
+		endIndex = StateLeafSizeFulu * 32
+	}
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:endIndex], out[:])
 	return
 }
@@ -61,6 +64,10 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 		depth = 6
 		leafSize = StateLeafSize
 	}
+	if b.Version() >= clparams.FuluVersion {
+		depth = 7
+		leafSize = StateLeafSizeFulu
+	}
 
 	schema := []interface{}{}
 	for i := 0; i < leafSize*32; i += 32 {
@@ -80,6 +87,10 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 		depth = 6
 		leafSize = StateLeafSize
 	}
+	if b.Version() >= clparams.FuluVersion {
+		depth = 7
+		leafSize = StateLeafSizeFulu
+	}
 
 	schema := []interface{}{}
 	for i := 0; i < leafSize*32; i += 32 {
@@ -97,6 +108,10 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 	if b.Version() >= clparams.ElectraVersion {
 		depth = 6
 		leafSize = StateLeafSize
+	}
+	if b.Version() >= clparams.FuluVersion {
+		depth = 7
+		leafSize = StateLeafSizeFulu
 	}
 
 	schema := []interface{}{}
@@ -221,6 +236,10 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.add(PendingDepositsLeafIndex, b.pendingDeposits)
 		beaconStateHasher.add(PendingPartialWithdrawalsLeafIndex, b.pendingPartialWithdrawals)
 		beaconStateHasher.add(PendingConsolidationsLeafIndex, b.pendingConsolidations)
+	}
+
+	if b.version >= clparams.FuluVersion {
+		beaconStateHasher.add(ProposerLookaheadLeafIndex, b.proposerLookahead)
 	}
 
 	beaconStateHasher.run()

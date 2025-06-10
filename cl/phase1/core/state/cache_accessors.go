@@ -126,12 +126,34 @@ func (b *CachingBeaconState) ComputeCommittee(
 
 // GetBeaconProposerIndex updates cache and gets the beacon proposer index
 func (b *CachingBeaconState) GetBeaconProposerIndex() (uint64, error) {
+	if b.Version() >= clparams.FuluVersion {
+		p := b.GetProposerLookahead()
+		return p.Get(int(b.Slot() / b.BeaconConfig().SlotsPerEpoch)), nil
+	}
+
 	if b.proposerIndex == nil {
 		if err := b._updateProposerIndex(); err != nil {
 			return 0, err
 		}
 	}
 	return *b.proposerIndex, nil
+}
+
+// GetBeaconProposerIndices returns the proposer indices for the given epoch
+func (b *CachingBeaconState) GetBeaconProposerIndices(epoch uint64) ([]uint64, error) {
+	indices := b.GetActiveValidatorsIndices(epoch)
+	beaconConfig := b.BeaconConfig()
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	// Input for the seed hash.
+	mix := b.GetRandaoMix(int(mixPosition))
+	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+
+	// Write the seed to an array.
+	seedArray := [32]byte{}
+	copy(seedArray[:], seed[:])
+
+	return shuffling.ComputeProposerIndices(b.BeaconState, epoch, seedArray, indices)
 }
 
 // GetBeaconProposerIndexForSlot compute the proposer index for a specific slot
