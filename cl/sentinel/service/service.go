@@ -243,19 +243,20 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
-	isError, err := strconv.Atoi(resp.Header.Get("REQRESP-RESPONSE-CODE"))
+	code, err := strconv.Atoi(resp.Header.Get("REQRESP-RESPONSE-CODE"))
 	if err != nil {
 		// TODO: think about how to properly handle this. should we? (or should we just assume no response is success?)
 		return nil, err
 	}
 	// known error codes, just remove the peer
-	if isError != 0 {
+	responseCode := ResponseCode(code)
+	if !responseCode.Success() {
 		if shouldBanOnFail {
 			s.sentinel.Peers().RemovePeer(pid)
 			s.sentinel.Host().Peerstore().RemovePeer(pid)
 			s.sentinel.Host().Network().ClosePeer(pid)
 		}
-		return nil, fmt.Errorf("peer error code: %d", isError)
+		return nil, fmt.Errorf("peer error code: %d (%s). Error message: %s", code, responseCode.String(), responseCode.ErrorMessage(resp))
 	}
 
 	// read the body from the response
@@ -265,7 +266,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	}
 	ans := &sentinelrpc.ResponseData{
 		Data:  data,
-		Error: isError != 0,
+		Error: !responseCode.Success(),
 		Peer: &sentinelrpc.Peer{
 			Pid: pid.String(),
 		},
@@ -465,4 +466,32 @@ func parseTopic(input string) (string, string) {
 	topick := parts[3]
 
 	return capability, topick
+}
+
+type ResponseCode int
+
+func (r ResponseCode) String() string {
+	switch r {
+	case 0:
+		return "success"
+	case 1:
+		return "invalid request"
+	case 2:
+		return "server error"
+	case 3:
+		return "resource unavailable"
+	}
+	return "unknown"
+}
+
+func (r ResponseCode) Success() bool {
+	return r == 0
+}
+
+func (r ResponseCode) ErrorMessage(resp *http.Response) string {
+	if r == 0 || r == 1 {
+		return ""
+	}
+	errBody, _ := io.ReadAll(resp.Body)
+	return string(errBody)
 }
