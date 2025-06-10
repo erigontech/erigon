@@ -164,7 +164,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 	return func(s network.Stream) {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Error("[pubsubhandler] panic in stream handler", "err", r)
+				log.Error("[pubsubhandler] panic in stream handler", "err", r, "name", name)
 				_ = s.Reset()
 				_ = s.Close()
 			}
