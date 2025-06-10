@@ -6,10 +6,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-func step[T ~uint64](n T, a ForkableId) uint64 {
-	return uint64(n) / a.SnapshotConfig().RootNumPerStep
-}
-
 // toPrefix exclusive
 func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, rwTx kv.RwTx) (delCount uint64, err error) {
 	c, err := rwTx.RwCursor(tbl) // TODO: no dupsort tbl assumed
@@ -34,11 +30,3 @@ func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, r
 
 	return
 }
-
-type IdentityRootRelation struct{}
-
-func (i *IdentityRootRelation) RootNum2Num(rootNum RootNum, tx kv.Tx) (num Num, err error) {
-	return Num(rootNum), nil
-}
-
-var IdentityRootRelationInstance = &IdentityRootRelation{}

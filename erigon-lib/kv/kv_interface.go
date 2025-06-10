@@ -577,6 +577,8 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+
+	//RoForkables() ForkablesRoTx
 	//ForkableAggTx(ForkableGroup) any
 }
 
@@ -612,6 +614,8 @@ type TemporalRwTx interface {
 	RwTx
 	TemporalTx
 	TemporalPutDel
+
+	//RwForkables() ForkablesRwTx
 
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)

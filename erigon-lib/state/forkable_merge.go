@@ -8,6 +8,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -83,7 +84,8 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	segPath := f.snaps.schema.DataFile(version.V1_0, from, to)
 	cfg := seg.DefaultCfg
 	cfg.Workers = compressWorkers
-	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+f.a.String(), segPath, f.a.Dirs().Tmp, cfg, log.LvlTrace, f.logger)
+	r := ee.Registry
+	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+r.String(f.a), segPath, r.Dirs(f.a).Tmp, cfg, log.LvlTrace, f.logger)
 	if err != nil {
 		return
 	}

@@ -408,7 +408,7 @@ func TestMergedFileGet(t *testing.T) {
 			}
 		}
 
-		snapCfg := headerId.SnapshotConfig()
+		snapCfg := ee.Registry.SnapshotConfig(headerId)
 		var nDirtyFiles, nVisibleFiles int
 		if mergeDisabled {
 			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
@@ -457,7 +457,7 @@ func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), headerId, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
 
-	ma, err := NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, ee.IdentityRootRelationInstance, log,
+	ma, err := NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, IdentityRootRelationInstance, log,
 		App_WithPruneFrom(Num(1)),
 		App_WithIndexBuilders(builder),
 		App_WithUpdateCanonical())
@@ -480,7 +480,7 @@ func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), bodyId, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
 
-	ma, err := NewMarkedForkable(bodyId, kv.BlockBody, kv.HeaderCanonical, ee.IdentityRootRelationInstance, log,
+	ma, err := NewMarkedForkable(bodyId, kv.BlockBody, kv.HeaderCanonical, IdentityRootRelationInstance, log,
 		App_WithPruneFrom(Num(1)),
 		App_WithIndexBuilders(builder))
 	require.NoError(t, err)

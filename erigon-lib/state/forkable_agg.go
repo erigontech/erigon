@@ -609,7 +609,7 @@ func (r *ForkableAgg) BeginTemporalTx() *ForkableAggTemporalTx {
 func (r *ForkableAggTemporalTx) AlignedMaxRootNum() RootNum {
 	// return aligned max root num of "any" aligned forkable,
 	// which is ok since all are expected to be at same height
-	return loopOverDebugFiles(r, ee.AllForkableId, true, func(db ForkableFilesTxI) RootNum {
+	return loopOverDebugFiles(r, kv.AllForkableId, true, func(db ForkableFilesTxI) RootNum {
 		return db.VisibleFilesMaxRootNum()
 	})
 }
@@ -649,7 +649,7 @@ func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func
 		}
 	}
 
-	panic(fmt.Sprintf("no forkable with id %s", forId.String()))
+	panic(fmt.Sprintf("no forkable with id %s", ee.Registry.String(forId)))
 }
 
 func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipUnaligned bool, fn func(ForkableFilesTxI) R) R {
@@ -683,7 +683,7 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 		}
 	}
 
-	panic(fmt.Sprintf("no forkable with id %s", forId.String()))
+	panic(fmt.Sprintf("no forkable with id %s", ee.Registry.Name(forId)))
 }
 
 func (r *ForkableAggTemporalTx) Close() {

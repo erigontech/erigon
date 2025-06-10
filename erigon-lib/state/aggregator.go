@@ -411,6 +411,9 @@ func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
 
+type VisibleFile = kv.VisibleFile
+type VisibleFiles = kv.VisibleFiles
+
 func (at *AggregatorRoTx) AllFiles() VisibleFiles {
 	var res VisibleFiles
 	if at == nil {

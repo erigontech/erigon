@@ -96,7 +96,7 @@ func TestUnmarkedPrune(t *testing.T) {
 			borSpanId, uma := setupBorSpans(t, log, dir, db)
 
 			ctx := context.Background()
-			cfg := borSpanId.SnapshotConfig()
+			cfg := ee.Registry.SnapshotConfig(borSpanId)
 			entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
 			uma_tx := uma.BeginTemporalTx()
@@ -151,7 +151,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
 	require.NoError(t, err)
-	cfg := borSpanId.SnapshotConfig()
+	cfg := ee.Registry.SnapshotConfig(borSpanId)
 	num_files := uint64(5)
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 

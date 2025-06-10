@@ -46,7 +46,7 @@ type SnapshotRepo struct {
 }
 
 func NewSnapshotRepoForForkable(id ForkableId, logger log.Logger) *SnapshotRepo {
-	return NewSnapshotRepo(id.Name(), id.SnapshotConfig(), logger)
+	return NewSnapshotRepo(ee.Registry.Name(id), ee.Registry.SnapshotConfig(id), logger)
 }
 
 func NewSnapshotRepo(name string, cfg *ee.SnapshotConfig, logger log.Logger) *SnapshotRepo {
@@ -145,14 +145,14 @@ func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) (maxRootNum RootNum) {
 	return RootNum(f.current.EndTxNum())
 }
 
-type VisibleFile = kv.VisibleFile
-type VisibleFiles = kv.VisibleFiles
+// type VisibleFile = kv.VisibleFile
+// type VisibleFiles = kv.VisibleFiles
 
 func (f *SnapshotRepo) visibleFiles() visibleFiles {
 	return f.current
 }
 
-func (f *SnapshotRepo) VisibleFiles() (files VisibleFiles) {
+func (f *SnapshotRepo) VisibleFiles() (files kv.VisibleFiles) {
 	for _, file := range f.current {
 		files = append(files, file)
 	}
@@ -274,7 +274,7 @@ func (f *SnapshotRepo) Garbage(vfs visibleFiles, merged *FilesItem) (garbage []*
 // FindMergeRange returns the most recent merge range to process
 // can be successively called with updated (merge processed) visibleFiles
 // to get the next range to process.
-func (f *SnapshotRepo) FindMergeRange(maxEndRootNum RootNum, files VisibleFiles) (mrange MergeRange) {
+func (f *SnapshotRepo) FindMergeRange(maxEndRootNum RootNum, files kv.VisibleFiles) (mrange MergeRange) {
 	toRootNum := min(uint64(maxEndRootNum), files.EndRootNum())
 	for i := 0; i < len(files); i++ {
 		item := files[i]

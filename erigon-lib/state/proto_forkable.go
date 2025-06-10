@@ -38,8 +38,8 @@ type ProtoForkable struct {
 func NewProto(a ee.ForkableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoForkable {
 	return &ProtoForkable{
 		a:        a,
-		cfg:      a.SnapshotConfig(),
-		parser:   a.SnapshotConfig().Schema,
+		cfg:      ee.Registry.SnapshotConfig(a),
+		parser:   ee.Registry.SnapshotConfig(a).Schema,
 		builders: builders,
 		freezer:  freezer,
 		snaps:    NewSnapshotRepoForForkable(a, logger),
@@ -72,20 +72,20 @@ func (a *ProtoForkable) IntegrateDirtyFiles(files []*FilesItem) {
 //     be used to build bigger files too.
 //  2. The caller is responsible for ensuring that data is available in db to freeze.
 func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.RoDB, compressionWorkers int, ps *background.ProgressSet) (builtFile *FilesItem, built bool, err error) {
-	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
+	log.Debug("freezing %s from %d to %d", ee.Registry.Name(a.a), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
-	cfg := a.a.SnapshotConfig()
+	cfg := ee.Registry.SnapshotConfig(a.a)
 	calcFrom, calcTo, canFreeze = a.snaps.GetFreezingRange(calcFrom, calcTo)
 	if !canFreeze {
 		return nil, false, nil
 	}
 
-	log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
+	log.Debug("freezing %s from %d to %d", ee.Registry.Name(a.a), calcFrom, calcTo)
 	path := a.parser.DataFile(version.V1_0, calcFrom, calcTo)
 	segCfg := seg.DefaultCfg
 	segCfg.Workers = compressionWorkers
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, segCfg, log.LvlTrace, a.logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+ee.Registry.Name(a.a), path, ee.Registry.Dirs(a.a).Tmp, segCfg, log.LvlTrace, a.logger)
 	if err != nil {
 		return nil, false, err
 	}
@@ -287,7 +287,7 @@ func (a *ProtoForkableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, file
 			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
 		})
 		if index == len(a.files) {
-			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", ap.a.Name(), entityNum)
+			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", ee.Registry.Name(ap.a), entityNum)
 		}
 
 		v, f, err := a.GetFromFile(entityNum, index)
@@ -346,7 +346,7 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 		return word, true, nil
 	}
 
-	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, a.files[idx].src.decompressor.FileName())
+	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ee.Registry.Name(ap.a), entityNum, a.files[idx].src.decompressor.FileName())
 }
 
 func (a *ProtoForkableTx) NoFilesCheck() {

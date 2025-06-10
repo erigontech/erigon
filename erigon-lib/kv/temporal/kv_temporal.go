@@ -271,6 +271,14 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
+func (tx *Tx) RoForkables() any {
+	return tx
+}
+
+func (tx *Tx) Marked(g kv.ForkableGroup, id kv.ForkableId) kv.MarkedRoTx {
+	return newMarkedRoTx(tx.Tx, tx.forkaggs[int(g)].Marked(id))
+}
+
 func (tx *RwTx) WarmupDB(force bool) error {
 	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
 		return mdbxTx.WarmupDB(force)

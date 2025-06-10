@@ -14,10 +14,6 @@ import (
 
 const MaxUint64 = ^uint64(0)
 
-type RootRelationI interface {
-	RootNum2Num(from RootNum, tx kv.Tx) (Num, error)
-}
-
 type BufferFactory interface {
 	New() etl.Buffer
 }
@@ -359,7 +355,7 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	if err != nil {
 		return 0, err
 	}
-	log.Info("pruning", "forkable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
+	log.Info("pruning", "forkable", ee.Registry.Name(ap.a), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)
@@ -417,8 +413,8 @@ func (m *BufferedTx) GetDb(entityNum Num, tx kv.Tx) (data Bytes, err error) {
 
 func (m *BufferedTx) Put(entityNum Num, value Bytes) error {
 	if m.values == nil {
-		m.values = etl.NewCollector(m.id.Name()+".forkable.flush",
-			m.id.Dirs().Tmp, m.factory.New(), m.a.logger).LogLvl(log.LvlTrace)
+		m.values = etl.NewCollector(ee.Registry.Name(m.id)+".forkable.flush",
+			ee.Registry.Dirs(m.id).Tmp, m.factory.New(), m.a.logger).LogLvl(log.LvlTrace)
 	}
 
 	key := m.ap.encTs(entityNum)
@@ -440,7 +436,7 @@ func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	if err != nil {
 		return 0, err
 	}
-	log.Info("pruning", "forkable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
+	log.Info("pruning", "forkable", ee.Registry.Name(ap.a), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)

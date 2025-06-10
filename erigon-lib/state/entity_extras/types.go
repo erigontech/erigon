@@ -3,7 +3,6 @@ package entity_extras
 import "github.com/erigontech/erigon-lib/kv"
 
 /** custom types **/
-
 type Num = kv.Num
 type RootNum = kv.RootNum
 
