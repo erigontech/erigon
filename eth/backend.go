@@ -46,6 +46,7 @@ import (
 
 	"github.com/erigontech/mdbx-go/mdbx"
 
+	"github.com/erigontech/erigon-db/dbstats"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
 	snaptype2 "github.com/erigontech/erigon-db/snaptype"
@@ -575,6 +576,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
 	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
+	go dbstats.PrintTableSizesPeriodically(ctx, backend.chainDB, logger)
 
 	var currentBlock *types.Block
 	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
