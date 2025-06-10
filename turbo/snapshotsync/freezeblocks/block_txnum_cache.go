@@ -18,7 +18,7 @@ type GetMaxTxNum func(blockNum uint64) (uint64, error)
 // to find answer "what's the block number for this txNum"
 type BlockTxNumLookupCache struct {
 	mu      sync.RWMutex
-	cache   map[snapshotsync.Range][]uint64
+	cache   map[snapshotsync.Range][]atomic.Uint64
 	cadence float64
 }
 
@@ -28,13 +28,13 @@ func NewBlockTxNumLookupCache(cadence int) *BlockTxNumLookupCache {
 	}
 
 	return &BlockTxNumLookupCache{
-		cache:   make(map[snapshotsync.Range][]uint64),
+		cache:   make(map[snapshotsync.Range][]atomic.Uint64),
 		cadence: float64(cadence),
 	}
 }
 
 // ensureLookup creates the lookup table if it doesn't exist
-func (c *BlockTxNumLookupCache) ensureLookup(r snapshotsync.Range) []uint64 {
+func (c *BlockTxNumLookupCache) ensureLookup(r snapshotsync.Range) []atomic.Uint64 {
 	// lookup[i] stores maxTxNum for blockNumber = from + i * cadence   for i in [0, size-2]
 	// lookup[size-1] stores maxTxNum for blockNumber = to - 1
 
@@ -58,9 +58,9 @@ func (c *BlockTxNumLookupCache) ensureLookup(r snapshotsync.Range) []uint64 {
 	rangeLen := float64(r.To() - r.From())
 	size := int(rangeLen/c.cadence) + 1
 
-	lookup := make([]uint64, size)
+	lookup := make([]atomic.Uint64, size)
 	for i := range lookup {
-		lookup[i] = math.MaxUint64 // sentinel for unset values
+		lookup[i].Store(math.MaxUint64)
 	}
 
 	c.cache[r] = lookup
@@ -78,7 +78,7 @@ func (c *BlockTxNumLookupCache) Find(r snapshotsync.Range, queryTxNum uint64, ge
 		if err != nil {
 			return true
 		}
-		txNum = atomic.LoadUint64(&lookup[i])
+		txNum = lookup[i].Load()
 		if txNum == math.MaxUint64 {
 			// not found
 			blkNum := c.index2BlkNum(r.From(), len(lookup), i)
@@ -86,7 +86,7 @@ func (c *BlockTxNumLookupCache) Find(r snapshotsync.Range, queryTxNum uint64, ge
 			if err != nil {
 				return true
 			}
-			atomic.StoreUint64(&lookup[i], txNum)
+			lookup[i].Store(txNum)
 		}
 
 		return txNum >= queryTxNum
@@ -108,7 +108,7 @@ func (c *BlockTxNumLookupCache) Find(r snapshotsync.Range, queryTxNum uint64, ge
 		h := (from + to) >> 1
 
 		if h == rangeFrom {
-			txNum = atomic.LoadUint64(&lookup[lookupIndex-1])
+			txNum = lookup[lookupIndex-1].Load()
 		} else {
 			txNum, err = getter(h)
 			if err != nil {
@@ -130,7 +130,7 @@ func (c *BlockTxNumLookupCache) Find(r snapshotsync.Range, queryTxNum uint64, ge
 func (c *BlockTxNumLookupCache) GetLastMaxTxNum(r snapshotsync.Range, getter GetMaxTxNum) (maxTxNum uint64, err error) {
 	lookup := c.ensureLookup(r)
 	lastIdx := len(lookup) - 1
-	maxTxNum = atomic.LoadUint64(&lookup[lastIdx])
+	maxTxNum = lookup[lastIdx].Load()
 	if maxTxNum != math.MaxUint64 {
 		return maxTxNum, nil
 	}
@@ -139,7 +139,7 @@ func (c *BlockTxNumLookupCache) GetLastMaxTxNum(r snapshotsync.Range, getter Get
 	if err != nil {
 		return 0, err
 	}
-	atomic.StoreUint64(&lookup[lastIdx], maxTxNum)
+	lookup[lastIdx].Store(maxTxNum)
 
 	return maxTxNum, nil
 }
