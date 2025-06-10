@@ -19,12 +19,12 @@ jobs:
       - name: Download arm64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar.gz
+          name: ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar
 
       - name: Download amd64v2 artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar.gz
+          name: ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar
 
       - name: Update and install required packages, run dpkg
         run: |
@@ -35,9 +35,9 @@ jobs:
 
       - name: Extract archives and rename amd64v2 to amd64
         run: |
-          tar xzvf ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar.gz
+          tar xvf ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar
           mv -v ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2 ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64
-          tar xzvf ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar.gz
+          tar xvf ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar
           cat <<-END > postinst.template
           #!/bin/bash
           echo "WARNING: erigon package does not install any configurations nor services."
