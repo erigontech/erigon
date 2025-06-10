@@ -38,15 +38,15 @@ import (
 )
 
 // downloadBodies executes bodies download.
-func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Context, tx kv.RwTx, fromBlock, toBlock uint64) (err error) {
+func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Context, tx kv.RwTx, fromBlock, toBlock uint64, forkChoiceUpdate bool) (lastValidAncestor common.Hash, err error) {
 	headerProgress := toBlock
 	bodyProgress := fromBlock - 1
 
 	if err := stages.SaveStageProgress(tx, stages.Bodies, bodyProgress); err != nil {
-		return err
+		return lastValidAncestor, err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Headers, headerProgress); err != nil {
-		return err
+		return lastValidAncestor, err
 	}
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
@@ -60,7 +60,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	defer e.bd.ClearBodyCache()
 
 	if bodyProgress >= headerProgress {
-		return nil
+		return lastValidAncestor, nil
 	}
 
 	logPrefix := "EngineBlockDownloader"
@@ -86,8 +86,8 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	prevProgress := bodyProgress
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
-	var lastValidAncestor common.Hash
-	blocksBatch := make([]*types.Block, 0, e.insertBlockBatchSize)
+	blockBatchSize := 500
+	blocksBatch := make([]*types.Block, 0, blockBatchSize)
 	blocksInsertedWithoutExec := 0
 
 	loopBody := func() (bool, error) {
@@ -160,7 +160,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 			}
 
 			var blockBatchInserted bool
-			if len(blocksBatch) >= e.insertBlockBatchSize {
+			if len(blocksBatch) >= blockBatchSize {
 				e.logger.Debug("[EngineBlockDownloader] blocks batch insert blocks threshold reached", "batch size", len(blocksBatch))
 				if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
 					return false, fmt.Errorf("InsertBlock: %w", err)
@@ -168,20 +168,21 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 				blocksInsertedWithoutExec += len(blocksBatch)
 				blockBatchInserted = true
 			}
-			if uint(blocksInsertedWithoutExec) >= e.syncCfg.LoopBlockLimit {
+			if forkChoiceUpdate && uint(blocksInsertedWithoutExec) >= e.syncCfg.LoopBlockLimit {
 				e.logger.Debug("[EngineBlockDownloader] blocks batch update fork choice threshold reached", "batch size", blocksInsertedWithoutExec)
 				// we need to call UFC to avoid chaindata growth when doing long backward syncs
-				head, err := e.updateForkChoiceLargeBatch(ctx, blocksBatch, lastValidAncestor)
+				// NOTE: above is only allowed/spec compliant if done within a FCU call - we simply
+				head := blocksBatch[len(blocksBatch)-1].Header()
+				err := e.forkChoiceUpdate(ctx, head.Hash(), head.ParentHash, lastValidAncestor)
 				if err != nil {
-					return false, fmt.Errorf("updateForkChoiceLargeBatch: %w", err)
+					return false, fmt.Errorf("forkChoiceUpdate: %w", err)
 				}
-				if head != (common.Hash{}) {
-					lastValidAncestor = head
-				}
+
+				lastValidAncestor = head.Hash()
 				blocksInsertedWithoutExec = 0
 			}
 			if blockBatchInserted {
-				blocksBatch = make([]*types.Block, 0, e.insertBlockBatchSize)
+				blocksBatch = make([]*types.Block, 0, blockBatchSize)
 			}
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 			rawBlock := types.RawBlock{Header: header, Body: rawBody}
@@ -236,39 +237,43 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	var shouldBreak bool
 	for !stopped && !shouldBreak {
 		if shouldBreak, err = loopBody(); err != nil {
-			return err
+			return lastValidAncestor, err
 		}
 	}
 	if len(blocksBatch) > 0 {
 		if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
-			return fmt.Errorf("InsertBlock: %w", err)
+			return lastValidAncestor, fmt.Errorf("InsertBlock: %w", err)
 		}
-		blocksBatch = blocksBatch[:0]
+	}
+	if len(blocksBatch) > 0 && forkChoiceUpdate {
+		head := blocksBatch[len(blocksBatch)-1].Header()
+		if err := e.forkChoiceUpdate(ctx, head.Hash(), head.ParentHash, lastValidAncestor); err != nil {
+			return lastValidAncestor, fmt.Errorf("forkChoiceUpdate: %w", err)
+		}
+
+		lastValidAncestor = head.Hash()
 	}
 
 	if stopped {
-		return common.ErrStopped
+		return lastValidAncestor, common.ErrStopped
 	}
 	e.logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
 
-	return nil
+	return lastValidAncestor, nil
 }
 
-func (e *EngineBlockDownloader) updateForkChoiceLargeBatch(ctx context.Context, batch []*types.Block, lastValidAncestor common.Hash) (common.Hash, error) {
+func (e *EngineBlockDownloader) forkChoiceUpdate(ctx context.Context, head, finalized, lastValidAncestor common.Hash) error {
 	var backOff backoff.BackOff
 	backOff = backoff.NewConstantBackOff(100 * time.Millisecond)
 	backOff = backoff.WithContext(backOff, ctx)
 	retryErr := errors.New("retry")
 	logTicker := time.NewTicker(time.Second)
 	defer logTicker.Stop()
-	op := func() (common.Hash, error) {
+	op := func() error {
 		noTimeoutOpt := eth1_chain_reader.WithUfcTimeoutOverride(0)
-		finalizedIdx := len(batch) - e.finalizedDistance
-		finalized := batch[finalizedIdx].Hash()
-		head := batch[finalizedIdx+1].Hash() // needs to be at least 1 ahead of finalized and safe
 		status, _, _, err := e.chainRW.UpdateForkChoice(ctx, head, finalized, finalized, noTimeoutOpt)
 		if err != nil {
-			return common.Hash{}, backoff.Permanent(fmt.Errorf("updateForkChoiceLargeBatch UpdateForkChoice: %w", err))
+			return backoff.Permanent(fmt.Errorf("EngineBlockDownloader: forkChoiceUpdate: %w", err))
 		}
 		switch status {
 		case executionproto.ExecutionStatus_Busy:
@@ -278,27 +283,27 @@ func (e *EngineBlockDownloader) updateForkChoiceLargeBatch(ctx context.Context, 
 			default: // no-op
 			}
 			// retry busy
-			return common.Hash{}, retryErr
+			return retryErr
 		case executionproto.ExecutionStatus_Success:
-			return head, nil
+			return nil
 		case executionproto.ExecutionStatus_TooFarAway:
-			e.logger.Debug("[EngineBlockDownloader] updateForkChoiceLargeBatch too far away")
-			return common.Hash{}, nil
+			e.logger.Debug("[EngineBlockDownloader] forkChoiceUpdate too far away")
+			return nil
 		case executionproto.ExecutionStatus_BadBlock:
-			e.logger.Warn("[EngineBlockDownloader] bad block in updateForkChoiceLargeBatch", "block", head, "lastValidAncestor", lastValidAncestor)
+			e.logger.Warn("[EngineBlockDownloader] bad block", "block", head, "lastValidAncestor", lastValidAncestor)
 			e.hd.ReportBadHeaderPoS(head, lastValidAncestor)
 			// no retry
-			return common.Hash{}, backoff.Permanent(errors.New("bad block in updateForkChoiceLargeBatch"))
+			return backoff.Permanent(errors.New("EngineBlockDownloader: bad block"))
 		case executionproto.ExecutionStatus_InvalidForkchoice:
-			e.logger.Warn("[EngineBlockDownloader] invalid fork choice in updateForkChoiceLargeBatch", "block", head, "lastValidAncestor", lastValidAncestor)
+			e.logger.Warn("[EngineBlockDownloader] invalid fork choice", "block", head, "lastValidAncestor", lastValidAncestor)
 			e.hd.ReportBadHeaderPoS(head, lastValidAncestor)
 			// no retry
-			return common.Hash{}, backoff.Permanent(errors.New("invalid fork choice in updateForkChoiceLargeBatch"))
+			return backoff.Permanent(errors.New("EngineBlockDownloader: invalid fork choice"))
 		default:
-			panic(fmt.Sprintf("unknown execution status in updateForkChoiceLargeBatch: %v", status))
+			panic(fmt.Sprintf("EngineBlockDownloader: unknown execution status in forkChoiceUpdate: %v", status))
 		}
 	}
-	return backoff.RetryWithData(op, backOff)
+	return backoff.Retry(op, backOff)
 }
 
 func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDelivered uint64, prevDeliveredCount, deliveredCount,

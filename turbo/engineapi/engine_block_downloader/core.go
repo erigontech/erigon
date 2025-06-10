@@ -35,8 +35,9 @@ func (e *EngineBlockDownloader) download(
 	hashToDownload common.Hash,
 	heightToDownload uint64,
 	requestId int,
-	chainTip *types.Block,
+	newPayloadBlock *types.Block,
 ) {
+	forkChoiceUpdate := newPayloadBlock == nil // means we are asked to download blocks backwards by a fcu
 	/* Start download process*/
 	// First we schedule the headers download process
 	if !e.scheduleHeadersDownload(requestId, hashToDownload, heightToDownload) {
@@ -87,8 +88,8 @@ func (e *EngineBlockDownloader) download(
 	memoryMutation := membatchwithdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx)
 	defer memoryMutation.Rollback()
 
-	if chainTip != nil {
-		err = rawdb.WriteCanonicalHash(memoryMutation, chainTip.Hash(), chainTip.NumberU64())
+	if !forkChoiceUpdate {
+		err = rawdb.WriteCanonicalHash(memoryMutation, newPayloadBlock.Hash(), newPayloadBlock.NumberU64())
 		if err != nil {
 			e.logger.Warn("[EngineBlockDownloader] Could not make leading header canonical", "err", err)
 			e.status.Store(headerdownload.Idle)
@@ -102,22 +103,67 @@ func (e *EngineBlockDownloader) download(
 		return
 	}
 
+	currentHeader := e.chainRW.CurrentHeader(ctx)
+	if currentHeader == nil {
+		e.logger.Warn("[EngineBlockDownloader] Could not load current header", "err", err)
+		e.status.Store(headerdownload.Idle)
+		return
+	}
+
+	currentHeaderNum := currentHeader.Number.Uint64()
+	if startBlock+1000 > currentHeaderNum {
+		e.logger.Warn(
+			"[EngineBlockDownloader] Can not download sidechain deeper back than allowed unwind distance",
+			"startBlock", startBlock,
+			"currentHeaderNum", currentHeaderNum,
+		)
+		e.status.Store(headerdownload.Idle)
+		return
+	}
+
+	if !forkChoiceUpdate && endBlock-startBlock > uint64(e.syncCfg.LoopBlockLimit) {
+		e.logger.Warn(
+			"[EngineBlockDownloader] Can not download new payload backward chain longer than sync loop block limit - waiting for fork choice update",
+			"startBlock", startBlock,
+			"endBlock", endBlock,
+			"currentHeaderNum", currentHeaderNum,
+		)
+		e.status.Store(headerdownload.Idle)
+		return
+	}
+
 	// bodiesCollector := etl.NewCollector("EngineBlockDownloader", e.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), e.logger)
-	if err := e.downloadAndLoadBodiesSyncronously(ctx, memoryMutation, startBlock, endBlock); err != nil {
+	lastValidAncestor, err := e.downloadAndLoadBodiesSyncronously(ctx, memoryMutation, startBlock, endBlock, forkChoiceUpdate)
+	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could not download bodies", "err", err)
 		e.status.Store(headerdownload.Idle)
 		return
 	}
+
 	tx.Rollback() // Discard the original db tx
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
-	if chainTip == nil {
-		e.status.Store(headerdownload.Idle)
-		return
+
+	if forkChoiceUpdate {
+		// means we're called within a fork choice update!
+		head := e.chainRW.GetBlockByHash(ctx, hashToDownload)
+		if head == nil {
+			e.logger.Warn("[EngineBlockDownloader] Could not read hash head after block download during a fcu", "hash", hashToDownload)
+			e.status.Store(headerdownload.Idle)
+			return
+		}
+
+		err := e.forkChoiceUpdate(ctx, head.Hash(), head.ParentHash(), lastValidAncestor)
+		if err != nil {
+			e.logger.Warn("[EngineBlockDownloader] fork choice update failed", "err", err)
+			e.status.Store(headerdownload.Idle)
+			return
+		}
 	}
+
 	// Can fail, not an issue in this case.
-	e.chainRW.InsertBlockAndWait(ctx, chainTip)
+	e.chainRW.InsertBlockAndWait(ctx, newPayloadBlock)
 	// Lastly attempt verification
-	status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, chainTip.Hash(), chainTip.NumberU64())
+	status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, newPayloadBlock.Hash(), newPayloadBlock.NumberU64())
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] block verification failed", "reason", err)
 		e.status.Store(headerdownload.Idle)
@@ -131,7 +177,7 @@ func (e *EngineBlockDownloader) download(
 	if status == execution.ExecutionStatus_BadBlock {
 		e.logger.Warn("[EngineBlockDownloader] block segments downloaded are invalid")
 		e.status.Store(headerdownload.Idle)
-		e.hd.ReportBadHeaderPoS(chainTip.Hash(), latestValidHash)
+		e.hd.ReportBadHeaderPoS(newPayloadBlock.Hash(), latestValidHash)
 		return
 	}
 	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
