@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -542,7 +541,6 @@ Loop:
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
-		var gasUsed uint64
 		var txTasks []*state.TxTask
 		var validationResults []state.AAValidationResult
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -571,15 +569,6 @@ Loop:
 				Config: chainConfig,
 
 				ValidationResults: validationResults,
-			}
-			if txTask.HistoryExecution && gasUsed == 0 {
-				gasUsed, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
-				if err != nil {
-					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-						hooks.OnBlockEnd(err)
-					}
-					return err
-				}
 			}
 
 			if cfg.genesis != nil {
@@ -773,8 +762,8 @@ Loop:
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
-					"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
-					"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
+					"block", outputBlockNum.GetValueUint64(), "txNum", inputTxNum,
+					"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
 					"flush+commitment", t1, "tx.commit", t2, "prune", t3)
 			default:
 			}

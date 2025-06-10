@@ -117,6 +117,7 @@ require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
+	github.com/crate-crypto/go-eth-kzg v1.3.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc // indirect
 	github.com/elastic/go-freelru v0.16.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
