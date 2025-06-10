@@ -65,29 +65,27 @@ func CollectTableSizes(ctx context.Context, db kv.RoDB) ([]TableSize, error) {
 }
 
 func PrintTableSizesPeriodically(ctx context.Context, db kv.RoDB, logger log.Logger) {
-	go func() {
-		if !dbg.EnvBool("PRINT_TABLE_SIZES", false) {
+	if !dbg.EnvBool("PRINT_TABLE_SIZES", false) {
+		return
+	}
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
 			return
-		}
+		case <-ticker.C:
+			tableSizes, err := CollectTableSizes(ctx, db)
+			if err != nil {
+				logger.Error("[dbstats] failed to collect table sizes", "err", err)
+				continue
+			}
 
-		ticker := time.NewTicker(15 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				tableSizes, err := CollectTableSizes(ctx, db)
-				if err != nil {
-					logger.Error("[dbstats] failed to collect table sizes", "err", err)
-					continue
-				}
-
-				for _, t := range tableSizes {
-					logger.Debug("[dbstats] table size", "table", t.Name, "size", t.Size)
-				}
+			for _, t := range tableSizes {
+				logger.Debug("[dbstats] table size", "table", t.Name, "size", t.Size)
 			}
 		}
-	}()
+	}
 }
