@@ -145,7 +145,7 @@ jobs:
             --push \
             .
           echo Testing skopeo
-          skopeo copy docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}-skopeo 
+          skopeo copy -a --multi-arch all docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}-skopeo 
 
       - name: Create archives and checksums
         env:
@@ -208,18 +208,19 @@ jobs:
   test-release:
     name: test on ${{ matrix.id }}
     if: ${{ ! inputs.skip_tests }}
-    runs-on: [ self-hosted, Release, "${{ matrix.runner-arch }}" ]
+    #runs-on: [ self-hosted, Release, "${{ matrix.runner-arch }}" ]
+    runs-on: ubuntu-latest
     timeout-minutes: 7200  # 5 days
     needs: [ build-release ]
-    strategy:
-      matrix:
-        include:
-          - id: linux/amd64
-            runner-arch: X64
-            artifact: linux_amd64
-          - id: linux/arm64
-            runner-arch: ARM64
-            artifact: linux_arm64
+    #strategy:
+    #  matrix:
+    #    include:
+    #      - id: linux/amd64
+    #        runner-arch: X64
+    #        artifact: linux_amd64
+    #      - id: linux/arm64
+    #        runner-arch: ARM64
+    #        artifact: linux_arm64
 
     steps:
 
@@ -351,9 +352,9 @@ jobs:
         DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
         DOCKER_URL_TMP: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
       run: |
-        skopeo copy docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}
+        skopeo copy -a --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}
         if ( "x${{ inputs.publish_latest_tag }}" -eq "xtrue" ); then
-          skopeo copy docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest-test
+          skopeo copy -a --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest-test
         fi
 
   publish-release:
