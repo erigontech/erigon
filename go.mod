@@ -33,7 +33,7 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.4.5
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/sync v0.5.4
-	github.com/anacrolix/torrent v1.58.2-0.20250604010703-7c29c120a504
+	github.com/anacrolix/torrent v1.58.2-0.20250610025943-9b88d091c5df
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.17.0
@@ -170,7 +170,7 @@ require (
 	github.com/anacrolix/log v0.16.1-0.20250526073428-5cb74e15092b // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
-	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c // indirect
+	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250610025550-ddd9eb198797 // indirect
 	github.com/anacrolix/mmsg v1.0.1 // indirect
 	github.com/anacrolix/multiless v0.4.0 // indirect
 	github.com/anacrolix/stm v0.4.1-0.20221221005312-96d17df0e496 // indirect

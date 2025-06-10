@@ -32,6 +32,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
+	"github.com/go-viper/mapstructure/v2"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/pelletier/go-toml/v2"
@@ -392,14 +393,19 @@ var torrentCat = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
 		}
+		var ms map[string]any
+		err = mapstructure.Decode(mi, &ms)
+		if err != nil {
+			return fmt.Errorf("decoding metainfo into map: %w", err)
+		}
 		fmt.Printf("InfoHash = '%x'\n", mi.HashInfoBytes())
-		mi.InfoBytes = nil
-		bytes, err := toml.Marshal(mi)
+		delete(ms, "InfoBytes")
+		bytes, err := toml.Marshal(ms)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s\n", string(bytes))
-		return nil
+		_, err = os.Stdout.Write(bytes)
+		return err
 	},
 }
 var torrentClean = &cobra.Command{
