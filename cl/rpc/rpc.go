@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
@@ -169,7 +170,14 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req 
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, uint64(req.Len()))
+	blobs, pid, err := b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, uint64(req.Len()))
+	if err != nil {
+		if strings.Contains(err.Error(), "invalid request") {
+			b.BanPeer(pid)
+		}
+		return nil, pid, err
+	}
+	return blobs, pid, nil
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
