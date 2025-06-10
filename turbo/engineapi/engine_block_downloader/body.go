@@ -87,8 +87,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
 	var lastValidAncestor common.Hash
-	blockBatchSize := 500
-	blocksBatch := make([]*types.Block, 0, blockBatchSize)
+	blocksBatch := make([]*types.Block, 0, e.insertBlockBatchSize)
 	blocksInsertedWithoutExec := 0
 
 	loopBody := func() (bool, error) {
@@ -160,15 +159,16 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 				return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
 			}
 
-			if len(blocksBatch) == blockBatchSize {
+			var blockBatchInserted bool
+			if len(blocksBatch) >= e.insertBlockBatchSize {
 				e.logger.Debug("[EngineBlockDownloader] blocks batch insert blocks threshold reached", "batch size", len(blocksBatch))
 				if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
 					return false, fmt.Errorf("InsertBlock: %w", err)
 				}
 				blocksInsertedWithoutExec += len(blocksBatch)
-				blocksBatch = make([]*types.Block, 0, blockBatchSize)
+				blockBatchInserted = true
 			}
-			if uint(blocksInsertedWithoutExec) == e.syncCfg.LoopBlockLimit {
+			if uint(blocksInsertedWithoutExec) >= e.syncCfg.LoopBlockLimit {
 				e.logger.Debug("[EngineBlockDownloader] blocks batch update fork choice threshold reached", "batch size", blocksInsertedWithoutExec)
 				// we need to call UFC to avoid chaindata growth when doing long backward syncs
 				head, err := e.updateForkChoiceLargeBatch(ctx, blocksBatch, lastValidAncestor)
@@ -179,6 +179,9 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 					lastValidAncestor = head
 				}
 				blocksInsertedWithoutExec = 0
+			}
+			if blockBatchInserted {
+				blocksBatch = make([]*types.Block, 0, e.insertBlockBatchSize)
 			}
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 			rawBlock := types.RawBlock{Header: header, Body: rawBody}
