@@ -218,7 +218,7 @@ mainloop:
 				if len(columns) > 0 {
 					r.Append(&cltypes.DataColumnsByRootIdentifier{
 						BlockRoot: blockRoot,
-						Columns:   solid.NewListSSZUint64(columns),
+						Columns:   *solid.NewListSSZUint64(columns),
 					})
 				}
 			}
@@ -279,7 +279,7 @@ func (d *peerdas) composeIdentifierRequest(ctx context.Context, blocks []*cltype
 		}
 		ids.Append(&cltypes.DataColumnsByRootIdentifier{
 			BlockRoot: blockRoot,
-			Columns:   solid.NewListSSZUint64(columns),
+			Columns:   *solid.NewListSSZUint64(columns),
 		})
 	}
 	return ids, nil
