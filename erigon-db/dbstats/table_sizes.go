@@ -3,8 +3,10 @@ package dbstats
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -83,9 +85,19 @@ func PrintTableSizesPeriodically(ctx context.Context, db kv.RoDB, logger log.Log
 				continue
 			}
 
+			var sb strings.Builder
 			for _, t := range tableSizes {
-				logger.Debug("[dbstats] table size", "table", t.Name, "size", t.Size)
+				if t.Size == 0 {
+					continue
+				}
+
+				sb.WriteString(t.Name)
+				sb.WriteRune(':')
+				sb.WriteString(common.ByteCount(t.Size))
+				sb.WriteRune(',')
 			}
+
+			logger.Debug("[dbstats] table sizes", "all", sb.String())
 		}
 	}
 }
