@@ -240,7 +240,7 @@ func (a *Aggregator) ReloadSalt() error {
 func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
 	dd := a.d[dependent]
 	if dd.disable || a.d[dependency].disable {
-		a.logger.Info("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
+		a.logger.Debug("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
 		return
 	}
 	// "hard alignment":
