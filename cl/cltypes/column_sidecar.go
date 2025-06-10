@@ -17,8 +17,10 @@ const (
 )
 
 var (
-	_ ssz2.ObjectSSZ             = (*DataColumnSidecar)(nil)
-	_ ssz2.ObjectSSZ             = (*ColumnSidecarsByRangeRequest)(nil)
+	_ ssz2.SizedObjectSSZ = (*DataColumnSidecar)(nil)
+	_ ssz2.SizedObjectSSZ = (*ColumnSidecarsByRangeRequest)(nil)
+
+	_ ssz2.SizedObjectSSZ        = (*DataColumnsByRootIdentifier)(nil)
 	_ solid.EncodableHashableSSZ = (*DataColumnsByRootIdentifier)(nil)
 )
 
@@ -89,6 +91,10 @@ func (d *DataColumnSidecar) EncodingSizeSSZ() int {
 
 func (d *DataColumnSidecar) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(d.getSchema()...)
+}
+
+func (d *DataColumnSidecar) Static() bool {
+	return false
 }
 
 type Cell [BytesPerCell]byte
@@ -164,35 +170,34 @@ func (*ColumnSidecarsByRangeRequest) Clone() clonable.Clonable {
 	return &ColumnSidecarsByRangeRequest{}
 }
 
+func (c *ColumnSidecarsByRangeRequest) Static() bool {
+	return false
+}
+
 // DataColumnsByRootIdentifier is the request for getting a range of column sidecars by root identifier.
 type DataColumnsByRootIdentifier struct {
 	BlockRoot common.Hash
-	Columns   *solid.ListSSZUint64
+	Columns   solid.ListSSZUint64
 }
 
 func (d *DataColumnsByRootIdentifier) EncodeSSZ(buf []byte) ([]byte, error) {
-	if d.Columns == nil {
-		d.Columns = solid.NewListSSZUint64([]uint64{})
-	}
 	return ssz2.MarshalSSZ(buf, d.BlockRoot, d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) DecodeSSZ(buf []byte, _ int) error {
-	if d.Columns == nil {
-		d.Columns = solid.NewListSSZUint64([]uint64{})
-	}
 	return ssz2.UnmarshalSSZ(buf, 0, &d.BlockRoot, d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) EncodingSizeSSZ() int {
-	if d.Columns == nil {
-		d.Columns = solid.NewListSSZUint64([]uint64{})
-	}
 	return 32 + d.Columns.EncodingSizeSSZ()
 }
 
 func (*DataColumnsByRootIdentifier) Clone() clonable.Clonable {
 	return &DataColumnsByRootIdentifier{}
+}
+
+func (d *DataColumnsByRootIdentifier) Static() bool {
+	return false
 }
 
 func (d *DataColumnsByRootIdentifier) HashSSZ() ([32]byte, error) {
