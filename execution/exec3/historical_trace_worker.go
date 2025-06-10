@@ -352,7 +352,6 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		}
 
 		txTask.CreateReceipt(tx)
-
 		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
 		}
