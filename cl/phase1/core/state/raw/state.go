@@ -87,6 +87,9 @@ type BeaconState struct {
 	pendingPartialWithdrawals     *solid.ListSSZ[*solid.PendingPartialWithdrawal]
 	pendingConsolidations         *solid.ListSSZ[*solid.PendingConsolidation]
 
+	// Fulu
+	proposerLookahead solid.Uint64VectorSSZ // Vector[ValidatorIndex, (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH]
+
 	//  leaves for computing hashes
 	leaves        []byte          // Pre-computed leaves.
 	touchedLeaves []atomic.Uint32 // Maps each leaf to whether they were touched or not.
@@ -122,10 +125,11 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		stateRoots:                   solid.NewHashVector(int(cfg.SlotsPerHistoricalRoot)),
 		randaoMixes:                  solid.NewHashVector(int(cfg.EpochsPerHistoricalVector)),
 		validators:                   solid.NewValidatorSet(int(cfg.ValidatorRegistryLimit)),
-		leaves:                       make([]byte, StateLeafSize*32),
+		leaves:                       make([]byte, StateLeafSizeLatest*32),
 		pendingDeposits:              solid.NewPendingDepositList(cfg),
 		pendingPartialWithdrawals:    solid.NewPendingWithdrawalList(cfg),
 		pendingConsolidations:        solid.NewPendingConsolidationList(cfg),
+		proposerLookahead:            solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch)),
 	}
 	state.init()
 	return state
@@ -136,7 +140,7 @@ func (b *BeaconState) SetValidatorSet(validatorSet *solid.ValidatorSet) {
 }
 
 func (b *BeaconState) init() error {
-	b.touchedLeaves = make([]atomic.Uint32, StateLeafSize)
+	b.touchedLeaves = make([]atomic.Uint32, StateLeafSizeLatest)
 	return nil
 }
 
@@ -192,6 +196,9 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["pending_deposits"] = b.pendingDeposits
 		obj["pending_partial_withdrawals"] = b.pendingPartialWithdrawals
 		obj["pending_consolidations"] = b.pendingConsolidations
+	}
+	if b.version >= clparams.FuluVersion {
+		obj["proposer_lookahead"] = b.proposerLookahead
 	}
 	return json.Marshal(obj)
 }
@@ -284,4 +291,8 @@ func (b *BeaconState) GetExitBalanceToConsume() uint64 {
 
 func (b *BeaconState) GetConsolidationBalanceToConsume() uint64 {
 	return b.consolidationBalanceToConsume
+}
+
+func (b *BeaconState) GetProposerLookahead() solid.Uint64VectorSSZ {
+	return b.proposerLookahead
 }
