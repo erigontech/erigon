@@ -271,8 +271,8 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
-func (tx *Tx) RoForkables() any {
-	return tx
+func (tx *Tx) RoForkables(g kv.ForkableGroup) any {
+	return tx.forkaggs[int(g)]
 }
 
 func (tx *Tx) Marked(g kv.ForkableGroup, id kv.ForkableId) kv.MarkedRoTx {
