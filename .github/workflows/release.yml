@@ -11,7 +11,8 @@ env:
   DOCKER_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
-  BINARIES: "erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
+  # BINARIES: "erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
+  BINARIES: "erigon downloader"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   DOCKERHUB_REPOSITORY_DEV: "erigontech/dev-erigon"
   DOCKERFILE_PATH: "Dockerfile"
@@ -212,15 +213,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 7200  # 5 days
     needs: [ build-release ]
-    #strategy:
-    #  matrix:
-    #    include:
-    #      - id: linux/amd64
-    #        runner-arch: X64
-    #        artifact: linux_amd64
-    #      - id: linux/arm64
-    #        runner-arch: ARM64
-    #        artifact: linux_arm64
+    strategy:
+      matrix:
+        include:
+          - id: linux/amd64
+            runner-arch: X64
+            artifact: linux_amd64
+          - id: linux/arm64
+            runner-arch: ARM64
+            artifact: linux_arm64
 
     steps:
 
