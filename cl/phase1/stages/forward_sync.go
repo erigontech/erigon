@@ -111,6 +111,8 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 		}
 	}
 
+	log.Info("[test] denebBlocks", "len", len(denebBlocks))
+	log.Info("[test] fuluBlocks", "len", len(fuluBlocks))
 	if len(denebBlocks) > 0 && shouldProcessBlobs(denebBlocks, cfg) {
 		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, denebBlocks)
 		if err != nil {
