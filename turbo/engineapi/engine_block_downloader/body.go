@@ -165,8 +165,8 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 				if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
 					return false, fmt.Errorf("InsertBlock: %w", err)
 				}
-				blocksBatch = make([]*types.Block, 0, blockBatchSize)
 				blocksInsertedWithoutExec += len(blocksBatch)
+				blocksBatch = make([]*types.Block, 0, blockBatchSize)
 			}
 			if uint(blocksInsertedWithoutExec) == e.syncCfg.LoopBlockLimit {
 				e.logger.Debug("[EngineBlockDownloader] blocks batch update fork choice threshold reached", "batch size", blocksInsertedWithoutExec)
