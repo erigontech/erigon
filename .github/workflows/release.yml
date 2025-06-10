@@ -160,11 +160,11 @@ jobs:
             echo Current directory is $(pwd) . Checksum file and archive will be created for this directory
             sha256sum * > checksums.txt
             ls -lao
-            tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar.gz \
+            tar cvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar.gz \
               --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;')/," .
 
             echo "Debug: testing archive output for linux_$(echo $dir | sed 's,linux_,,; s,_,,;'):"
-            tar -tzvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar.gz
+            tar -tvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar.gz
             echo "Debug end."
             cd -
           done
