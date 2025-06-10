@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
@@ -43,8 +44,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
-
-	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon-db/downloader"
 	"github.com/erigontech/erigon-db/downloader/downloadercfg"
@@ -579,6 +578,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
 	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
+	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, kv.ChainDB, logger)
 
 	var currentBlock *types.Block
 	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
