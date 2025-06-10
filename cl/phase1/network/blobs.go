@@ -17,9 +17,7 @@
 package network
 
 import (
-	"encoding/json"
 	"errors"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -113,11 +111,6 @@ Loop:
 				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
 				if err != nil {
 					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
-					if strings.Contains(err.Error(), "invalid request") {
-						// print the request
-						bytes, _ := json.Marshal(req)
-						log.Debug("RequestBlobsFrantically: invalid request", "request", string(bytes))
-					}
 					return
 				}
 				if responses == nil {
