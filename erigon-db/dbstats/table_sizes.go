@@ -85,7 +85,7 @@ func PrintTableSizesPeriodically(ctx context.Context, db kv.RoDB, logger log.Log
 				}
 
 				for _, t := range tableSizes {
-					logger.Trace("[dbstats] table size", "table", t.Name, "size", t.Size)
+					logger.Debug("[dbstats] table size", "table", t.Name, "size", t.Size)
 				}
 			}
 		}
