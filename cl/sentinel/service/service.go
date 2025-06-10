@@ -231,8 +231,14 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
-		if strings.Contains(errorMessage.Error(), "Read Code: EOF") {
-			// don't ban the peer.
+		//if strings.Contains(errorMessage.Error(), "Read Code: EOF") {
+		// don't ban the peer.
+		//	return nil, errorMessage
+		//}
+		if resp.StatusCode == http.StatusBadRequest {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
 			return nil, errorMessage
 		}
 		if shouldBanOnFail {
