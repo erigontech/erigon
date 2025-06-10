@@ -23,14 +23,15 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"runtime"
 	"runtime/pprof"
-	"strconv"
 
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
@@ -104,6 +105,8 @@ func initGenesis(cliCtx *cli.Context) error {
 	if err := decodeGenesisStreaming(file, genesis, logger); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
+	logger.Info("after parseGenesisStreaming,GC")
+	runtime.GC()
 	// TODO:DEBUG:record final allocation profile
 	if allocFile, err := os.Create("initgenesis_alloc_final.prof"); err == nil {
 		pprof.Lookup("allocs").WriteTo(allocFile, 0)
@@ -199,7 +202,7 @@ func decodeGenesisStreaming(r io.Reader, genesis *types.Genesis, logger log.Logg
 			if !ok {
 				return fmt.Errorf("expected string for nonce, got %T", token)
 			}
-			genesis.Nonce = parseUint64(nonceStr)
+			genesis.Nonce = math.MustParseUint64(nonceStr)
 
 		case "timestamp":
 			var timestamp uint64
@@ -230,7 +233,7 @@ func decodeGenesisStreaming(r io.Reader, genesis *types.Genesis, logger log.Logg
 			if !ok {
 				return fmt.Errorf("expected string for gasLimit, got %T", token)
 			}
-			genesis.GasLimit = parseUint64(gasLimitStr)
+			genesis.GasLimit = math.MustParseUint64(gasLimitStr)
 
 		case "difficulty":
 			// Read the difficulty value as a token instead of using Decode
@@ -242,7 +245,7 @@ func decodeGenesisStreaming(r io.Reader, genesis *types.Genesis, logger log.Logg
 			if !ok {
 				return fmt.Errorf("expected string for difficulty, got %T", token)
 			}
-			genesis.Difficulty = parseBigInt(difficultyStr)
+			genesis.Difficulty = math.MustParseBig256(difficultyStr)
 
 		case "mixHash":
 			// Read the mixHash value as a token instead of using Decode
@@ -341,13 +344,6 @@ func parseAllocStreaming(decoder *json.Decoder, alloc types.GenesisAlloc, logger
 		}
 
 		alloc[addr] = account
-
-		// TODO:Force garbage collection periodically to keep memory usage low during large genesis parsing
-		if len(alloc)%1000000 == 0 {
-			logger.Info("Processed accounts", "count", len(alloc))
-			// Uncomment the line below if memory usage is still too high
-			// runtime.GC()
-		}
 	}
 
 	// Expect closing brace
@@ -360,51 +356,6 @@ func parseAllocStreaming(decoder *json.Decoder, alloc types.GenesisAlloc, logger
 	}
 
 	return nil
-}
-
-func has0xPrefix(str string) bool {
-	return len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')
-}
-
-// Helper functions for parsing hex values
-func parseUint64(s string) uint64 {
-	if s == "" {
-		return 0
-	}
-
-	// Use the same logic as math.ParseUint64
-	if len(s) >= 2 && (s[:2] == "0x" || s[:2] == "0X") {
-		v, err := strconv.ParseUint(s[2:], 16, 64)
-		if err != nil {
-			return 0
-		}
-		return v
-	}
-
-	v, err := strconv.ParseUint(s, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return v
-}
-
-func parseBigInt(s string) *big.Int {
-	if s == "" {
-		return new(big.Int)
-	}
-
-	// Use the same logic as math.ParseBig256
-	var bigint *big.Int
-	var ok bool
-	if len(s) >= 2 && (s[:2] == "0x" || s[:2] == "0X") {
-		bigint, ok = new(big.Int).SetString(s[2:], 16)
-	} else {
-		bigint, ok = new(big.Int).SetString(s, 10)
-	}
-	if !ok {
-		return big.NewInt(0)
-	}
-	return bigint
 }
 
 // parseGenesisAccountStreaming parses a GenesisAccount manually to avoid reflection
@@ -448,7 +399,7 @@ func parseGenesisAccountStreaming(decoder *json.Decoder, logger log.Logger) (typ
 			// Handle both string and number formats
 			switch v := balance.(type) {
 			case string:
-				account.Balance = parseBigInt(v)
+				account.Balance = math.MustParseBig256(v)
 			case float64:
 				account.Balance = big.NewInt(int64(v))
 			default:
@@ -468,7 +419,7 @@ func parseGenesisAccountStreaming(decoder *json.Decoder, logger log.Logger) (typ
 				logger.Error("Expected string for nonce", "got_type", fmt.Sprintf("%T", token), "value", token)
 				return types.GenesisAccount{}, fmt.Errorf("expected string for nonce, got %T", token)
 			}
-			account.Nonce = parseUint64(nonceStr)
+			account.Nonce = math.MustParseUint64(nonceStr)
 
 		case "code":
 			// Read the code value as a token instead of using Decode
