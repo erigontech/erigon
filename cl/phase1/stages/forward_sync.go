@@ -77,6 +77,10 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 
 	// Request blobs from the network
 	blobs, err = network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
+	if errors.Is(err, network2.ErrTimeout) {
+		log.Warn("Blob request timeout", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
+		return highestSlotProcessed, nil
+	}
 	if err != nil {
 		// Return an error if blobs could not be retrieved
 		err = fmt.Errorf("failed to get blobs: %w", err)
