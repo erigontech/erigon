@@ -181,11 +181,11 @@ type DataColumnsByRootIdentifier struct {
 }
 
 func (d *DataColumnsByRootIdentifier) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, d.BlockRoot, d.Columns)
+	return ssz2.MarshalSSZ(buf, d.BlockRoot[:], d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, d.BlockRoot, &d.Columns)
+	return ssz2.UnmarshalSSZ(buf, 0, d.BlockRoot[:], &d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) EncodingSizeSSZ() int {
