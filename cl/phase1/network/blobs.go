@@ -32,7 +32,7 @@ import (
 
 var ErrTimeout = errors.New("timeout")
 
-var requestBlobBatchExpiration = 30 * time.Second
+var requestBlobBatchExpiration = 15 * time.Second
 
 // This is just a bunch of functions to handle blobs
 
