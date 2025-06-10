@@ -32,7 +32,7 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// https://github.com/ethereum/wiki/wiki/RLP
+// https://github.com/ethereum/eth-wiki/blob/master/fundamentals/rlp.md
 const (
 	// EmptyStringCode is the RLP code for empty strings.
 	EmptyStringCode = 0x80
