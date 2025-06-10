@@ -261,6 +261,19 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 	// Update the state root cache
 	b.SetVersion(clparams.FuluVersion)
 
+	// initialize the proposer lookahead
+	lookahead := solid.NewUint64VectorSSZ(int((b.BeaconConfig().MinSeedLookahead + 1) * b.BeaconConfig().SlotsPerEpoch))
+	for i := 0; i < int(b.BeaconConfig().MinSeedLookahead+1); i++ {
+		proposerIndices, err := b.GetBeaconProposerIndices(epoch + uint64(i))
+		if err != nil {
+			return err
+		}
+		for j := 0; j < len(proposerIndices); j++ {
+			lookahead.Set(i*int(b.BeaconConfig().SlotsPerEpoch)+j, proposerIndices[j])
+		}
+	}
+	b.SetProposerLookahead(lookahead)
+
 	log.Info("Upgrade to Fulu complete")
 	return nil
 }
