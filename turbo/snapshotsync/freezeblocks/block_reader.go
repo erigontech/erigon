@@ -1583,7 +1583,7 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 
 	getMaxTxNum := func(seg *snapshotsync.VisibleSegment) GetMaxTxNum {
 		return func(i uint64) (uint64, error) {
-			b, buf, err = BodyForStorageFromSnapshot(uint64(i), seg, buf)
+			b, buf, err = BodyForStorageFromSnapshot(i, seg, buf)
 			if err != nil {
 				return 0, err
 			}
