@@ -128,7 +128,8 @@ func (b *CachingBeaconState) ComputeCommittee(
 func (b *CachingBeaconState) GetBeaconProposerIndex() (uint64, error) {
 	if b.Version() >= clparams.FuluVersion {
 		p := b.GetProposerLookahead()
-		return p.Get(int(b.Slot() / b.BeaconConfig().SlotsPerEpoch)), nil
+		index := int(b.Slot() % b.BeaconConfig().SlotsPerEpoch)
+		return p.Get(index), nil
 	}
 
 	if b.proposerIndex == nil {
