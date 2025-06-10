@@ -254,9 +254,9 @@ func (l *ListSSZUint64) EncodingSizeSSZ() int {
 }
 
 func (l *ListSSZUint64) Clone() clonable.Clonable {
-	return &ListSSZUint64{list: append([]uint64{}, l.list...)}
+	return &ListSSZUint64{list: []uint64{}}
 }
 
 func (l *ListSSZUint64) Static() bool {
-	return true
+	return false
 }
