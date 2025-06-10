@@ -1,15 +1,21 @@
 package freezeblocks
 
 import (
+	"fmt"
 	"math"
-	"math/bits"
+	"sort"
 	"sync"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
-// BlockTxNumLookupCache implements a lookup table for partially memoized binary search
+const E2StepSize = 1_000
+
+type GetMaxTxNum func(blockNum uint64) (uint64, error)
+
+// BlockTxNumLookupCache implements a partial lookup table
+// to find answer "what's the block number for this txNum"
 type BlockTxNumLookupCache struct {
 	mu      sync.RWMutex
 	cache   map[snapshotsync.Range][]uint64
@@ -17,6 +23,10 @@ type BlockTxNumLookupCache struct {
 }
 
 func NewBlockTxNumLookupCache(cadence int) *BlockTxNumLookupCache {
+	if E2StepSize%cadence != 0 {
+		panic(fmt.Sprintf("E2StepSize (%d) must be divisible by cadence (%d)", E2StepSize, cadence))
+	}
+
 	return &BlockTxNumLookupCache{
 		cache:   make(map[snapshotsync.Range][]uint64),
 		cadence: float64(cadence),
@@ -25,6 +35,9 @@ func NewBlockTxNumLookupCache(cadence int) *BlockTxNumLookupCache {
 
 // ensureLookup creates the lookup table if it doesn't exist
 func (c *BlockTxNumLookupCache) ensureLookup(r snapshotsync.Range) []uint64 {
+	// lookup[i] stores maxTxNum for blockNumber = from + i * cadence   for i in [0, size-2]
+	// lookup[size-1] stores maxTxNum for blockNumber = to - 1
+
 	// Try read lock first for common case
 	c.mu.RLock()
 	if lookup, ok := c.cache[r]; ok {
@@ -43,7 +56,7 @@ func (c *BlockTxNumLookupCache) ensureLookup(r snapshotsync.Range) []uint64 {
 	}
 
 	rangeLen := float64(r.To() - r.From())
-	size := 1 + (1 << bits.Len64(uint64(math.Ceil(rangeLen/c.cadence))-1))
+	size := int(rangeLen/c.cadence) + 1
 
 	lookup := make([]uint64, size)
 	for i := range lookup {
@@ -54,84 +67,89 @@ func (c *BlockTxNumLookupCache) ensureLookup(r snapshotsync.Range) []uint64 {
 	return lookup
 }
 
-// GetMaxTxNum retrieves the cached max transaction number for a block
-// Returns (maxTxNum, true) if cached, (0, false) if not cached
-func (c *BlockTxNumLookupCache) GetMaxTxNum(r snapshotsync.Range, blockNum uint64) (maxTxNum uint64, exists bool) {
-	lookup := c.ensureLookup(r)
+func (c *BlockTxNumLookupCache) Find(r snapshotsync.Range, queryTxNum uint64, getter GetMaxTxNum) (blockNum uint64, err error) {
+	// assumption...txNum is in the given range
 
-	// Check if this block number maps to a cache slot
-	idx, managed := c.blockToIndex(lookup, r, blockNum)
-	if !managed {
-		return 0, false
+	// i) first find lookup block index at which queryTxNum might reside. This will be a range of blocks. This step uses lookup cache
+	// ii) then in that narrow block range, search for block containing queryTxNum. This cannot employ cache.
+	lookup := c.ensureLookup(r)
+	var txNum uint64
+	lookupIndex := sort.Search(len(lookup), func(i int) bool {
+		if err != nil {
+			return true
+		}
+		txNum = atomic.LoadUint64(&lookup[i])
+		if txNum == math.MaxUint64 {
+			// not found
+			blkNum := c.index2BlkNum(r.From(), len(lookup), i)
+			txNum, err = getter(blkNum)
+			if err != nil {
+				return true
+			}
+			atomic.StoreUint64(&lookup[i], txNum)
+		}
+
+		return txNum >= queryTxNum
+
+	})
+
+	if err != nil {
+		return 0, err
 	}
 
-	maxTxNum = atomic.LoadUint64(&lookup[idx])
-	return maxTxNum, maxTxNum != math.MaxUint64
-}
-
-// SetMaxTxNum caches the max transaction number for a block
-// Only sets if the block maps to a cache slot
-func (c *BlockTxNumLookupCache) SetMaxTxNum(r snapshotsync.Range, blockNum uint64, maxTxNum uint64) (isSet bool) {
-	lookup := c.ensureLookup(r)
-
-	// Check if this block number maps to a cache slot
-	idx, managed := c.blockToIndex(lookup, r, blockNum)
-	if !managed {
-		return false
+	if lookupIndex == 0 {
+		return r.From(), nil
 	}
 
-	atomic.CompareAndSwapUint64(&lookup[idx], math.MaxUint64, maxTxNum)
-	return true
+	from, to := c.index2BlkNum(r.From(), len(lookup), lookupIndex-1), c.index2BlkNum(r.From(), len(lookup), lookupIndex)
+	rangeFrom := from
+
+	for from < to {
+		h := (from + to) >> 1
+
+		if h == rangeFrom {
+			txNum = atomic.LoadUint64(&lookup[lookupIndex-1])
+		} else {
+			txNum, err = getter(h)
+			if err != nil {
+				return 0, err
+			}
+		}
+
+		if txNum >= queryTxNum {
+			to = h
+		} else {
+			from = h + 1
+		}
+
+	}
+
+	return from, nil
 }
 
-// GetLastMaxTxNum retrieves the cached max transaction number for the last block in range
-func (c *BlockTxNumLookupCache) GetLastMaxTxNum(r snapshotsync.Range) (maxTxNum uint64, exists bool) {
+func (c *BlockTxNumLookupCache) GetLastMaxTxNum(r snapshotsync.Range, getter GetMaxTxNum) (maxTxNum uint64, err error) {
 	lookup := c.ensureLookup(r)
 	lastIdx := len(lookup) - 1
 	maxTxNum = atomic.LoadUint64(&lookup[lastIdx])
-	return maxTxNum, maxTxNum != math.MaxUint64
+	if maxTxNum != math.MaxUint64 {
+		return maxTxNum, nil
+	}
+
+	maxTxNum, err = getter(r.To() - 1)
+	if err != nil {
+		return 0, err
+	}
+	atomic.StoreUint64(&lookup[lastIdx], maxTxNum)
+
+	return maxTxNum, nil
 }
 
-// SetLastMaxTxNum caches the max transaction number for the last block in range
-func (c *BlockTxNumLookupCache) SetLastMaxTxNum(r snapshotsync.Range, maxTxNum uint64) {
-	lookup := c.ensureLookup(r)
-	lastIdx := len(lookup) - 1
-	atomic.CompareAndSwapUint64(&lookup[lastIdx], math.MaxUint64, maxTxNum)
-}
-
-// blockToIndex maps a block number to its lookup table index
-// Returns (index, true) if this block should be cached, (0, false) otherwise
-func (c *BlockTxNumLookupCache) blockToIndex(lookup []uint64, r snapshotsync.Range, blockNum uint64) (lookupIndex int, cachedByLookup bool) {
-	// Check bounds
-	if blockNum < r.From() || blockNum >= r.To() {
-		return 0, false
+func (c *BlockTxNumLookupCache) index2BlkNum(from uint64, lookupSize, idxlookupIdx int) uint64 {
+	if idxlookupIdx >= lookupSize {
+		panic(fmt.Sprintf("index2BlkNum: idxlookupIdx (%d) >= lookupSize (%d)", idxlookupIdx, lookupSize))
 	}
-
-	if blockNum == r.To()-1 {
-		// we don't store r.To() but r.To()-1
-		return len(lookup) - 1, true
+	if idxlookupIdx == lookupSize-1 {
+		return from + uint64(idxlookupIdx)*uint64(c.cadence) - 1
 	}
-
-	rangeSize := r.To() - r.From()
-	intervals := uint64(len(lookup) - 1)
-	per_interval_width := float64(rangeSize) / float64(intervals)
-
-	offset := float64(blockNum - r.From())
-
-	if math.Mod(offset, per_interval_width) == 0 {
-		// divisible
-		return int(offset / per_interval_width), true
-	}
-
-	// if offset+1 is change point causes index to increment...use it
-	// e.g. 10000-10500; cadence = 64; lookup size = 9
-	// then: per_interval_width=62.5
-	// for 10062, lookup_index = 0, lookup_index_1 = 1
-	lookup_index := int(math.Floor(offset / per_interval_width))
-	lookup_index_1 := int(math.Floor((offset + 1) / per_interval_width))
-	if lookup_index_1-lookup_index == 1 {
-		return lookup_index, true
-	}
-
-	return 0, false
+	return from + uint64(idxlookupIdx)*uint64(c.cadence)
 }
