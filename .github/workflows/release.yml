@@ -145,7 +145,7 @@ jobs:
             --push \
             .
           echo Testing skopeo
-          skopeo copy -a --multi-arch all docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}-skopeo 
+          skopeo copy --multi-arch all docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}-skopeo 
 
       - name: Create archives and checksums
         env:
@@ -352,9 +352,9 @@ jobs:
         DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
         DOCKER_URL_TMP: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
       run: |
-        skopeo copy -a --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}
+        skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}
         if ( "x${{ inputs.publish_latest_tag }}" -eq "xtrue" ); then
-          skopeo copy -a --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest-test
+          skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest-test
         fi
 
   publish-release:
