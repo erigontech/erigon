@@ -8,7 +8,6 @@ tests:
 	# not needed for now
 	rm -rf tests/mainnet/eip6110
 	rm -rf tests/mainnet/whisk
-	rm -rf tests/mainnet/fulu
 	rm -rf tests/mainnet/eip7441
 	rm -rf tests/mainnet/eip7732
 
@@ -29,3 +28,6 @@ capella:
 
 deneb:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/deneb/ -v --timeout 30m
+
+fulu:
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/fulu/ -v --timeout 30m
