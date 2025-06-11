@@ -872,12 +872,6 @@ func String2Appendable(in string) (Appendable, error) {
 	}
 }
 
-type ForkableGroup uint16
-
-const (
-	BorGroup ForkableGroup = iota
-)
-
 // --- Deprecated
 const (
 

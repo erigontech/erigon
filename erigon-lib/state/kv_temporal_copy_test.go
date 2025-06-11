@@ -249,6 +249,26 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
+func (tx *Tx) RoForkables(id kv.ForkableId) any {
+	panic("not implemented")
+}
+
+func (tx *Tx) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) MarkedRw(id kv.ForkableId) kv.MarkedRwTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) RoForkables(id kv.ForkableId) any {
+	panic("not implemented")
+}
+
 func (tx *RwTx) WarmupDB(force bool) error {
 	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
 		return mdbxTx.WarmupDB(force)

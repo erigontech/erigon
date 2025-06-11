@@ -7,13 +7,13 @@ import (
 // forkables
 
 type ForkablesRoTx interface {
-	Marked(ForkableGroup) MarkedRoTx
-	Unmarked(ForkableGroup) UnmarkedRoTx
+	Marked() MarkedRoTx
+	Unmarked() UnmarkedRoTx
 }
 
 type ForkablesRwTx interface {
-	Marked(ForkableGroup) MarkedRwTx
-	Unmarked(ForkableGroup) UnmarkedRwTx
+	Marked() MarkedRwTx
+	Unmarked() UnmarkedRwTx
 }
 
 type ForkableRoTxCommons interface {

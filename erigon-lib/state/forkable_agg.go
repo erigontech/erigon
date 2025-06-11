@@ -22,7 +22,6 @@ type ForkableAgg struct {
 	db     kv.RoDB
 	dirs   datadir.Dirs
 	tmpdir string
-	group  kv.ForkableGroup
 
 	marked          []*Forkable[MarkedTxI]
 	unmarked        []*Forkable[UnmarkedTxI]
@@ -52,7 +51,7 @@ type ForkableAgg struct {
 	logger       log.Logger
 }
 
-func NewForkableAgg(ctx context.Context, group kv.ForkableGroup, dirs datadir.Dirs, db kv.RoDB, logger log.Logger) *ForkableAgg {
+func NewForkableAgg(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger log.Logger) *ForkableAgg {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &ForkableAgg{
 		db:        db,
@@ -67,8 +66,6 @@ func NewForkableAgg(ctx context.Context, group kv.ForkableGroup, dirs datadir.Di
 		mergeWorkers:           1,
 		compressWorkers:        1,
 		ps:                     background.NewProgressSet(),
-		group:                  group,
-
 		// marked:   ap.marked,
 		// unmarked: ap.unmarked,
 		// buffered: ap.buffered,
@@ -110,10 +107,6 @@ func (r *ForkableAgg) SetCompressWorkers(n int) {
 
 func (r *ForkableAgg) SetMergeDisabled(disabled bool) {
 	r.mergeDisabled.Store(disabled)
-}
-
-func (r *ForkableAgg) Group() kv.ForkableGroup {
-	return r.group
 }
 
 // - "open folder"
@@ -544,7 +537,7 @@ type ForkableAggTemporalTx struct {
 	// TODO _leakId logic
 
 	mp map[ForkableId]uint32
-	// TODO map from forkableId -> stragety+index in array; strategy encoded in lowest 2-bits.
+	// map from forkableId -> stragety+index in array; strategy encoded in lowest 2-bits.
 }
 
 func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
@@ -577,10 +570,15 @@ func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 	}
 }
 
+func (r *ForkableAggTemporalTx) IsForkablePresent(id ForkableId) bool {
+	_, ok := r.mp[id]
+	return ok
+}
+
 func (r *ForkableAggTemporalTx) Marked(id ForkableId) MarkedTxI {
 	index, ok := r.mp[id]
 	if !ok {
-		panic(fmt.Errorf("forkable %s not found", id))
+		panic(fmt.Errorf("forkable %s not found", ee.Registry.Name(id)))
 	}
 
 	return r.marked[index>>2]
@@ -589,7 +587,7 @@ func (r *ForkableAggTemporalTx) Marked(id ForkableId) MarkedTxI {
 func (r *ForkableAggTemporalTx) Unmarked(id ForkableId) UnmarkedTxI {
 	index, ok := r.mp[id]
 	if !ok {
-		panic(fmt.Errorf("forkable %s not found", id))
+		panic(fmt.Errorf("forkable %s not found", ee.Registry.Name(id)))
 	}
 	return r.unmarked[index>>2]
 }
@@ -597,7 +595,7 @@ func (r *ForkableAggTemporalTx) Unmarked(id ForkableId) UnmarkedTxI {
 func (r *ForkableAggTemporalTx) Buffered(id ForkableId) BufferedTxI {
 	index, ok := r.mp[id]
 	if !ok {
-		panic(fmt.Errorf("forkable %s not found", id))
+		panic(fmt.Errorf("forkable %s not found", ee.Registry.Name(id)))
 	}
 	return r.buffered[index>>2]
 }

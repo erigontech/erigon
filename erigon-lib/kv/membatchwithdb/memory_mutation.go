@@ -766,3 +766,11 @@ func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
 	panic("not supported")
 }
 func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.(kv.TemporalTx).Debug() }
+
+func (m *MemoryMutation) RoForkables(id kv.ForkableId) any {
+	return m.db.(kv.TemporalTx).RoForkables(id)
+}
+
+func (m *MemoryMutation) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
+	return m.db.(kv.TemporalTx).MarkedRo(id)
+}

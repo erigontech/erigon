@@ -79,11 +79,11 @@ func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB
 	tdb := &DB{RwDB: db, agg: agg}
 	if len(forkaggs) > 0 {
 		tdb.forkaggs = make([]*state.ForkableAgg, len(forkaggs))
-		for _, forkagg := range forkaggs {
-			if tdb != nil {
+		for i, forkagg := range forkaggs {
+			if tdb.forkaggs[i] != nil {
 				panic("forkaggs already set")
 			}
-			tdb.forkaggs[forkagg.Group()] = forkagg
+			tdb.forkaggs[i] = forkagg
 		}
 	}
 	return tdb, nil
@@ -231,6 +231,14 @@ func (tx *tx) Agg() *state.Aggregator { return tx.db.agg }
 func (tx *tx) Rollback() {
 	tx.autoClose()
 }
+func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
+	for i, forkagg := range tx.forkaggs {
+		if forkagg.IsForkablePresent(forkableId) {
+			return i
+		}
+	}
+	panic(fmt.Sprintf("forkable not found: %d", forkableId))
+}
 
 func (tx *Tx) Rollback() {
 	if tx == nil {
@@ -271,12 +279,24 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
-func (tx *Tx) RoForkables(g kv.ForkableGroup) any {
-	return tx.forkaggs[int(g)]
+func (tx *Tx) RoForkables(id kv.ForkableId) any {
+	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
 
-func (tx *Tx) Marked(g kv.ForkableGroup, id kv.ForkableId) kv.MarkedRoTx {
-	return newMarkedRoTx(tx.Tx, tx.forkaggs[int(g)].Marked(id))
+func (tx *Tx) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
+	return newMarkedRoTx(tx.Tx, tx.forkaggs[tx.searchForkableAggIdx(id)].Marked(id))
+}
+
+func (tx *RwTx) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
+	return newMarkedRoTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Marked(id))
+}
+
+func (tx *RwTx) MarkedRw(id kv.ForkableId) kv.MarkedRwTx {
+	return newMarkedRoTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Marked(id))
+}
+
+func (tx *RwTx) RoForkables(id kv.ForkableId) any {
+	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
 
 func (tx *RwTx) WarmupDB(force bool) error {
@@ -588,8 +608,8 @@ func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
 
-func (tx *tx) ForkableAggTx(forkable kv.ForkableGroup) any {
-	return tx.forkaggs[forkable]
+func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
+	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
 
 // func (tx *RwTx) ForkableAgg(forkable kv.ForkableGroup) any {

@@ -75,7 +75,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 			mergedFile.closeFilesAndRemove()
 		}
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("[forkable] merging panic for forkable_%s: %s", f.a, filesToMerge.String(f.snaps.stepSize))
+			err = fmt.Errorf("[forkable] merging panic for forkable_%s: %s", ee.Registry.Name(f.a), filesToMerge.String(f.snaps.stepSize))
 		}
 	}()
 
