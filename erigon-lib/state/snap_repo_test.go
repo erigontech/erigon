@@ -652,7 +652,8 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			seg3, err := seg.NewDecompressor(filename + ".sample")
 			require.NoError(t, err)
 
-			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, seg3, seg.CompressNone, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), false, AccessorBTree|AccessorExistence)
+			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
+			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), false, AccessorBTree|AccessorExistence)
 			if err != nil {
 				t.Fatal(err)
 			}

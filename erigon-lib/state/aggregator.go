@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
 )
 
 type Aggregator struct {
@@ -241,7 +240,7 @@ func (a *Aggregator) ReloadSalt() error {
 func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
 	dd := a.d[dependent]
 	if dd.disable || a.d[dependency].disable {
-		a.logger.Info("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
+		a.logger.Debug("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
 		return
 	}
 	// "hard alignment":
@@ -1664,7 +1663,7 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 	if fi < 0 {
 		return nil, fmt.Errorf("file not found")
 	}
-	r := seg.NewReader(dt.files[fi].src.decompressor.MakeGetter(), dt.d.Compression)
+	r := dt.dataReader(dt.files[fi].src.decompressor)
 	return NewSegStreamReader(r, -1), nil
 }
 

@@ -90,17 +90,17 @@ func TestNilBlobSchedule(t *testing.T) {
 	c.PragueTime = big.NewInt(2)
 
 	// Everything should be 0 before Cancun
-	assert.Equal(t, uint64(0), c.GetTargetBlobGasPerBlock(0))
+	assert.Equal(t, uint64(0), c.GetTargetBlobsPerBlock(0))
 	assert.Equal(t, uint64(0), c.GetMaxBlobsPerBlock(0))
 	assert.Equal(t, uint64(0), c.GetBlobGasPriceUpdateFraction(0))
 
 	// Original EIP-4844 values
-	assert.Equal(t, 3*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(1))
+	assert.Equal(t, uint64(3), c.GetTargetBlobsPerBlock(1))
 	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(1))
 	assert.Equal(t, uint64(3338477), c.GetBlobGasPriceUpdateFraction(1))
 
 	// EIP-7691: Blob throughput increase
-	assert.Equal(t, 6*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(2))
+	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(2))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(2))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(2))
 }
@@ -142,47 +142,47 @@ func TestBlobParameterOnlyHardforks(t *testing.T) {
 	}
 
 	time := uint64(0)
-	assert.Equal(t, uint64(0), c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(0), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(0), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(0), c.GetBlobGasPriceUpdateFraction(time))
 
 	time = cancunTime
-	assert.Equal(t, 3*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(3), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(3338477), c.GetBlobGasPriceUpdateFraction(time))
 
 	time = (cancunTime + pragueTime) / 2
-	assert.Equal(t, 3*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(3), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(3338477), c.GetBlobGasPriceUpdateFraction(time))
 
 	time = pragueTime
-	assert.Equal(t, 6*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 
 	time = (pragueTime + bpo1time) / 2
-	assert.Equal(t, 6*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 
 	time = bpo1time
-	assert.Equal(t, 24*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(24), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(48), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 
 	time = (bpo1time + bpo2time) / 2
-	assert.Equal(t, 24*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(24), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(48), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 
 	time = bpo2time
-	assert.Equal(t, 36*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(36), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(56), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 
 	time = bpo2time * 2
-	assert.Equal(t, 36*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(36), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(56), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 }
@@ -215,7 +215,7 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 	}
 
 	time := pragueTime * 2
-	assert.Equal(t, 6*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 }
@@ -239,7 +239,7 @@ func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	}
 
 	// Prague should take priority
-	assert.Equal(t, 6*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(0))
+	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(0))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(0))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(0))
 }

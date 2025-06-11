@@ -104,7 +104,7 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
 
 	// 1. Require stage_exec > 0: means don't need handle "half-block execution case here"
 	// 2. Require stage_exec > 0: means has enough state-history
@@ -121,7 +121,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 		fromTxNum := progressOfDomains(tx, cfg.Produce)
 		var ok bool
-		ok, startBlock, err = txNumsReader.FindBlockNum(tx, fromTxNum)
+		startBlock, ok, err = txNumsReader.FindBlockNum(tx, fromTxNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
 		}
@@ -281,8 +281,8 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 	receiptProgress := ac.HistoryProgress(domain, tx)
 	accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
 	if accProgress != receiptProgress {
-		_, e1, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
-		_, e2, _ := txNumsReader.FindBlockNum(tx, accProgress)
+		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
 
 		err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
 		log.Warn(err.Error())
@@ -293,7 +293,7 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
 	if !dbg.AssertEnabled {
-		return nil
+		return
 	}
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
@@ -302,7 +302,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.BlockReader))
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return err
@@ -326,14 +326,22 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 			return err
 		}
 		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
-		//fmt.Printf("[dbg.integrity] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
-		if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
-			_min, _ := txNumsReader.Min(tx, blockNum)
-			_max, _ := txNumsReader.Max(tx, blockNum)
-			err := fmt.Errorf("bad receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
-			log.Warn(err.Error())
+		_min, _ := txNumsReader.Min(tx, blockNum)
+		_max, _ := txNumsReader.Max(tx, blockNum)
+
+		lastSystemTxn := txNum == _max
+		empyBlock := _max-_min <= 1
+		if lastSystemTxn || empyBlock {
+			prevCumGasUsed = int(cumGasUsed)
+			prevBN = blockNum
+			continue
+		}
+
+		//duplicateInsideBlock := !blockChanged && int(cumGasUsed) == prevCumGasUsed
+		duplicateInsideBlock := int(cumGasUsed) <= prevCumGasUsed && blockNum == prevBN
+		if duplicateInsideBlock && cumGasUsed != 0 {
+			err := fmt.Errorf("assert: duplicate receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
 			return err
-			//panic(err)
 		}
 		prevCumGasUsed = int(cumGasUsed)
 		prevBN = blockNum
@@ -366,7 +374,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 	var cumulativeBlobGasUsedInBlock uint64
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.BlockReader))
 	fromTxNum, _ := txNumsReader.Min(tx, fromBlock)
 	prevTxNumLog := fromTxNum
 
@@ -473,7 +481,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				if prevTxNumLog > 0 {
 					dbg.ReadMemStats(&m)
 					txsPerSec := (txTask.TxNum - prevTxNumLog) / uint64(logPeriod.Seconds())
-					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", fmt.Sprintf("%dK", txTask.BlockNum/10_000), "tx/s", fmt.Sprintf("%dK", txsPerSec/1_000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", fmt.Sprintf("%dK", txTask.BlockNum/1_000), "tx/s", fmt.Sprintf("%dK", txsPerSec/1_000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				}
 				prevTxNumLog = txTask.TxNum
 			default:
