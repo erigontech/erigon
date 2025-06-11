@@ -149,12 +149,12 @@ type ColumnSidecarsByRangeRequest struct {
 	*/
 	StartSlot uint64
 	Count     uint64
-	Columns   *solid.ListSSZUint64
+	Columns   solid.Uint64ListSSZ
 }
 
 func (c *ColumnSidecarsByRangeRequest) tryInit() {
 	if c.Columns == nil {
-		c.Columns = solid.NewListSSZUint64([]uint64{}, int(clparams.GetBeaconConfig().NumberOfColumns))
+		c.Columns = solid.NewUint64ListSSZ(int(clparams.GetBeaconConfig().NumberOfColumns))
 	}
 }
 
@@ -184,12 +184,12 @@ func (c *ColumnSidecarsByRangeRequest) Static() bool {
 // DataColumnsByRootIdentifier is the request for getting a range of column sidecars by root identifier.
 type DataColumnsByRootIdentifier struct {
 	BlockRoot common.Hash
-	Columns   *solid.ListSSZUint64
+	Columns   solid.Uint64ListSSZ
 }
 
 func (d *DataColumnsByRootIdentifier) tryInit() {
 	if d.Columns == nil {
-		d.Columns = solid.NewListSSZUint64([]uint64{}, int(clparams.GetBeaconConfig().NumberOfColumns))
+		d.Columns = solid.NewUint64ListSSZ(int(clparams.GetBeaconConfig().NumberOfColumns))
 	}
 }
 
