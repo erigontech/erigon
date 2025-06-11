@@ -134,6 +134,7 @@ integration stage_exec
 erigon seg rm-state-snapshots --domain=rcache,logtopics,logaddrs,tracesfrom,tracesto
 integration stage_custom_trace --domain=rcache,logindex,traceindex --reset
 integration stage_custom_trace --domain=rcache,logindex,traceindex
+erigon seg integrity --datadir /erigon-data/ --check=ReceiptsNoDups
 ```
 
 ## How to re-gen bor checkpoints
