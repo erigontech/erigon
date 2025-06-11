@@ -75,7 +75,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, nil
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, blockNum, 0, chainConfig.ChainName)
 	if err != nil {
 		return false, nil, err

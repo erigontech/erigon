@@ -97,7 +97,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	}
 	defer tx.Rollback()
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
 		return StorageRangeResult{}, err
@@ -193,7 +193,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 
 	// forces negative numbers to fail (too large) but allows zero
 	startNum := uint64(startNumber.Int64())
@@ -260,7 +260,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 	defer tx.Rollback()
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 
 	startBlock, err := api.blockByHashWithSenders(ctx, tx, startHash)
 	if err != nil {
@@ -306,7 +306,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	}
 	defer tx.Rollback()
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 
 	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
@@ -511,7 +511,7 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 		return nil, err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {

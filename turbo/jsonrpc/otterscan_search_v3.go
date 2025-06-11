@@ -138,7 +138,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		// Internal search code considers blockNum [including], so adjust the value
 		fromBlockNum--
 	}
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 
 	fromTxNum := -1
 	if fromBlockNum != 0 {
@@ -177,7 +177,7 @@ func createForwardTxNumIter(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader,
 func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
 	isLastPage := false
 	fromTxNum := -1
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 
 	if fromBlockNum == 0 {
 		isLastPage = true

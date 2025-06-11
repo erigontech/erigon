@@ -44,7 +44,7 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 		return false, err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 	reader, err := rpchelper.CreateHistoryStateReader(tx, txNumsReader, blockNumber, 0, chainConfig.ChainName)
 	if err != nil {
 		return false, err
