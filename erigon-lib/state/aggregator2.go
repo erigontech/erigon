@@ -386,7 +386,6 @@ func Compatibility(d datadir.Dirs) error {
 				}
 				requiredVersion, ok := msVs[fileInfo.Ext]
 				if !ok {
-					println("file ext not supported", fileInfo.Ext, "name", name)
 					return nil
 				}
 
