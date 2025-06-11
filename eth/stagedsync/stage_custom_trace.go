@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -480,4 +481,36 @@ func firstStepNotInFiles(tx kv.Tx, produce Produce) uint64 {
 		fromStep = min(fromStep, ac.DbgII(kv.TracesToIdx).FirstStepNotInFiles())
 	}
 	return fromStep
+}
+
+func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Produce) error {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var tables []string
+	if produce.ReceiptDomain {
+		tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
+	}
+	if produce.RCacheDomain {
+		tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
+	}
+	if produce.LogAddr {
+		tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)
+	}
+	if produce.LogTopic {
+		tables = append(tables, db.Debug().InvertedIdxTables(kv.LogTopicIdx)...)
+	}
+	if produce.TraceFrom {
+		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx)...)
+	}
+	if produce.TraceTo {
+		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
+	}
+	if err := backup.ClearTables(ctx, tx, tables...); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
