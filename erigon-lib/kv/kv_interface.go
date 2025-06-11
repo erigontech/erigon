@@ -588,6 +588,10 @@ type TemporalDebugTx interface {
 	DomainFiles(domain ...Domain) VisibleFiles
 
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
+
+	DomainProgress(domain Domain) (txNum uint64)
+	IIProgress(name InvertedIdx) (txNum uint64)
+	StepSize() uint64
 }
 
 type TemporalDebugDB interface {

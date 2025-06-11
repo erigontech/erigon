@@ -41,10 +41,15 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	//toBlock := stageExecProgress
 
 	{
+<<<<<<< HEAD
 		ac := state.AggTx(tx)
 		log.Info("[integrity] ReceiptsNoDuplicates starting", "fromBlock", fromBlock, "toBlock", toBlock)
 		receiptProgress := ac.HistoryProgress(kv.ReceiptDomain, tx)
 		accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
+=======
+		receiptProgress := ac.DomainProgress(kv.ReceiptDomain, tx)
+		accProgress := ac.DomainProgress(kv.AccountsDomain, tx)
+>>>>>>> 8248b85d57 (save)
 		if accProgress != receiptProgress {
 			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
 			log.Warn(err.Error())
