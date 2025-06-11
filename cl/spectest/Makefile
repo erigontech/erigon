@@ -3,7 +3,7 @@
 
 tests:
 	wget https://github.com/ethereum/consensus-spec-tests/releases/download/v1.5.0/mainnet.tar.gz
-	tar --no-xattrs xzf mainnet.tar.gz
+	tar xf mainnet.tar.gz --no-xattrs 
 	rm mainnet.tar.gz
 	# not needed for now
 	rm -rf tests/mainnet/eip6110
