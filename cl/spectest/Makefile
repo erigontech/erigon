@@ -16,9 +16,6 @@ clean:
 mainnet:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/ -v --timeout 30m
 
-electra:
-	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/electra/ -v --timeout 30m
-
 whisk:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/whisk/ -v --timeout 30m
 

@@ -285,12 +285,25 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltype
 				log.Warn("Failed to get validator balance", "index", w.Index, "error", err)
 				return false
 			}
+			// Calculate total withdrawn amount for this validator from previous withdrawals
+			totalWithdrawn := uint64(0)
+			for _, w := range withdrawals {
+				if w.Validator == w.Index {
+					totalWithdrawn += w.Amount
+				}
+			}
+			balance := validatorBalance
+			if validatorBalance > totalWithdrawn {
+				balance = validatorBalance - totalWithdrawn
+			} else {
+				balance = 0
+			}
 			validator := b.ValidatorSet().Get(int(w.Index))
 			if validator.ExitEpoch() == cfg.FarFutureEpoch &&
 				validator.EffectiveBalance() >= cfg.MinActivationBalance &&
-				validatorBalance > cfg.MinActivationBalance {
+				balance > cfg.MinActivationBalance {
 				wd := validator.WithdrawalCredentials()
-				withdrawableBalance := min(validatorBalance-cfg.MinActivationBalance, w.Amount)
+				withdrawableBalance := min(balance-cfg.MinActivationBalance, w.Amount)
 				withdrawals = append(withdrawals, &cltypes.Withdrawal{
 					Index:     nextWithdrawalIndex,
 					Validator: w.Index,
