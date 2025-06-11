@@ -217,11 +217,7 @@ func (t TxNumsReader) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error
 	}
 	defer c.Close()
 
-<<<<<<< HEAD
-	maxTxNum, ok, err := t.readTxNumFunc(tx, c, blockNum-1)
-=======
-	minTxNum, ok, err := t.index.MaxTxNum(tx, c, blockNum-1)
->>>>>>> 1760f16646 (optimise FindBlockNum (#15398))
+	maxTxNum, ok, err := t.index.MaxTxNum(tx, c, blockNum-1)
 	if err != nil {
 		return 0, err
 	}
