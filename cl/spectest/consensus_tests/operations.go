@@ -17,14 +17,12 @@
 package consensus_tests
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/spectest"
 
@@ -328,12 +326,6 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 		return err
 	}
 
-	for i := 0; i < executionPayload.Withdrawals.Len(); i++ {
-		log.Info("[aaaa] withdrawal %d: %v\n", i, executionPayload.Withdrawals.Get(i))
-	}
-
-	bytes, _ := json.Marshal(executionPayload.Withdrawals)
-
 	if err := c.Machine.ProcessWithdrawals(preState, executionPayload.Withdrawals); err != nil {
 		if expectedError {
 			return nil
@@ -348,7 +340,7 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, expectedRoot, haveRoot, "aaaa withdrawals: %s", string(bytes))
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
