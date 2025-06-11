@@ -175,8 +175,8 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	db.RwDB.Close()
 	db.agg.Close()
+	db.RwDB.Close()
 }
 
 func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
