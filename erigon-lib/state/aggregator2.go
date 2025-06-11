@@ -384,14 +384,12 @@ func Compatibility(d datadir.Dirs) error {
 					//println("file type not supported", fileInfo.TypeString, name)
 					return nil
 				}
-				println("fileInfoExt", fileInfo.Ext, fileInfo.TypeString)
 				requiredVersion, ok := msVs[fileInfo.Ext]
 				if !ok {
 					println("file ext not supported", fileInfo.Ext, "name", name)
 					return nil
 				}
 
-				println("versions:", currentFileVersion.String(), requiredVersion.String())
 				if currentFileVersion.Major < requiredVersion.Major {
 					return fmt.Errorf("version mismatch: need files at least version %d for file %s to start Erigon "+
 						"properly. Doublecheck the version pls", requiredVersion.Major, fileInfo.Name())

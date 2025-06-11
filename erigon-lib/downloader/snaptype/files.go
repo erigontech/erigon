@@ -197,6 +197,8 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		res.Type, ok = ParseFileType(typeString)
 		if ok {
 			res.CaplinTypeString = res.Type.Name()
+		} else {
+			return res, isStateFile, false
 		}
 	}
 	if caplin {
