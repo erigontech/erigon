@@ -26,42 +26,46 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	fromBlock := uint64(1)
-	stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return err
-	}
-	toBlock := stageExecProgress
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
-	if err != nil {
-		return err
-	}
-	if toBlock > 0 {
-		toBlock-- // [fromBlock,toBlock)
-	}
-
-	ac := state.AggTx(tx)
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
-	if err != nil {
-		return err
-	}
-	log.Info("[integrity] ReceiptsNoDuplicates starting", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
-
+	var fromBlock, toBlock uint64
 	{
-		receiptProgress := ac.HistoryProgress(kv.ReceiptDomain, tx)
-		accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
-		if accProgress != receiptProgress {
-			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
-			log.Warn(err.Error())
+		tx, err := db.BeginTemporalRo(ctx)
+		if err != nil {
+			return err
 		}
+		defer tx.Rollback()
+
+		fromBlock = uint64(1)
+		stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		toBlock = stageExecProgress
+
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
+		fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+		if err != nil {
+			return err
+		}
+		if toBlock > 0 {
+			toBlock-- // [fromBlock,toBlock)
+		}
+
+		ac := state.AggTx(tx)
+		toTxNum, err := txNumsReader.Max(tx, toBlock)
+		if err != nil {
+			return err
+		}
+		log.Info("[integrity] ReceiptsNoDuplicates starting", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
+
+		{
+			receiptProgress := ac.HistoryProgress(kv.ReceiptDomain, tx)
+			accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
+			if accProgress != receiptProgress {
+				err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
+				log.Warn(err.Error())
+			}
+		}
+		tx.Rollback()
 	}
 
 	wg := errgroup.Group{}
@@ -70,6 +74,12 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	batchSize := uint64(50_000)
 	for bn := fromBlock; bn < toBlock; bn += batchSize {
 		wg.Go(func() error {
+			tx, err := db.BeginTemporalRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+
 			if err := receiptsNoDuplicatesRange(ctx, bn, min(bn+batchSize, toBlock), tx, blockReader, failFast); err != nil {
 				return err
 			}
