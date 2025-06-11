@@ -170,6 +170,10 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
+	requestProcessStart := time.Now()
+	defer func() {
+		s.logger.Info("[newPayload] processing time", "duration")
+	}()
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
