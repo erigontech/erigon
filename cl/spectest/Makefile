@@ -22,5 +22,8 @@ whisk:
 eip7594:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/eip7594/ -v --timeout 30m
 
+capella:
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/capella/ -v --timeout 30m
+
 deneb:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/deneb/ -v --timeout 30m
