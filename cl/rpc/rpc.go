@@ -115,7 +115,8 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRootProtocolV1, buffer.Bytes(), uint64(req.Len()))
+	data := common.CopyBytes(buffer.Bytes())
+	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, uint64(req.Len()))
 	if err != nil {
 		return nil, pid, err
 	}
