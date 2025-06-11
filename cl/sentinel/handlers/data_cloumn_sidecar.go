@@ -28,7 +28,6 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 
 	count := 0
 
-loop:
 	for slot := req.StartSlot; slot < req.StartSlot+req.Count; slot++ {
 		if slot > curSlot {
 			// slot is in the future
@@ -54,20 +53,21 @@ loop:
 			continue
 		}
 
-		for _, columnIndex := range req.Columns.List() {
+		req.Columns.Range(func(index int, columnIndex uint64, length int) bool {
 			if count >= int(c.beaconConfig.MaxRequestDataColumnSidecars) {
 				// max number of sidecars reached
-				break loop
+				return false
 			}
 			if columnIndex >= c.beaconConfig.NumberOfColumns {
 				// skip invalid column index
-				continue
+				return true
 			}
 			if err := c.dataColumnStorage.WriteStream(s, slot, blockRoot, columnIndex); err != nil {
-				return err
+				return false
 			}
 			count++
-		}
+			return true
+		})
 	}
 
 	return nil
@@ -88,7 +88,6 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	defer tx.Rollback()
 
 	count := 0
-loop:
 	for i := 0; i < req.Len(); i++ {
 		id := req.Get(i)
 		blockRoot := id.BlockRoot
@@ -115,20 +114,21 @@ loop:
 			continue
 		}
 
-		for _, columnIndex := range columns.List() {
+		columns.Range(func(index int, columnIndex uint64, length int) bool {
 			if count >= int(c.beaconConfig.MaxRequestDataColumnSidecars) {
 				// max number of sidecars reached
-				break loop
+				return false
 			}
 			if columnIndex >= c.beaconConfig.NumberOfColumns {
 				// skip invalid column index
-				continue
+				return true
 			}
 			if err := c.dataColumnStorage.WriteStream(s, *slot, blockRoot, columnIndex); err != nil {
-				return err
+				return false
 			}
 			count++
-		}
+			return true
+		})
 	}
 	return nil
 }
