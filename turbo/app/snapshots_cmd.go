@@ -384,7 +384,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			}
 
 			// check that commitment file has state in it
-			// When domains are "purified", we want to keep latest commitment file with state key in it
+			// When domains are "compacted", we want to keep latest commitment file with state key in it
 			if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
 				const trieStateKey = "state"
 
@@ -510,7 +510,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			}
 			minS, maxS = 0, math.MaxUint64
 
-		} else { // prevent all commitment files with trie state from deletion for "purified" domains case
+		} else { // prevent all commitment files with trie state from deletion for "compacted" domains case
 			hasStateTrie := 0
 			for _, file := range commitmentFilesWithState {
 				if file.To <= minS {
