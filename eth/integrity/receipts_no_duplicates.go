@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -50,8 +53,6 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	if err != nil {
 		return err
 	}
-	prevCumGasUsed := -1
-	prevBN := uint64(1)
 	log.Info("[integrity] ReceiptsNoDuplicates starting", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
 
 	{
@@ -62,6 +63,41 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 			log.Warn(err.Error())
 		}
 	}
+
+	wg := errgroup.Group{}
+	wg.SetLimit(estimate.AlmostAllCPUs())
+
+	batchSize := uint64(50_000)
+	for bn := fromBlock; bn < toBlock; bn += batchSize {
+		wg.Go(func() error {
+			if err := receiptsNoDuplicatesRange(ctx, bn, min(bn+batchSize, toBlock), tx, blockReader, failFast); err != nil {
+				return err
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", bn/1_000, toBlock/1_000))
+			default:
+			}
+			return nil
+		})
+	}
+	if err := wg.Wait(); err != nil {
+		return nil
+	}
+
+	return nil
+}
+func receiptsNoDuplicatesRange(ctx context.Context, fromTxNum, toTxNum uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	prevCumGasUsed := -1
+	prevBN := uint64(1)
+	log.Info("[integrity] ReceiptsNoDuplicates starting", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
 
 	var cumGasUsed uint64
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
