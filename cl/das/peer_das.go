@@ -210,7 +210,7 @@ mainloop:
 				delete(requestMap[blockRoot], uint64(sidecar.Index))
 			}
 			// check if there are any remaining requests and send again if there are
-			r := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestDataColumnSidecars))
+			r := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
 			for blockRoot, columns := range requestMap {
 				id := &cltypes.DataColumnsByRootIdentifier{
 					BlockRoot: blockRoot,
@@ -259,7 +259,7 @@ func (d *peerdas) composeIdentifierRequest(ctx context.Context, blocks []*cltype
 		return nil, err
 	}
 
-	ids := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestDataColumnSidecars))
+	ids := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion {
 			continue
