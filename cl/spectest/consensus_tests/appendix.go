@@ -193,7 +193,8 @@ func addSszTests() {
 		With("WithdrawalRequest", sszStaticTestByEmptyObject(&solid.WithdrawalRequest{}, runAfterVersion(clparams.ElectraVersion))).
 		With("DepositRequest", sszStaticTestByEmptyObject(&solid.DepositRequest{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
 		With("ConsolidationRequest", sszStaticTestByEmptyObject(&solid.ConsolidationRequest{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
-		With("PendingConsolidation", sszStaticTestByEmptyObject(&solid.PendingConsolidation{}, runAfterVersion(clparams.ElectraVersion))).        // no need json test
-		With("PendingDeposit", sszStaticTestByEmptyObject(&solid.PendingDeposit{}, runAfterVersion(clparams.ElectraVersion))).                    // no need json test
-		With("PendingPartialWithdrawal", sszStaticTestByEmptyObject(&solid.PendingPartialWithdrawal{}, runAfterVersion(clparams.ElectraVersion))) // no need json test
+		With("PendingConsolidation", sszStaticTestByEmptyObject(&solid.PendingConsolidation{}, runAfterVersion(clparams.ElectraVersion))).         // no need json test
+		With("PendingDeposit", sszStaticTestByEmptyObject(&solid.PendingDeposit{}, runAfterVersion(clparams.ElectraVersion))).                     // no need json test
+		With("PendingPartialWithdrawal", sszStaticTestByEmptyObject(&solid.PendingPartialWithdrawal{}, runAfterVersion(clparams.ElectraVersion))). // no need json test
+		With("DataColumnsByRootIdentifier", sszStaticTestByEmptyObject(&cltypes.DataColumnsByRootIdentifier{}, runAfterVersion(clparams.FuluVersion)))
 }

@@ -150,3 +150,19 @@ func ListObjectSSZRoot[T ssz.HashableSSZ](list []T, limit uint64) ([32]byte, err
 	lenLeaf := Uint64Root(uint64(len(list)))
 	return utils.Sha256(vectorLeaf[:], lenLeaf[:]), nil
 }
+
+func ListUint64SSZRoot(list []uint64, limit uint64) ([32]byte, error) {
+	globalHasher.mu2.Lock()
+	defer globalHasher.mu2.Unlock()
+	// due to go generics we cannot make a method for global hasher.
+	subLeaves := globalHasher.getBufferForSSZList(len(list))
+	for i, element := range list {
+		subLeaves[i] = Uint64Root(element)
+	}
+	vectorLeaf, err := MerkleizeVector(subLeaves, limit)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	lenLeaf := Uint64Root(uint64(len(list)))
+	return utils.Sha256(vectorLeaf[:], lenLeaf[:]), nil
+}
