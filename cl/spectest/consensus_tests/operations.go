@@ -339,7 +339,7 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, expectedRoot, haveRoot, "aaaa withdrawals: %s", string(bytes))
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
