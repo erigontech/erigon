@@ -90,14 +90,11 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 
 	return nil
 }
+
 func receiptsNoDuplicatesRange(ctx context.Context, fromTxNum, toTxNum uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
 	prevCumGasUsed := -1
 	prevBN := uint64(1)
-	log.Info("[integrity] ReceiptsNoDuplicates starting", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
 
 	var cumGasUsed uint64
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
@@ -131,8 +128,6 @@ func receiptsNoDuplicatesRange(ctx context.Context, fromTxNum, toTxNum uint64, t
 		select {
 		case <-ctx.Done():
 			return
-		case <-logEvery.C:
-			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", blockNum/1_000, toBlock/1_000))
 		default:
 		}
 	}
