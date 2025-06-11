@@ -115,9 +115,10 @@ func (d *peerdas) downloadFromPeers(ctx context.Context, request *solid.ListSSZ[
 		if _, ok := requestMap[blockRoot]; !ok {
 			requestMap[blockRoot] = make(map[uint64]bool)
 		}
-		for _, column := range req.Columns.List() {
+		req.Columns.Range(func(index int, column uint64, length int) bool {
 			requestMap[blockRoot][column] = true
-		}
+			return true
+		})
 	}
 
 	stopChan := make(chan struct{})
@@ -211,16 +212,14 @@ mainloop:
 			// check if there are any remaining requests and send again if there are
 			r := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestDataColumnSidecars))
 			for blockRoot, columns := range requestMap {
-				columns := make([]uint64, 0, len(columns))
+				id := &cltypes.DataColumnsByRootIdentifier{
+					BlockRoot: blockRoot,
+					Columns:   solid.NewUint64ListSSZ(int(d.beaconConfig.NumberOfColumns)),
+				}
 				for column := range columns {
-					columns = append(columns, uint64(column))
+					id.Columns.Append(column)
 				}
-				if len(columns) > 0 {
-					r.Append(&cltypes.DataColumnsByRootIdentifier{
-						BlockRoot: blockRoot,
-						Columns:   solid.NewListSSZUint64(columns, int(d.beaconConfig.NumberOfColumns)),
-					})
-				}
+				r.Append(id)
 			}
 			if r.Len() == 0 {
 				break mainloop
@@ -277,10 +276,14 @@ func (d *peerdas) composeIdentifierRequest(ctx context.Context, blocks []*cltype
 		if err != nil {
 			return nil, err
 		}
-		ids.Append(&cltypes.DataColumnsByRootIdentifier{
+		id := &cltypes.DataColumnsByRootIdentifier{
 			BlockRoot: blockRoot,
-			Columns:   solid.NewListSSZUint64(columns, int(d.beaconConfig.NumberOfColumns)),
-		})
+			Columns:   solid.NewUint64ListSSZ(int(d.beaconConfig.NumberOfColumns)),
+		}
+		for _, column := range columns {
+			id.Columns.Append(column)
+		}
+		ids.Append(id)
 	}
 	return ids, nil
 }
