@@ -29,5 +29,8 @@ capella:
 deneb:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/deneb/ -v --timeout 30m
 
+electra:
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/electra/ -v --timeout 30m
+
 fulu:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/fulu/ -v --timeout 30m
