@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
-	"runtime/pprof"
 
 	"github.com/urfave/cli/v2"
 
@@ -88,7 +86,6 @@ func initGenesis(cliCtx *cli.Context) error {
 	if err != nil {
 		utils.Fatalf("Failed to stat genesis file: %v", err)
 	}
-	// Use streaming for files larger than 100MB
 	if fileInfo.Size() > largeGenesisFileThreshold {
 		logger.Info("Using streaming JSON parser for large genesis file", "size", fileInfo.Size())
 		if err := parseGenesisStreaming(file, genesis, logger); err != nil {
@@ -97,16 +94,6 @@ func initGenesis(cliCtx *cli.Context) error {
 	} else if err = json.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
-	logger.Info("after parseGenesisStreaming,GC")
-	runtime.GC()
-	// TODO:DEBUG:record final allocation profile
-	if allocFile, err := os.Create("initgenesis_alloc_final.prof"); err == nil {
-		defer allocFile.Close()
-		pprof.Lookup("allocs").WriteTo(allocFile, 0)
-		logger.Info("Allocation profile saved", "stage", "final", "file", "initgenesis_alloc_final.prof")
-	}
-	//TODO: just test json decode to save time
-	return nil
 
 	// Open and initialise both full and light databases
 	stack, err := MakeNodeWithDefaultConfig(cliCtx, logger)
@@ -119,16 +106,18 @@ func initGenesis(cliCtx *cli.Context) error {
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
 	}
-	defer chaindb.Close()
 
-	if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
-		tracer.Hooks.OnBlockchainInit(genesis.Config)
+	if tracer != nil {
+		if tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+			tracer.Hooks.OnBlockchainInit(genesis.Config)
+		}
 	}
 
 	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}
+	chaindb.Close()
 	logger.Info("Successfully wrote genesis state", "hash", hash.Hash())
 	return nil
 }
@@ -157,7 +146,6 @@ func parseGenesisStreaming(r io.Reader, genesis *types.Genesis, logger log.Logge
 
 // parseAllocStreaming parses the alloc section of genesis file entry by entry.
 func parseAllocStreaming(decoder *json.Decoder, alloc types.GenesisAlloc, logger log.Logger) error {
-	// The handler for each entry in the "alloc" object.
 	handler := func(addrStr string, d *json.Decoder, l log.Logger) error {
 		addr := common.HexToAddress(addrStr)
 		account, err := parseGenesisAccountStreaming(d, l)
