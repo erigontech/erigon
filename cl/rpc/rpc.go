@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -129,6 +130,10 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 		}
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
+
+	bytes, _ := json.Marshal(ColumnSidecars)
+	log.Info("[test] success to send column sidecars", "bytes", string(bytes))
+
 	return ColumnSidecars, pid, nil
 }
 
