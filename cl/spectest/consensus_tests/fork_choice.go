@@ -266,7 +266,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 
 			}
 
-			err = forkStore.OnBlock(ctx, blk, true, true, false)
+			err = forkStore.OnBlock(ctx, blk, true, true, true)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {
