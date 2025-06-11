@@ -714,6 +714,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
 				return err
 			}
+		case integrity.HeaderNoGaps:
+			if err := integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
 		case integrity.Blocks:
 			if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
 				return err
