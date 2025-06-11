@@ -644,13 +644,14 @@ func (c *bn256AddByzantium) Run(input []byte) ([]byte, error) {
 // runBn256ScalarMul implements the Bn256ScalarMul precompile, referenced by
 // both Byzantium and Istanbul operations.
 func runBn256ScalarMul(input []byte) ([]byte, error) {
-	p, err := newCurvePoint(getData(input, 0, 64))
-	if err != nil {
-		return nil, err
+	x := getData(input, 0, 64)
+	s := getData(input, 64, 32)
+	var out [64]byte
+	if evmone.EcMul(&out, (*[64]byte)(x), (*[32]byte)(s)) {
+		return out[:], nil
+	} else {
+		return nil, errors.New("bn256: invalid point")
 	}
-	res := new(bn256.G1)
-	res.ScalarMult(p, new(big.Int).SetBytes(getData(input, 64, 32)))
-	return res.Marshal(), nil
 }
 
 // bn256ScalarMulIstanbul implements a native elliptic curve scalar
