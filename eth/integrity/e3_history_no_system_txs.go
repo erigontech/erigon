@@ -95,15 +95,15 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 							log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/agg.StepSize(), txNum, blockNum, key))
 							break
 						}
-
-						select {
-						case <-logEvery.C:
-							log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: checked=%dK keys", count.Load()/1_000))
-						default:
-						}
 					}
 					it.Close()
 					count.Add(1)
+
+					select {
+					case <-logEvery.C:
+						log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: checked=%.2fm keys", float64(count.Load())/1_000_000))
+					default:
+					}
 				}
 				return nil
 			})
