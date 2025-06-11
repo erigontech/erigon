@@ -49,6 +49,7 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 		progress := ac.HistoryProgress(kv.ReceiptDomain, rtx)
 		assert.Greater(progress, uint64(0), "Receipt domain progress should be greater than 0")
 
+		//check couple empty blocks
 		cumGasUsed, _, logIndex, err := rawtemporaldb.ReceiptAsOf(rtx, 3)
 		require.NoError(err)
 		assert.Equal(0, int(cumGasUsed))
