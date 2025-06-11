@@ -85,7 +85,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		})
 	}
 	if err := wg.Wait(); err != nil {
-		return nil
+		return err
 	}
 
 	return nil
