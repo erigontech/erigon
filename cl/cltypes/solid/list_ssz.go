@@ -220,11 +220,12 @@ var (
 )
 
 type ListSSZUint64 struct {
-	list []uint64
+	list  []uint64
+	limit int
 }
 
-func NewListSSZUint64(list []uint64) *ListSSZUint64 {
-	return &ListSSZUint64{list: list}
+func NewListSSZUint64(list []uint64, limit int) *ListSSZUint64 {
+	return &ListSSZUint64{list: list, limit: limit}
 }
 
 func (l *ListSSZUint64) List() []uint64 {
@@ -259,4 +260,8 @@ func (l *ListSSZUint64) Clone() clonable.Clonable {
 
 func (l *ListSSZUint64) Static() bool {
 	return false
+}
+
+func (l *ListSSZUint64) HashSSZ() ([32]byte, error) {
+	return merkle_tree.ListUint64SSZRoot(l.list, uint64(l.limit))
 }

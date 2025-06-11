@@ -1,8 +1,6 @@
 package cltypes
 
 import (
-	"errors"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -151,18 +149,27 @@ type ColumnSidecarsByRangeRequest struct {
 	*/
 	StartSlot uint64
 	Count     uint64
-	Columns   solid.ListSSZUint64
+	Columns   *solid.ListSSZUint64
+}
+
+func (c *ColumnSidecarsByRangeRequest) tryInit() {
+	if c.Columns == nil {
+		c.Columns = solid.NewListSSZUint64([]uint64{}, int(clparams.GetBeaconConfig().NumberOfColumns))
+	}
 }
 
 func (c *ColumnSidecarsByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, c.StartSlot, c.Count, &c.Columns)
+	c.tryInit()
+	return ssz2.MarshalSSZ(buf, &c.StartSlot, &c.Count, c.Columns)
 }
 
 func (c *ColumnSidecarsByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, &c.StartSlot, &c.Count, &c.Columns)
+	c.tryInit()
+	return ssz2.UnmarshalSSZ(buf, 0, &c.StartSlot, &c.Count, c.Columns)
 }
 
 func (c *ColumnSidecarsByRangeRequest) EncodingSizeSSZ() int {
+	c.tryInit()
 	return 16 + c.Columns.EncodingSizeSSZ()
 }
 
@@ -177,18 +184,27 @@ func (c *ColumnSidecarsByRangeRequest) Static() bool {
 // DataColumnsByRootIdentifier is the request for getting a range of column sidecars by root identifier.
 type DataColumnsByRootIdentifier struct {
 	BlockRoot common.Hash
-	Columns   solid.ListSSZUint64
+	Columns   *solid.ListSSZUint64
+}
+
+func (d *DataColumnsByRootIdentifier) tryInit() {
+	if d.Columns == nil {
+		d.Columns = solid.NewListSSZUint64([]uint64{}, int(clparams.GetBeaconConfig().NumberOfColumns))
+	}
 }
 
 func (d *DataColumnsByRootIdentifier) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, d.BlockRoot[:], &d.Columns)
+	d.tryInit()
+	return ssz2.MarshalSSZ(buf, d.BlockRoot[:], d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, d.BlockRoot[:], &d.Columns)
+	d.tryInit()
+	return ssz2.UnmarshalSSZ(buf, 0, d.BlockRoot[:], d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) EncodingSizeSSZ() int {
+	d.tryInit()
 	return 32 + d.Columns.EncodingSizeSSZ()
 }
 
@@ -201,5 +217,6 @@ func (d *DataColumnsByRootIdentifier) Static() bool {
 }
 
 func (d *DataColumnsByRootIdentifier) HashSSZ() ([32]byte, error) {
-	return [32]byte{}, errors.New("don't call this method")
+	d.tryInit()
+	return merkle_tree.HashTreeRoot(d.BlockRoot[:], d.Columns)
 }
