@@ -139,7 +139,10 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
 	req := &cltypes.ColumnSidecarsByRangeRequest{
 		StartSlot: start,
 		Count:     count,
-		Columns:   solid.NewListSSZUint64(columns, int(b.beaconConfig.NumberOfColumns)),
+		Columns:   solid.NewUint64ListSSZ(int(b.beaconConfig.NumberOfColumns)),
+	}
+	for _, column := range columns {
+		req.Columns.Append(column)
 	}
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
