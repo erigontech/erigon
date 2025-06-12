@@ -30,6 +30,7 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/holiman/uint256"
+	"github.com/ncw/gmp"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/erigontech/erigon-lib/chain"
@@ -527,13 +528,15 @@ var (
 	errModExpBaseLengthTooLarge     = errors.New("base length is too large")
 	errModExpExponentLengthTooLarge = errors.New("exponent length is too large")
 	errModExpModulusLengthTooLarge  = errors.New("modulus length is too large")
+
+	gmp1 = gmp.NewInt(1)
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	var (
-		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
-		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+		baseLen = new(gmp.Int).SetBytes(getData(input, 0, 32)).Uint64()
+		expLen  = new(gmp.Int).SetBytes(getData(input, 32, 32)).Uint64()
+		modLen  = new(gmp.Int).SetBytes(getData(input, 64, 32)).Uint64()
 	)
 	if c.osaka {
 		// EIP-7823: Set upper bounds for MODEXP
@@ -559,16 +562,16 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	}
 	// Retrieve the operands and execute the exponentiation
 	var (
-		base = new(big.Int).SetBytes(getData(input, 0, baseLen))
-		exp  = new(big.Int).SetBytes(getData(input, baseLen, expLen))
-		mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
+		base = new(gmp.Int).SetBytes(getData(input, 0, baseLen))
+		exp  = new(gmp.Int).SetBytes(getData(input, baseLen, expLen))
+		mod  = new(gmp.Int).SetBytes(getData(input, baseLen+expLen, modLen))
 		v    []byte
 	)
 	switch {
 	case mod.BitLen() == 0:
 		// Modulo 0 is undefined, return zero
 		return common.LeftPadBytes([]byte{}, int(modLen)), nil
-	case base.Cmp(common.Big1) == 0:
+	case base.Cmp(gmp1) == 0:
 		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
 		v = base.Mod(base, mod).Bytes()
 	//case mod.Bit(0) == 0:
