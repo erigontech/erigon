@@ -107,6 +107,9 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	if resp.Header.Get("REQRESP-RESPONSE-CODE") != "0" {
 		a, _ := io.ReadAll(resp.Body)
 		//TODO: proper errors
+		digest := common.Bytes4{}
+		copy(digest[:], status.ForkDigest[:])
+		log.Debug("hand shake error", "status.ForkDigest", digest, "status.HeadSlot", status.HeadSlot)
 		return false, fmt.Errorf("hand shake error: %s, %s", resp.Header.Get("REQRESP-RESPONSE-CODE"), string(a))
 	}
 	responseStatus := &cltypes.Status{}
