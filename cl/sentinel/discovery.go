@@ -184,6 +184,7 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 			s.host.Peerstore().RemovePeer(peerId)
 			s.host.Network().ClosePeer(peerId)
 			s.peers.RemovePeer(peerId)
+			return
 		}
 		valid, err := s.handshaker.ValidatePeer(peerId)
 		if err != nil {
