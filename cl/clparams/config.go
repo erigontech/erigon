@@ -660,8 +660,8 @@ type BeaconChainConfig struct {
 
 // GetBlobParameters returns the blob parameters at a given epoch
 func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
-	// Iterate through schedule in reverse epoch order
-	for i := len(b.BlobSchedule) - 1; i >= 0; i-- {
+	// Iterate through schedule in desceding order
+	for i := range b.BlobSchedule {
 		entry := b.BlobSchedule[i]
 		if epoch >= entry.Epoch {
 			return entry
