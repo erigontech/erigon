@@ -31,6 +31,7 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/holiman/uint256"
 
+	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -38,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/blake2b"
 	"github.com/erigontech/erigon-lib/crypto/bn256"
-	"github.com/consensys/gnark-crypto/ecc/bn254"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/crypto/secp256r1"
 	"github.com/erigontech/erigon/core/tracing"
