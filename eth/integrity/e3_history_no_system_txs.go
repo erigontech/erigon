@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -42,6 +43,8 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	defer logEvery.Stop()
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	g := &errgroup.Group{}
+	g.SetLimit(estimate.AlmostAllCPUs())
+
 	for j := 0; j < 256; j++ {
 		j := j
 		for jj := 0; jj < 255; jj++ {
@@ -60,7 +63,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 				}
 				defer keys.Close()
 
-				txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+				txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 
 				for keys.HasNext() {
 					key, _, err := keys.Next()
@@ -76,7 +79,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 						if err != nil {
 							return err
 						}
-						ok, blockNum, err := txNumsReader.FindBlockNum(tx, txNum)
+						blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
 						if err != nil {
 							return err
 						}

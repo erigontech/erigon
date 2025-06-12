@@ -93,7 +93,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			}
 			accessor := item.index
 			if accessor == nil {
-				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
+				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.aggStep, item.endTxNum/dt.aggStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
@@ -195,8 +195,4 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
 	}
 	return nil
-}
-
-func InitAccountSchemaIntegrity() {
-	Schema.AccountsDomain.crossDomainIntegrity = domainIntegrityCheck
 }

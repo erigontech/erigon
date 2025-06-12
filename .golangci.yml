@@ -54,8 +54,9 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - regexpMust
+        - unnecessaryDefer
         - appendAssign
+        - regexpMust
         - rangeValCopy
         - exitAfterDefer
         - elseif
@@ -74,7 +75,6 @@ linters:
         - returnAfterHttpError
         - weakCond
         - builtinShadowDecl
-        - unnecessaryDefer
         - uncheckedInlineErr
         - preferStringWriter
         - commentedOutCode
@@ -137,10 +137,6 @@ linters:
           - gocritic
           - gosec
         path: metrics/sample\.go
-      - linters:
-          - gocritic
-          - gosec
-        path: p2p/simulations
       - linters:
           - gocritic
           - gosec

@@ -546,7 +546,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	}
 	defer tx.Rollback()
 
-	stateReader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, "")
+	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st := state.New(stateReader)
 	require.NoError(t, err)
@@ -554,7 +554,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
 
-	stateReader, err = rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 2, 0, "")
+	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
 	require.NoError(t, err)

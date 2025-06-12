@@ -24,8 +24,10 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/core/state"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -43,6 +45,8 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	switch {
 	case evm.chainRules.IsOsaka:
 		precompiles = PrecompiledContractsOsaka
+	case evm.chainRules.IsBhilai:
+		precompiles = PrecompiledContractsBhilai
 	case evm.chainRules.IsPrague:
 		precompiles = PrecompiledContractsPrague
 	case evm.chainRules.IsNapoli:
@@ -76,7 +80,7 @@ type EVM struct {
 	Context evmtypes.BlockContext
 	evmtypes.TxContext
 	// IntraBlockState gives access to the underlying state
-	intraBlockState evmtypes.IntraBlockState
+	intraBlockState *state.IntraBlockState
 
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
@@ -98,7 +102,7 @@ type EVM struct {
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
-func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
+func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
@@ -107,13 +111,13 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
-		intraBlockState: state,
+		intraBlockState: ibs,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
 	}
 	if evm.config.JumpDestCache == nil {
-		evm.config.JumpDestCache = NewJumpDestCache(jumpDestCacheLimit)
+		evm.config.JumpDestCache = NewJumpDestCache(JumpDestCacheLimit)
 	}
 
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
@@ -123,7 +127,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 
 // Reset resets the EVM with a new transaction context.Reset
 // This is not threadsafe and should only be done very cautiously.
-func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
+func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
 
@@ -131,7 +135,7 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.abort.Store(false)
 }
 
-func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
+func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
@@ -243,7 +247,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 		// but is the correct thing to do and matters on other networks, in tests, and potential
 		// future scenarios
-		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
+		evm.intraBlockState.AddBalance(addr, *u256.Num0, tracing.BalanceChangeTouchAccount)
 	}
 
 	// It is allowed to call precompiles, even via delegatecall
@@ -285,7 +289,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		evm.intraBlockState.RevertToSnapshot(snapshot)
+		evm.intraBlockState.RevertToSnapshot(snapshot, err)
 		if err != ErrExecutionReverted {
 			if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 				evm.Config().Tracer.OnGasChange(gas, 0, tracing.GasChangeCallFailedExecution)
@@ -407,8 +411,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if err != nil {
 		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if nonce != 0 ||
-		(contractHash != (common.Hash{}) && contractHash != empty.CodeHash) { // non-empty storage
+	hasStorage, err := evm.intraBlockState.HasStorage(address)
+	if err != nil {
+		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != empty.CodeHash) || hasStorage {
 		err = ErrContractAddressCollision
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining, 0, tracing.GasChangeCallFailedExecution)
@@ -464,7 +471,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in homestead this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.intraBlockState.RevertToSnapshot(snapshot)
+		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
 		if err != ErrExecutionReverted {
 			contract.UseGas(contract.Gas, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
 		}
@@ -525,7 +532,7 @@ func (evm *EVM) ChainRules() *chain.Rules {
 }
 
 // IntraBlockState returns the EVM's IntraBlockState
-func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
+func (evm *EVM) IntraBlockState() *state.IntraBlockState {
 	return evm.intraBlockState
 }
 

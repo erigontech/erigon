@@ -43,16 +43,16 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, d
 	sdc.mainTtx.SetLimitReadAsOfTxNum(txNum, domainOnly)
 }
 
-func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 	}
 
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.AggTx().a.tmpdir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	trieCtx := &TrieContext{
-		roTtx:  sd.roTtx,
-		getter: sd, // to read from sd cache as well
-		sd:     sd,
+		roTtx:  tx,
+		getter: sd.AsGetter(tx),
+		putter: sd.AsPutDel(tx),
 
 		stepSize: sd.StepSize(),
 	}
@@ -109,7 +109,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 }
 
 // Evaluates commitment for gathered updates.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, txNum uint64, logPrefix string) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -137,7 +137,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
-		if err = sdc.encodeAndStoreCommitmentState(blockNum, sdc.sharedDomains.txNum, rootHash); err != nil {
+		if err = sdc.encodeAndStoreCommitmentState(blockNum, txNum, rootHash); err != nil {
 			return nil, err
 		}
 	}
@@ -188,7 +188,7 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.Tx) (blockNum, txNum uint64, ok bool, err error) {
+func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (blockNum, txNum uint64, ok bool, err error) {
 	_, _, state, err := sdc.LatestCommitmentState()
 	if err != nil {
 		return 0, 0, false, err
@@ -232,7 +232,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		return 0, 0, true, nil
 	}
 
-	newRh, err := sdc.rebuildCommitment(ctx, sdc.sharedDomains.roTtx, blockNum, txNum)
+	newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -382,13 +382,14 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 	}
 
 	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
+	return sdc.ComputeCommitment(ctx, true, blockNum, txNum, "rebuild commit")
 }
 
 type TrieContext struct {
 	roTtx  kv.TemporalTx
 	getter kv.TemporalGetter
-	sd     *SharedDomains
+	putter kv.TemporalPutDel
+	txNum  uint64
 
 	limitReadAsOfTxNum uint64
 	stepSize           uint64
@@ -441,7 +442,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//	defer sdc.mu.Unlock()
 	//}
 
-	return sdc.sd.DomainPut(kv.CommitmentDomain, prefix, nil, data, prevData, prevStep)
+	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
 }
 
 func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, err error) {

@@ -135,7 +135,7 @@ func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber 
 	}
 }
 
-var TooMuchIterations = errors.New("[rpc] dumper: too much iterations protection triggered")
+var ErrTooManyIterations = errors.New("[rpc] dumper: too many iterations protection triggered")
 
 func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress common.Address, maxResults int) ([]byte, error) {
 	var emptyHash = common.Hash{}

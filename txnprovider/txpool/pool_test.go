@@ -21,21 +21,19 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/big"
 	"testing"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/state"
-
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -46,8 +44,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/execution/testutil"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -60,7 +60,7 @@ func TestNonceFromAddress(t *testing.T) {
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -314,7 +314,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0 /* shanghaiTime */, nil /* agraBlock */, common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Prague"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
 	require.NotEqual(t, pool, nil)
 
@@ -439,7 +439,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
@@ -562,7 +562,7 @@ func TestReverseNonces(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -692,7 +692,7 @@ func TestTxnPoke(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -915,9 +915,9 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 			cfg := txpoolcfg.DefaultConfig
 
-			var shanghaiTime *big.Int
+			chainConfig := testutil.Forks["Paris"]
 			if test.isShanghai {
-				shanghaiTime = big.NewInt(0)
+				chainConfig = testutil.Forks["Shanghai"]
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -929,12 +929,12 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
-			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, nil, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
 
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 			sndrBytes := accounts3.SerialiseV3(&sndr)
-			err = sd.DomainPut(kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
+			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, sd.TxNum(), nil, 0)
 			asrt.NoError(err)
 
 			err = sd.Flush(ctx, tx)
@@ -975,7 +975,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -1037,11 +1037,12 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	ch := make(chan Announcements, 1)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
-	chainID := *maxUint256
+	var chainConfig chain.Config
+	copier.Copy(&chainConfig, testutil.Forks["Prague"])
+	chainConfig.ChainID = maxUint256.ToBig()
 	cache := kvcache.NewDummy()
 	logger := log.New()
-	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
-		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, &chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
 	tx, err := coreDB.BeginTemporalRw(ctx)
@@ -1053,7 +1054,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 
 	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 	sndrBytes := accounts3.SerialiseV3(&sndr)
-	err = sd.DomainPut(kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
+	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, sd.TxNum(), nil, 0)
 	require.NoError(t, err)
 
 	err = sd.Flush(ctx, tx)
@@ -1090,7 +1091,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 
 	require.NotEqual(pool, nil)
@@ -1274,7 +1275,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Shanghai"], nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(txnPool, nil)
 
@@ -1385,7 +1386,7 @@ func TestBlobSlots(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -1468,7 +1469,7 @@ func TestGetBlobsV1(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	pool.blockGasLimit.Store(30000000)
@@ -1526,12 +1527,22 @@ func TestGetBlobsV1(t *testing.T) {
 	}
 	blobHashes = append(blobHashes, blobTxn.BlobHashes...)
 
-	blobs, proofs := pool.GetBlobs(blobHashes)
-	require.Equal(len(blobs), len(blobHashes))
+	blobBundles := pool.GetBlobs(blobHashes)
+	require.Equal(len(blobBundles), len(blobHashes))
+	blobs := make([][]byte, 0, len(blobBundles))
+	proofs := make([]gokzg4844.KZGProof, 0, len(blobBundles))
+	for _, bb := range blobBundles {
+		blobs = append(blobs, bb.Blob)
+		for _, p := range bb.Proofs {
+			proofs = append(proofs, p)
+		}
+
+	}
 	require.Equal(len(proofs), len(blobHashes))
-	assert.Equal(blobTxn.Blobs, blobs)
-	assert.Equal(blobTxn.Proofs[0][:], proofs[0])
-	assert.Equal(blobTxn.Proofs[1][:], proofs[1])
+	assert.Equal(blobTxn.BlobBundles[0].Blob, blobs[0])
+	assert.Equal(blobTxn.BlobBundles[1].Blob, blobs[1])
+	assert.Equal(blobTxn.BlobBundles[0].Proofs[0], proofs[0])
+	assert.Equal(blobTxn.BlobBundles[1].Proofs[0], proofs[1])
 }
 
 func TestGasLimitChanged(t *testing.T) {
@@ -1543,7 +1554,7 @@ func TestGasLimitChanged(t *testing.T) {
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -1627,7 +1638,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	b.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 

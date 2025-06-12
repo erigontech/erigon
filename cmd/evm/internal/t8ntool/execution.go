@@ -81,17 +81,14 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.StateWriter) {
-	var blockNr uint64 = 0
-
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd, nil)
-	sd.SetBlockNum(blockNr)
-
+func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
+	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	statedb := state.New(stateReader) //ibs
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		balance, _ := uint256.FromBig(a.Balance)
+		var balance uint256.Int
+		_ = balance.SetFromBig(a.Balance)
 		statedb.SetBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range a.Storage {
 			key := k
@@ -107,7 +104,6 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains,
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	sd.SetBlockNum(blockNr + 1)
 	if err := statedb.FinalizeTx(chainRules, stateWriter); err != nil {
 		panic(err)
 	}

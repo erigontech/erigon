@@ -12,7 +12,7 @@ replace (
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250501041114-4a48ac232c83
-	github.com/erigontech/interfaces v0.0.0-20250403152627-37abc29fd1da
+	github.com/erigontech/interfaces v0.0.0-20250602082224-daf6311709c1
 	github.com/erigontech/mdbx-go v0.39.8
 	github.com/erigontech/secp256k1 v1.2.0
 )
@@ -26,6 +26,7 @@ require (
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/containerd/cgroups/v3 v3.0.3
+	github.com/crate-crypto/go-eth-kzg v1.3.0
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
 	github.com/crate-crypto/go-kzg-4844 v1.1.0
 	github.com/davecgh/go-spew v1.1.1
@@ -44,6 +45,7 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.3.2
+	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.18.0
 	github.com/mattn/go-colorable v0.1.13
 	github.com/mattn/go-isatty v0.0.20
@@ -78,6 +80,8 @@ require (
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20241129212102-9c50ad6b591e // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/pion/udp v0.1.4 // indirect

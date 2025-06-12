@@ -35,7 +35,7 @@ Param(
         "rpctest",
         "sentry",
         "state",
-        "test",
+        "test-short",
         "test-all",
         "txpool",
         "all"
@@ -397,7 +397,7 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
   Error !
   Directory $MyContext.Directory does not seem to be a properly cloned Erigon repository
   Please clone it using 
-  git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
+  git clone -j8 https://github.com/erigontech/erigon.git
 
 "@
     exit 1
@@ -519,7 +519,7 @@ if ($BuildTarget -eq "db-tools") {
     # Clear go cache
     go.exe clean -cache
 
-} elseif ($BuildTarget -eq "test") {
+} elseif ($BuildTarget -eq "test-short") {
     Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
     $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./..."

@@ -47,7 +47,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 			if overflow {
 				return errors.New("account.Balance higher than 2^256-1")
 			}
-			state.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+			state.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified)
 		}
 		if account.State != nil && account.StateDiff != nil {
 			return fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())

@@ -40,6 +40,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-db/rawdb/blockio"
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -65,7 +66,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
@@ -168,6 +168,22 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "remove_overlaps",
+			Action: func(c *cli.Context) error {
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+
+				return doRemoveOverlap(c, dirs)
+			},
+			Usage: "remove overlaps from e3 files",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
 			Name:   "uploader",
 			Action: doUploaderCommand,
 			Usage:  "run erigon in snapshot upload mode (no execution)",
@@ -227,6 +243,15 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
+			Name:  "reset-to-3.0",
+			Usage: "change all the snapshots to 3.0 file format",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				return dirs.RenameNewVersions()
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
 			Name:    "rm-state-snapshots",
 			Aliases: []string{"rm-state-segments", "rm-state"},
 			Action:  doRmStateSnapshots,
@@ -265,7 +290,7 @@ var snapshotCommand = cli.Command{
 			Action: doSqueeze,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "type", Required: true},
+				&cli.StringFlag{Name: "type", Required: true, Aliases: []string{"domain"}},
 			}),
 		},
 		{
@@ -532,20 +557,12 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	var removed uint64
-	var cleanedSize datasize.ByteSize
 	for _, res := range toRemove {
-		s, err := os.Stat(res.Path)
-		if err != nil {
-			return fmt.Errorf("failed to stat %s: %w", res.Path, err)
-		}
-		cleanedSize += datasize.ByteSize(s.Size())
-
-		if err := os.Remove(res.Path); err != nil {
-			return fmt.Errorf("failed to remove %s: %w", res.Path, err)
-		}
+		os.Remove(res.Path)
+		os.Remove(res.Path + ".torrent")
 		removed++
 	}
-	fmt.Printf("removed %d (%v) state snapshot segments files\n", removed, cleanedSize.HumanReadable())
+	fmt.Printf("removed %d state snapshot segments files\n", removed)
 
 	return nil
 }
@@ -1065,7 +1082,9 @@ func doClearIndexing(cliCtx *cli.Context) error {
 
 	// remove salt-state.txt and salt-blocks.txt
 	os.Remove(filepath.Join(snapDir, "salt-state.txt"))
+	os.Remove(filepath.Join(snapDir, "salt-state.txt.torrent"))
 	os.Remove(filepath.Join(snapDir, "salt-blocks.txt"))
+	os.Remove(filepath.Join(snapDir, "salt-blocks.txt.torrent"))
 
 	return nil
 }
@@ -1148,7 +1167,7 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, seg.CompressNone)
+		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
 		if err != nil {
 			return err
 		}
@@ -1357,7 +1376,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 		return nil
@@ -1542,6 +1561,28 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 
+func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+
+	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer db.Close()
+	chainConfig := fromdb.ChainConfig(db)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	ctx := cliCtx.Context
+
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+
+	return agg.RemoveOverlapsAfterMerge(ctx)
+}
+
 func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
@@ -1700,13 +1741,14 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer br.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 
-	blockSnapBuildSema := semaphore.NewWeighted(max(int64(runtime.NumCPU()), int64(dbg.BuildSnapshotAllowance)))
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
-	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
-	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
+	agg.SetCollateAndBuildWorkers(min(8, estimate.StateV3Collate.Workers()))
+	agg.SetMergeWorkers(min(8, estimate.StateV3Collate.Workers()))
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PeriodicalyPrintProcessSet(ctx)
 
 	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil); err != nil {
 		return err
@@ -1775,7 +1817,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)

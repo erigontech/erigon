@@ -146,7 +146,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api._txNumReader)
 
 	if err != nil {
 		return nil, err
@@ -160,15 +160,15 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	getHash := func(i uint64) common.Hash {
+	getHash := func(i uint64) (common.Hash, error) {
 		if hash, ok := overrideBlockHash[i]; ok {
-			return hash
+			return hash, nil
 		}
 		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
 		if err != nil || !ok {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
-		return hash
+		return hash, err
 	}
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
@@ -208,7 +208,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		st.SetTxContext(idx)
+		st.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
@@ -232,7 +232,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after replaying the txns, we want to overload the state
 	// overload state
 	if stateOverride != nil {
-		err = stateOverride.Override((evm.IntraBlockState()).(*state.IntraBlockState))
+		err = stateOverride.Override(evm.IntraBlockState())
 		if err != nil {
 			return nil, err
 		}

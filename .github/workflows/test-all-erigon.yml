@@ -43,6 +43,14 @@ jobs:
 
   tests-mac-linux:
     needs: source-of-changes
+    concurrency:
+      group: tests-mac-linux-${{ matrix.os }}-${{ github.ref }}
+      cancel-in-progress: >-
+        ${{
+          needs.source-of-changes.outputs.changed_files != 'true' &&
+          !startsWith(github.ref, 'refs/heads/release/') &&
+          github.ref != 'refs/heads/main'
+        }}
     strategy:
       matrix:
         os:
@@ -79,7 +87,7 @@ jobs:
         
       - name: Run all tests on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-all
+        run: GOGC=80 make test-all-race
 
       - name: SonarCloud
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
@@ -96,6 +104,14 @@ jobs:
 
   tests-windows:
     needs: source-of-changes
+    concurrency:
+      group: tests-windows-${{ matrix.os }}-${{ github.ref }}
+      cancel-in-progress: >-
+        ${{
+          needs.source-of-changes.outputs.changed_files != 'true' &&
+          !startsWith(github.ref, 'refs/heads/release/') &&
+          github.ref != 'refs/heads/main'
+        }}
     strategy:
       matrix:
         os: [ windows-2025 ]
@@ -106,15 +122,11 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v4
         
-      - name: Update submodules on Windows
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: git submodule update --init --recursive --force
-        
       - name: Setup Go environment on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
 
       - name: Cache Chocolatey packages
         if: needs.source-of-changes.outputs.changed_files != 'true'

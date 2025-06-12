@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/trie"
@@ -52,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -81,10 +79,10 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		return nil, err
 	}
 	if header == nil {
-		return nil, nil
+		return nil, errors.New("header not found")
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +174,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	blockNum := *(header.Number)
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, api._txNumReader, blockNum.Uint64(), isLatest, 0, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -299,7 +297,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	roTx, err := api.db.BeginRo(ctx)
+	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +317,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -346,7 +344,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 	}
 	if blockNrOrHash.BlockNumber.Uint64() < latestBlock {
 		// Get first txnum of blockNumber+1 to ensure that correct state root will be restored as of blockNumber has been executed
-		lastTxnInBlock, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)).Min(tx, blockNrOrHash.BlockNumber.Uint64()+1)
+		lastTxnInBlock, err := api._txNumReader.Min(tx, blockNrOrHash.BlockNumber.Uint64()+1)
 		if err != nil {
 			return nil, err
 		}
@@ -421,7 +419,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 		}
 	}
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
+	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -448,14 +446,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		res, err := reader.ReadAccountStorage(address, keyHash)
+		res, _, err := reader.ReadAccountStorage(address, keyHash)
 		if err != nil {
-			res = []byte{}
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
-		n := new(big.Int)
-		n.SetBytes(res)
-		proof.StorageProof[i].Value = (*hexutil.Big)(n)
+		proof.StorageProof[i].Value = (*hexutil.Big)(res.ToBig())
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
@@ -737,7 +732,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, api._txNumReader, blockNumber+1, 0, chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api._txNumReader)
 		if err != nil {
 			return nil, err
 		}

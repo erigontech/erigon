@@ -1,3 +1,19 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package engineapi
 
 import (
@@ -24,10 +40,12 @@ var ourCapabilities = []string{
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
 	"engine_getPayloadV4",
+	"engine_getPayloadV5",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
+	"engine_getBlobsV2",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -72,6 +90,14 @@ func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV4", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.ElectraVersion)
+}
+
+// Same as [GetPayloadV4], but returning BlobsBundleV2 instead of BlobsBundleV1
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#engine_getpayloadv5
+func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	e.logger.Info("Received GetPayloadV5", "payloadId", decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.FuluVersion)
 }
 
 // Updates the forkchoice state after validating the headBlockHash
@@ -170,5 +196,24 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	return e.getBlobs(ctx, blobHashes)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.CapellaVersion)
+	if err != nil {
+		return nil, err
+	}
+	if ret, ok := resp.([]*engine_types.BlobAndProofV1); ok {
+		return ret, err
+	}
+	return nil, err
+}
+
+func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
+	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
+	if err != nil {
+		return nil, err
+	}
+	if ret, ok := resp.([]*engine_types.BlobAndProofV2); ok {
+		return ret, err
+	}
+	return nil, err
 }

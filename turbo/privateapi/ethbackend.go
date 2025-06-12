@@ -104,7 +104,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifi
 		defer func() {
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
-					logger.Warn("[rpc] terminted subscription to `logs` events", "reason", err)
+					logger.Warn("[rpc] terminated subscription to `logs` events", "reason", err)
 				}
 			}
 		}()
@@ -237,7 +237,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				s.logger.Warn("[rpc] terminted subscription to `newHeaders` events", "reason", err)
+				s.logger.Warn("[rpc] terminated subscription to `newHeaders` events", "reason", err)
 			}
 		}
 	}()
@@ -448,7 +448,7 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx.(kv.TemporalTx))
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, s.blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, s.blockReader))
 	maxTxNum, err := txNumsReader.Max(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err

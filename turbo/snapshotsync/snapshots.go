@@ -32,9 +32,10 @@ import (
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -43,7 +44,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
@@ -495,7 +495,7 @@ func (s *RoTx) Close() {
 type BlockSnapshots interface {
 	LogStat(label string)
 	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps bool) error
+	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
 	Delete(fileName string) error
@@ -567,7 +567,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 
 	s.segmentsMin.Store(segmentsMin)
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 
 	if cfg.NoDownloader {
 		s.DownloadComplete()
@@ -650,8 +650,8 @@ func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
-		"blocks", common2.PrettyCounter(s.SegmentsMax()+1), "indices", common2.PrettyCounter(s.IndicesMax()+1),
-		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1),
+		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 }
 
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
@@ -811,7 +811,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 	return newVisibleSegments
 }
 
-func (s *RoSnapshots) recalcVisibleFiles() {
+func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
@@ -832,12 +832,12 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		if len(newVisibleSegments) > 0 {
 			to = newVisibleSegments[len(newVisibleSegments)-1].to - 1
 		}
-		if s.alignMin {
+		if alignMin {
 			maxVisibleBlocks = append(maxVisibleBlocks, to)
 		}
 	}
 
-	if s.alignMin {
+	if alignMin {
 		// all types must have same hight
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
@@ -974,7 +974,7 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -997,7 +997,7 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 		return err
 	}
 
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
@@ -1167,7 +1167,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		return err
 	}
 
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
@@ -1177,8 +1177,8 @@ func (s *RoSnapshots) OpenFolder() error {
 	return nil
 }
 
-func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps bool) error {
-	defer s.recalcVisibleFiles()
+func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error {
+	defer s.recalcVisibleFiles(alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -1204,7 +1204,7 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
@@ -1359,7 +1359,7 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	v := s.View()
 	defer v.Close()
 
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 	if err := s.delete(fileName); err != nil {
 		return fmt.Errorf("can't delete file: %w", err)
 	}
@@ -1395,7 +1395,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
 				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
-				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			case <-finish:
 				return
 			case <-ctx.Done():
@@ -1600,9 +1600,11 @@ func removeOldFiles(toDel []string, snapDir string) {
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
+		_ = os.Remove(withoutExt + ".idx.torrent")
 		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 		if isTxnType {
 			_ = os.Remove(withoutExt + "-to-block.idx")
+			_ = os.Remove(withoutExt + "-to-block.idx.torrent")
 		}
 	}
 	tmpFiles, err := snaptype.TmpFiles(snapDir)

@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -18,8 +21,6 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core/snaptype"
-	"github.com/stretchr/testify/require"
 )
 
 type Num = state.Num
@@ -251,7 +252,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 
 	ps := background.NewProgressSet()
 	from, to := RootNum(0), RootNum(entries_count)
-	file, built, err := ma.BuildFile(ctx, from, to, db, ps)
+	file, built, err := ma.BuildFile(ctx, from, to, db, 1, ps)
 	require.NoError(t, err)
 	require.NotNil(t, file)
 	require.True(t, built)
@@ -259,7 +260,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	_, end := file.Range()
 	from, to = RootNum(end), RootNum(entries_count)
 
-	file2, built, err := ma.BuildFile(ctx, from, to, db, ps)
+	file2, built, err := ma.BuildFile(ctx, from, to, db, 1, ps)
 	require.NoError(t, err)
 	require.Nil(t, file2)
 	require.False(t, built)

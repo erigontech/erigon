@@ -118,9 +118,9 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	if rw.background {
 		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
 	} else {
-		rw.SetReader(state.NewReaderV3(rs.Domains()))
+		rw.SetReader(state.NewReaderV3(rs.TemporalGetter()))
 	}
-	rw.stateWriter = state.NewWriter(rs.Domains(), accumulator)
+	rw.stateWriter = state.NewWriter(rs.TemporalPutDel(), accumulator, 0)
 }
 
 func (rw *Worker) SetGaspool(gp *core.GasPool) {
@@ -193,7 +193,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		if rw.background {
 			rw.SetReader(state.NewReaderParallelV3(rw.rs.Domains()))
 		} else {
-			rw.SetReader(state.NewReaderV3(rw.rs.Domains()))
+			rw.SetReader(state.NewReaderV3(rw.rs.TemporalGetter()))
 		}
 	}
 	if rw.background && rw.chainTx == nil {
@@ -207,6 +207,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
+	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.rs.Domains().SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
@@ -236,7 +237,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, constCall /* constCall */, hooks)
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, constCall /* constCall */, hooks, rw.vmCfg)
 			return ret, err
 		}
 		rw.engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -248,13 +249,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, false /* constCall */, hooks)
-			if err != nil {
-				return nil, err
-			}
-
-			txTask.Logs = append(txTask.Logs, logs...)
-
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, false /* constCall */, hooks, rw.vmCfg)
+			txTask.Logs = append(txTask.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 			return ret, err
 		}
 
@@ -275,7 +271,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	default:
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		ibs.SetTxContext(txTask.TxIndex)
+		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
@@ -314,7 +310,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 

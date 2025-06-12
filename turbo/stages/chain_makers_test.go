@@ -34,9 +34,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -105,7 +105,7 @@ func TestGenerateChain(t *testing.T) {
 		return
 	}
 
-	tx, err := m.DB.BeginRw(m.Ctx)
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return
@@ -121,22 +121,22 @@ func TestGenerateChain(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if !uint256.NewInt(989000).Eq(balance) {
-		t.Errorf("wrong balance of addr1: %s", balance)
+	if !uint256.NewInt(989000).Eq(&balance) {
+		t.Errorf("wrong balance of addr1: %s", &balance)
 	}
 	balance, err = st.GetBalance(addr2)
 	if err != nil {
 		t.Error(err)
 	}
-	if !uint256.NewInt(10000).Eq(balance) {
-		t.Errorf("wrong balance of addr2: %s", balance)
+	if !uint256.NewInt(10000).Eq(&balance) {
+		t.Errorf("wrong balance of addr2: %s", &balance)
 	}
 	balance, err = st.GetBalance(addr3)
 	if err != nil {
 		t.Error(err)
 	}
-	if fmt.Sprintf("%s", balance) != "19687500000000001000" { //nolint
-		t.Errorf("wrong balance of addr3: %s", balance)
+	if fmt.Sprintf("%s", &balance) != "19687500000000001000" { //nolint
+		t.Errorf("wrong balance of addr3: %s", &balance)
 	}
 
 	// Test of receipts

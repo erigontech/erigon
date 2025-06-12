@@ -60,10 +60,11 @@ type callContext struct {
 
 // callLog is the result of LOG opCode
 type callLog struct {
-	Index   uint64         `json:"index"`
-	Address common.Address `json:"address"`
-	Topics  []common.Hash  `json:"topics"`
-	Data    hexutil.Bytes  `json:"data"`
+	Index    uint64         `json:"index"`
+	Address  common.Address `json:"address"`
+	Topics   []common.Hash  `json:"topics"`
+	Data     hexutil.Bytes  `json:"data"`
+	Position hexutil.Uint   `json:"position"`
 }
 
 // callTrace is the result of a callTracer run.
@@ -150,7 +151,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
+			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
@@ -262,7 +263,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
 	m := mock.Mock(b)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(b, err)
 	defer dbTx.Rollback()
 	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
@@ -283,7 +284,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		if _, err = tracer.GetResult(); err != nil {
 			b.Fatal(err)
 		}
-		statedb.RevertToSnapshot(snap)
+		statedb.RevertToSnapshot(snap, nil)
 	}
 }
 
@@ -338,7 +339,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	}
 	rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
 	m := mock.Mock(t)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()
 

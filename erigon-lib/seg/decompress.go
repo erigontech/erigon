@@ -527,7 +527,7 @@ func (d *Decompressor) MadvSequential() *Decompressor {
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
 }
-func (d *Decompressor) MadvNormal() *Decompressor {
+func (d *Decompressor) MadvNormal() MadvDisabler {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
@@ -554,10 +554,17 @@ type Getter struct {
 	dataP       uint64
 	dataBit     int // Value 0..7 - position of the bit
 	trace       bool
+	d           *Decompressor
 }
 
-func (g *Getter) Trace(t bool)     { g.trace = t }
-func (g *Getter) FileName() string { return g.fName }
+func (g *Getter) MadvNormal() MadvDisabler {
+	g.d.MadvNormal()
+	return g
+}
+func (g *Getter) DisableReadAhead() { g.d.DisableReadAhead() }
+func (g *Getter) Trace(t bool)      { g.trace = t }
+func (g *Getter) Count() int        { return g.d.Count() }
+func (g *Getter) FileName() string  { return g.fName }
 
 func (g *Getter) nextPos(clean bool) (pos uint64) {
 	defer func() {
@@ -659,6 +666,7 @@ func (d *Decompressor) EmptyWordsCount() int { return int(d.emptyWordsCount) }
 // for the same decompressor
 func (d *Decompressor) MakeGetter() *Getter {
 	return &Getter{
+		d:           d,
 		posDict:     d.posDict,
 		data:        d.data[d.wordsStart:],
 		patternDict: d.dict,

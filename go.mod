@@ -7,11 +7,13 @@ toolchain go1.23.6
 replace (
 	github.com/erigontech/erigon-db => ./erigon-db
 	github.com/erigontech/erigon-lib => ./erigon-lib
+	github.com/erigontech/erigon-p2p => ./p2p
 )
 
 require (
 	github.com/erigontech/erigon-db v0.0.0-00010101000000-000000000000
 	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
+	github.com/erigontech/erigon-p2p v0.0.0-00010101000000-000000000000
 )
 
 replace (
@@ -41,10 +43,12 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v1.1.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
-	github.com/deckarep/golang-set/v2 v2.3.1
+	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/emicklei/dot v1.6.2
+	github.com/erigontech/evmone_precompiles v0.0.0-20250610054925-d60899dfa819
+	github.com/felixge/fgprof v0.9.3
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-chi/chi/v5 v5.1.0
@@ -63,13 +67,12 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.7
 	github.com/hashicorp/golang-lru/v2 v2.0.7
+	github.com/heimdalr/dag v1.5.0
 	github.com/holiman/uint256 v1.3.2
 	github.com/huandu/xstrings v1.5.0
-	github.com/huin/goupnp v1.3.0
-	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedib0t/go-pretty/v6 v6.5.9
+	github.com/jinzhu/copier v0.4.0
 	github.com/json-iterator/go v1.1.12
-	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.18.0
 	github.com/libp2p/go-libp2p v0.37.2
 	github.com/libp2p/go-libp2p-mplex v0.9.0
@@ -80,7 +83,6 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.2.3
 	github.com/pion/randutil v0.1.0
-	github.com/pion/stun v0.6.1
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
 	github.com/prysmaticlabs/gohashtree v0.0.4-beta
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
@@ -102,7 +104,6 @@ require (
 	golang.org/x/net v0.40.0
 	golang.org/x/sync v0.14.0
 	golang.org/x/sys v0.33.0
-	golang.org/x/time v0.11.0
 	google.golang.org/grpc v1.72.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
 	google.golang.org/protobuf v1.36.6
@@ -119,8 +120,10 @@ require (
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
+	github.com/crate-crypto/go-eth-kzg v1.3.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc // indirect
 	github.com/elastic/go-freelru v0.16.0 // indirect
+	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
@@ -128,8 +131,11 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
+	github.com/huin/goupnp v1.3.0 // indirect
+	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
+	github.com/pion/stun v0.6.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/protolambda/ztyp v0.2.2 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
@@ -140,6 +146,7 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
+	golang.org/x/time v0.11.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250218202821-56aae31c358a // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect
 )
