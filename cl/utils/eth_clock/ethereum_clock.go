@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 )
@@ -134,7 +135,29 @@ func (t *ethereumClockImpl) GetCurrentEpoch() uint64 {
 
 func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
 	currentEpoch := t.GetCurrentEpoch()
-	return t.ComputeForkDigest(currentEpoch)
+	// Retrieve current fork version.
+	stateVersion := t.beaconCfg.GetCurrentStateVersion(currentEpoch)
+	currentForkVersion := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
+	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
+		if currentEpoch >= fork.epoch {
+			currentForkVersion = fork.version
+			stateVersion = fork.stateVersion
+			continue
+		}
+		break
+	}
+	digest1, err := t.computeForkDigestForVersion(currentForkVersion)
+	if err != nil {
+		return [4]byte{}, err
+	}
+	digest2, err := t.ComputeForkDigest(currentEpoch)
+	if err != nil {
+		return [4]byte{}, err
+	}
+	if digest1 != digest2 {
+		log.Warn("CurrentForkDigest mismatch", "digest1", digest1, "digest2", digest2, "stateVersion", stateVersion)
+	}
+	return digest1, nil
 }
 
 func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
@@ -241,7 +264,7 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 
 	// XOR first 4 bytes of base digest with first 4 bytes of blob params hash
 	digest = common.Bytes4{}
-	for i := range 4 {
+	for i := 0; i < 4; i++ {
 		digest[i] = baseDigest[i] ^ blobParamsHash[i]
 	}
 
