@@ -187,7 +187,7 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		}
 		valid, err := s.handshaker.ValidatePeer(peerId)
 		if err != nil {
-			log.Trace("[sentinel] failed to validate peer:", "err", err)
+			log.Debug("[sentinel] failed to validate peer:", "err", err)
 		}
 		if !valid {
 			log.Debug("Handshake was unsuccessful")
