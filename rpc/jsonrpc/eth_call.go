@@ -348,7 +348,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err != nil {
 			return nil, err
 		}
-		commitmentStartingTxNum := tx.HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if lastTxnInBlock < commitmentStartingTxNum {
 			return nil, state.PrunedError
 		}

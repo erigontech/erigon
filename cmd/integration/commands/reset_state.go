@@ -189,7 +189,7 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "domain and ii progress\n\n")
 	fmt.Fprintf(w, "Note: progress for commitment domain (in terms of txNum) is not presented.\n")
-	fmt.Fprint(w, "\n \t\t progress(txnum) \t\t progress(step)\n")
+	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
 
 	dbg := tx.Debug()
 	stepSize := dbg.StepSize()
@@ -198,10 +198,10 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 		txNum := dbg.DomainProgress(d)
 		step := txNum / stepSize
 		if d == kv.CommitmentDomain {
-			fmt.Fprintf(w, "%s \t\t - \t\t %d\n", d.String(), step)
+			fmt.Fprintf(w, "%s \t\t - \t\t - \t\t %d\n", d.String(), step)
 			continue
 		}
-		fmt.Fprintf(w, "%s \t\t %d \t\t %d\n", d.String(), txNum, step)
+		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), dbg.HistoryStartFrom(d), txNum, step)
 	}
 	fmt.Fprintf(w, "--\n")
 

@@ -349,18 +349,6 @@ func (tx *RwTx) Commit() error {
 	return t.Commit()
 }
 
-func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryStartFrom(name)
-}
-
-func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
-}
-
-func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
-}
-
 func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.aggtx.RangeAsOf(tx.ctx, rtx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
@@ -558,6 +546,15 @@ func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error 
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
+func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
+	return tx.aggtx.HistoryStartFrom(name)
+}
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
+}
+func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
+}
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.Tx)
 }
@@ -570,9 +567,12 @@ func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.RwTx)
 }
-func (tx *Tx) StepSize() uint64 {
+func (tx *tx) stepSize() uint64 {
 	return tx.aggtx.StepSize()
 }
+func (tx *Tx) StepSize() uint64 {
+	return tx.stepSize()
+}
 func (tx *RwTx) StepSize() uint64 {
-	return tx.aggtx.StepSize()
+	return tx.stepSize()
 }
