@@ -29,7 +29,7 @@ RUN --mount=type=cache,target=/root/.cache \
 FROM docker.io/library/alpine:3.20
 
 # install required runtime libs, along with some helpers for debugging
-RUN apk add --no-cache ca-certificates libstdc++ tzdata
+RUN apk add --no-cache ca-certificates libstdc++ tzdata libgmp3-dev
 RUN apk add --no-cache curl jq bind-tools
 
 # Setup user and group
