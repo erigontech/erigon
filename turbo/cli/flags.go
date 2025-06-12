@@ -487,18 +487,24 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 	}
 
 	if c.Enabled {
-		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis)
+		if ctx.IsSet(utils.HttpCompressionFlag.Name) {
+			c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)
+		} else {
+			c.HttpCompression = true
+		}
+		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis, "http.compression", c.HttpCompression)
+	} else {
+		c.HttpCompression = false
 	}
 
-	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
-		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)
+	if c.WebsocketEnabled {
+		if ctx.IsSet(utils.WsCompressionFlag.Name) {
+			c.WebsocketCompression = ctx.Bool(utils.WsCompressionFlag.Name)
+		} else {
+			c.WebsocketCompression = true
+		}
 	} else {
-		c.HttpCompression = true
-	}
-	if ctx.IsSet(utils.WsCompressionFlag.Name) {
-		c.WebsocketCompression = ctx.Bool(utils.WsCompressionFlag.Name)
-	} else {
-		c.WebsocketCompression = true
+		c.WebsocketCompression = false
 	}
 
 	err := c.StateCache.CacheSize.UnmarshalText([]byte(ctx.String(utils.StateCacheFlag.Name)))
