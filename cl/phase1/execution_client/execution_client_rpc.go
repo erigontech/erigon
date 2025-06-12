@@ -153,10 +153,10 @@ func (cc *ExecutionClientRpc) NewPayload(
 	return newPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
 }
 
-func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized common.Hash, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
 	forkChoiceRequest := engine_types.ForkChoiceState{
 		HeadHash:           head,
-		SafeBlockHash:      head,
+		SafeBlockHash:      safe,
 		FinalizedBlockHash: finalized,
 	}
 	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
