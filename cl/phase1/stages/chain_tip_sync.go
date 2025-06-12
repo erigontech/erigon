@@ -246,6 +246,7 @@ MainLoop:
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	totalRequest := args.targetSlot - args.seenSlot
+	log.Debug("[chainTipSync] totalRequest", "totalRequest", totalRequest, "seenSlot", args.seenSlot, "targetSlot", args.targetSlot)
 	// If the execution engine is not ready, wait for it to be ready.
 	ready, err := waitForExecutionEngineToBeFinished(ctx, cfg)
 	if err != nil {
@@ -256,6 +257,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		log.Debug("[chainTipSync] execution engine is not ready yet")
 		return nil
 	}
+
+	log.Debug("[chainTipSync] execution engine is ready")
 
 	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
 		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
