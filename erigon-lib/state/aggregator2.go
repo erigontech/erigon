@@ -2,6 +2,10 @@ package state
 
 import (
 	"context"
+	"errors"
+	"io/fs"
+	"path/filepath"
+	"strings"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -279,3 +283,33 @@ func EnableHistoricalRCache() {
 }
 
 var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
+
+func Compatibility(d datadir.Dirs) error {
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !entry.IsDir() {
+				name := entry.Name()
+				if strings.HasPrefix(name, "v1.0-") {
+					return errors.New("bad incompatible snapshots with current erigon version. " +
+						"Check twice version or run `erigon seg update-to-new-ver-format` command")
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
