@@ -113,7 +113,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check if blob data is available
-	if checkDataAvaiability {
+	if checkDataAvaiability && !clparams.IsDevnet() {
 		if block.Version() >= clparams.FuluVersion {
 			available, err := f.peerDas.IsDataAvailable(ctx, blockRoot)
 			if err != nil {

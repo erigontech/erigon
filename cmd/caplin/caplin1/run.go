@@ -181,7 +181,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	// init the current beacon config for global access
-	clparams.InitGlobalBeaconConfig(beaconConfig)
+	clparams.InitGlobalBeaconConfig(beaconConfig, &config)
 
 	if config.NetworkId == clparams.CustomNetwork {
 		config.NetworkId = clparams.NetworkType(beaconConfig.DepositNetworkID)
