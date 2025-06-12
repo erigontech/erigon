@@ -23,7 +23,7 @@ jobs:
           go-version: '1.23'
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
-        run: sudo apt update && sudo apt install build-essential
+        run: sudo apt update && sudo apt install build-essential libgmp3-dev
 
       - name: Test erigon as a library
         env:
