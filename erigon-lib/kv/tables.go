@@ -149,6 +149,7 @@ const (
 	BorEvents               = "BorEvents"                 // event_id -> event_payload
 	BorEventNums            = "BorEventNums"              // block_num -> event_id (last event_id in that block)
 	BorEventProcessedBlocks = "BorEventProcessedBlocks"   // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
+	BorEventTimes           = "BorEventTimes"             // timestamp -> event_id
 	BorSpans                = "BorSpans"                  // span_id -> span (in JSON encoding)
 	BorMilestones           = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
 	BorMilestoneEnds        = "BorMilestoneEnds"          // start block_num -> milestone_id (first block of milestone)
@@ -362,6 +363,7 @@ var ChaindataTables = []string{
 	BorEvents,
 	BorEventNums,
 	BorEventProcessedBlocks,
+	BorEventTimes,
 	BorSpans,
 	BorMilestones,
 	BorMilestoneEnds,
@@ -604,6 +606,7 @@ var BorTablesCfg = TableCfg{
 	BorEvents:               {Flags: DupSort},
 	BorEventNums:            {Flags: DupSort},
 	BorEventProcessedBlocks: {Flags: DupSort},
+	BorEventTimes:           {Flags: DupSort},
 	BorSpans:                {Flags: DupSort},
 	BorCheckpoints:          {Flags: DupSort},
 	BorCheckpointEnds:       {Flags: DupSort},

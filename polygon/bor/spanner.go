@@ -18,6 +18,7 @@ package bor
 
 import (
 	"encoding/hex"
+	"errors"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -127,6 +128,10 @@ func (c *ChainSpanner) GetCurrentProducers(spanId uint64, chain ChainHeaderReade
 	}
 
 	span := chain.BorSpan(spanId)
+
+	if span == nil {
+		return nil, errors.New("no span found")
+	}
 
 	producers := make([]*valset.Validator, len(span.SelectedProducers))
 	for i := range span.SelectedProducers {
