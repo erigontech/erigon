@@ -80,7 +80,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 			if err != nil {
 				return err
 			}
-			if _, err := s.Write([]byte{0}); err != nil {
+			if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
 				return err
 			}
 			if _, err := s.Write(forkDigest[:]); err != nil {
@@ -134,7 +134,7 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 		if err != nil {
 			return err
 		}
-		if _, err := s.Write([]byte{0}); err != nil {
+		if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
 			return err
 		}
 		if _, err := s.Write(forkDigest[:]); err != nil {

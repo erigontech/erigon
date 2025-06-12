@@ -133,20 +133,20 @@ func (t *ethereumClockImpl) GetCurrentEpoch() uint64 {
 }
 
 func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
-
-	currentEpoch := t.GetCurrentEpoch()
-	// Retrieve current fork version.
-	currentForkVersion := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
-	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
-		if currentEpoch >= fork.epoch {
-			currentForkVersion = fork.version
-			continue
+	/*
+		currentEpoch := t.GetCurrentEpoch()
+		// Retrieve current fork version.
+		currentForkVersion := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
+		for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
+			if currentEpoch >= fork.epoch {
+				currentForkVersion = fork.version
+				continue
+			}
+			break
 		}
-		break
-	}
-	return t.computeForkDigestForVersion(currentForkVersion)
-
-	//return t.ComputeForkDigest(t.GetCurrentEpoch())
+		return t.computeForkDigestForVersion(currentForkVersion)
+	*/
+	return t.ComputeForkDigest(t.GetCurrentEpoch())
 }
 
 func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
@@ -248,12 +248,12 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 	}
 
 	// For Fulu and later, XOR base digest with hash of blob parameters
-	maxBlobs := t.beaconCfg.MaxBlobsPerBlockByVersion(stateVersion)
+	blobParams := t.beaconCfg.GetBlobParameters(epoch)
 
 	// Hash blob parameters (epoch and max_blobs_per_block)
 	blobParamsBytes := make([]byte, 16)
-	binary.BigEndian.PutUint64(blobParamsBytes[:8], epoch)
-	binary.BigEndian.PutUint64(blobParamsBytes[8:], maxBlobs)
+	binary.BigEndian.PutUint64(blobParamsBytes[:8], blobParams.Epoch)
+	binary.BigEndian.PutUint64(blobParamsBytes[8:], blobParams.MaxBlobsPerBlock)
 	blobParamsHash := utils.Sha256(blobParamsBytes)
 
 	// XOR first 4 bytes of base digest with first 4 bytes of blob params hash

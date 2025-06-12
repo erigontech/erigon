@@ -68,8 +68,8 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 				log.Debug("failed to compute fork digest", "error", err)
 				return false
 			}
-			if _, err := s.Write([]byte{0}); err != nil {
-				log.Debug("failed to write empty byte", "error", err)
+			if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
+				log.Debug("failed to write success byte", "error", err)
 				return false
 			}
 
@@ -146,8 +146,8 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 				log.Debug("failed to compute fork digest", "error", err)
 				return false
 			}
-			if _, err := s.Write([]byte{0}); err != nil {
-				log.Debug("failed to write empty byte", "error", err)
+			if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
+				log.Debug("failed to write success byte", "error", err)
 				return false
 			}
 
