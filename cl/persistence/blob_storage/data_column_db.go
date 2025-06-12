@@ -78,6 +78,7 @@ func (s *dataCloumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	if err != nil {
 		return err
 	}
+	// snappy of | length | ssz data |
 	if err := ssz_snappy.EncodeAndWrite(fh, columnData); err != nil {
 		fh.Close()
 		s.fs.Remove(filepath)
