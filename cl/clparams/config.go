@@ -1378,25 +1378,6 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 		return nil, nil, networkid.MainnetChainID, errors.New("chain not found")
 	}
 }
-
-var (
-	globalBeaconConfig *BeaconChainConfig
-)
-
-func InitGlobalBeaconConfig(cfg *BeaconChainConfig) {
-	if cfg == nil {
-		panic("cannot initialize globalBeaconConfig with nil")
-	}
-	if globalBeaconConfig != nil {
-		panic("globalBeaconConfig already initialized")
-	}
-	globalBeaconConfig = cfg
-}
-
-func GetBeaconConfig() *BeaconChainConfig {
-	return globalBeaconConfig
-}
-
 func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
 	shuffle := func(urls []string) []string {
 		if len(urls) <= 1 {
