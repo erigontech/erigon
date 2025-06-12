@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/turbo/services"
@@ -85,7 +87,7 @@ func NewProduce(produceList []string) Produce {
 	return produce
 }
 
-func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
+func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg ethconfig.Sync) CustomTraceCfg {
 	execArgs := &exec3.ExecArgs{
 		ChainDB:     db,
 		BlockReader: br,
@@ -294,81 +296,14 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 	return nil
 }
 
-func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
+func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, fromBlock, toBlock uint64) (err error) {
 	if !dbg.AssertEnabled {
 		return
 	}
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
 	}
-
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
-	if err != nil {
-		return err
-	}
-	if fromTxNum < 2 {
-		fromTxNum = 2 //i don't remember why need this
-	}
-
-	if toBlock > 0 {
-		toBlock-- // [fromBlock,toBlock)
-	}
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
-	if err != nil {
-		return err
-	}
-	prevCumGasUsed := -1
-	prevBN := uint64(1)
-	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
-		cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
-		if err != nil {
-			return err
-		}
-		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
-		_min, _ := txNumsReader.Min(tx, blockNum)
-		_max, _ := txNumsReader.Max(tx, blockNum)
-
-		lastSystemTxn := txNum == _max
-		empyBlock := _max-_min <= 1
-		if lastSystemTxn || empyBlock {
-			prevCumGasUsed = int(cumGasUsed)
-			prevBN = blockNum
-			continue
-		}
-
-		//duplicateInsideBlock := !blockChanged && int(cumGasUsed) == prevCumGasUsed
-		duplicateInsideBlock := int(cumGasUsed) <= prevCumGasUsed && blockNum == prevBN
-		if duplicateInsideBlock && cumGasUsed != 0 {
-			err := fmt.Errorf("assert: duplicate receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
-			return err
-		}
-
-		prevCumGasUsed = int(cumGasUsed)
-		prevBN = blockNum
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", txNum/1_000, toTxNum/1_000))
-		default:
-		}
-	}
-	return nil
-}
-
-func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsReader, curTxNum uint64) uint64 {
-	txNumMax, _ := txNumsReader.Max(tx, fromBlock)
-	i := uint64(0)
-	for txNumMax < curTxNum {
-		i++
-		txNumMax, _ = txNumsReader.Max(tx, fromBlock+i)
-	}
-	return fromBlock + i
+	return integrity.ReceiptsNoDuplicatesRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
 }
 
 func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
@@ -397,13 +332,10 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			doms.SetTxNum(txTask.TxNum)
 
 			if produce.ReceiptDomain {
+				var receipt *types.Receipt
 				if !txTask.Final {
-					var receipt *types.Receipt
 					if txTask.TxIndex >= 0 {
 						receipt = txTask.BlockReceipts[txTask.TxIndex]
-					}
-					if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
-						return err
 					}
 				}
 
@@ -416,17 +348,18 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						}
 						if len(lastReceipt.Logs) > 0 {
 							firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-							receipt := types.Receipt{
+							receipt = &types.Receipt{
 								CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
 								FirstLogIndexWithinBlock: uint32(firstIndex),
 							}
-
-							if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
-								return err
-							}
 						}
 					}
+				}
 
+				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+					return err
+				}
+				if txTask.Final { // block changed
 					cumulativeBlobGasUsedInBlock = 0
 				}
 			}
@@ -548,4 +481,36 @@ func firstStepNotInFiles(tx kv.Tx, produce Produce) uint64 {
 		fromStep = min(fromStep, ac.DbgII(kv.TracesToIdx).FirstStepNotInFiles())
 	}
 	return fromStep
+}
+
+func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Produce) error {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var tables []string
+	if produce.ReceiptDomain {
+		tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
+	}
+	if produce.RCacheDomain {
+		tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
+	}
+	if produce.LogAddr {
+		tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)
+	}
+	if produce.LogTopic {
+		tables = append(tables, db.Debug().InvertedIdxTables(kv.LogTopicIdx)...)
+	}
+	if produce.TraceFrom {
+		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx)...)
+	}
+	if produce.TraceTo {
+		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
+	}
+	if err := backup.ClearTables(ctx, tx, tables...); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
