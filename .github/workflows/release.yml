@@ -147,6 +147,8 @@ jobs:
             .
           echo Testing skopeo
           skopeo copy --multi-arch all docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}-skopeo 
+          echo Testing skopeo delete
+          skopeo delete docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}-skopeo 
 
       - name: Create archives and checksums
         env:
