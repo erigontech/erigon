@@ -344,11 +344,13 @@ var (
 
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
-		Usage: "Enable compression over HTTP-RPC",
+		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
+		Value: true,
 	}
 	WsCompressionFlag = cli.BoolFlag{
 		Name:  "ws.compression",
-		Usage: "Enable compression over WebSocket",
+		Usage: "Enable compression over WebSocket (enabled by default in case WS-RPC is enabled). Use --ws.enabled=false to disable it",
+		Value: true,
 	}
 	HTTPCORSDomainFlag = cli.StringFlag{
 		Name:  "http.corsdomain",
