@@ -44,7 +44,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, err
 	}
 	defer tx.Rollback()
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 
 	latestState := rpchelper.NewLatestStateReader(tx)
 	plainStateAcc, err := latestState.ReadAccountData(addr)
@@ -165,7 +165,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
 	}
 
-	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
+	bn, ok, err := txNumsReader.FindBlockNum(tx, creationTxnID)
 	if err != nil {
 		return nil, err
 	}

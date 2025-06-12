@@ -106,7 +106,7 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
 
 	// 1. Require stage_exec > 0: means don't need handle "half-block execution case here"
 	// 2. Require stage_exec > 0: means has enough state-history
@@ -123,7 +123,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 		fromTxNum := progressOfDomains(tx, cfg.Produce)
 		var ok bool
-		ok, startBlock, err = txNumsReader.FindBlockNum(tx, fromTxNum)
+		startBlock, ok, err = txNumsReader.FindBlockNum(tx, fromTxNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
 		}
@@ -286,8 +286,8 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 	receiptProgress := ac.HistoryProgress(domain, tx)
 	accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
 	if accProgress != receiptProgress {
-		_, e1, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
-		_, e2, _ := txNumsReader.FindBlockNum(tx, accProgress)
+		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
 
 		err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
 		log.Warn(err.Error())
@@ -313,7 +313,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 	var cumulativeBlobGasUsedInBlock uint64
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.BlockReader))
 	fromTxNum, _ := txNumsReader.Min(tx, fromBlock)
 	prevTxNumLog := fromTxNum
 

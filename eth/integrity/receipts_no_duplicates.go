@@ -28,12 +28,12 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	}
 	defer tx.Rollback()
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 
 	receiptDomainProgress := state.AggTx(tx).HistoryProgress(kv.ReceiptDomain, tx)
 
 	fromBlock := uint64(1)
-	_, toBlock, _ := txNumsReader.FindBlockNum(tx, receiptDomainProgress)
+	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptDomainProgress)
 	//stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	//if err != nil {
 	//	return err
@@ -61,7 +61,7 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return err
