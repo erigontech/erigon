@@ -1710,10 +1710,21 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-func (at *AggregatorRoTx) HistoryProgress(name kv.Domain, tx kv.Tx) uint64 {
+// func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
+// 	return at.d[name].d.maxTxNumInDB(tx)
+// }
+
+func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
+	d := at.d[name]
+	if d.d.historyDisabled {
+		// this is not accurate, okay for reporting...
+		// if historyDisabled, there's no way to get progress in
+		// terms of exact txNum
+		return at.d[name].d.maxStepInDBNoHistory(tx) * at.a.aggregationStep
+	}
 	return at.d[name].HistoryProgress(tx)
 }
-func (at *AggregatorRoTx) ProgressII(name kv.InvertedIdx, tx kv.Tx) uint64 {
+func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)
 }
 

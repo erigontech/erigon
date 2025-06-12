@@ -207,7 +207,7 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb uint64) {
 		return 0
 	}
 	if d.largeValues {
-		return (^binary.BigEndian.Uint64(lstIdx[len(lstIdx)-8:])) / d.aggregationStep
+		return ^binary.BigEndian.Uint64(lstIdx[len(lstIdx)-8:])
 	}
 	lstVal, err := tx.GetOne(d.valuesTable, lstIdx)
 	if err != nil {

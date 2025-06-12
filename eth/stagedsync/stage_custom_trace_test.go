@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/eth/stagedsync"
 )
@@ -45,8 +44,7 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 	require.NoError(err)
 
 	err = m.DB.ViewTemporal(ctx, func(rtx kv.TemporalTx) error {
-		ac := state2.AggTx(rtx)
-		progress := ac.HistoryProgress(kv.ReceiptDomain, rtx)
+		progress := rtx.Debug().DomainProgress(kv.ReceiptDomain)
 		assert.Greater(progress, uint64(0), "Receipt domain progress should be greater than 0")
 
 		cumGasUsed, _, logIndex, err := rawtemporaldb.ReceiptAsOf(rtx, 3)

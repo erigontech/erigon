@@ -282,8 +282,8 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 	defer tx.Rollback()
 
 	ac := state2.AggTx(tx)
-	receiptProgress := ac.HistoryProgress(domain, tx)
-	accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
+	receiptProgress := ac.DomainProgress(domain, tx)
+	accProgress := ac.DomainProgress(kv.AccountsDomain, tx)
 	if accProgress != receiptProgress {
 		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
 		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
@@ -436,22 +436,22 @@ func progressOfDomains(tx kv.Tx, produce Produce) uint64 {
 	ac := state2.AggTx(tx)
 	txNum := uint64(math.MaxUint64)
 	if produce.ReceiptDomain {
-		txNum = min(txNum, ac.HistoryProgress(kv.ReceiptDomain, tx))
+		txNum = min(txNum, ac.DomainProgress(kv.ReceiptDomain, tx))
 	}
 	if produce.RCacheDomain {
-		txNum = min(txNum, ac.HistoryProgress(kv.RCacheDomain, tx))
+		txNum = min(txNum, ac.DomainProgress(kv.RCacheDomain, tx))
 	}
 	if produce.LogAddr {
-		txNum = min(txNum, ac.ProgressII(kv.LogAddrIdx, tx))
+		txNum = min(txNum, ac.IIProgress(kv.LogAddrIdx, tx))
 	}
 	if produce.LogTopic {
-		txNum = min(txNum, ac.ProgressII(kv.LogTopicIdx, tx))
+		txNum = min(txNum, ac.IIProgress(kv.LogTopicIdx, tx))
 	}
 	if produce.TraceFrom {
-		txNum = min(txNum, ac.ProgressII(kv.TracesFromIdx, tx))
+		txNum = min(txNum, ac.IIProgress(kv.TracesFromIdx, tx))
 	}
 	if produce.TraceTo {
-		txNum = min(txNum, ac.ProgressII(kv.TracesToIdx, tx))
+		txNum = min(txNum, ac.IIProgress(kv.TracesToIdx, tx))
 	}
 	return txNum
 }

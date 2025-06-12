@@ -1053,11 +1053,11 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	return tx.Commit()
 }
 
-func printAllStages(db kv.RoDB, ctx context.Context, logger log.Logger) error {
+func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	sn, borSn, _, _, _, _, _ := allSnapshots(ctx, db, logger) // ignore error here to get some stat.
 	defer sn.Close()
 	defer borSn.Close()
-	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn) })
+	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {
