@@ -401,6 +401,6 @@ func Compatibility(d datadir.Dirs) error {
 			return err
 		}
 	}
-	println("ALL ACCORDING TO PLAN")
+
 	return nil
 }
