@@ -132,6 +132,7 @@ type MockSentry struct {
 
 	HistoryV3      bool
 	agg            *libstate.Aggregator
+	cfg            ethconfig.Config
 	BlockSnapshots *freezeblocks.RoSnapshots
 	BlockReader    services.FullBlockReader
 	ReceiptsReader *receipts.Generator
@@ -283,6 +284,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
+	cfg.Genesis = gspec
 
 	logger := log.Root()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
@@ -314,6 +316,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		BlockReader:    br,
 		ReceiptsReader: receipts.NewGenerator(br, engine),
 		HistoryV3:      true,
+		cfg:            cfg,
 	}
 
 	if tb != nil {
@@ -544,7 +547,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		logger, stages.ModeApplyingBlocks,
 	)
 
-	cfg.Genesis = gspec
 	pipelineStages := stages2.NewPipelineStages(mock.Ctx, db, &cfg, p2p.Config{}, mock.sentriesClient, mock.Notifications,
 		snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, logger, checkStateRoot)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
@@ -584,8 +586,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		stagedsync.MiningPruneOrder,
 		logger, stages.ModeBlockProduction,
 	)
-
-	cfg.Genesis = gspec
 
 	mock.StreamWg.Add(1)
 	go mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
@@ -701,6 +701,7 @@ func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
 	return chain.NumberOfPoWBlocks()
 }
 
+func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
 func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n == 0 {
