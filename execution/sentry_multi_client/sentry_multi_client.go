@@ -34,9 +34,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -60,8 +62,10 @@ import (
 // RecvUploadMessage - sending bodies/receipts - may be heavy, it's ok to not process this messages enough fast, it's also ok to drop some of these messages if we can't process.
 // RecvUploadHeadersMessage - sending headers - dedicated stream because headers propagation speed important for network health
 // PeerEventsLoop - logging peer connect/disconnect events
+// AnnounceBlockRangeLoop - announces available block range to all peers every epoch
 func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 	sentries := cs.Sentries()
+	go cs.AnnounceBlockRangeLoop(ctx)
 	for i := range sentries {
 		sentry := sentries[i]
 		go cs.RecvMessageLoop(ctx, sentry, nil)
@@ -79,6 +83,7 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	ids := []proto_sentry.MessageId{
 		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
+		eth.ToProto[direct.ETH69][eth.GetReceiptsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -112,12 +117,104 @@ func (cs *MultiClient) RecvMessageLoop(
 		eth.ToProto[direct.ETH67][eth.BlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.NewBlockHashesMsg],
 		eth.ToProto[direct.ETH67][eth.NewBlockMsg],
+		eth.ToProto[direct.ETH69][eth.BlockRangeUpdateMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
+}
+
+func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
+	frequency := 384 * time.Second // one epoch
+
+	headerInDB := func() bool {
+		var done bool
+		_ = cs.db.View(ctx, func(tx kv.Tx) error {
+			header := rawdb.ReadCurrentHeaderHavingBody(tx)
+			done = header != nil
+			return nil
+		})
+		return done
+	}
+
+	if err := cs.waitForPrerequisites(ctx, frequency, headerInDB); err != nil {
+		return
+	}
+
+	broadcastEvery := time.NewTicker(frequency)
+	defer broadcastEvery.Stop()
+
+	for {
+		select {
+		case <-broadcastEvery.C:
+			cs.doAnnounceBlockRange(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
+	sentries := cs.Sentries()
+	status, err := cs.statusDataProvider.GetStatusData(ctx)
+	if err != nil {
+		cs.logger.Error("blockRangeUpdate", "err", err)
+		return
+	}
+
+	request := eth.BlockRangeUpdatePacket{
+		Earliest:   status.EarliestBlockHeight,
+		Latest:     status.MaxBlockHeight,
+		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
+	}
+
+	data, err := rlp.EncodeToBytes(&request)
+	if err != nil {
+		cs.logger.Error("blockRangeUpdate", "err", err)
+		return
+	}
+
+	for _, s := range sentries {
+		_, err := s.SendMessageToAll(ctx, &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69,
+			Data: data,
+		})
+		if err != nil {
+			cs.logger.Error("blockRangeUpdate", "err", err)
+			continue // continue sending message to other sentries
+		}
+	}
+}
+
+// waitForPrerequisites handles waiting for the blockReader to be ready and for a header to be available.
+func (cs *MultiClient) waitForPrerequisites(ctx context.Context, pollFrequency time.Duration, isHeaderAvailable func() bool) error {
+	cs.logger.Info("Waiting for blockreader to be ready")
+	if err := <-cs.blockReader.Ready(ctx); err != nil {
+		return err
+	}
+	cs.logger.Info("Blockreader ready")
+
+	if isHeaderAvailable() {
+		cs.logger.Info("Header already available.")
+		return nil
+	}
+
+	timer := time.NewTicker(pollFrequency)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			cs.logger.Info("Context cancelled while waiting for header.")
+			return ctx.Err()
+		case <-timer.C:
+			if isHeaderAvailable() {
+				return nil
+			}
+		}
+	}
 }
 
 func (cs *MultiClient) PeerEventsLoop(
@@ -135,6 +232,26 @@ func (cs *MultiClient) PeerEventsLoop(
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "PeerEvents", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
 }
 
+// BlockRangeUpdateLoop sends current available block range to all peers
+func (cs *MultiClient) BlockRangeUpdateLoop(
+	ctx context.Context,
+	sentry proto_sentry.SentryClient,
+	wg *sync.WaitGroup,
+) {
+	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
+		return sentry.PeerEvents(streamCtx, &proto_sentry.PeerEventsRequest{}, grpc.WaitForReady(true))
+	}
+	messageFactory := func() *proto_sentry.PeerEvent {
+		return new(proto_sentry.PeerEvent)
+	}
+
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "BlockRangeUpdate", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
+}
+
+type StatusGetter interface {
+	GetStatusData(ctx context.Context) (*proto_sentry.StatusData, error)
+}
+
 // MultiClient - does handle request/response/subscriptions to multiple sentries
 // each sentry may support same or different p2p protocol
 type MultiClient struct {
@@ -146,7 +263,7 @@ type MultiClient struct {
 	db                                kv.TemporalRoDB
 	Engine                            consensus.Engine
 	blockReader                       services.FullBlockReader
-	statusDataProvider                *sentry.StatusDataProvider
+	statusDataProvider                StatusGetter
 	logPeerInfo                       bool
 	sendHeaderRequestsToMultiplePeers bool
 	maxBlockBroadcastPeers            func(*types.Header) uint
@@ -170,7 +287,7 @@ func NewMultiClient(
 	syncCfg ethconfig.Sync,
 	blockReader services.FullBlockReader,
 	blockBufferSize int,
-	statusDataProvider *sentry.StatusDataProvider,
+	statusDataProvider StatusGetter,
 	logPeerInfo bool,
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
@@ -370,12 +487,12 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			}
 		}
 	}
-	outreq := proto_sentry.PeerMinBlockRequest{
-		PeerId:   peerID,
-		MinBlock: highestBlock,
+	outreq := proto_sentry.SetPeerLatestBlockRequest{
+		PeerId:            peerID,
+		LatestBlockHeight: highestBlock,
 	}
-	if _, err1 := sentryClient.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-		cs.logger.Error("Could not send min block for peer", "err", err1)
+	if _, err1 := sentryClient.SetPeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+		cs.logger.Error("Could not send latest block for peer", "err", err1)
 	}
 	return nil
 }
@@ -448,12 +565,12 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
 	cs.Bd.AddToPrefetch(request.Block.Header(), request.Block.RawBody())
-	outreq := proto_sentry.PeerMinBlockRequest{
-		PeerId:   inreq.PeerId,
-		MinBlock: request.Block.NumberU64(),
+	outreq := proto_sentry.SetPeerLatestBlockRequest{
+		PeerId:            inreq.PeerId,
+		LatestBlockHeight: request.Block.NumberU64(),
 	}
-	if _, err1 := sentryClient.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-		cs.logger.Error("Could not send min block for peer", "err", err1)
+	if _, err1 := sentryClient.SetPeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+		cs.logger.Error("Could not send latest block for peer", "err", err1)
 	}
 	cs.logger.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), sentry.ConvertH512ToPeerID(inreq.PeerId)))
 	return nil
@@ -567,15 +684,23 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 }
 
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	return cs.getReceiptsInner(ctx, inreq, sentryClient, false)
+}
+
+func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	return cs.getReceiptsInner(ctx, inreq, sentryClient, true)
+}
+
+func (cs *MultiClient) getReceiptsInner(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient, isEth69 bool) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
 	}
-	cachedReceipts, needMore, err := eth.AnswerGetReceiptsQueryCacheOnly(ctx, cs.ethApiWrapper, query.GetReceiptsPacket)
+	cachedReceipts, needMore, err := eth.AnswerGetReceiptsQueryCacheOnly(ctx, cs.ethApiWrapper, query.GetReceiptsPacket, isEth69)
 	if err != nil {
 		return err
 	}
-	receiptsList := []rlp.RawValue{}
+	var receiptsList []rlp.RawValue
 	if cachedReceipts != nil {
 		receiptsList = cachedReceipts.EncodedReceipts
 	}
@@ -591,7 +716,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 			return err
 		}
 		defer tx.Rollback()
-		receiptsList, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket, cachedReceipts)
+		receiptsList, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket, cachedReceipts, isEth69)
 		if err != nil {
 			return err
 		}
@@ -619,6 +744,24 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		return fmt.Errorf("send receipts response: %w", err)
 	}
 	//println(fmt.Sprintf("[%s] GetReceipts responseLen %d", sentry.ConvertH512ToPeerID(inreq.PeerId), len(b)))
+	return nil
+}
+
+// blockRange69 handles incoming BLOCK_RANGE_UPDATE messages
+func (cs *MultiClient) blockRange69(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	var query eth.BlockRangeUpdatePacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
+	}
+
+	if _, err1 := sentryClient.SetPeerBlockRange(ctx, &proto_sentry.SetPeerBlockRangeRequest{
+		PeerId:            inreq.PeerId,
+		LatestBlockHeight: query.Latest,
+		MinBlockHeight:    query.Earliest,
+	}, &grpc.EmptyCallOption{}); err1 != nil {
+		cs.logger.Error("Could not send latest block range for peer", "err", err1)
+	}
+
 	return nil
 }
 
@@ -668,6 +811,10 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 		return cs.receipts66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_RECEIPTS_66:
 		return cs.getReceipts66(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GET_RECEIPTS_69:
+		return cs.getReceipts69(ctx, inreq, sentry)
+	case proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69:
+		return cs.blockRange69(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}

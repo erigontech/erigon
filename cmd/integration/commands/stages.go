@@ -1259,6 +1259,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		genesisBlock,
 		chainConfig.ChainID.Uint64(),
 		logger,
+		blockReader,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }

@@ -23,6 +23,8 @@ import (
 	"sort"
 	"time"
 
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/erigontech/erigon-db/rawdb"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
@@ -63,6 +65,16 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
 	return block, err
 }
+
+func (r *RemoteBlockReader) EarliestBlockNum(ctx context.Context) (uint64, error) {
+	reply, err := r.client.MinimumBlockAvailable(ctx, &emptypb.Empty{})
+	if err != nil {
+		return 0, err
+	}
+
+	return reply.BlockNum, nil
+}
+
 func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
@@ -1305,6 +1317,10 @@ func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	}
 	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
 	return block, err
+}
+
+func (r *BlockReader) EarliestBlockNum(ctx context.Context) (uint64, error) {
+	return r.sn.SegmentsMin(), nil
 }
 
 func (r *BlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
