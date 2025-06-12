@@ -243,6 +243,15 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
+			Name:  "reset-to-3.0",
+			Usage: "change all the snapshots to 3.0 file format",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				return dirs.RenameNewVersions()
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
 			Name:    "rm-state-snapshots",
 			Aliases: []string{"rm-state-segments", "rm-state"},
 			Action:  doRmStateSnapshots,
@@ -375,7 +384,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			}
 
 			// check that commitment file has state in it
-			// When domains are "purified", we want to keep latest commitment file with state key in it
+			// When domains are "compacted", we want to keep latest commitment file with state key in it
 			if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
 				const trieStateKey = "state"
 
@@ -501,7 +510,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			}
 			minS, maxS = 0, math.MaxUint64
 
-		} else { // prevent all commitment files with trie state from deletion for "purified" domains case
+		} else { // prevent all commitment files with trie state from deletion for "compacted" domains case
 			hasStateTrie := 0
 			for _, file := range commitmentFilesWithState {
 				if file.To <= minS {
@@ -703,6 +712,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 		switch chk {
 		case integrity.BlocksTxnID:
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
+				return err
+			}
+		case integrity.HeaderNoGaps:
+			if err := integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast); err != nil {
 				return err
 			}
 		case integrity.Blocks:
@@ -1367,7 +1380,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 		return nil
@@ -1808,7 +1821,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
