@@ -617,8 +617,6 @@ type TemporalRwTx interface {
 
 	UnmarkedRw(ForkableId) UnmarkedRwTx
 
-	//RwForkables() ForkablesRwTx
-
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
