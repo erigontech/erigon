@@ -703,25 +703,37 @@ func runBn256Pairing(input []byte) ([]byte, error) {
 	}
 	// Convert the input into a set of coordinates
 	var (
-		cs []*bn256.G1
-		ts []*bn256.G2
+		cs []bn254.G1Affine
+		ts []bn254.G2Affine
 	)
 	for i := 0; i < len(input); i += 192 {
-		c, err := newCurvePoint(input[i : i+64])
+		// c, err := newCurvePoint(input[i : i+64])
+		c := bn254.G1Affine{}
+		_, err := c.SetBytes(input[i : i+64])
 		if err != nil {
 			return nil, err
 		}
-		t, err := newTwistPoint(input[i+64 : i+192])
+
+		// t, err := newTwistPoint(input[i+64 : i+192])
+		t := bn254.G2Affine{}
 		if err != nil {
 			return nil, err
 		}
+		_, err = t.SetBytes(input[i+64 : i+192])
 		cs = append(cs, c)
 		ts = append(ts, t)
 	}
-	// Execute the pairing checks and return the results
-	if bn256.PairingCheck(cs, ts) {
+	if len(cs) == 0 {
 		return true32Byte, nil
 	}
+	success, err := bn254.PairingCheck(cs, ts)
+	if err != nil {
+		return nil, err
+	}
+	if success {
+		return true32Byte, nil
+	}
+
 	return false32Byte, nil
 }
 
