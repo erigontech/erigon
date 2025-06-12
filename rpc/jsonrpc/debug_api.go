@@ -21,6 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
+	"runtime/debug"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
@@ -65,6 +67,11 @@ type PrivateDebugAPI interface {
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
+	FreeOSMemory()
+	SetGCPercent(v int) int
+	SetMemoryLimit(limit int64) int64
+	GcStats() *debug.GCStats
+	MemStats() *runtime.MemStats
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -534,4 +541,47 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 	}
 
 	return nil, nil
+}
+
+// MemStats returns detailed runtime memory statistics.
+func (api *PrivateDebugAPIImpl) MemStats() *runtime.MemStats {
+	s := new(runtime.MemStats)
+	runtime.ReadMemStats(s)
+	return s
+}
+
+// GcStats returns GC statistics.
+func (api *PrivateDebugAPIImpl) GcStats() *debug.GCStats {
+	s := new(debug.GCStats)
+	debug.ReadGCStats(s)
+	return s
+}
+
+// FreeOSMemory forces a garbage collection.
+func (api *PrivateDebugAPIImpl) FreeOSMemory() {
+	debug.FreeOSMemory()
+}
+
+// SetGCPercent sets the garbage collection target percentage. It returns the previous
+// setting. A negative value disables GC.
+func (api *PrivateDebugAPIImpl) SetGCPercent(v int) int {
+	return debug.SetGCPercent(v)
+}
+
+// SetMemoryLimit sets the GOMEMLIMIT for the process. It returns the previous limit.
+// Note:
+//
+//   - The input limit is provided as bytes. A negative input does not adjust the limit
+//
+//   - A zero limit or a limit that's lower than the amount of memory used by the Go
+//     runtime may cause the garbage collector to run nearly continuously. However,
+//     the application may still make progress.
+//
+//   - Setting the limit too low will cause Geth to become unresponsive.
+//
+//   - Geth also allocates memory off-heap, particularly for fastCache and Pebble,
+//     which can be non-trivial (a few gigabytes by default).
+func (api *PrivateDebugAPIImpl) SetMemoryLimit(limit int64) int64 {
+	log.Info("Setting memory limit", "size", common.PrettyDuration(limit))
+	return debug.SetMemoryLimit(limit)
 }
