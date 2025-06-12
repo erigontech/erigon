@@ -43,6 +43,7 @@ type EthereumClock interface {
 	StateVersionByForkDigest(common.Bytes4) (clparams.StateVersion, error) // ForkDigestVersion
 	StateVersionByEpoch(uint64) clparams.StateVersion
 	ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
+	ComputeForkDigest(epoch uint64) (digest common.Bytes4, err error) // new in fulu
 
 	GenesisValidatorsRoot() common.Hash
 	GenesisTime() uint64
@@ -217,12 +218,43 @@ func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clpa
 }
 
 func (t *ethereumClockImpl) ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error) {
-	var currentVersion32 common.Hash
-	copy(currentVersion32[:], currentVersion[:])
-	dataRoot := utils.Sha256(currentVersion32[:], t.genesisValidatorsRoot[:])
+	dataRoot := computeForkDataRoot(currentVersion, t.genesisValidatorsRoot)
 	// copy first four bytes to output
 	copy(digest[:], dataRoot[:4])
 	return
+}
+
+func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes4, err error) {
+	// Get fork version for epoch
+	stateVersion := t.beaconCfg.GetCurrentStateVersion(epoch)
+	version := t.beaconCfg.GetForkVersionByVersion(stateVersion)
+	forkVersion := utils.Uint32ToBytes4(version)
+
+	// Compute base digest from fork version and genesis validators root
+	baseDigest := computeForkDataRoot(forkVersion, t.genesisValidatorsRoot)
+
+	if stateVersion < clparams.FuluVersion {
+		digest = common.Bytes4{}
+		copy(digest[:], baseDigest[:4])
+		return
+	}
+
+	// For Fulu and later, XOR base digest with hash of blob parameters
+	maxBlobs := t.beaconCfg.MaxBlobsPerBlockByVersion(stateVersion)
+
+	// Hash blob parameters (epoch and max_blobs_per_block)
+	blobParamsBytes := make([]byte, 16)
+	binary.BigEndian.PutUint64(blobParamsBytes[:8], epoch)
+	binary.BigEndian.PutUint64(blobParamsBytes[8:], maxBlobs)
+	blobParamsHash := utils.Sha256(blobParamsBytes)
+
+	// XOR first 4 bytes of base digest with first 4 bytes of blob params hash
+	digest = common.Bytes4{}
+	for i := 0; i < 4; i++ {
+		digest[i] = baseDigest[i] ^ blobParamsHash[i]
+	}
+
+	return digest, nil
 }
 
 func (t *ethereumClockImpl) GenesisValidatorsRoot() common.Hash {
@@ -231,4 +263,10 @@ func (t *ethereumClockImpl) GenesisValidatorsRoot() common.Hash {
 
 func (t *ethereumClockImpl) GenesisTime() uint64 {
 	return t.genesisTime
+}
+
+func computeForkDataRoot(version [4]byte, genesisValidatorsRoot common.Hash) common.Hash {
+	var currentVersion32 common.Hash
+	copy(currentVersion32[:], version[:])
+	return utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 }
