@@ -190,7 +190,7 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 			log.Trace("[sentinel] failed to validate peer:", "err", err)
 		}
 		if !valid {
-			log.Trace("Handshake was unsuccessful")
+			log.Debug("Handshake was unsuccessful")
 			// on handshake fail, we disconnect with said peer, and remove them from our pool
 			s.host.Peerstore().RemovePeer(peerId)
 			s.host.Network().ClosePeer(peerId)
