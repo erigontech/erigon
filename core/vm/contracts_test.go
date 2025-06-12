@@ -38,17 +38,10 @@ import (
 // precompiledTest defines the input/output pairs for precompiled contract tests.
 type precompiledTest struct {
 	Input, Expected string
+	ExpectedError   string
 	Gas             uint64
 	Name            string
 	NoBenchmark     bool // Benchmark primarily the worst-cases
-}
-
-// precompiledFailureTest defines the input/error pairs for precompiled
-// contract failure tests.
-type precompiledFailureTest struct {
-	Input         string
-	ExpectedError string
-	Name          string
 }
 
 // allPrecompiles does not map to the actual set of precompiles, as it also contains
@@ -77,7 +70,7 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 }
 
 // EIP-152 test vectors
-var blake2FMalformedInputTests = []precompiledFailureTest{
+var blake2FMalformedInputTests = []precompiledTest{
 	{
 		Input:         "",
 		ExpectedError: errBlake2FInvalidInputLength.Error(),
@@ -141,7 +134,7 @@ func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 	})
 }
 
-func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing.T) {
+func testPrecompiledFailure(addr string, test precompiledTest, t *testing.T) {
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
@@ -193,7 +186,9 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 		bench.ReportMetric(float64(mgasps)/100, "mgas/s")
 		//Check if it is correct
 		if err != nil {
-			bench.Error(err)
+			if err.Error() != test.ExpectedError {
+				bench.Error(err)
+			}
 			return
 		}
 		if common.Bytes2Hex(res) != test.Expected {
@@ -325,7 +320,7 @@ func testJson(name, addr string, t *testing.T) {
 }
 
 func testJsonFail(name, addr string, t *testing.T) {
-	tests, err := loadJsonFail(name)
+	tests, err := loadJson(fmt.Sprintf("fail-%v", name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,6 +357,9 @@ func BenchmarkPrecompiledBLS12381MapG1(b *testing.B)      { benchJson("blsMapG1"
 func BenchmarkPrecompiledBLS12381MapG2(b *testing.B)      { benchJson("blsMapG2", "11", b) }
 
 // Failure tests
+func TestPrecompiledBn256AddFail(t *testing.T)      { testJsonFail("bn256Add", "06", t) }
+func BenchmarkPrecompiledBn256AddFail(b *testing.B) { benchJson("fail-bn256Add", "06", b) }
+
 func TestPrecompiledBLS12381G1AddFail(t *testing.T)      { testJsonFail("blsG1Add", "0b", t) }
 func TestPrecompiledBLS12381G1MultiExpFail(t *testing.T) { testJsonFail("blsG1MultiExp", "0c", t) }
 func TestPrecompiledBLS12381G2AddFail(t *testing.T)      { testJsonFail("blsG2Add", "0d", t) }
@@ -376,16 +374,6 @@ func loadJson(name string) ([]precompiledTest, error) {
 		return nil, err
 	}
 	var testcases []precompiledTest
-	err = json.Unmarshal(data, &testcases)
-	return testcases, err
-}
-
-func loadJsonFail(name string) ([]precompiledFailureTest, error) {
-	data, err := os.ReadFile(fmt.Sprintf("testdata/precompiles/fail-%v.json", name))
-	if err != nil {
-		return nil, err
-	}
-	var testcases []precompiledFailureTest
 	err = json.Unmarshal(data, &testcases)
 	return testcases, err
 }

@@ -1,0 +1,7 @@
+[
+  {
+    "Input": "1581d9d4d7eb0e3cdc75739f7098479097d579573f23e70b07cbd40a5d97bbc118da69b1d2cb7b89fdb3bba2524bf135453ce828faea190d8f4d48d572cbe3fe2034b5942fbdd612f2553a9fd9fa5eb4c3e5ce6a34ed100f62de0e380f4e67f816027893e1f5082bdc48651667776e2b1e32a85edd33ff430eef15e8e68b3d4",
+    "ExpectedError": "bn256: invalid point",
+    "Name": "marius1"
+  }
+]
