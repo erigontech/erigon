@@ -119,7 +119,7 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	if responseStatus.ForkDigest != forkDigest {
 		respDigest := common.Bytes4{}
 		copy(respDigest[:], responseStatus.ForkDigest[:])
-		log.Debug("Fork digest mismatch", "responseStatus.ForkDigest", respDigest, "forkDigest", forkDigest)
+		log.Debug("Fork digest mismatch", "responseStatus.ForkDigest", respDigest, "forkDigest", forkDigest, "responseStatus.HeadSlot", responseStatus.HeadSlot)
 		return false, nil
 	}
 	return true, nil
