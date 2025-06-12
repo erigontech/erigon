@@ -252,8 +252,8 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 
 	// Hash blob parameters (epoch and max_blobs_per_block)
 	blobParamsBytes := make([]byte, 16)
-	binary.BigEndian.PutUint64(blobParamsBytes[:8], blobParams.Epoch)
-	binary.BigEndian.PutUint64(blobParamsBytes[8:], blobParams.MaxBlobsPerBlock)
+	binary.LittleEndian.PutUint64(blobParamsBytes[:8], blobParams.Epoch)
+	binary.LittleEndian.PutUint64(blobParamsBytes[8:], blobParams.MaxBlobsPerBlock)
 	blobParamsHash := utils.Sha256(blobParamsBytes)
 
 	// XOR first 4 bytes of base digest with first 4 bytes of blob params hash
