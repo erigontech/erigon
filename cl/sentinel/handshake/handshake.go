@@ -107,7 +107,11 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 
 	digest := common.Bytes4{}
 	copy(digest[:], status.ForkDigest[:])
-	log.Debug("[handshake]", "status.ForkDigest", digest, "status.HeadSlot", status.HeadSlot, "status.FinalizedEpoch", status.FinalizedEpoch)
+	headRoot := common.Hash{}
+	copy(headRoot[:], status.HeadRoot[:])
+	finalizedRoot := common.Hash{}
+	copy(finalizedRoot[:], status.FinalizedRoot[:])
+	log.Debug("[handshake]", "status.ForkDigest", digest, "status.HeadSlot", status.HeadSlot, "status.FinalizedEpoch", status.FinalizedEpoch, "status.HeadRoot", headRoot.String(), "status.FinalizedRoot", finalizedRoot.String())
 
 	if resp.Header.Get("REQRESP-RESPONSE-CODE") != "0" {
 		a, _ := io.ReadAll(resp.Body)
