@@ -22,6 +22,10 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 		return nil, err
 	}
 
+	if err := Compatibility(dirs); err != nil {
+		panic(err)
+	}
+
 	a, err := NewAggregator(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
 		return nil, err
@@ -300,7 +304,7 @@ func Compatibility(d datadir.Dirs) error {
 				name := entry.Name()
 				if strings.HasPrefix(name, "v1.0-") {
 					return errors.New("bad incompatible snapshots with current erigon version. " +
-						"Check twice version or run `erigon seg update-to-new-ver-format` command")
+						"Check twice version or run `erigon seg reset-to-old-ver-format` command")
 				}
 			}
 			return nil
