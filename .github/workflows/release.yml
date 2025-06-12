@@ -351,12 +351,14 @@ jobs:
         DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
         DOCKER_URL_TMP: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
       run: |
+        echo Publishing docker image: 
         skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}
-        if ( "x${{ inputs.publish_latest_tag }}" == "xtrue" ); then
+        if [ "x${{ inputs.publish_latest_tag }}" == "xtrue" ]; then
+          echo Publishing latest tag:
           skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest-test
         fi
         echo Deleting temporary image:
-        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} && echo " ...done"
+        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} && echo -n " ...done"
 
   publish-release:
     needs: [ build-debian-pkg, publish-docker-image, build-release ]
