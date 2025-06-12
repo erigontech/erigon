@@ -2,7 +2,7 @@
 FROM docker.io/library/golang:1.24-bullseye AS builder
 
 RUN apt update
-RUN apt install -y build-essential git bash ca-certificates libstdc++6
+RUN apt install -y build-essential git bash ca-certificates libstdc++6 libgmp3-dev
 
 WORKDIR /app
 ADD go.mod go.mod
