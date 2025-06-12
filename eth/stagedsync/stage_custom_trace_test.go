@@ -44,7 +44,7 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 	require.NoError(err)
 
 	err = m.DB.ViewTemporal(ctx, func(rtx kv.TemporalTx) error {
-		progress := rtx.Debug().HistoryProgress(kv.ReceiptDomain)
+		progress := rtx.Debug().DomainProgress(kv.ReceiptDomain)
 		assert.Greater(progress, uint64(0), "Receipt domain progress should be greater than 0")
 
 		cumGasUsed, _, logIndex, err := rawtemporaldb.ReceiptAsOf(rtx, 3)
