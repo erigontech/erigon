@@ -573,6 +573,10 @@ func (a *ApiHandler) produceBeaconBody(
 	if finalizedHash == (libcommon.Hash{}) {
 		finalizedHash = head // probably fuck up fcu for EL but not a big deal.
 	}
+	safeHash := a.forkchoiceStore.GetEth1Hash(baseState.CurrentJustifiedCheckpoint().Root)
+	if safeHash == (libcommon.Hash{}) {
+		safeHash = head
+	}
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, 0, err
@@ -616,6 +620,7 @@ func (a *ApiHandler) produceBeaconBody(
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
 			finalizedHash,
+			safeHash,
 			head,
 			&engine_types.PayloadAttributes{
 				Timestamp:             hexutil.Uint64(latestExecutionPayload.Time + secsDiff),
@@ -1207,8 +1212,9 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, true, false); err != nil {
 		return err
 	}
-	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().Root
-	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
+	finalizedHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.FinalizedCheckpoint().Root)
+	safeHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.JustifiedCheckpoint().Root)
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
 		return err
 	}
 	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)
