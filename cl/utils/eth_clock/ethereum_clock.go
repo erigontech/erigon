@@ -155,7 +155,7 @@ func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
 		return [4]byte{}, err
 	}
 	if digest1 != digest2 {
-		log.Warn("CurrentForkDigest mismatch", "digest1", digest1, "digest2", digest2, "stateVersion", stateVersion)
+		log.Warn("CurrentForkDigest mismatch", "digest1", digest1, "digest2", digest2, "stateVersion", stateVersion, "currentEpoch", currentEpoch)
 	}
 	return digest1, nil
 }
