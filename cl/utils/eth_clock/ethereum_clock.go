@@ -148,8 +148,6 @@ func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
 		break
 	}
 	return t.computeForkDigestForVersion(currentForkVersion)
-
-	//return t.ComputeForkDigest(t.GetCurrentEpoch())
 }
 
 func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
@@ -244,11 +242,11 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 	// Compute base digest from fork version and genesis validators root
 	baseDigest := computeForkDataRoot(forkVersion, t.genesisValidatorsRoot)
 
-	if stateVersion < clparams.FuluVersion {
-		digest = common.Bytes4{}
-		copy(digest[:], baseDigest[:4])
-		return
-	}
+	//if stateVersion < clparams.FuluVersion { // TODO: add back in
+	digest = common.Bytes4{}
+	copy(digest[:], baseDigest[:4])
+	return
+	//}
 
 	// For Fulu and later, XOR base digest with hash of blob parameters
 	blobParams := t.beaconCfg.GetBlobParameters(epoch)
