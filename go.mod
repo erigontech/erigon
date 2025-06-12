@@ -1,8 +1,8 @@
 module github.com/erigontech/erigon
 
-go 1.23.0
+go 1.24
 
-toolchain go1.23.6
+toolchain go1.24.0
 
 replace (
 	github.com/erigontech/erigon-db => ./erigon-db
@@ -47,7 +47,7 @@ require (
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/emicklei/dot v1.6.2
-	github.com/erigontech/evmone_precompiles v0.0.0-20250610054925-d60899dfa819
+	github.com/erigontech/evmone_precompiles v0.0.0-20250612094417-ffeac80ad010
 	github.com/felixge/fgprof v0.9.3
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
