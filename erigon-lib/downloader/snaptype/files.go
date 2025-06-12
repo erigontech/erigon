@@ -93,15 +93,17 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4
 }
 
+// check that filename w/o ext matches pattern: "<any>.<num>-<num>"
+var StateFileRegex = regexp.MustCompile(`^[^.]+\.\d+-\d+$`)
+
 func IsStateFileV2(name string) bool {
 	base := strings.TrimSuffix(name, filepath.Ext(name))
 	parts := strings.SplitN(base, "-", 2)
 	if len(parts) != 2 {
 		return false
 	}
-	// check that filename w/o ext matches pattern: "<any>.<num>-<num>"
-	re := regexp.MustCompile(`^[^.]+\.\d+-\d+$`)
-	return re.MatchString(parts[1])
+
+	return StateFileRegex.MatchString(parts[1])
 }
 
 func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {

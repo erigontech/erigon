@@ -18,7 +18,6 @@ package snapshotsync
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -599,10 +598,6 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal("bodies", f.TypeString)
 
 	var e3 bool
-	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-021700-021800-bodies.seg.torrent"))
-	println(fmt.Sprintf("file %+v %v %v", f, e3, ok))
-	f, e3, ok = snaptype.ParseFileNameOld("", stat("v1.0-021700-021800-bodies.seg.torrent"))
-	println(fmt.Sprintf("file %+v %v %v", f, e3, ok))
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx"))
 	require.True(ok)
 	require.False(e3)
