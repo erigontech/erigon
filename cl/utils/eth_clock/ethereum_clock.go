@@ -134,16 +134,7 @@ func (t *ethereumClockImpl) GetCurrentEpoch() uint64 {
 
 func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
 	currentEpoch := t.GetCurrentEpoch()
-	// Retrieve current fork version.
-	currentForkVersion := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
-	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
-		if currentEpoch >= fork.epoch {
-			currentForkVersion = fork.version
-			continue
-		}
-		break
-	}
-	return t.computeForkDigestForVersion(currentForkVersion)
+	return t.ComputeForkDigest(currentEpoch)
 }
 
 func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
