@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1.2
 FROM docker.io/library/golang:1.24.3-alpine3.22 AS builder
 
-RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++ gmp-dev
 
 WORKDIR /app
 ADD go.mod go.mod
