@@ -112,6 +112,7 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	responseStatus := &cltypes.Status{}
 
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(resp.Body, responseStatus, clparams.Phase0Version); err != nil {
+		log.Debug("DecodeAndReadNoForkDigest", "error", err)
 		return false, nil
 	}
 	forkDigest, err := h.ethClock.CurrentForkDigest()
