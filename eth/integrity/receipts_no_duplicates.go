@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -30,26 +29,15 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 
-	receiptDomainProgress := state.AggTx(tx).HistoryProgress(kv.ReceiptDomain, tx)
+	receiptDomainProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
 
 	fromBlock := uint64(1)
 	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptDomainProgress)
-	//stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
-	//if err != nil {
-	//	return err
-	//}
-	//toBlock := stageExecProgress
 
 	{
-<<<<<<< HEAD
-		ac := state.AggTx(tx)
 		log.Info("[integrity] ReceiptsNoDuplicates starting", "fromBlock", fromBlock, "toBlock", toBlock)
-		receiptProgress := ac.HistoryProgress(kv.ReceiptDomain, tx)
-		accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
-=======
-		receiptProgress := ac.DomainProgress(kv.ReceiptDomain, tx)
-		accProgress := ac.DomainProgress(kv.AccountsDomain, tx)
->>>>>>> 8248b85d57 (save)
+		receiptProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
+		accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
 		if accProgress != receiptProgress {
 			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
 			log.Warn(err.Error())
