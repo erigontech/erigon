@@ -34,61 +34,65 @@ func (b *forkableBaseTx) GetFromFile(entityNum Num, idx int) (v []byte, found bo
 	return b.f.GetFromFile(entityNum, idx)
 }
 
-// implements both MarkedRoTx and MarkedRwTx
-type markedTx struct {
+// implements both UnmarkedRoTx and UnmarkedRwTx
+type unmarkedTx struct {
 	forkableBaseTx
-	s    state.MarkedTxI
+	s    state.UnmarkedTxI
 	dbtx kv.Tx
 }
 
-func newMarkedRoTx(dbtx kv.Tx, s state.MarkedTxI) *markedTx {
-	return &markedTx{
+var (
+	_ kv.UnmarkedRwTx = (*unmarkedTx)(nil)
+)
+
+func newUnmarkedTx(dbtx kv.Tx, s state.UnmarkedTxI) *unmarkedTx {
+	return &unmarkedTx{
 		forkableBaseTx: forkableBaseTx{f: s.DebugFiles()},
 		s:              s,
 		dbtx:           dbtx,
 	}
 }
 
-func (m *markedTx) Get(num Num) ([]byte, error) {
+func (m *unmarkedTx) Get(num Num) ([]byte, error) {
 	return m.s.Get(num, m.dbtx)
 }
 
-func (m *markedTx) Debug() kv.ForkableRoTxCommons {
+func (m *unmarkedTx) Debug() kv.ForkableRoTxCommons {
 	return m
 }
 
-func (m *markedTx) RoDbDebug() kv.MarkedDbRoTx {
+func (m *unmarkedTx) RoDbDebug() kv.UnmarkedDbRoTx {
 	return m
 }
 
-func (m *markedTx) GetDb(num Num, hash []byte) ([]byte, error) {
-	return m.s.DebugDb().GetDb(num, hash, m.dbtx)
+func (m *unmarkedTx) GetDb(num Num) ([]byte, error) {
+	return m.s.DebugDb().GetDb(num, m.dbtx)
 }
 
-func (m *markedTx) HasRootNumUpto(ctx context.Context, to RootNum) (bool, error) {
+func (m *unmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum) (bool, error) {
 	return m.s.DebugDb().HasRootNumUpto(ctx, to, m.dbtx)
 }
 
-func (m *markedTx) Type() kv.CanonicityStrategy {
+func (m *unmarkedTx) Type() kv.CanonicityStrategy {
 	return m.s.Type()
 }
 
-func (m *markedTx) Close() {
+func (m *unmarkedTx) Close() {
 	m.s.Close()
 }
 
-func (m *markedTx) Put(num Num, hash, v []byte) error {
-	return m.s.Put(num, hash, v, m.dbtx.(kv.RwTx))
+func (m *unmarkedTx) Append(num Num, v []byte) error {
+	return m.s.Append(num, v, m.dbtx.(kv.RwTx))
 }
 
-func (m *markedTx) RwDbDebug() kv.MarkedDbRwTx {
+func (m *unmarkedTx) RwDbDebug() kv.UnmarkedDbRwTx {
 	return m
 }
 
-func (m *markedTx) Prune(ctx context.Context, to RootNum, limit uint64) (uint64, error) {
+func (m *unmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64) (uint64, error) {
 	return m.s.DebugDb().Prune(ctx, to, limit, m.dbtx.(kv.RwTx))
 }
 
-func (m *markedTx) Unwind(ctx context.Context, from RootNum) error {
+func (m *unmarkedTx) Unwind(ctx context.Context, from RootNum) error {
 	return m.s.DebugDb().Unwind(ctx, from, m.dbtx.(kv.RwTx))
 }

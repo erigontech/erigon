@@ -283,16 +283,16 @@ func (tx *Tx) RoForkables(id kv.ForkableId) any {
 	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
 
-func (tx *Tx) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
-	return newMarkedRoTx(tx.Tx, tx.forkaggs[tx.searchForkableAggIdx(id)].Marked(id))
+func (tx *Tx) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
+	return newUnmarkedTx(tx.Tx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
 }
 
-func (tx *RwTx) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
-	return newMarkedRoTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Marked(id))
+func (tx *RwTx) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
+	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
 }
 
-func (tx *RwTx) MarkedRw(id kv.ForkableId) kv.MarkedRwTx {
-	return newMarkedRoTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Marked(id))
+func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
+	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
 }
 
 func (tx *RwTx) RoForkables(id kv.ForkableId) any {
@@ -611,7 +611,3 @@ func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv
 func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
 	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
-
-// func (tx *RwTx) ForkableAgg(forkable kv.ForkableGroup) any {
-// 	return tx.forkaggs[forkable]
-// }

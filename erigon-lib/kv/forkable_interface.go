@@ -74,7 +74,7 @@ type UnmarkedRoTx interface {
 
 type UnmarkedRwTx interface {
 	UnmarkedRoTx
-	RwDbDebug() UnmarkedDbRoTx
+	RwDbDebug() UnmarkedDbRwTx
 	Append(num Num, value []byte) error
 }
 

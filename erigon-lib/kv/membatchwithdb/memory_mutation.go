@@ -771,6 +771,6 @@ func (m *MemoryMutation) RoForkables(id kv.ForkableId) any {
 	return m.db.(kv.TemporalTx).RoForkables(id)
 }
 
-func (m *MemoryMutation) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
-	return m.db.(kv.TemporalTx).MarkedRo(id)
+func (m *MemoryMutation) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
+	return m.db.(kv.TemporalTx).UnmarkedRo(id)
 }

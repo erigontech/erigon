@@ -253,15 +253,15 @@ func (tx *Tx) RoForkables(id kv.ForkableId) any {
 	panic("not implemented")
 }
 
-func (tx *Tx) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
+func (tx *Tx) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
 	panic("not implemented")
 }
 
-func (tx *RwTx) MarkedRo(id kv.ForkableId) kv.MarkedRoTx {
+func (tx *RwTx) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
 	panic("not implemented")
 }
 
-func (tx *RwTx) MarkedRw(id kv.ForkableId) kv.MarkedRwTx {
+func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
 	panic("not implemented")
 }
 

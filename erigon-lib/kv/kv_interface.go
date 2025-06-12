@@ -579,7 +579,7 @@ type TemporalTx interface {
 	AggTx() any
 
 	RoForkables(ForkableId) any // any forkableId, returns that group
-	MarkedRo(ForkableId) MarkedRoTx
+	UnmarkedRo(ForkableId) UnmarkedRoTx
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -615,7 +615,7 @@ type TemporalRwTx interface {
 	TemporalTx
 	TemporalPutDel
 
-	MarkedRw(ForkableId) MarkedRwTx
+	UnmarkedRw(ForkableId) UnmarkedRwTx
 
 	//RwForkables() ForkablesRwTx
 
