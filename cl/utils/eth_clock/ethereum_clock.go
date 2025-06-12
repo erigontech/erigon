@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 )
@@ -134,30 +133,20 @@ func (t *ethereumClockImpl) GetCurrentEpoch() uint64 {
 }
 
 func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
-	currentEpoch := t.GetCurrentEpoch()
-	// Retrieve current fork version.
-	stateVersion := t.beaconCfg.GetCurrentStateVersion(currentEpoch)
-	currentForkVersion := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
-	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
-		if currentEpoch >= fork.epoch {
-			currentForkVersion = fork.version
-			stateVersion = fork.stateVersion
-			continue
+	/*
+		currentEpoch := t.GetCurrentEpoch()
+		// Retrieve current fork version.
+		currentForkVersion := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
+		for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
+			if currentEpoch >= fork.epoch {
+				currentForkVersion = fork.version
+				continue
+			}
+			break
 		}
-		break
-	}
-	digest1, err := t.computeForkDigestForVersion(currentForkVersion)
-	if err != nil {
-		return [4]byte{}, err
-	}
-	digest2, err := t.ComputeForkDigest(currentEpoch)
-	if err != nil {
-		return [4]byte{}, err
-	}
-	if digest1 != digest2 {
-		log.Warn("CurrentForkDigest mismatch", "digest1", digest1, "digest2", digest2, "stateVersion", stateVersion, "currentEpoch", currentEpoch)
-	}
-	return digest1, nil
+		return t.computeForkDigestForVersion(currentForkVersion)
+	*/
+	return t.ComputeForkDigest(t.GetCurrentEpoch())
 }
 
 func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
@@ -228,7 +217,12 @@ func (t *ethereumClockImpl) StateVersionByEpoch(epoch uint64) clparams.StateVers
 }
 
 func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clparams.StateVersion, error) {
-	return t.forkDigestToVersion[digest], nil
+	stateVersion, ok := t.forkDigestToVersion[digest]
+	if ok {
+		return stateVersion, nil
+	}
+
+	return clparams.FuluVersion, nil
 }
 
 func (t *ethereumClockImpl) computeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error) {
