@@ -62,7 +62,24 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 				// skip invalid column index
 				return true
 			}
+
+			forkDigest, err := c.ethClock.ComputeForkDigest(slot / c.beaconConfig.SlotsPerEpoch)
+			if err != nil {
+				log.Debug("failed to compute fork digest", "error", err)
+				return false
+			}
+			if _, err := s.Write([]byte{0}); err != nil {
+				log.Debug("failed to write empty byte", "error", err)
+				return false
+			}
+
+			if _, err := s.Write(forkDigest[:]); err != nil {
+				log.Debug("failed to write fork digest", "error", err)
+				return false
+			}
+
 			if err := c.dataColumnStorage.WriteStream(s, slot, blockRoot, columnIndex); err != nil {
+				log.Debug("failed to write data column sidecar", "error", err)
 				return false
 			}
 			count++
@@ -123,7 +140,24 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 				// skip invalid column index
 				return true
 			}
+
+			forkDigest, err := c.ethClock.ComputeForkDigest(*slot / c.beaconConfig.SlotsPerEpoch)
+			if err != nil {
+				log.Debug("failed to compute fork digest", "error", err)
+				return false
+			}
+			if _, err := s.Write([]byte{0}); err != nil {
+				log.Debug("failed to write empty byte", "error", err)
+				return false
+			}
+
+			if _, err := s.Write(forkDigest[:]); err != nil {
+				log.Debug("failed to write fork digest", "error", err)
+				return false
+			}
+
 			if err := c.dataColumnStorage.WriteStream(s, *slot, blockRoot, columnIndex); err != nil {
+				log.Debug("failed to write data column sidecar", "error", err)
 				return false
 			}
 			count++
