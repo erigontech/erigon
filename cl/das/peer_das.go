@@ -81,6 +81,9 @@ func (d *peerdas) DataRecoverAndPrune(ctx context.Context) error {
 }
 
 func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+	// TODO: not all beacon nodes support this p2p request for now, so temporarily disable it
+	return nil
+
 	// try to request columns in batches of 8 blocks in parallel
 	wg := sync.WaitGroup{}
 	for i := 0; i < len(blocks); i += 8 {
