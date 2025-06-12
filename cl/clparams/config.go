@@ -26,6 +26,7 @@ import (
 	mathrand "math/rand"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"time"
 
@@ -412,6 +413,11 @@ func (b ConfigHex4Bytes) MarshalJSON() ([]byte, error) {
 	return fmt.Appendf(nil, `"0x%s"`, hex.EncodeToString(b[:])), nil
 }
 
+type BlobParameters struct {
+	Epoch            uint64 `yaml:"EPOCH" json:"EPOCH,string"`
+	MaxBlobsPerBlock uint64 `yaml:"MAX_BLOBS_PER_BLOCK" json:"MAX_BLOBS_PER_BLOCK,string"`
+}
+
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
 type BeaconChainConfig struct {
 	// Constants (non-configurable)
@@ -647,6 +653,25 @@ type BeaconChainConfig struct {
 	DepositRequestType             ConfigByte `yaml:"DEPOSIT_REQUEST_TYPE" spec:"true" json:"DEPOSIT_REQUEST_TYPE"`                                    // DepositRequestType is the type for deposit requests.
 	WithdrawalRequestType          ConfigByte `yaml:"WITHDRAWAL_REQUEST_TYPE" spec:"true" json:"WITHDRAWAL_REQUEST_TYPE"`                              // WithdrawalRequestType is the type for withdrawal requests.
 	ConsolidationRequestType       ConfigByte `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE"`                        // ConsolidationRequestType is the type for consolidation requests.
+
+	// EIP7892 - Blob Schedule
+	BlobSchedule []BlobParameters `yaml:"BLOB_SCHEDULE" spec:"true" json:"BLOB_SCHEDULE"` // Schedule of blob limits per epoch
+}
+
+// GetBlobParameters returns the blob parameters at a given epoch
+func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
+	// Iterate through schedule in reverse epoch order
+	for i := len(b.BlobSchedule) - 1; i >= 0; i-- {
+		entry := b.BlobSchedule[i]
+		if epoch >= entry.Epoch {
+			return entry
+		}
+	}
+	// Default to Electra parameters if no matching schedule entry
+	return BlobParameters{
+		Epoch:            b.ElectraForkEpoch,
+		MaxBlobsPerBlock: b.MaxBlobsPerBlockElectra,
+	}
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -689,6 +714,10 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
+	// sort blob schedule by epoch in descending order
+	sort.Slice(b.BlobSchedule, func(i, j int) bool {
+		return b.BlobSchedule[i].Epoch > b.BlobSchedule[j].Epoch
+	})
 }
 
 func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleEntry {
