@@ -373,7 +373,7 @@ func Compatibility(d datadir.Dirs) error {
 				name := entry.Name()
 				if strings.HasPrefix(name, "v1-") {
 					return errors.New("bad incompatible snapshots with current erigon version. " +
-						"Check twice version or run 'erigon rename-to-old' command")
+						"Check twice version or run `erigon seg update-to-new-ver-format` command")
 				}
 				fileInfo, _, _ := snaptype.ParseFileName("", name)
 
