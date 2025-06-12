@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	communication2 "github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -116,7 +117,9 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	forkDigest, err := h.ethClock.CurrentForkDigest()
 	//return responseStatus.ForkDigest == forkDigest, err
 	if responseStatus.ForkDigest != forkDigest {
-		log.Debug("Fork digest mismatch", "responseStatus.ForkDigest", responseStatus.ForkDigest, "forkDigest", forkDigest)
+		respDigest := common.Bytes4{}
+		copy(respDigest[:], responseStatus.ForkDigest[:])
+		log.Debug("Fork digest mismatch", "responseStatus.ForkDigest", respDigest, "forkDigest", forkDigest)
 		return false, nil
 	}
 	return true, nil
