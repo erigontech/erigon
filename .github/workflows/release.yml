@@ -145,10 +145,6 @@ jobs:
             --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
             --push \
             .
-          echo Testing skopeo
-          skopeo copy --multi-arch all docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}-skopeo 
-          echo Testing skopeo delete
-          skopeo delete docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}-skopeo 
 
       - name: Create archives and checksums
         env:
@@ -359,6 +355,8 @@ jobs:
         if ( "x${{ inputs.publish_latest_tag }}" -eq "xtrue" ); then
           skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest-test
         fi
+        echo Deleting temporary image:
+        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} || echo " ...done"
 
   publish-release:
     needs: [ build-debian-pkg, publish-docker-image, build-release ]
