@@ -42,7 +42,7 @@ type EthereumClock interface {
 	LastFork() (common.Bytes4, error)                                      // GetLastFork
 	StateVersionByForkDigest(common.Bytes4) (clparams.StateVersion, error) // ForkDigestVersion
 	StateVersionByEpoch(uint64) clparams.StateVersion
-	ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
+	//ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
 	ComputeForkDigest(epoch uint64) (digest common.Bytes4, err error) // new in fulu
 
 	GenesisValidatorsRoot() common.Hash
@@ -84,7 +84,7 @@ func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, bea
 	}
 
 	for _, fork := range forkList(beaconCfg.ForkVersionSchedule) {
-		digest, err := impl.ComputeForkDigestForVersion(fork.version)
+		digest, err := impl.computeForkDigestForVersion(fork.version)
 		if err != nil {
 			panic(err)
 		}
@@ -143,7 +143,7 @@ func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
 		}
 		break
 	}
-	return t.ComputeForkDigestForVersion(currentForkVersion)
+	return t.computeForkDigestForVersion(currentForkVersion)
 }
 
 func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
@@ -161,7 +161,7 @@ func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
 	if nextForkIndex-1 == len(forkList)-1 {
 		return [4]byte{}, nil
 	}
-	return t.ComputeForkDigestForVersion(forkList[nextForkIndex].version)
+	return t.computeForkDigestForVersion(forkList[nextForkIndex].version)
 }
 
 func (t *ethereumClockImpl) ForkId() ([]byte, error) {
@@ -217,7 +217,7 @@ func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clpa
 	return t.forkDigestToVersion[digest], nil
 }
 
-func (t *ethereumClockImpl) ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error) {
+func (t *ethereumClockImpl) computeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error) {
 	dataRoot := computeForkDataRoot(currentVersion, t.genesisValidatorsRoot)
 	// copy first four bytes to output
 	copy(digest[:], dataRoot[:4])
@@ -250,7 +250,7 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 
 	// XOR first 4 bytes of base digest with first 4 bytes of blob params hash
 	digest = common.Bytes4{}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		digest[i] = baseDigest[i] ^ blobParamsHash[i]
 	}
 
