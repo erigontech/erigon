@@ -15,7 +15,14 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
+
+func init() {
+	if err := ckzg.LoadTrustedSetupFile("./kzg_trusted_setup/trusted_setup.txt", 8); err != nil {
+		panic(err)
+	}
+}
 
 type PeerDas interface {
 	InitLocalNodeId(nodeId enode.ID)
