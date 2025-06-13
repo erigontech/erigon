@@ -264,15 +264,15 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 
-	domains, err := libstate.NewSharedDomains(tx, log.New())
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer domains.Close()
-
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
+	//domains, err := libstate.NewSharedDomains(tx, log.New())
+	//if err != nil {
+	//	test.err = err
+	//	return false
+	//}
+	//defer domains.Close()
+	//
+	//domains.SetTxNum(1)
+	//domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		test.err = err
