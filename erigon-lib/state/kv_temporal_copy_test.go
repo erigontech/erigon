@@ -575,3 +575,15 @@ func (tx *Tx) StepSize() uint64 {
 func (tx *RwTx) StepSize() uint64 {
 	return tx.aggtx.StepSize()
 }
+func (tx *Tx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.Tx)
+}
+func (tx *RwTx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.RwTx)
+}
+func (tx *Tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.Tx)
+}
+func (tx *RwTx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.RwTx)
+}
