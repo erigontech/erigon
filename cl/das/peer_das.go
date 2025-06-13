@@ -2,7 +2,6 @@ package das
 
 import (
 	"context"
-	"path/filepath"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -14,17 +13,10 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/kzg"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
-
-func init() {
-	trustedSetupPath := filepath.Join("kzg_trusted_setup", "trusted_setup.txt")
-	if err := ckzg.LoadTrustedSetupFile(trustedSetupPath, 8); err != nil {
-		panic(err)
-	}
-}
 
 type PeerDas interface {
 	InitLocalNodeId(nodeId enode.ID)
@@ -48,6 +40,7 @@ func NewPeerDas(
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
 	columnStorage blob_storage.DataCloumnStorage) PeerDas {
+	kzg.InitKZG()
 	p := &peerdas{
 		rpc:               rpc,
 		beaconConfig:      beaconConfig,
