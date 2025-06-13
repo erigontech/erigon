@@ -835,8 +835,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		dirs, br, nil, genesis, syncCfg, nil)
 
 	if unwind > 0 {
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			minUnwindableBlockNum, _, err := libstate.AggTx(tx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			minUnwindableBlockNum, _, err := tx.Debug().CanUnwindBeforeBlockNum(s.BlockNumber - unwind)
 			if err != nil {
 				return err
 			}

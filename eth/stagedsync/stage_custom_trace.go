@@ -114,7 +114,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	// 2. Require stage_exec > 0: means has enough state-history
 	var execProgress uint64
 	var startBlock, endBlock uint64
-	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
+	if err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) (err error) {
 		execProgress, err = stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return err
@@ -198,12 +198,11 @@ Loop:
 }
 
 func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := state2.AggTx(tx)
-		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
+	if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		if err := tx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
-		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil {
+		if _, err := tx.PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
 		return nil
@@ -250,7 +249,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	if lastTxNum/agg.StepSize() > 0 {
 		toStep = lastTxNum / agg.StepSize()
 	}
-	if err := db.View(ctx, func(tx kv.Tx) error {
+	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		fromStep = firstStepNotInFiles(tx, produce)
 		return nil
 	}); err != nil {
@@ -274,16 +273,15 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	return nil
 }
 
-func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.TxNumsReader) (err error) {
-	tx, err := db.BeginRo(context.Background())
+func AssertNotBehindAccounts(db kv.TemporalRoDB, domain kv.Domain, txNumsReader rawdbv3.TxNumsReader) (err error) {
+	tx, err := db.BeginTemporalRo(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	ac := state2.AggTx(tx)
-	receiptProgress := ac.DomainProgress(domain, tx)
-	accProgress := ac.DomainProgress(kv.AccountsDomain, tx)
+	receiptProgress := tx.Debug().DomainProgress(domain)
+	accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
 	if accProgress != receiptProgress {
 		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
 		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
@@ -431,32 +429,32 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 	return nil
 }
 
-func progressOfDomains(tx kv.Tx, produce Produce) uint64 {
+func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
-	ac := state2.AggTx(tx)
+	dbg := tx.Debug()
 	txNum := uint64(math.MaxUint64)
 	if produce.ReceiptDomain {
-		txNum = min(txNum, ac.DomainProgress(kv.ReceiptDomain, tx))
+		txNum = min(txNum, dbg.DomainProgress(kv.ReceiptDomain))
 	}
 	if produce.RCacheDomain {
-		txNum = min(txNum, ac.DomainProgress(kv.RCacheDomain, tx))
+		txNum = min(txNum, dbg.DomainProgress(kv.RCacheDomain))
 	}
 	if produce.LogAddr {
-		txNum = min(txNum, ac.IIProgress(kv.LogAddrIdx, tx))
+		txNum = min(txNum, dbg.IIProgress(kv.LogAddrIdx))
 	}
 	if produce.LogTopic {
-		txNum = min(txNum, ac.IIProgress(kv.LogTopicIdx, tx))
+		txNum = min(txNum, dbg.IIProgress(kv.LogTopicIdx))
 	}
 	if produce.TraceFrom {
-		txNum = min(txNum, ac.IIProgress(kv.TracesFromIdx, tx))
+		txNum = min(txNum, dbg.IIProgress(kv.TracesFromIdx))
 	}
 	if produce.TraceTo {
-		txNum = min(txNum, ac.IIProgress(kv.TracesToIdx, tx))
+		txNum = min(txNum, dbg.IIProgress(kv.TracesToIdx))
 	}
 	return txNum
 }
 
-func firstStepNotInFiles(tx kv.Tx, produce Produce) uint64 {
+func firstStepNotInFiles(tx kv.TemporalTx, produce Produce) uint64 {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	ac := state2.AggTx(tx)
 	fromStep := uint64(math.MaxUint64)

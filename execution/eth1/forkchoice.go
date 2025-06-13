@@ -202,8 +202,8 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 	rawdb.WriteForkchoiceHead(tx, blockHash)
 }
 
-func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
-	return state.AggTx(tx).CanUnwindToBlockNum(tx)
+func minUnwindableBlock(tx kv.TemporalTx, number uint64) (uint64, error) {
+	return tx.Debug().CanUnwindToBlockNum()
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
