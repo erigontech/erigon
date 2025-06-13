@@ -61,7 +61,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/btree v1.6.0
-	github.com/ugorji/go/codec v1.2.12
+	github.com/ugorji/go/codec v1.2.13
 	github.com/valyala/fastjson v1.6.4
 	go.uber.org/mock v0.5.0
 	golang.org/x/crypto v0.39.0
