@@ -32,6 +32,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -715,12 +716,12 @@ func runBn256Pairing(input []byte) ([]byte, error) {
 			return nil, err
 		}
 
-		// t, err := newTwistPoint(input[i+64 : i+192])
 		t := bn254.G2Affine{}
+		_, err = t.SetBytes(input[i+64 : i+192])
 		if err != nil {
 			return nil, err
 		}
-		_, err = t.SetBytes(input[i+64 : i+192])
+
 		cs = append(cs, c)
 		ts = append(ts, t)
 	}
