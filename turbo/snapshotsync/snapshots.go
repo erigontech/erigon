@@ -571,6 +571,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 
 	if cfg.NoDownloader {
 		s.DownloadComplete()
+		log.Debug("[snapshots] DownloadComplete")
 	}
 
 	return s
@@ -700,6 +701,7 @@ func (r *ready) set() {
 	if r.state {
 		return
 	}
+	log.Debug("[snapshots] ready")
 	r.state = true
 	close(r.on)
 }
