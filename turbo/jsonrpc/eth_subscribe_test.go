@@ -18,7 +18,7 @@ package jsonrpc
 
 import (
 	"context"
-	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -58,14 +58,23 @@ func TestEthSubscribe(t *testing.T) {
 	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(err)
 	}
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	ctx := context.Background()
 	logger := log.New()
 	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore())
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, func() {}, m.Log)
+	// Creating a new filter will set up new internal subscription channels actively managed by subscription tasks.
+	// We must wait for the first NEW_SNAPSHOT notification, which is always sent unconditionally by EthBackendServer
+	// at the start of Subscribe, to be sure that the subscription is ready, otherwise we could miss some events.
+	subscriptionReadyWg := sync.WaitGroup{}
+	subscriptionReadyWg.Add(1)
+	onNewSnapshot := func() {
+		subscriptionReadyWg.Done()
+	}
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log)
+	subscriptionReadyWg.Wait() // This is needed *before* stages.StageLoopIteration, which sends NEW_HEADER events
 
 	newHeads, id := ff.SubscribeNewHeads(16)
 	defer ff.UnsubscribeHeads(id)
@@ -80,7 +89,6 @@ func TestEthSubscribe(t *testing.T) {
 
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		header := <-newHeads
-		fmt.Printf("Got header %d\n", header.Number.Uint64())
 		require.Equal(i, header.Number.Uint64())
 	}
 }
