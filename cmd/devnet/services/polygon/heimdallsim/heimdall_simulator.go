@@ -227,8 +227,8 @@ func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint6
 	return events, err
 }
 
-func (h *HeimdallSimulator) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
-	return nil, errors.New("method FetchStateSyncEvent not implemented")
+func (h *HeimdallSimulator) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
+	return nil, errors.New("method FetchChainManagerStatus not implemented")
 }
 
 func (h *HeimdallSimulator) FetchStatus(ctx context.Context) (*heimdall.Status, error) {

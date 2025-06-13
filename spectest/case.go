@@ -62,6 +62,13 @@ func ReadTestCases(root fs.FS) (out *TestCases, err error) {
 	out = &TestCases{}
 	if err := fs.WalkDir(root, ".", func(path string, d fs.DirEntry, err error) error {
 		pathList := strings.Split(path, string(os.PathSeparator))
+		// Skip hidden folders (those starting with '.')
+		for _, part := range pathList {
+			if strings.HasPrefix(part, ".") {
+				return nil
+			}
+		}
+
 		//TODO: probably we can do more sanitation here
 		if len(pathList) != 6 {
 			return nil
