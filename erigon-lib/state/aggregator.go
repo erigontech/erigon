@@ -263,7 +263,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	// ii has checker on history dirtyFiles (same domain)
 	dd := a.d[domain]
 	if dd.histCfg.snapshotsDisabled || dd.histCfg.historyDisabled || dd.disable {
-		a.logger.Info("history or ii disabled, can't register dependency", "domain", domain.String())
+		a.logger.Debug("history or ii disabled, can't register dependency", "domain", domain.String())
 		return
 	}
 
