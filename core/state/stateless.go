@@ -136,6 +136,30 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key common.Hash) 
 	return uint256.Int{}, false, nil
 }
 
+func (s *Stateless) HasStorage(address common.Address) (bool, error) {
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return false, err
+	}
+	// check if account has been deleted, in which case it has no storage
+	if _, ok := s.deleted[addrHash]; ok {
+		return false, nil
+	}
+	// check if we know about any storage updates with non-empty values
+	for _, v := range s.storageWrites[addrHash] {
+		if !v.IsZero() {
+			return true, nil
+		}
+	}
+	// check if account does not exist in trie, in which case it has no storage
+	acc, ok := s.t.GetAccount(addrHash[:])
+	if !ok {
+		return false, nil
+	}
+	// check if account in trie has empty storage root or not
+	return acc.Root == trie.EmptyRoot, nil
+}
+
 // ReadAccountCode is a part of the StateReader interface
 func (s *Stateless) ReadAccountCode(address common.Address) (code []byte, err error) {
 	if s.trace {
@@ -262,6 +286,7 @@ func (s *Stateless) CreateContract(address common.Address) error {
 		fmt.Printf("Stateless: CreateContract %x hash %x\n", address, addrHash)
 	}
 	s.created[addrHash] = struct{}{}
+	delete(s.deleted, addrHash)
 	return nil
 }
 

@@ -62,7 +62,7 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 			continue
 		}
 		// TODO: seek(from)
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), hi.hc.h.Compression)
+		g := hi.hc.iit.dataReader(item.src.decompressor)
 
 		idx := hi.hc.iit.statelessIdxReader(i)
 		var offset uint64
