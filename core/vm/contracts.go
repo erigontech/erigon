@@ -44,8 +44,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/secp256r1"
 	"github.com/erigontech/erigon/core/tracing"
 
-	"filippo.io/bigmod"
-
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
 )
@@ -563,33 +561,24 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	}
 	// Retrieve the operands and execute the exponentiation
 	var (
-		base = getData(input, 0, baseLen)
-		mod  = getData(input, baseLen+expLen, modLen)
-		exp  = getData(input, baseLen, expLen)
+		base = new(big.Int).SetBytes(getData(input, 0, baseLen))
+		exp  = new(big.Int).SetBytes(getData(input, baseLen, expLen))
+		mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
 		v    []byte
 	)
-
-	modBm, err := bigmod.NewModulus(getData(input, baseLen+expLen, modLen))
-	if err != nil {
-		return nil, err
-	}
-	baseBm, err := new(bigmod.Nat).SetBytes(getData(input, 0, baseLen), modBm)
-	if err != nil {
-		return nil, err
-	}
-
 	switch {
-	case modBm.BitLen() == 0:
+	case mod.BitLen() == 0:
 		// Modulo 0 is undefined, return zero
 		return common.LeftPadBytes([]byte{}, int(modLen)), nil
-	case baseBm.IsOne() == 1:
+	case base.Cmp(common.Big1) == 0:
 		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
-		v = baseBm.Mod(baseBm, modBm).Bytes(modBm)
-	case modBm.Nat().IsOdd() == 1:
-		v = baseBm.Exp(baseBm, exp, modBm).Bytes(modBm)
+		v = base.Mod(base, mod).Bytes()
+	//case mod.Bit(0) == 0:
+	//	// Modulo is even
+	//	v = math.FastExp(base, exp, mod).Bytes()
 	default:
-		// Modulo is even
-		v = math.FastExp(new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp), new(big.Int).SetBytes(mod)).Bytes()
+		// Modulo is odd
+		v = base.Exp(base, exp, mod).Bytes()
 	}
 	return common.LeftPadBytes(v, int(modLen)), nil
 }
