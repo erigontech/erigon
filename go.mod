@@ -151,6 +151,7 @@ require (
 )
 
 require (
+	filippo.io/bigmod v0.1.0
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.2.0 // indirect
 	github.com/agnivade/levenshtein v1.2.0 // indirect
