@@ -48,13 +48,13 @@ var (
 	ErrEIP7594DataNotAvailable = errors.New("EIP-7594 column data is not available")
 )
 
-func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.Eth1Block, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
+func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
 	expectedBlobHashes := []common.Hash{}
-	transactions, err := types.DecodeTransactions(block.Transactions.UnderlyngReference())
+	transactions, err := types.DecodeTransactions(block.Body.ExecutionPayload.Transactions.UnderlyngReference())
 	if err != nil {
 		return fmt.Errorf("unable to decode transactions: %v", err)
 	}
-	kzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
+	block.Body.BlobKzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
 		var kzg common.Hash
 		kzg, err = utils.KzgCommitmentToVersionedHash(common.Bytes48(*value))
 		if err != nil {
@@ -68,7 +68,10 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	}
 
 	maxBlobsPerBlock := cfg.MaxBlobsPerBlockByVersion(block.Version())
-	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
+	if block.Version() >= clparams.FuluVersion {
+		maxBlobsPerBlock = cfg.GetBlobParameters(block.Slot / cfg.SlotsPerEpoch).MaxBlobsPerBlock
+	}
+	return ethutils.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
 func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
@@ -144,7 +147,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	startEngine := time.Now()
 	if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
 		if block.Version() >= clparams.DenebVersion {
-			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
+			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
 				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
 			}
 		}
