@@ -88,6 +88,7 @@ func createSentinel(
 	indiciesDB kv.RwDB,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
+	dataColumnStorage blob_storage.DataCloumnStorage,
 	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		context.Background(),
@@ -98,6 +99,7 @@ func createSentinel(
 		indiciesDB,
 		logger,
 		forkChoiceReader,
+		dataColumnStorage,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -183,6 +185,7 @@ func StartSentinelService(
 	srvCfg *ServerConfig,
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	dataColumnStorage blob_storage.DataCloumnStorage,
 	logger log.Logger) (sentinelrpc.SentinelClient, *enode.LocalNode, error) {
 	ctx := context.Background()
 	sent, localNode, err := createSentinel(
@@ -192,6 +195,7 @@ func StartSentinelService(
 		indiciesDB,
 		forkChoiceReader,
 		ethClock,
+		dataColumnStorage,
 		logger,
 	)
 	if err != nil {
