@@ -522,7 +522,8 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 				// End not concurrent safe
 			}
 		} else {
-			d.logger.Crit("error checking snapshot file length", "name", f.Path(), "err", err)
+			// In Erigon 3.1, .torrent files are only written when the data is complete.
+			d.logger.Crit("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
 		}
 		passed = false
 		d.verifyPieces(f)
