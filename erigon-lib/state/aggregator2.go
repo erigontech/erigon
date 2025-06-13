@@ -288,6 +288,16 @@ func EnableHistoricalRCache() {
 
 var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
 
+func isNewVerFormat(name string) bool {
+	if !strings.HasPrefix(name, "v") {
+		return false
+	}
+	name = strings.TrimPrefix(name, "v")
+	parts := strings.SplitN(name, "-", 2)
+	version := parts[0]
+	return strings.Count(version, ".") == 1
+}
+
 func Compatibility(d datadir.Dirs) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
@@ -302,9 +312,11 @@ func Compatibility(d datadir.Dirs) error {
 
 			if !entry.IsDir() {
 				name := entry.Name()
-				if strings.HasPrefix(name, "v1.0-") {
-					return errors.New("bad incompatible snapshots with current erigon version. " +
-						"Check twice version or run `erigon seg reset-to-old-ver-format` command")
+				if isNewVerFormat(name) {
+					return errors.New("the current snapshots are not compatible with this version of Erigon. " +
+						"Please ensure you're using Erigon v3.1 or later, or run " +
+						"`erigon seg reset-to-old-ver-format` to revert snapshots to the old format " +
+						"(they would be compatible with this 3.0)")
 				}
 			}
 			return nil
