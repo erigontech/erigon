@@ -2,6 +2,7 @@ package das
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -19,7 +20,8 @@ import (
 )
 
 func init() {
-	if err := ckzg.LoadTrustedSetupFile("./kzg_trusted_setup/trusted_setup.txt", 8); err != nil {
+	trustedSetupPath := filepath.Join("kzg_trusted_setup", "trusted_setup.txt")
+	if err := ckzg.LoadTrustedSetupFile(trustedSetupPath, 8); err != nil {
 		panic(err)
 	}
 }
