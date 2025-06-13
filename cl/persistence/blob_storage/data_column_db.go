@@ -27,6 +27,7 @@ type DataCloumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
 	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
 	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
+	ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	SavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error)
 	//Prune() error
@@ -149,6 +150,16 @@ func (s *dataCloumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 		return nil, err
 	}
 	return data, nil
+}
+
+func (s *dataCloumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
+	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
+	if _, err := s.fs.Stat(filepath); err == afero.ErrFileNotFound {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *dataCloumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
