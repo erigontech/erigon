@@ -27,14 +27,12 @@ import (
 	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"hash"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/mclock"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon-p2p/enr"
@@ -630,7 +628,6 @@ func (c *Codec) decryptMessage(input, nonce, headerData, readKey []byte) (Packet
 // The packetLen here is the length remaining after the static header.
 func (h *StaticHeader) checkValid(packetLen int) error {
 	if h.ProtocolID != protocolID {
-		log.Debug("[checkValid]", "h.ProtocolID", hex.EncodeToString(h.ProtocolID[:]), "protocolID", hex.EncodeToString(protocolID[:]))
 		return errInvalidHeader
 	}
 	if h.Version < minVersion {
