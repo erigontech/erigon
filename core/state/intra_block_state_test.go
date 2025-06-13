@@ -264,7 +264,7 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 
-	//domains, err := libstate.NewSharedDomains(tx, log.New())
+	//domains, err := stateLib.NewSharedDomains(tx, log.New())
 	//if err != nil {
 	//	test.err = err
 	//	return false
