@@ -555,8 +555,11 @@ type DenebBeaconBlock struct {
 	Blobs     *solid.ListSSZ[*Blob]     `json:"blobs"`
 }
 
-func NewDenebBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *DenebBeaconBlock {
+func NewDenebBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion, slot uint64) *DenebBeaconBlock {
 	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlockByVersion(version))
+	if version >= clparams.FuluVersion {
+		maxBlobsPerBlock = int(beaconCfg.GetBlobParameters(slot / beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock)
+	}
 	b := &DenebBeaconBlock{
 		Block:     NewBeaconBlock(beaconCfg, version),
 		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
