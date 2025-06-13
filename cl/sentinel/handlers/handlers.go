@@ -19,6 +19,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -164,7 +165,10 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 	return func(s network.Stream) {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Error("[pubsubhandler] panic in stream handler", "err", r, "name", name)
+				// print stack trace
+				buf := make([]byte, 1024)
+				buf = buf[:runtime.Stack(buf, false)]
+				log.Error("[pubsubhandler] panic in stream handler", "err", r, "name", name, "stack", string(buf))
 				_ = s.Reset()
 				_ = s.Close()
 			}
