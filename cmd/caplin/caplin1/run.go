@@ -285,6 +285,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
+	columnStorage := blob_storage.NewDataColumnStore(indexDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs), pruneBlobDistance, beaconConfig, ethClock)
 	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:                       config.CaplinDiscoveryAddr,
 		Port:                         int(config.CaplinDiscoveryPort),
@@ -311,12 +312,11 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconConfig.SlotsPerEpoch,
 			HeadRoot:       state.FinalizedCheckpoint().Root,
 		},
-	}, ethClock, forkChoice, logger)
+	}, ethClock, forkChoice, columnStorage, logger)
 	if err != nil {
 		return err
 	}
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
-	columnStorage := blob_storage.NewDataColumnStore(indexDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs), pruneBlobDistance, beaconConfig, ethClock)
 	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, columnStorage)
 	peerDas.InitLocalNodeId(localNode.ID()) // hack init
 	forkChoice.InitPeerDas(peerDas)         // hack init
