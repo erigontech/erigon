@@ -63,6 +63,16 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 				return true
 			}
 
+			exists, err := c.dataColumnStorage.ColumnSidecarExists(c.ctx, slot, blockRoot, int64(columnIndex))
+			if err != nil {
+				log.Debug("failed to check if data column sidecar exists", "error", err)
+				return false
+			}
+			if !exists {
+				// skip
+				return true
+			}
+
 			forkDigest, err := c.ethClock.ComputeForkDigest(slot / c.beaconConfig.SlotsPerEpoch)
 			if err != nil {
 				log.Debug("failed to compute fork digest", "error", err)
@@ -79,7 +89,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 			}
 
 			if err := c.dataColumnStorage.WriteStream(s, slot, blockRoot, columnIndex); err != nil {
-				log.Debug("failed to write data column sidecar", "error", err)
+				log.Debug("failed to write stream data column sidecar", "error", err)
 				return false
 			}
 			count++
@@ -141,6 +151,16 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 				return true
 			}
 
+			exists, err := c.dataColumnStorage.ColumnSidecarExists(c.ctx, *slot, blockRoot, int64(columnIndex))
+			if err != nil {
+				log.Debug("failed to check if data column sidecar exists", "error", err)
+				return false
+			}
+			if !exists {
+				// skip
+				return true
+			}
+
 			forkDigest, err := c.ethClock.ComputeForkDigest(*slot / c.beaconConfig.SlotsPerEpoch)
 			if err != nil {
 				log.Debug("failed to compute fork digest", "error", err)
@@ -157,7 +177,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 			}
 
 			if err := c.dataColumnStorage.WriteStream(s, *slot, blockRoot, columnIndex); err != nil {
-				log.Debug("failed to write data column sidecar", "error", err)
+				log.Debug("failed to write stream data column sidecar", "error", err)
 				return false
 			}
 			count++
