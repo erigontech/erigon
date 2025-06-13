@@ -62,6 +62,69 @@ func (c *curvePoint) IsInfinity() bool {
 	return c.z == gfP{0}
 }
 
+func (c *curvePoint) AddAffine(p, q *curvePoint) {
+	if p.IsInfinity() {
+		c.Set(q)
+		return
+	}
+	if q.IsInfinity() {
+		c.Set(p)
+		return
+	}
+
+	x1 := p.x
+	y1 := p.y
+	x2 := q.x
+	y2 := q.y
+
+	// Use classic formula for point addition.
+	// https://en.wikipedia.org/wiki/Elliptic_curve_point_multiplication#Point_operations
+
+	dx, dy := gfP{}, gfP{}
+	gfpSub(&dx, &x2, &x1)
+	gfpSub(&dy, &y2, &y1)
+
+	xx := gfP{}
+	xxTemp := gfP{}
+	dxEqualZero := dx == gfP{0}
+	if dxEqualZero {
+		dyEqualNotZero := dy != gfP{0}
+		if dyEqualNotZero { // For opposite points
+			c.x = gfP{0} // return the point at infinity.
+			c.y = gfP{0}
+			c.z = gfP{0}
+			c.t = gfP{0}
+			return
+		}
+
+		// For coincident points find the slope of the tangent line.
+		gfpMul(&xx, &x1, &x1)
+		gfpAdd(&xxTemp, &xx, &xx)
+		gfpAdd(&dy, &xxTemp, &xx)
+		gfpAdd(&dx, &y1, &y1)
+	}
+
+	dx.Invert(&dx)
+	slope := gfP{}
+	gfpMul(&slope, &dy, &dx)
+	slopeSquared := gfP{}
+	gfpMul(&slopeSquared, &slope, &slope)
+	xr := gfP{}
+
+	gfpSub(&xr, &slopeSquared, &x1)
+	gfpSub(&xr, &xr, &x2)
+
+	yr := gfP{}
+	gfpSub(&yr, &x1, &xr)
+	gfpMul(&yr, &yr, &slope)
+	gfpSub(&yr, &yr, &y1)
+
+	c.x = xr
+	c.y = yr
+	c.z = gfP{1}
+	c.t = gfP{1}
+}
+
 func (c *curvePoint) Add(a, b *curvePoint) {
 	if a.IsInfinity() {
 		c.Set(b)

@@ -78,7 +78,7 @@ func (e *G1) Add(a, b *G1) *G1 {
 	if e.p == nil {
 		e.p = &curvePoint{}
 	}
-	e.p.Add(a.p, b.p)
+	e.p.AddAffine(a.p, b.p)
 	return e
 }
 
@@ -109,7 +109,10 @@ func (e *G1) Marshal() []byte {
 		e.p = &curvePoint{}
 	}
 
-	e.p.MakeAffine()
+	if e.p.z[0] != 1 || e.p.z[1] != 0 || e.p.z[2] != 0 || e.p.z[3] != 0 {
+		e.p.MakeAffine()
+	}
+
 	ret := make([]byte, numBytes*2)
 	if e.p.IsInfinity() {
 		return ret

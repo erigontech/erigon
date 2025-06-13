@@ -3,6 +3,7 @@ package bn256
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 )
 
 type gfP [4]uint64
@@ -30,24 +31,93 @@ func (e *gfP) Set(f *gfP) {
 	e[3] = f[3]
 }
 
-func (e *gfP) Invert(f *gfP) {
-	bits := [4]uint64{0x3c208c16d87cfd45, 0x97816a916871ca8d, 0xb85045b68181585d, 0x30644e72e131a029}
+func (z *gfP) Add(x, y *gfP) bool {
+	var c uint64
+	z[0], c = bits.Add64(x[0], y[0], 0)
+	z[1], c = bits.Add64(x[1], y[1], c)
+	z[2], c = bits.Add64(x[2], y[2], c)
+	z[3], c = bits.Add64(x[3], y[3], c)
+	return c != 0
+}
 
-	sum, power := &gfP{}, &gfP{}
-	sum.Set(rN1)
-	power.Set(f)
+func (z *gfP) Sub(x, y *gfP) bool {
+	var c uint64
+	z[0], c = bits.Sub64(x[0], y[0], 0)
+	z[1], c = bits.Sub64(x[1], y[1], c)
+	z[2], c = bits.Sub64(x[2], y[2], c)
+	z[3], c = bits.Sub64(x[3], y[3], c)
+	return c != 0
+}
 
-	for word := 0; word < 4; word++ {
-		for bit := uint(0); bit < 64; bit++ {
-			if (bits[word]>>bit)&1 == 1 {
-				gfpMul(sum, sum, power)
+func (z *gfP) IsZero() bool {
+	return (z[0] | z[1] | z[2] | z[3]) == 0
+}
+
+func (z *gfP) Div2() {
+	z[0] = (z[1] << 63) | (z[0] >> 1)
+	z[1] = (z[2] << 63) | (z[1] >> 1)
+	z[2] = (z[3] << 63) | (z[2] >> 1)
+	z[3] = z[3] >> 1
+}
+
+func (e *gfP) Invert(x *gfP) {
+	// Use extended binary Euclidean algorithm. This evolves variables a and b until a is 0.
+	// Then GCD(x, mod) is in b. If GCD(x, mod) == 1 then the inversion exists and is in v.
+	// This follows the classic algorithm (Algorithm 1) presented in
+	// "Optimized Binary GCD for Modular Inversion".
+	// https://eprint.iacr.org/2020/972.pdf#algorithm.1
+	// TODO: The same paper has additional optimizations that could be applied.
+	a := *x
+	b := P_words
+
+	// Bézout's coefficients are originally initialized to 1 and 0. But because the input x
+	// is in Montgomery form XR the algorithm would compute X⁻¹R⁻¹. To get the expected X⁻¹R,
+	// we need to multiply the result by R². We can achieve the same effect "for free"
+	// by initializing u to R² instead of 1.
+	u := *r2
+	v := gfP{0}
+
+	zero := gfP{0}
+	one := gfP{1}
+	d := gfP{0}
+	tmp := gfP{}
+
+	for {
+		if a.IsZero() {
+			break
+		}
+
+		if a[0]&1 != 0 {
+			less := d.Sub(&a, &b)
+
+			if less {
+				b = a
+				a.Sub(&zero, &d)
+
+				tmp = u
+				u = v
+				v = tmp
+			} else {
+				a = d
 			}
-			gfpMul(power, power, power)
+
+			u.Sub(&u, &v)
+		}
+
+		a.Div2()
+		u.Div2()
+
+		if u[0]&1 != 0 {
+			u.Add(&u, &inv2)
 		}
 	}
 
-	gfpMul(sum, sum, r3)
-	e.Set(sum)
+	if b != one {
+		*e = zero
+		return
+	}
+
+	*e = v
 }
 
 func (e *gfP) Marshal(out []byte) {
