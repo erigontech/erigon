@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 
@@ -636,13 +637,10 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, tx
 		return
 	}
 
-	limit := uint64(1000)
-	// TODO: furious prune etc. ??
-	//
-
-
+	// 1. unlike in agg, less number of prune elements expected => so can do all of the pruning in one shot..
+	// 2. `toRootNum` is the max value. Each forkable checks if it can prune upto that point (e.g. files are be built).
 	return loopOverDebugDbsExec(r, kv.AllForkableId, func(db ForkableDbCommonTxI) error {
-		_, err = db.Prune(ctx, toRootNum, limit, tx)
+		_, err = db.Prune(ctx, toRootNum, math.MaxUint64, tx)
 		return err
 	})
 }
