@@ -53,8 +53,8 @@ func TestEmptyAcountEncoding(t *testing.T) {
 		Initialised: true,
 		Nonce:       0,
 		Balance:     *new(uint256.Int),
-		Root:        emptyRoot,     // extAccount doesn't have Root value
-		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
+		Root:        empty.RootHash, // extAccount doesn't have Root value
+		CodeHash:    empty.CodeHash, // extAccount doesn't have CodeHash value
 		Incarnation: 0,
 	}
 
