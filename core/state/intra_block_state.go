@@ -729,6 +729,18 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		}
 	}
 
+	if isEscrow := reason == tracing.BalanceIncreaseEscrow; isEscrow && sdb.balanceInc != nil {
+		bi, ok := sdb.balanceInc[addr]
+		if !ok {
+			bi = &BalanceIncrease{isEscrow: isEscrow}
+		}
+		bi.isEscrow = isEscrow
+		sdb.balanceInc[addr] = bi
+		if sdb.trace && bi.isEscrow {
+			fmt.Printf("protected escrow %x\n", addr)
+		}
+	}
+
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
