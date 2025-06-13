@@ -277,7 +277,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
+	// Called manually to ensure all torrents are present before verification.
+	cfg.AddTorrentsFromDisk = false
+	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
+	cfg.ManualDataVerification = manualDataVerification
 
 	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
 	if err != nil {
@@ -288,14 +291,27 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	d.HandleTorrentClientStatus()
 
+	err = d.AddTorrentsFromDisk(ctx)
+	if err != nil {
+		return fmt.Errorf("adding torrents from disk: %w", err)
+	}
+
+	// I think we could use DisableInitialPieceVerification to get the behaviour we want here: One
+	// hash, and fail if it's in the verify files list or we have fail fast on.
+
 	if len(_verifyFiles) > 0 {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
-	if verify || verifyFailfast || len(verifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
+		if err = d.VerifyData(ctx, verifyFiles); err != nil {
 			return err
 		}
 	}
+
+	// This only works if Cfg.ManualDataVerification is held by reference by the Downloader. The
+	// alternative is to pass the value through AddTorrentsFromDisk, do it per Torrent ourselves, or
+	// defer all hashing to the torrent Client in the Downloader and wait for it to complete.
+	cfg.ManualDataVerification = false
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {

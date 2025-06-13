@@ -329,6 +329,7 @@ func (d *Downloader) addTorrentSpec(
 	// completion data? We might want to clobber any piece completion and force the client to accept
 	// what we provide, assuming we trust our own metainfo generation more.
 	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
+	ts.DisableInitialPieceCheck = d.cfg.ManualDataVerification
 	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
 	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
 	t, first, err = d.torrentClient.AddTorrentSpec(ts)
@@ -364,36 +365,31 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 	return peerID, nil
 }
 
-// Trigger all pieces to be verified with the given concurrency primitives. It's
-// an error for a piece to not be complete or have an unknown state after
-// verification.
-func scheduleVerifyFile(ctx context.Context, eg *errgroup.Group, t *torrent.Torrent, piecesChecked *atomic.Uint64) {
-	for i := range t.NumPieces() {
-		// I think if a check fails, this will still power through and force the
-		// rest of the pieces to get verified but ignore the result. Check
-		// ctx.Err to avoid that.
-		eg.Go(func() (err error) {
-			defer piecesChecked.Add(1)
-			piece := t.Piece(i)
-			err = piece.VerifyDataContext(ctx)
+// Trigger all pieces to be verified with the given concurrency primitives. It's an error for a
+// piece to not be complete or have an unknown state after verification.
+func verifyTorrentComplete(
+	ctx context.Context,
+	eg *errgroup.Group,
+	t *torrent.Torrent,
+	verifiedBytes *atomic.Int64,
+) {
+	eg.Go(func() (err error) {
+		// Wrap error for errgroup.Group return.
+		defer func() {
 			if err != nil {
-				return
+				err = fmt.Errorf("verifying %v: %w", t.Name(), err)
 			}
-			// I wonder if we want the storage completion (derived from a piece
-			// completion DB in most cases), or if we want the torrent lib's
-			// cached version (since we did just verify data). That would be in
-			// piece.State().Completion.
-			completion := piece.Storage().Completion()
-			if !completion.Ok {
-				err = errors.New("storage state unknown")
-			}
-			if completion.Err != nil {
-				err = fmt.Errorf("storage completion state error: %w", completion.Err)
-			}
-			if err != nil {
-				err = fmt.Errorf("piece %s:%d verify failed: %w", t.Name(), i, err)
-			}
+		}()
+		err = t.VerifyDataContext(ctx)
+		if err != nil {
 			return
-		})
-	}
+		}
+		// This is a relatively new API feature, so please report if it does not work as expected.
+		if t.Complete().Bool() {
+			verifiedBytes.Add(t.Length())
+		} else {
+			err = errors.New("torrent not complete")
+		}
+		return
+	})
 }

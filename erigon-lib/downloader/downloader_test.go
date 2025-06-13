@@ -102,6 +102,6 @@ func TestVerifyData(t *testing.T) {
 	require.NoError(err)
 	defer d.Close()
 
-	err = d.VerifyData(d.ctx, nil, false)
+	err = d.VerifyData(d.ctx, nil)
 	require.NoError(err)
 }

@@ -56,7 +56,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -95,6 +94,7 @@ type Downloader struct {
 	verificationOccurring chansync.Flag
 	// Torrents that block completion. They were requested specifically. Torrents added from disk
 	// that aren't subsequently requested are not required to satisfy the sync stage.
+	// https://github.com/erigontech/erigon/issues/15514
 	requiredTorrents map[*torrent.Torrent]struct{}
 	stats            AggStats
 }
@@ -771,29 +771,19 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 	return rates, peers
 }
 
-func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFast bool) error {
-	total := 0
+// This is too coupled to the Downloader. Check all loaded torrents by forcing a new verification
+// then checking if the client considers them complete.
+func (d *Downloader) VerifyData(
+	ctx context.Context,
+	whiteList []string,
+) error {
+	var totalBytes int64
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
 	for _, t := range allTorrents {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.GotInfo(): //files to verify already have .torrent on disk. means must have `Info()` already
-		default: // skip other files
-			// TODO: This seems wrong. If we don't have the info we are missing
-			// something.
-			continue
+		if t.Info() == nil {
+			return fmt.Errorf("%v: missing torrent info", t.Name())
 		}
-
-		exists, err := dir.FileExist(filepath.Join(d.SnapDir(), t.Name()))
-		if err != nil {
-			return err
-		}
-		if !exists {
-			continue
-		}
-
 		if len(whiteList) > 0 {
 			name := t.Name()
 			exactOrPartialMatch := slices.ContainsFunc(whiteList, func(s string) bool {
@@ -804,12 +794,16 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 			}
 		}
 		toVerify = append(toVerify, t)
-		total += t.NumPieces()
+		totalBytes += t.Length()
 	}
+
 	d.logger.Info("[snapshots] Verify start")
 	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
-	var completedPieces, completedFiles atomic.Uint64
+	var (
+		verifiedBytes  atomic.Int64
+		completedFiles atomic.Uint64
+	)
 
 	{
 		logEvery := time.NewTicker(20 * time.Second)
@@ -824,30 +818,32 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 					return
 				case <-logEvery.C:
 					d.logger.Info("[snapshots] Verify",
-						"progress", fmt.Sprintf("%.2f%%", 100*float64(completedPieces.Load())/float64(total)),
+						"progress", fmt.Sprintf("%.2f%%", 100*float64(verifiedBytes.Load())/float64(totalBytes)),
 						"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
-						"sz_gb", downloadercfg.DefaultPieceSize*completedPieces.Load()/1024/1024/1024,
+						// GB not GiB?
+						"sz_gb", verifiedBytes.Load()>>30,
 					)
 				}
 			}
 		})
 	}
 
-	g, ctx := errgroup.WithContext(ctx)
-	// We're hashing multiple torrents and the torrent library limits hash
-	// concurrency per-torrent. We trigger piece verification ourselves to make
-	// the load more predictable. This value would be related to whatever
-	// hardware performs the hashing.
-	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+	eg, ctx := errgroup.WithContext(ctx)
+	// We're hashing multiple torrents and the torrent library limits hash concurrency per-torrent.
+	// We trigger torrent verification ourselves to make the load more predictable. This will only
+	// work if the hashing concurrency is per-torrent (which it is for now). anacrolix/torrent
+	// should provide a synchronous hashing mechanism that supports v1/v2. TODO: The multiplier is
+	// probably too high now that we don't iterate though pieces.
+	eg.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 	for _, t := range toVerify {
-		scheduleVerifyFile(ctx, g, t, &completedPieces)
-		// Technically this requires the pieces for a given torrent to be
-		// completed, but I took a shortcut after I realised. I don't think it's
-		// necessary for it to be super accurate since we also have a pieces counter.
+		verifyTorrentComplete(ctx, eg, t, &verifiedBytes)
+		// Technically this requires the pieces for a given torrent to be completed, but I took a
+		// shortcut after I realised. I don't think it's necessary for it to be super accurate since
+		// we also have a pieces counter.
 		completedFiles.Add(1)
 	}
 
-	return g.Wait()
+	return eg.Wait()
 }
 
 // AddNewSeedableFile decides what we do depending on whether we have the .seg file or the .torrent file

@@ -62,9 +62,12 @@ type Cfg struct {
 	// These are WebSeed URLs conforming to the requirements in anacrolix/torrent.
 	WebSeedUrls    []string
 	SnapshotConfig *snapcfg.Cfg
-	// TODO: Have I rendered this obsolete?
+	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: Remove this.
+	// Check with @mh0lt for best way to do this. I couldn't find the GitHub issue for cleaning up
+	// the Downloader API and responsibilities.
 	AddTorrentsFromDisk bool
 
+	// TODO: Can we get rid of this?
 	ChainName string
 
 	Dirs datadir.Dirs
@@ -72,6 +75,9 @@ type Cfg struct {
 	MdbxWriteMap bool
 	// Don't trust any existing piece completion. Revalidate all pieces when added.
 	VerifyTorrentData bool
+	// Disable automatic data verification in the torrent client. We want to call VerifyData
+	// ourselves.
+	ManualDataVerification bool
 }
 
 // Before options/flags applied.
@@ -96,7 +102,6 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 	torrentConfig.NoDHT = true
 
 	torrentConfig.Seed = true
-	// TODO: Check the result of this in the client status spew.
 	torrentConfig.UpnpID = torrentConfig.UpnpID + " leecher"
 
 	return torrentConfig
