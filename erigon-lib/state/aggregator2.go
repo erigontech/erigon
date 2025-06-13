@@ -391,7 +391,7 @@ func Compatibility(d datadir.Dirs) error {
 
 				if currentFileVersion.Major < requiredVersion.Major {
 					return fmt.Errorf("version mismatch: need files at least version %d for file %s to start Erigon "+
-						"properly. Doublecheck the version pls", requiredVersion.Major, fileInfo.Name())
+						"properly. Doublecheck the version pls. Probably should downgrade to some version of Erigon later than 3.1", requiredVersion.Major, fileInfo.Name())
 				}
 			}
 			return nil
