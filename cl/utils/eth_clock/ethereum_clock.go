@@ -242,7 +242,7 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 	// Compute base digest from fork version and genesis validators root
 	baseDigest := computeForkDataRoot(forkVersion, t.genesisValidatorsRoot)
 
-	//if stateVersion < clparams.FuluVersion { // TODO: add back in
+	//if stateVersion < clparams.FuluVersion { // TODO: add back in fulu-devnet2
 	digest = common.Bytes4{}
 	copy(digest[:], baseDigest[:4])
 	return
