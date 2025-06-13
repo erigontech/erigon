@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -205,6 +206,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
+			debug.PrintStack()
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things

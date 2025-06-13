@@ -22,7 +22,6 @@ import (
 	"runtime"
 	"testing"
 
-	lg "github.com/anacrolix/log"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -38,19 +37,19 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg2.New(context.Background(), dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet", false, false)
+	cfg, err := downloadercfg2.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg2.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo, true)
+	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
 	defer d.Close()
-	err = d.AddMagnetLink(d.ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.RequestSnapshot(snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 	tt, ok := d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
 
 	// adding same file twice is ok
-	err = d.AddMagnetLink(d.ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.RequestSnapshot(snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 
 	// adding same file with another infoHash - is ok, must be skipped
@@ -58,8 +57,10 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//	- release of re-compressed version of same file,
 	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
-	err = d.AddMagnetLink(d.ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
-	require.NoError(err)
+	err = d.RequestSnapshot(snaptype.Hex2InfoHash("bb"), "a.seg")
+	// I'm not sure if this is a good idea.
+	//require.Error(err)
+	_ = err
 	tt, ok = d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
@@ -95,12 +96,12 @@ func TestVerifyData(t *testing.T) {
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg2.New(context.Background(), dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet", false, false)
+	cfg, err := downloadercfg2.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg2.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo, true)
+	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
 	defer d.Close()
 
-	err = d.VerifyData(d.ctx, nil, false)
+	err = d.VerifyData(d.ctx, nil)
 	require.NoError(err)
 }

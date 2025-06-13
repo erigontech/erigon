@@ -58,12 +58,6 @@ type PreverifiedItem struct {
 }
 type Preverified []PreverifiedItem
 
-func Merge(p0 Preverified, p1 []PreverifiedItem) Preverified {
-	merged := append(p0, p1...)
-	slices.SortFunc(merged, func(i, j PreverifiedItem) int { return strings.Compare(i.Name, j.Name) })
-	return merged
-}
-
 func (p Preverified) Get(name string) (PreverifiedItem, bool) {
 	i := sort.Search(len(p), func(i int) bool { return p[i].Name >= name })
 	if i >= len(p) || p[i].Name != name {
@@ -506,13 +500,6 @@ func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uin
 	}
 
 	return snaptype.MergeSteps
-}
-
-func IsFrozen(networkName string, info snaptype.FileInfo) bool {
-	if networkName == "" {
-		return false
-	}
-	return KnownCfg(networkName).IsFrozen(info)
 }
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty

@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
-var greatOtterBanner = `
+var GreatOtterBanner = `
    _____ _             _   _                ____  _   _                                       
   / ____| |           | | (_)              / __ \| | | |                                      
  | (___ | |_ __ _ _ __| |_ _ _ __   __ _  | |  | | |_| |_ ___ _ __ ___ _   _ _ __   ___       
@@ -95,7 +95,6 @@ const (
 )
 
 type DownloadRequest struct {
-	Version     uint8
 	Path        string
 	TorrentHash string
 }
@@ -125,7 +124,12 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddR
 }
 
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
-func RequestSnapshotsDownload(ctx context.Context, downloadRequest []DownloadRequest, downloader proto_downloader.DownloaderClient, logPrefix string) error {
+func RequestSnapshotsDownload(
+	ctx context.Context,
+	downloadRequest []DownloadRequest,
+	downloader proto_downloader.DownloaderClient,
+	logPrefix string,
+) error {
 	preq := &proto_downloader.SetLogPrefixRequest{Prefix: logPrefix}
 	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
@@ -288,7 +292,20 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
+func WaitForDownloader(
+	ctx context.Context,
+	logPrefix string,
+	dirs datadir.Dirs,
+	headerchain, blobs, caplinState bool,
+	prune prune.Mode,
+	caplin CaplinMode,
+	agg *state.Aggregator,
+	tx kv.RwTx,
+	blockReader blockReader,
+	cc *chain.Config,
+	snapshotDownloader proto_downloader.DownloaderClient,
+	syncCfg ethconfig.Sync,
+) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
@@ -367,15 +384,12 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			continue
 		}
 
-		downloadRequest = append(downloadRequest, NewDownloadRequest(p.Name, p.Hash))
+		downloadRequest = append(downloadRequest, DownloadRequest{
+			Path:        p.Name,
+			TorrentHash: p.Hash,
+		})
 	}
 
-	if headerchain {
-		log.Info("[OtterSync] Starting Ottersync")
-		log.Info(greatOtterBanner)
-	}
-
-	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
 	for {
 		select {
 		case <-ctx.Done():
@@ -388,36 +402,24 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			continue
 		}
 		break
-
 	}
 
-	const checkInterval = 20 * time.Second
-	checkEvery := time.NewTicker(checkInterval)
-	defer checkEvery.Stop()
-
-	// Check once without delay, for faster erigon re-start
-	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
-	if err != nil {
-		return err
-	}
-
-	// Print download progress until all segments are available
-	for completedResp == nil || !completedResp.Completed {
+	// Check for completion immediately, then growing intervals.
+	interval := time.Second
+	for {
+		completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+		if err != nil {
+			return fmt.Errorf("waiting for snapshot download: %w", err)
+		}
+		if completedResp.GetCompleted() {
+			break
+		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-checkEvery.C:
-			completedResp, err = snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
-			if err != nil {
-				log.Warn("Error while waiting for snapshots progress", "err", err)
-			}
+			return context.Cause(ctx)
+		case <-time.After(interval):
 		}
-	}
-
-	if blockReader.FreezingCfg().Verify {
-		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-			return err
-		}
+		interval = min(interval*2, 20*time.Second)
 	}
 
 	if !headerchain {
@@ -438,67 +440,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 
 	if err := agg.OpenFolder(); err != nil {
 		return err
-	}
-
-	// ProhibitNewDownloads implies - so only make the download request once,
-	//
-	// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
-	// After "download once" - Erigon will produce and seed new files
-	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-	//
-	// after the initial call the downloader or snapshot-lock.file will prevent this download from running
-	//
-
-	// prohibit new downloads for the files that were downloaded
-
-	// If we only download headers and bodies, we should prohibit only those.
-	if headerchain {
-		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: coresnaptype.Bodies.Name(),
-		}); err != nil {
-			return err
-		}
-		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: coresnaptype.Headers.Name(),
-		}); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// prohibits further downloads, except some exceptions
-	for _, p := range blockReader.AllTypes() {
-		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p.Name(),
-		}); err != nil {
-			return err
-		}
-	}
-	for _, p := range coresnaptype.E3StateTypes {
-		snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p.Name(),
-		})
-	}
-
-	if caplin != NoCaplin {
-		for _, p := range snaptype.CaplinSnapshotTypes {
-			if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
-				continue
-			}
-
-			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-				Type: p.Name(),
-			}); err != nil {
-				return err
-			}
-		}
-		if caplinState {
-			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-				Type: "caplin",
-			}); err != nil {
-				return err
-			}
-		}
 	}
 
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
