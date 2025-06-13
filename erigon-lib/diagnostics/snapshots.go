@@ -123,7 +123,7 @@ func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
 	if err != nil {
 		return SyncStatistics{}
 	}
-	err = json.Unmarshal(statsBytes, &newStats)
+	err = fastjson.Unmarshal(statsBytes, &newStats)
 	if err != nil {
 		return SyncStatistics{}
 	}

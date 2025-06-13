@@ -17,7 +17,6 @@
 package heimdall
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -119,7 +118,7 @@ func (m *Milestone) UnmarshalJSON(b []byte) error {
 		MilestoneId string      `json:"milestone_id"`
 	}{}
 
-	if err := json.Unmarshal(b, &dto); err != nil {
+	if err := fastjson.Unmarshal(b, &dto); err != nil {
 		return err
 	}
 

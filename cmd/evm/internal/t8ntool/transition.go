@@ -574,7 +574,7 @@ func (g Alloc) OnAccount(addr common.Address, dumpAccount state.DumpAccount) {
 
 // saveFile marshalls the object to the given file
 func saveFile(baseDir, filename string, data interface{}) error {
-	b, err := json.MarshalIndent(data, "", " ")
+	b, err := fastjson.MarshalIndent(data, "", " ")
 	if err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
 	}
@@ -616,14 +616,14 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExec
 		return err
 	}
 	if len(stdOutObject) > 0 {
-		b, err := json.MarshalIndent(stdOutObject, "", " ")
+		b, err := fastjson.MarshalIndent(stdOutObject, "", " ")
 		if err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
 		}
 		os.Stdout.Write(b)
 	}
 	if len(stdErrObject) > 0 {
-		b, err := json.MarshalIndent(stdErrObject, "", " ")
+		b, err := fastjson.MarshalIndent(stdErrObject, "", " ")
 		if err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
 		}

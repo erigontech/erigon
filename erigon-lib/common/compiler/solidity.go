@@ -22,13 +22,13 @@ package compiler
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -158,7 +158,7 @@ func (s *Solidity) run(cmd *exec.Cmd, source string) (map[string]*Contract, erro
 // embedded within the JSON is malformed.
 func ParseCombinedJSON(combinedJSON []byte, source string, languageVersion string, compilerVersion string, compilerOptions string) (map[string]*Contract, error) {
 	var output solcOutput
-	if err := json.Unmarshal(combinedJSON, &output); err != nil {
+	if err := fastjson.Unmarshal(combinedJSON, &output); err != nil {
 		// Try to parse the output with the new solidity v.0.8.0 rules
 		return parseCombinedJSONV8(combinedJSON, source, languageVersion, compilerVersion, compilerOptions)
 	}
@@ -167,16 +167,16 @@ func ParseCombinedJSON(combinedJSON []byte, source string, languageVersion strin
 	for name, info := range output.Contracts {
 		// Parse the individual compilation results.
 		var abi interface{}
-		if err := json.Unmarshal([]byte(info.Abi), &abi); err != nil {
+		if err := fastjson.Unmarshal([]byte(info.Abi), &abi); err != nil {
 			return nil, fmt.Errorf("solc: error reading abi definition (%w)", err)
 		}
 
 		var userdoc, devdoc interface{}
-		marshalErr := json.Unmarshal([]byte(info.Userdoc), &userdoc)
+		marshalErr := fastjson.Unmarshal([]byte(info.Userdoc), &userdoc)
 		if marshalErr != nil {
 			log.Warn("Failed to unmarshal info.Devdoc", "", marshalErr)
 		}
-		marshalErr = json.Unmarshal([]byte(info.Devdoc), &devdoc)
+		marshalErr = fastjson.Unmarshal([]byte(info.Devdoc), &devdoc)
 		if marshalErr != nil {
 			log.Warn("Failed to unmarshal info.Devdoc", "", marshalErr)
 		}
@@ -207,7 +207,7 @@ func ParseCombinedJSON(combinedJSON []byte, source string, languageVersion strin
 // and parses it using the rules from solidity v.0.8.0 and later.
 func parseCombinedJSONV8(combinedJSON []byte, source string, languageVersion string, compilerVersion string, compilerOptions string) (map[string]*Contract, error) {
 	var output solcOutputV8
-	if err := json.Unmarshal(combinedJSON, &output); err != nil {
+	if err := fastjson.Unmarshal(combinedJSON, &output); err != nil {
 		return nil, err
 	}
 	// Compilation succeeded, assemble and return the contracts.

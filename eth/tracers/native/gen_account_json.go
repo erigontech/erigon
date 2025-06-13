@@ -3,7 +3,6 @@
 package native
 
 import (
-	"encoding/json"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -38,7 +37,7 @@ func (a *account) UnmarshalJSON(input []byte) error {
 		Storage map[common.Hash]common.Hash `json:"storage,omitempty"`
 	}
 	var dec account
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Balance != nil {

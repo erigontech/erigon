@@ -22,12 +22,13 @@ package common
 import (
 	"bytes"
 	"database/sql/driver"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 func TestBytesConversion(t *testing.T) {
@@ -82,7 +83,7 @@ func TestHashJsonValidation(t *testing.T) {
 	for _, test := range tests {
 		input := `"` + test.Prefix + strings.Repeat("0", test.Size) + `"`
 		var v Hash
-		err := json.Unmarshal([]byte(input), &v)
+		err := fastjson.Unmarshal([]byte(input), &v)
 		if err == nil {
 			if test.Error != "" {
 				t.Errorf("%s: error mismatch: have nil, want %q", input, test.Error)
@@ -111,7 +112,7 @@ func TestAddressUnmarshalJSON(t *testing.T) {
 	}
 	for i, test := range tests {
 		var v Address
-		err := json.Unmarshal([]byte(test.Input), &v)
+		err := fastjson.Unmarshal([]byte(test.Input), &v)
 		if err != nil && !test.ShouldErr {
 			t.Errorf("test #%d: unexpected error: %v", i, err)
 		}
@@ -166,7 +167,7 @@ func TestMixedcaseAccount_Address(t *testing.T) {
 		A     MixedcaseAddress
 		Valid bool
 	}
-	if err := json.Unmarshal([]byte(`[
+	if err := fastjson.Unmarshal([]byte(`[
 		{"A" : "0xae967917c465db8578ca9024c205720b1a3651A9", "Valid": false},
 		{"A" : "0xAe967917c465db8578ca9024c205720b1a3651A9", "Valid": true},
 		{"A" : "0XAe967917c465db8578ca9024c205720b1a3651A9", "Valid": false},
@@ -192,7 +193,7 @@ func TestMixedcaseAccount_Address(t *testing.T) {
 		`["x1111111111111111111112222222222223333323"]`,    // Missing 0
 		`["0xG111111111111111111112222222222223333323"]`,   //Non-hex
 	} {
-		if err := json.Unmarshal([]byte(r), &r2); err == nil {
+		if err := fastjson.Unmarshal([]byte(r), &r2); err == nil {
 			t.Errorf("Expected failure, input %v", r)
 		}
 

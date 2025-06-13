@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
@@ -227,7 +227,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 				return err
 			}
 
-			a, _ := json.Marshal(receiptsFromBlock)
+			a, _ := fastjson.Marshal(receiptsFromBlock)
 			assert.JSONEq(t, expect[block.Number.Uint64()], string(a))
 		}
 		return nil

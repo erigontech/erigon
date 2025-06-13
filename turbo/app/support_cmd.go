@@ -238,14 +238,14 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 			fmt.Println("Received request", request)
 			var requestId string
 
-			if err = json.Unmarshal(request.ID, &requestId); err != nil {
+			if err = fastjson.Unmarshal(request.ID, &requestId); err != nil {
 				logger.Error("Invalid request id", "err", err)
 				continue
 			}
 
 			nodeRequest := nodeRequest{}
 
-			if err = json.Unmarshal(request.Params, &nodeRequest); err != nil {
+			if err = fastjson.Unmarshal(request.Params, &nodeRequest); err != nil {
 				logger.Error("Invalid node request", "err", err, "id", requestId)
 				continue
 			}

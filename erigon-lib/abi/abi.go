@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 // The ABI holds information about a contract's context and available
@@ -157,7 +158,7 @@ func (abi *ABI) UnmarshalJSON(data []byte) error {
 		// declared as anonymous.
 		Anonymous bool
 	}
-	if err := json.Unmarshal(data, &fields); err != nil {
+	if err := fastjson.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	abi.Methods = make(map[string]Method)

@@ -3,7 +3,6 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
 	"math/big"
 
@@ -51,7 +50,7 @@ func (g *GenesisAccount) UnmarshalJSON(input []byte) error {
 		PrivateKey  *hexutil.Bytes              `json:"secretKey,omitempty"`
 	}
 	var dec GenesisAccount
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Constructor != nil {

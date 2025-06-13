@@ -350,7 +350,7 @@ func unpackTestEventData(dest interface{}, hexData string, jsonEvent []byte, ass
 	data, err := hex.DecodeString(hexData)
 	assert.NoError(err, "Hex data should be a correct hex-string")
 	var e Event
-	assert.NoError(json.Unmarshal(jsonEvent, &e), "Should be able to unmarshal event ABI")
+	assert.NoError(fastjson.Unmarshal(jsonEvent, &e), "Should be able to unmarshal event ABI")
 	a := ABI{Events: map[string]Event{"e": e}}
 	return a.UnpackIntoInterface(dest, "e", data)
 }

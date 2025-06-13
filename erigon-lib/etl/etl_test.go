@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -411,7 +410,7 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 
 func testLoadFromMapFunc(k []byte, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
 	valueMap := make(map[string][]byte)
-	err := json.Unmarshal(v, &valueMap)
+	err := fastjson.Unmarshal(v, &valueMap)
 	if err != nil {
 		return err
 	}
@@ -421,7 +420,7 @@ func testLoadFromMapFunc(k []byte, v []byte, _ CurrentTableReader, next LoadNext
 
 func testLoadFromMapDoubleFunc(k []byte, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
 	valueMap := make(map[string][]byte)
-	err := json.Unmarshal(v, &valueMap)
+	err := fastjson.Unmarshal(v, &valueMap)
 	if err != nil {
 		return err
 	}

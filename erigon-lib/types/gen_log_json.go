@@ -3,7 +3,6 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -53,7 +52,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 		Removed     *bool           `json:"removed"`
 	}
 	var dec Log
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Address == nil {

@@ -2,13 +2,14 @@ package log
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 const (
@@ -144,10 +145,10 @@ func JsonFormat() Format {
 // records will be pretty-printed. If lineSeparated is true, records
 // will be logged with a new line between each record.
 func JsonFormatEx(pretty, lineSeparated bool) Format {
-	jsonMarshal := json.Marshal
+	jsonMarshal := fastjson.Marshal
 	if pretty {
 		jsonMarshal = func(v interface{}) ([]byte, error) {
-			return json.MarshalIndent(v, "", "    ")
+			return fastjson.MarshalIndent(v, "", "    ")
 		}
 	}
 

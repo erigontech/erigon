@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -328,7 +328,7 @@ var (
 					buf, _ := d.MakeGetter().Next(nil)
 					var firstCheckpoint Checkpoint
 
-					if err = json.Unmarshal(buf, &firstCheckpoint); err != nil {
+					if err = fastjson.Unmarshal(buf, &firstCheckpoint); err != nil {
 						return err
 					}
 
@@ -390,7 +390,7 @@ var (
 					buf, _ := gg.Next(nil)
 					if len(buf) > 0 {
 						var firstMilestone Milestone
-						if err = json.Unmarshal(buf, &firstMilestone); err != nil {
+						if err = fastjson.Unmarshal(buf, &firstMilestone); err != nil {
 							return err
 						}
 						firstMilestoneId = uint64(firstMilestone.Id)

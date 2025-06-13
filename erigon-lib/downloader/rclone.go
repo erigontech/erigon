@@ -166,7 +166,7 @@ func (c *RCloneClient) ListRemotes(ctx context.Context) ([]string, error) {
 		Remotes []string `json:"remotes"`
 	}{}
 
-	err = json.Unmarshal(result, &remotes)
+	err = fastjson.Unmarshal(result, &remotes)
 
 	if err != nil {
 		return nil, err
@@ -219,7 +219,7 @@ func (c *RCloneClient) Stats(ctx context.Context) (*RCloneStats, error) {
 
 	var stats RCloneStats
 
-	err = json.Unmarshal(result, &stats)
+	err = fastjson.Unmarshal(result, &stats)
 
 	if err != nil {
 		return nil, err
@@ -743,7 +743,7 @@ func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.D
 				Error string `json:"error"`
 			}{}
 
-			if err := json.Unmarshal(body, &e); err == nil {
+			if err := fastjson.Unmarshal(body, &e); err == nil {
 				if strings.Contains(e.Error, "AccessDenied") {
 					return nil, fmt.Errorf("can't get remote list: %w", ErrAccessDenied)
 				}

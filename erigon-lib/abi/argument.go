@@ -20,11 +20,12 @@
 package abi
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 // Argument holds the name of the argument and the corresponding type.
@@ -48,7 +49,7 @@ type ArgumentMarshaling struct {
 // UnmarshalJSON implements json.Unmarshaler interface.
 func (argument *Argument) UnmarshalJSON(data []byte) error {
 	var arg ArgumentMarshaling
-	err := json.Unmarshal(data, &arg)
+	err := fastjson.Unmarshal(data, &arg)
 	if err != nil {
 		return fmt.Errorf("argument json err: %w", err)
 	}

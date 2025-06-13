@@ -18,7 +18,6 @@ package requests
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -34,6 +33,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	libfastjson "github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	p2p "github.com/erigontech/erigon-p2p"
@@ -364,7 +364,7 @@ func post(ctx context.Context, client *http.Client, url, method, request string,
 		return fmt.Errorf("failed to readAll from body: %w", err)
 	}
 
-	err = json.Unmarshal(b, &response)
+	err = libfastjson.Unmarshal(b, &response)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal response: %w", err)
 	}

@@ -19,13 +19,13 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -59,7 +59,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 		t.Fatalf("error flushing: %v", err)
 	}
 	var result interface{}
-	if err = json.Unmarshal(buf.Bytes(), &result); err != nil {
+	if err = fastjson.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
 	expectedJSON := `
@@ -97,6 +97,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 					"gas": "0x584a",
 					"gasUsed": "0x10",
 					"input": "0x",
+					"output": "0x",
 					"to": "0x00000000000000000000000000000000000000ff",
 					"type": "CALL",
 					"value": "0x0"
@@ -106,6 +107,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 				"gas": "0x5a4c",
 				"gasUsed": "0xb1",
 				"input": "0x00",
+				"output": "0x",
 				"to": "0x00000000000000000000000000000000000001ff",
 				"type": "CALL",
 				"value": "0x0"
@@ -115,6 +117,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 			"gas": "0xc350",
 			"gasUsed": "0x684c",
 			"input": "0x01000100",
+			"output": "0x",
 			"to": "0x00000000000000000000000000000000000002ff",
 			"type": "CALL",
 			"value": "0x0"
@@ -122,7 +125,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 		}
 	]`
 	var expected interface{}
-	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
+	if err = fastjson.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}
 	if !assert.Equal(t, expected, result) {
@@ -139,12 +142,12 @@ func TestGeneratedTraceApi(t *testing.T) {
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
 	}
-	buf, err := json.Marshal(traces)
+	buf, err := fastjson.Marshal(traces)
 	if err != nil {
 		t.Errorf("marshall result into JSON: %v", err)
 	}
 	var result interface{}
-	if err = json.Unmarshal(buf, &result); err != nil {
+	if err = fastjson.Unmarshal(buf, &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
 	expectedJSON := `
@@ -279,7 +282,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 		}
 	  ]`
 	var expected interface{}
-	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
+	if err = fastjson.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}
 	if !assert.Equal(t, expected, result) {
@@ -294,12 +297,12 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
 	}
-	buf, err := json.Marshal(traces)
+	buf, err := fastjson.Marshal(traces)
 	if err != nil {
 		t.Errorf("marshall result into JSON: %v", err)
 	}
 	var result interface{}
-	if err = json.Unmarshal(buf, &result); err != nil {
+	if err = fastjson.Unmarshal(buf, &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
 	expectedJSON := `
@@ -347,7 +350,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
 ]
 `
 	var expected interface{}
-	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
+	if err = fastjson.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}
 	t.Log(expected)

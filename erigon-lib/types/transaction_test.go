@@ -22,7 +22,6 @@ package types
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -466,7 +466,7 @@ func TestTransactionCoding(t *testing.T) {
 }
 
 func encodeDecodeJSON(tx Transaction) (Transaction, error) {
-	data, err := json.Marshal(tx)
+	data, err := fastjson.Marshal(tx)
 	if err != nil {
 		return nil, fmt.Errorf("json encoding failed: %w", err)
 	}

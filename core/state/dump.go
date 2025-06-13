@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -254,7 +255,7 @@ func (d *Dumper) RawDump(excludeCode, excludeStorage bool) Dump {
 // Dump returns a JSON string representing the entire state as a single json-object
 func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
 	dump := d.RawDump(excludeCode, excludeStorage)
-	json, err := json.MarshalIndent(dump, "", "    ")
+	json, err := fastjson.MarshalIndent(dump, "", "    ")
 	if err != nil {
 		fmt.Println("dump err", err)
 	}

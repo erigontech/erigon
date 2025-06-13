@@ -219,7 +219,7 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 		} else if err := fastjson.Unmarshal(msg.Result, &c.subid); err != nil {
 			return nil, nil, fmt.Errorf("invalid response: %w", err)
 		} else {
-			json.Unmarshal(msg.ID, &c.reqid)
+			fastjson.Unmarshal(msg.ID, &c.reqid)
 			return &c, nil, nil
 		}
 	default:

@@ -295,7 +295,7 @@ func TestJsonTestcases(t *testing.T) {
 			t.Fatal("Failed to read file", err)
 		}
 		var testcases []TwoOperandTestcase
-		json.Unmarshal(data, &testcases)
+		fastjson.Unmarshal(data, &testcases)
 		testTwoOperandOp(t, testcases, twoOpMethods[name], name)
 	}
 }

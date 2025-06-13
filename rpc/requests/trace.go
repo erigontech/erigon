@@ -18,11 +18,11 @@ package requests
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -112,7 +112,7 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 		args.Data = &hexutil.Bytes{}
 	}
 
-	argsVal, err := json.Marshal(args)
+	argsVal, err := fastjson.Marshal(args)
 
 	if err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 		traceOpts = []TraceOpt{TraceOpts.Trace, TraceOpts.StateDiff}
 	}
 
-	optsVal, err := json.Marshal(traceOpts)
+	optsVal, err := fastjson.Marshal(traceOpts)
 
 	if err != nil {
 		return nil, err

@@ -18,12 +18,12 @@ package requests
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 )
 
@@ -78,7 +78,7 @@ func (reqGen *requestGenerator) SubscribeFilterLogs(ctx context.Context, query e
 
 // ParseResponse converts any of the models interfaces to a string for readability
 func parseResponse(resp interface{}) (string, error) {
-	result, err := json.Marshal(resp)
+	result, err := fastjson.Marshal(resp)
 	if err != nil {
 		return "", fmt.Errorf("error trying to marshal response: %v", err)
 	}

@@ -17,7 +17,6 @@
 package heimdall
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -115,7 +114,7 @@ func (c *Checkpoint) UnmarshalJSON(b []byte) error {
 		Id       CheckpointId `json:"id"`
 	}{}
 
-	if err := json.Unmarshal(b, &dto); err != nil {
+	if err := fastjson.Unmarshal(b, &dto); err != nil {
 		return err
 	}
 

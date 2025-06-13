@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 )
 
@@ -53,7 +54,7 @@ func (d *diffTest) UnmarshalJSON(b []byte) (err error) {
 		CurrentBlocknumber string
 		CurrentDifficulty  string
 	}
-	if err := json.Unmarshal(b, &ext); err != nil {
+	if err := fastjson.Unmarshal(b, &ext); err != nil {
 		return err
 	}
 

@@ -21,7 +21,6 @@ package rawdb
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/types"
@@ -112,14 +112,14 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 	}
 
 	if cfg.Bor != nil {
-		borJSON, err := json.Marshal(cfg.Bor)
+		borJSON, err := fastjson.Marshal(cfg.Bor)
 		if err != nil {
 			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
 		}
 		cfg.BorJSON = borJSON
 	}
 
-	data, err := json.Marshal(cfg)
+	data, err := fastjson.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to JSON encode chain config: %w", err)
 	}

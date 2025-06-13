@@ -18,7 +18,6 @@ package heimdall
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/metrics"
@@ -684,7 +684,7 @@ func Fetch[T any](ctx context.Context, request *HttpRequest, logger log.Logger) 
 		return nil, ErrNoResponse
 	}
 
-	err = json.Unmarshal(body, result)
+	err = fastjson.Unmarshal(body, result)
 	if err != nil {
 		return nil, err
 	}

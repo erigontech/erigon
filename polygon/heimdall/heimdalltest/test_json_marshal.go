@@ -17,7 +17,6 @@
 package heimdalltest
 
 import (
-	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -32,7 +31,7 @@ func AssertJsonMarshalUnmarshal[T any](t *testing.T, value *T) {
 	require.NoError(t, err)
 
 	decodedValue := new(T)
-	err = json.Unmarshal(jsonBytes, decodedValue)
+	err = fastjson.Unmarshal(jsonBytes, decodedValue)
 	require.NoError(t, err)
 
 	assert.True(t, reflect.DeepEqual(value, decodedValue))

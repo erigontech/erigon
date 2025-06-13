@@ -18,10 +18,10 @@ package chain
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 )
 
@@ -42,7 +42,7 @@ func GetConfig(db kv.Getter, buf []byte) (*Config, error) {
 		return nil, nil
 	}
 	var config Config
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err := fastjson.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("invalid chain config JSON: %s, %w", data, err)
 	}
 	return &config, nil

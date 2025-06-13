@@ -20,7 +20,6 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -151,7 +150,7 @@ func (tx *AccessListTx) MarshalJSON() ([]byte, error) {
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 func (tx *DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
@@ -171,7 +170,7 @@ func (tx *DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 func toBlobTxJSON(tx *BlobTx) *txJSON {
@@ -197,7 +196,7 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 }
 
 func (tx *BlobTx) MarshalJSON() ([]byte, error) {
-	return json.Marshal(toBlobTxJSON(tx))
+	return fastjson.Marshal(toBlobTxJSON(tx))
 }
 
 func (tx *BlobTxWrapper) MarshalJSON() ([]byte, error) {
@@ -207,7 +206,7 @@ func (tx *BlobTxWrapper) MarshalJSON() ([]byte, error) {
 	enc.Commitments = tx.Commitments
 	enc.Proofs = tx.Proofs
 
-	return json.Marshal(enc)
+	return fastjson.Marshal(enc)
 }
 
 func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
@@ -262,7 +261,7 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 
 func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	var dec txJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.To != nil {
@@ -330,7 +329,7 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 
 func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	var dec txJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	// Access list is optional for now.
@@ -485,7 +484,7 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 
 func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 	var dec txJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 
@@ -494,7 +493,7 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 
 func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 	var dec txJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 
@@ -514,7 +513,7 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 
 func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	var dec txJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return nil, err
 	}
 	tx := BlobTx{}

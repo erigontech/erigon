@@ -22,7 +22,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,7 +121,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
 		return err
 	}
 
-	out, _ := json.MarshalIndent(results, "", "  ")
+	out, _ := fastjson.MarshalIndent(results, "", "  ")
 	fmt.Println(string(out))
 	return nil
 }

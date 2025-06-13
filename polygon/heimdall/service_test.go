@@ -19,7 +19,6 @@ package heimdall
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -37,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/params"
@@ -334,7 +334,7 @@ func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
 		b, err := os.ReadFile(fmt.Sprintf("%s/blockNum_%d.json", suite.proposerSequencesTestDataDir, blockNum))
 		require.NoError(t, err)
 		var proposerSequenceResponse getSnapshotProposerSequenceResponse
-		err = json.Unmarshal(b, &proposerSequenceResponse)
+		err = fastjson.Unmarshal(b, &proposerSequenceResponse)
 		require.NoError(t, err)
 		wantProducers := proposerSequenceResponse.Result
 
@@ -506,7 +506,7 @@ func readEntityFromFile[T any](t *testing.T, filePath string) *T {
 	bytes, err := os.ReadFile(filePath)
 	require.NoError(t, err)
 	var entity T
-	err = json.Unmarshal(bytes, &entity)
+	err = fastjson.Unmarshal(bytes, &entity)
 	require.NoError(t, err)
 	return &entity
 }

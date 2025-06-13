@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"math/big"
 	"reflect"
 	"testing"
@@ -32,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -104,7 +104,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er []ethapi.ExecutionResult
-		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+		if err = fastjson.Unmarshal(buf.Bytes(), &er); err != nil {
 			t.Fatalf("parsing result: %v", err)
 		}
 		if len(er) != int(*txcount) {
@@ -121,7 +121,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 		t.Fatalf("error flusing: %v", err)
 	}
 	var er []ethapi.ExecutionResult
-	if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+	if err = fastjson.Unmarshal(buf.Bytes(), &er); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
 }
@@ -149,7 +149,7 @@ func TestTraceBlockByHash(t *testing.T) {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er []ethapi.ExecutionResult
-		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+		if err = fastjson.Unmarshal(buf.Bytes(), &er); err != nil {
 			t.Fatalf("parsing result: %v", err)
 		}
 		if len(er) != int(*txcount) {
@@ -172,7 +172,7 @@ func TestTraceTransaction(t *testing.T) {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er ethapi.ExecutionResult
-		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+		if err = fastjson.Unmarshal(buf.Bytes(), &er); err != nil {
 			t.Fatalf("parsing result: %v, %s", err, buf.String())
 		}
 		if er.Gas != tt.gas {
@@ -202,7 +202,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er ethapi.ExecutionResult
-		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+		if err = fastjson.Unmarshal(buf.Bytes(), &er); err != nil {
 			t.Fatalf("parsing result: %v", err)
 		}
 		if er.Gas != tt.gas {

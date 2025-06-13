@@ -22,7 +22,6 @@ package common
 import (
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -96,7 +95,7 @@ func (ma *MixedcaseAddress) UnmarshalJSON(input []byte) error {
 	if err := hexutil.UnmarshalFixedJSON(addressT, input, ma.addr[:]); err != nil {
 		return err
 	}
-	return json.Unmarshal(input, &ma.original)
+	return fastjson.Unmarshal(input, &ma.original)
 }
 
 // MarshalJSON marshals the original value

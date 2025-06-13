@@ -18,12 +18,12 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
@@ -698,7 +698,7 @@ func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snaps
 		return nil, err
 	}
 	snap := new(Snapshot)
-	if err := json.Unmarshal(blob, snap); err != nil {
+	if err := fastjson.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
 	borEngine, _ := api.bor()

@@ -19,7 +19,6 @@ package bor
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -90,7 +89,7 @@ func LoadSnapshot(config *borcfg.BorConfig, sigcache *lru.ARCCache[common.Hash, 
 
 	snap := new(Snapshot)
 
-	if err := json.Unmarshal(blob, snap); err != nil {
+	if err := fastjson.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
 

@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -36,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -285,7 +285,7 @@ func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, 
 
 			spanKey := heimdall.SpanId(binary.BigEndian.Uint64(keyBytes))
 			var heimdallSpan heimdall.Span
-			if err = json.Unmarshal(spanBytes, &heimdallSpan); err != nil {
+			if err = fastjson.Unmarshal(spanBytes, &heimdallSpan); err != nil {
 				return err
 			}
 

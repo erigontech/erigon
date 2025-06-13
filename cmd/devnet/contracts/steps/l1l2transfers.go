@@ -19,7 +19,6 @@ package contracts_steps
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
@@ -296,7 +296,7 @@ func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransf
 						return fmt.Errorf("Send transaction failure: trace call failed: %w", err)
 					}
 
-					results, _ := json.MarshalIndent(callResults, "  ", "  ")
+					results, _ := fastjson.MarshalIndent(callResults, "  ", "  ")
 					fmt.Println(string(results))
 				}
 

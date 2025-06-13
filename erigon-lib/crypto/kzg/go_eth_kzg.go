@@ -16,13 +16,14 @@
 package kzg
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
 
 	"github.com/crate-crypto/go-eth-kzg"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 var goethkzgContext *goethkzg.Context
@@ -38,7 +39,7 @@ func InitGoEthKZGCtx() {
 			}
 
 			setup := new(goethkzg.JSONTrustedSetup)
-			if err = json.Unmarshal(file, setup); err != nil {
+			if err = fastjson.Unmarshal(file, setup); err != nil {
 				panic(fmt.Sprintf("could not unmarshal, err: %v", err))
 			}
 

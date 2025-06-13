@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -384,7 +385,7 @@ func TestOeTracer(t *testing.T) {
 			test := new(testcase)
 			blob, err := os.ReadFile(filepath.Join("testdata", dirPath, file.Name()))
 			require.NoError(t, err)
-			err = json.Unmarshal(blob, test)
+			err = fastjson.Unmarshal(blob, test)
 			require.NoError(t, err)
 			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			require.NoError(t, err)
@@ -438,15 +439,15 @@ func TestOeTracer(t *testing.T) {
 			// normalize result by marshalling and unmarshalling again
 			// to be able to do equality comparison with expected output
 			// (this exists just to ensure ordering of json attributes is the same)
-			tracesJsonBytes, err := json.Marshal(traceResult.Trace)
+			tracesJsonBytes, err := fastjson.Marshal(traceResult.Trace)
 			require.NoError(t, err)
 			var normalizedResult []*ParityTrace
-			err = json.Unmarshal(tracesJsonBytes, &normalizedResult)
+			err = fastjson.Unmarshal(tracesJsonBytes, &normalizedResult)
 			require.NoError(t, err)
 
-			want, err := json.Marshal(test.Result)
+			want, err := fastjson.Marshal(test.Result)
 			require.NoError(t, err)
-			have, err := json.Marshal(normalizedResult)
+			have, err := fastjson.Marshal(normalizedResult)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(have))
 		})

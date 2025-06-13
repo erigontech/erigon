@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -514,7 +515,7 @@ func (t *Tracer) mustFlushToFile(filePath string) {
 }
 
 func (t *Tracer) flushToFile(filePath string) error {
-	b, err := json.MarshalIndent(t.traces, "", "    ")
+	b, err := fastjson.MarshalIndent(t.traces, "", "    ")
 	if err != nil {
 		return err
 	}

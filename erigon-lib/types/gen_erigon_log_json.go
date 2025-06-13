@@ -3,7 +3,6 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -59,7 +58,7 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	}
 
 	var dec ErigonLog
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Address == nil {

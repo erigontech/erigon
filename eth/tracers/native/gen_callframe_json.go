@@ -3,7 +3,6 @@
 package native
 
 import (
-	"encoding/json"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -65,7 +64,7 @@ func (c *callFrame) UnmarshalJSON(input []byte) error {
 		Value    *hexutil.Big    `json:"value,omitempty" rlp:"optional"`
 	}
 	var dec callFrame0
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Type != nil {

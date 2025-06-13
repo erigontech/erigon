@@ -3,7 +3,6 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
 	"math/big"
 
@@ -88,7 +87,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		RequestsHash          *common.Hash                                `json:"requestsHash"`
 	}
 	var dec Genesis
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Config != nil {

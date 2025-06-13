@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	math2 "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
@@ -249,7 +250,7 @@ func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error
 	}
 
 	var config OeTracerConfig
-	if err := json.Unmarshal(*traceConfig.TracerConfig, &config); err != nil {
+	if err := fastjson.Unmarshal(*traceConfig.TracerConfig, &config); err != nil {
 		return OeTracerConfig{}, err
 	}
 

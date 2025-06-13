@@ -2,7 +2,6 @@ package tests
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/jwt"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -40,7 +40,7 @@ func TestEngineApiTestJsonUnmarshall(t *testing.T) {
 	var engineApiTest EngineApiTest
 	bytes, err := os.ReadFile(filepath.Join(".", "engineapi-performance-tests", "EcAdd12CACHABLE_150M.json"))
 	require.NoError(t, err)
-	err = json.Unmarshal(bytes, &engineApiTest)
+	err = fastjson.Unmarshal(bytes, &engineApiTest)
 	require.NoError(t, err)
 }
 

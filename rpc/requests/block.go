@@ -18,12 +18,12 @@ package requests
 
 import (
 	"context"
-	"encoding/json"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
 	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -64,7 +64,7 @@ type BlockWithTxHashes struct {
 
 func (b *BlockWithTxHashes) UnmarshalJSON(input []byte) error {
 	var header types.Header
-	if err := json.Unmarshal(input, &header); err != nil {
+	if err := fastjson.Unmarshal(input, &header); err != nil {
 		return err
 	}
 
@@ -72,7 +72,7 @@ func (b *BlockWithTxHashes) UnmarshalJSON(input []byte) error {
 		Hash              common.Hash   `json:"hash"`
 		TransactionHashes []common.Hash `json:"transactions"`
 	}
-	if err := json.Unmarshal(input, &bd); err != nil {
+	if err := fastjson.Unmarshal(input, &bd); err != nil {
 		return err
 	}
 
@@ -90,7 +90,7 @@ type Block struct {
 
 func (b *Block) UnmarshalJSON(input []byte) error {
 	var header types.Header
-	if err := json.Unmarshal(input, &header); err != nil {
+	if err := fastjson.Unmarshal(input, &header); err != nil {
 		return err
 	}
 
@@ -98,7 +98,7 @@ func (b *Block) UnmarshalJSON(input []byte) error {
 		Hash         common.Hash              `json:"hash"`
 		Transactions []*ethapi.RPCTransaction `json:"transactions"`
 	}
-	if err := json.Unmarshal(input, &bd); err != nil {
+	if err := fastjson.Unmarshal(input, &bd); err != nil {
 		return err
 	}
 

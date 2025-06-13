@@ -22,7 +22,6 @@ package types
 import (
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"math/big"
 	"reflect"
 	"testing"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -399,7 +399,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 			},
 		},
 	}
-	expectedJson, err := json.Marshal(body)
+	expectedJson, err := fastjson.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resultJson, err := json.Marshal(rawBody)
+	resultJson, err := fastjson.Marshal(rawBody)
 	if err != nil {
 		t.Fatal(err)
 	}

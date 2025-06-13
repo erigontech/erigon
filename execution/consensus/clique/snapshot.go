@@ -29,11 +29,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -108,7 +108,7 @@ func loadSnapshot(config *chain.CliqueConfig, db kv.RwDB, num uint64, hash commo
 	}
 
 	snap := new(Snapshot)
-	if err := json.Unmarshal(blob, snap); err != nil {
+	if err := fastjson.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
 	snap.config = config
@@ -144,7 +144,7 @@ func lastSnapshot(db kv.RwDB, logger log.Logger) (uint64, error) {
 
 // store inserts the snapshot into the database.
 func (s *Snapshot) store(db kv.RwDB) error {
-	blob, err := json.Marshal(s)
+	blob, err := fastjson.Marshal(s)
 	if err != nil {
 		return err
 	}

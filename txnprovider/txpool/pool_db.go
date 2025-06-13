@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -84,7 +85,7 @@ func ChainConfig(tx kv.Getter) (*chain.Config, error) {
 		return nil, nil
 	}
 	var config chain.Config
-	if err := json.Unmarshal(v, &config); err != nil {
+	if err := fastjson.Unmarshal(v, &config); err != nil {
 		return nil, fmt.Errorf("invalid chain config JSON in pool db: %w", err)
 	}
 	return &config, nil

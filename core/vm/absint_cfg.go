@@ -19,7 +19,6 @@ package vm
 import (
 	"bytes"
 	"compress/zlib"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -27,6 +26,8 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 ////////////////////////
@@ -330,7 +331,7 @@ type CfgProof struct {
 
 func DeserializeCfgProof(proofBytes []byte) *CfgProof {
 	proof := CfgProof{}
-	err := json.Unmarshal(DecompressProof(proofBytes), &proof)
+	err := fastjson.Unmarshal(DecompressProof(proofBytes), &proof)
 	if err != nil {
 		log.Fatal("Cannot deserialize proof")
 	}
@@ -338,7 +339,7 @@ func DeserializeCfgProof(proofBytes []byte) *CfgProof {
 }
 
 func (proof *CfgProof) Serialize() []byte {
-	res, err := json.MarshalIndent(*proof, "", " ")
+	res, err := fastjson.MarshalIndent(*proof, "", " ")
 	if err != nil {
 		log.Fatal("Cannot serialize proof")
 	}

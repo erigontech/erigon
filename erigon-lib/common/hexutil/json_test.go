@@ -17,7 +17,6 @@
 package hexutil
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -38,7 +37,7 @@ func checkError(t *testing.T, input string, got, want error) {
 		require.NoError(t, want, "input %s", input)
 		return
 	}
-	require.Equal(t, want.Error(), got.Error(), "input %s", input)
+	require.Contains(t, got.Error(), want.Error(), "input %s", input)
 }
 
 func bigFromString(s string) *big.Int {
@@ -92,7 +91,7 @@ func TestUnmarshalBig(t *testing.T) {
 	for idx, test := range unmarshalBigTests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
 			var v Big
-			err := json.Unmarshal([]byte(test.input), &v)
+			err := fastjson.Unmarshal([]byte(test.input), &v)
 			checkError(t, test.input, err, test.wantErr)
 			if test.want != nil {
 				require.Equal(t, test.want.(*big.Int).Bytes(), v.ToInt().Bytes())
@@ -151,7 +150,7 @@ func TestUnmarshalUint64(t *testing.T) {
 	for idx, test := range unmarshalUint64Tests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
 			var v Uint64
-			err := json.Unmarshal([]byte(test.input), &v)
+			err := fastjson.Unmarshal([]byte(test.input), &v)
 			checkError(t, test.input, err, test.wantErr)
 			if test.want != nil {
 				require.EqualValues(t, test.want, v)
@@ -228,7 +227,7 @@ func TestUnmarshalUint(t *testing.T) {
 	for idx, test := range unmarshalUintTests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
 			var v Uint
-			err := json.Unmarshal([]byte(test.input), &v)
+			err := fastjson.Unmarshal([]byte(test.input), &v)
 			if uintBits == 32 && test.wantErr32bit != nil {
 				checkError(t, test.input, err, test.wantErr32bit)
 				return

@@ -28,9 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goccy/go-json"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/types"
@@ -47,7 +46,7 @@ func TestRemoteNotify(t *testing.T) {
 			t.Errorf("failed to read miner notification: %v", err)
 		}
 		var work [3]string
-		if err := json.Unmarshal(blob, &work); err != nil {
+		if err := fastjson.Unmarshal(blob, &work); err != nil {
 			t.Errorf("failed to unmarshal miner notification: %v", err)
 		}
 		sink <- work
@@ -93,7 +92,7 @@ func TestRemoteNotifyFull(t *testing.T) {
 			t.Errorf("failed to read miner notification: %v", err)
 		}
 		var work map[string]interface{}
-		if err := json.Unmarshal(blob, &work); err != nil {
+		if err := fastjson.Unmarshal(blob, &work); err != nil {
 			t.Errorf("failed to unmarshal miner notification: %v", err)
 		}
 		sink <- work
@@ -143,7 +142,7 @@ func TestRemoteMultiNotify(t *testing.T) {
 			t.Errorf("failed to read miner notification: %v", err)
 		}
 		var work [3]string
-		if err := json.Unmarshal(blob, &work); err != nil {
+		if err := fastjson.Unmarshal(blob, &work); err != nil {
 			t.Errorf("failed to unmarshal miner notification: %v", err)
 		}
 		sink <- work
@@ -193,7 +192,7 @@ func TestRemoteMultiNotifyFull(t *testing.T) {
 			t.Errorf("failed to read miner notification: %v", err)
 		}
 		var work map[string]interface{}
-		if err := json.Unmarshal(blob, &work); err != nil {
+		if err := fastjson.Unmarshal(blob, &work); err != nil {
 			t.Errorf("failed to unmarshal miner notification: %v", err)
 		}
 		sink <- work

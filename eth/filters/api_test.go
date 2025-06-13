@@ -20,7 +20,6 @@
 package filters
 
 import (
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -74,7 +73,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	// single address
 	var test2 FilterCriteria
 	vector = fmt.Sprintf(`{"address": "%s"}`, address0.Hex())
-	if err := json.Unmarshal([]byte(vector), &test2); err != nil {
+	if err := fastjson.Unmarshal([]byte(vector), &test2); err != nil {
 		t.Fatal(err)
 	}
 	if len(test2.Addresses) != 1 {
@@ -87,7 +86,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	// multiple address
 	var test3 FilterCriteria
 	vector = fmt.Sprintf(`{"address": ["%s", "%s"]}`, address0.Hex(), address1.Hex())
-	if err := json.Unmarshal([]byte(vector), &test3); err != nil {
+	if err := fastjson.Unmarshal([]byte(vector), &test3); err != nil {
 		t.Fatal(err)
 	}
 	if len(test3.Addresses) != 2 {
@@ -103,7 +102,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	// single topic
 	var test4 FilterCriteria
 	vector = fmt.Sprintf(`{"topics": ["%s"]}`, topic0.Hex())
-	if err := json.Unmarshal([]byte(vector), &test4); err != nil {
+	if err := fastjson.Unmarshal([]byte(vector), &test4); err != nil {
 		t.Fatal(err)
 	}
 	if len(test4.Topics) != 1 {
@@ -119,7 +118,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	// test multiple "AND" topics
 	var test5 FilterCriteria
 	vector = fmt.Sprintf(`{"topics": ["%s", "%s"]}`, topic0.Hex(), topic1.Hex())
-	if err := json.Unmarshal([]byte(vector), &test5); err != nil {
+	if err := fastjson.Unmarshal([]byte(vector), &test5); err != nil {
 		t.Fatal(err)
 	}
 	if len(test5.Topics) != 2 {
@@ -141,7 +140,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	// test optional topic
 	var test6 FilterCriteria
 	vector = fmt.Sprintf(`{"topics": ["%s", null, "%s"]}`, topic0.Hex(), topic2.Hex())
-	if err := json.Unmarshal([]byte(vector), &test6); err != nil {
+	if err := fastjson.Unmarshal([]byte(vector), &test6); err != nil {
 		t.Fatal(err)
 	}
 	if len(test6.Topics) != 3 {
@@ -166,7 +165,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	// test OR topics
 	var test7 FilterCriteria
 	vector = fmt.Sprintf(`{"topics": [["%s", "%s"], null, ["%s", null]]}`, topic0.Hex(), topic1.Hex(), topic2.Hex())
-	if err := json.Unmarshal([]byte(vector), &test7); err != nil {
+	if err := fastjson.Unmarshal([]byte(vector), &test7); err != nil {
 		t.Fatal(err)
 	}
 	if len(test7.Topics) != 3 {

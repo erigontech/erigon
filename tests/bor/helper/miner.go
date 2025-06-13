@@ -3,7 +3,6 @@ package helper
 import (
 	"context"
 	"crypto/ecdsa"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	p2p "github.com/erigontech/erigon-p2p"
@@ -38,7 +38,7 @@ func InitGenesis(fileLocation string, sprintSize uint64, chainName string) types
 	}
 
 	genesis := &types.Genesis{}
-	if err := json.Unmarshal(genesisData, genesis); err != nil {
+	if err := fastjson.Unmarshal(genesisData, genesis); err != nil {
 		panic(err)
 	}
 
@@ -46,7 +46,7 @@ func InitGenesis(fileLocation string, sprintSize uint64, chainName string) types
 
 	if genesis.Config.BorJSON != nil {
 		borConfig := &borcfg.BorConfig{}
-		err = json.Unmarshal(genesis.Config.BorJSON, borConfig)
+		err = fastjson.Unmarshal(genesis.Config.BorJSON, borConfig)
 		if err != nil {
 			panic(fmt.Sprintf("Could not parse 'bor' config for %s: %v", fileLocation, err))
 		}

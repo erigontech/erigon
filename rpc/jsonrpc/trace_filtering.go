@@ -359,7 +359,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	}
 	engine := api.engine()
 
-	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+	var jsoniterMarshaller = jsoniter.ConfigCompatibleWithStandardLibrary
 	stream.WriteArrayStart()
 	first := true
 	// Execute all transactions in picked blocks
@@ -470,7 +470,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				*tr.BlockNumber = blockNum
 				tr.Type = "reward" // nolint: goconst
 				tr.TraceAddress = []int{}
-				b, err := json.Marshal(tr)
+				b, err := jsoniterMarshaller.Marshal(tr)
 				if err != nil {
 					if first {
 						first = false
@@ -510,7 +510,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 						*tr.BlockNumber = blockNum
 						tr.Type = "reward" // nolint: goconst
 						tr.TraceAddress = []int{}
-						b, err := json.Marshal(tr)
+						b, err := jsoniterMarshaller.Marshal(tr)
 						if err != nil {
 							if first {
 								first = false
@@ -655,7 +655,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				pt.BlockNumber = &blockNum
 				pt.TransactionHash = &txHash
 				pt.TransactionPosition = &txIndexU64
-				b, err := json.Marshal(pt)
+				b, err := jsoniterMarshaller.Marshal(pt)
 				if err != nil {
 					if first {
 						first = false

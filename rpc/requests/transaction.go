@@ -19,13 +19,13 @@ package requests
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -76,7 +76,7 @@ func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef Bloc
 		data = &bytes
 	}
 
-	argsVal, err := json.Marshal(ethapi.CallArgs{
+	argsVal, err := fastjson.Marshal(ethapi.CallArgs{
 		From:                 &args.From,
 		To:                   args.To,
 		Gas:                  &gas,

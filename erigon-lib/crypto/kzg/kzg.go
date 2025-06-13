@@ -18,7 +18,6 @@ package kzg
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -26,6 +25,8 @@ import (
 	"sync"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 const (
@@ -66,7 +67,7 @@ func InitKZGCtx() {
 			}
 
 			setup := new(gokzg4844.JSONTrustedSetup)
-			if err = json.Unmarshal(file, setup); err != nil {
+			if err = fastjson.Unmarshal(file, setup); err != nil {
 				panic(fmt.Sprintf("could not unmarshal, err: %v", err))
 			}
 

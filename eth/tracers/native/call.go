@@ -136,7 +136,7 @@ type callTracerConfig struct {
 func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
 	config := defaultCallTracerConfig()
 	if cfg != nil {
-		if err := json.Unmarshal(cfg, &config); err != nil {
+		if err := fastjson.Unmarshal(cfg, &config); err != nil {
 			return nil, err
 		}
 	}

@@ -21,7 +21,6 @@ package vm
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -33,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -376,7 +376,7 @@ func loadJson(name string) ([]precompiledTest, error) {
 		return nil, err
 	}
 	var testcases []precompiledTest
-	err = json.Unmarshal(data, &testcases)
+	err = fastjson.Unmarshal(data, &testcases)
 	return testcases, err
 }
 
@@ -386,7 +386,7 @@ func loadJsonFail(name string) ([]precompiledFailureTest, error) {
 		return nil, err
 	}
 	var testcases []precompiledFailureTest
-	err = json.Unmarshal(data, &testcases)
+	err = fastjson.Unmarshal(data, &testcases)
 	return testcases, err
 }
 

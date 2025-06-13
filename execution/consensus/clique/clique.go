@@ -31,7 +31,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -624,7 +624,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 		}
 
 		s := new(Snapshot)
-		err = json.Unmarshal(v, s)
+		err = fastjson.Unmarshal(v, s)
 		if err != nil {
 			return nil, err
 		}

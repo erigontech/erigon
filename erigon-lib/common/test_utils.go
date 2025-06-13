@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 // LoadJSON reads the given file and unmarshals its content.
@@ -32,7 +34,7 @@ func LoadJSON(file string, val interface{}) error {
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(content, val); err != nil {
+	if err := fastjson.Unmarshal(content, val); err != nil {
 		var syntaxerr *json.SyntaxError
 		if ok := errors.As(err, &syntaxerr); ok {
 			line := findLine(content, syntaxerr.Offset)

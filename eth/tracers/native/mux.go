@@ -46,7 +46,7 @@ type muxTracer struct {
 func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
 	var config map[string]json.RawMessage
 	if cfg != nil {
-		if err := json.Unmarshal(cfg, &config); err != nil {
+		if err := fastjson.Unmarshal(cfg, &config); err != nil {
 			return nil, err
 		}
 	}

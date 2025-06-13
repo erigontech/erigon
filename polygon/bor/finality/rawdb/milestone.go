@@ -18,7 +18,6 @@ package rawdb
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -87,7 +86,7 @@ func ReadFinality[T BlockFinality[T]](db kv.RwDB) (uint64, common.Hash, error) {
 		return 0, common.Hash{}, fmt.Errorf("%w for %s", ErrEmptyLastFinality, string(key))
 	}
 
-	if err = json.Unmarshal(data, lastTV); err != nil {
+	if err = fastjson.Unmarshal(data, lastTV); err != nil {
 		log.Error(fmt.Sprintf("Unable to unmarshal the last %s block number in database", string(key)), "err", err)
 
 		return 0, common.Hash{}, fmt.Errorf("%w(%v) for %s, data %v(%q)",
@@ -195,7 +194,7 @@ func ReadLockField(db kv.RwDB) (bool, uint64, common.Hash, map[string]struct{}, 
 		return false, 0, common.Hash{}, nil, fmt.Errorf("%w for %s", ErrIncorrectLockField, string(key))
 	}
 
-	if err = json.Unmarshal(data, &lockField); err != nil {
+	if err = fastjson.Unmarshal(data, &lockField); err != nil {
 		log.Error("Unable to unmarshal the lock field in database", "err", err)
 
 		return false, 0, common.Hash{}, nil, fmt.Errorf("%w(%v) for lock field , data %v(%q)",
@@ -254,7 +253,7 @@ func ReadFutureMilestoneList(db kv.RwDB) ([]uint64, map[uint64]common.Hash, erro
 		return nil, nil, fmt.Errorf("%w for %s", ErrIncorrectLockField, string(key))
 	}
 
-	if err = json.Unmarshal(data, &futureMilestoneField); err != nil {
+	if err = fastjson.Unmarshal(data, &futureMilestoneField); err != nil {
 		log.Error("Unable to unmarshal the future milestone field in database", "err", err)
 
 		return nil, nil, fmt.Errorf("%w(%v) for future milestone field, data %v(%q)",

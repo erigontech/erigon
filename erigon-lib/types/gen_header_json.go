@@ -3,7 +3,6 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
 	"math/big"
 
@@ -11,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 var _ = (*headerMarshaling)(nil)
@@ -74,7 +74,7 @@ func (h Header) MarshalJSON() ([]byte, error) {
 	enc.VerkleProof = h.VerkleProof
 	enc.VerkleKeyVals = h.VerkleKeyVals
 	enc.Hash = h.Hash()
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -108,7 +108,7 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 		VerkleKeyVals         []verkle.KeyValuePair
 	}
 	var dec Header
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.ParentHash == nil {

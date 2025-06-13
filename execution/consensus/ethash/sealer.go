@@ -31,10 +31,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goccy/go-json"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 )
@@ -250,9 +249,9 @@ func (s *remoteSealer) notifyWork() {
 	// this is the complete block header, otherwise it is a JSON array.
 	var blob []byte
 	if s.ethash.config.NotifyFull {
-		blob, _ = json.Marshal(s.currentBlock.Header())
+		blob, _ = fastjson.Marshal(s.currentBlock.Header())
 	} else {
-		blob, _ = json.Marshal(work)
+		blob, _ = fastjson.Marshal(work)
 	}
 
 	s.reqWG.Add(len(s.notifyURLs))

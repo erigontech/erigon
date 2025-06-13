@@ -1,7 +1,6 @@
 package downloaderrawdb
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
@@ -27,7 +26,7 @@ func ReadTorrentInfo(downloaderDBTx kv.Tx, name string) (*TorrentInfo, error) {
 	if len(infoBytes) == 0 {
 		return &info, nil
 	}
-	if err = json.Unmarshal(infoBytes, &info); err != nil {
+	if err = fastjson.Unmarshal(infoBytes, &info); err != nil {
 		return nil, err
 	}
 	return &info, nil
@@ -44,7 +43,7 @@ func ReadTorrentInfoHash(downloaderDBTx kv.Tx, name string) (hashBytes []byte, e
 	}
 
 	var info TorrentInfo
-	if err = json.Unmarshal(infoBytes, &info); err == nil {
+	if err = fastjson.Unmarshal(infoBytes, &info); err == nil {
 		return info.Hash, nil
 	}
 	return nil, nil

@@ -19,7 +19,6 @@ package heimdall
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -188,7 +187,7 @@ func entityStoreKeyParse(key []byte) uint64 {
 
 func (s *mdbxEntityStore[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
 	entity := s.makeEntity()
-	if err := json.Unmarshal(jsonBytes, entity); err != nil {
+	if err := fastjson.Unmarshal(jsonBytes, entity); err != nil {
 		return generics.Zero[TEntity](), err
 	}
 	return entity, nil

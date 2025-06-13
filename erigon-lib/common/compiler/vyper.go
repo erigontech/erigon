@@ -22,12 +22,13 @@ package compiler
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 // Vyper contains information about the vyper compiler.
@@ -112,7 +113,7 @@ func (s *Vyper) run(cmd *exec.Cmd, source string) (map[string]*Contract, error) 
 // embedded within the JSON is malformed.
 func ParseVyperJSON(combinedJSON []byte, source string, languageVersion string, compilerVersion string, compilerOptions string) (map[string]*Contract, error) {
 	var output map[string]interface{}
-	if err := json.Unmarshal(combinedJSON, &output); err != nil {
+	if err := fastjson.Unmarshal(combinedJSON, &output); err != nil {
 		return nil, err
 	}
 

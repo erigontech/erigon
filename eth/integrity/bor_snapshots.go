@@ -2,12 +2,12 @@ package integrity
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
@@ -48,7 +48,7 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	config := &borcfg.BorConfig{}
 
-	if err := json.Unmarshal(cc.BorJSON, config); err != nil {
+	if err := fastjson.Unmarshal(cc.BorJSON, config); err != nil {
 		err = fmt.Errorf("invalid chain config 'bor' JSON: %w", err)
 		return err
 	}

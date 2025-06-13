@@ -18,11 +18,11 @@ package accounts_steps
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
@@ -153,7 +153,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 				return 0, fmt.Errorf("Send transaction failure: trace call failed: %w", err)
 			}
 
-			results, _ := json.MarshalIndent(callResults, "  ", "  ")
+			results, _ := fastjson.MarshalIndent(callResults, "  ", "  ")
 			logger.Debug("Send transaction call trace", "hash", hash, "trace", string(results))
 		}
 	}

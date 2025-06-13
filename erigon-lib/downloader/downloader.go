@@ -486,7 +486,7 @@ func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, st
 
 			var lock snapshotLock
 
-			if err = json.Unmarshal(data, &lock); err != nil {
+			if err = fastjson.Unmarshal(data, &lock); err != nil {
 				return nil, err
 			}
 

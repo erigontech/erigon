@@ -128,7 +128,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			// Call tracer test found, read if from disk
 			if blob, err := os.ReadFile(filepath.Join("testdata", dirPath, file.Name())); err != nil {
 				t.Fatalf("failed to read testcase: %v", err)
-			} else if err := json.Unmarshal(blob, test); err != nil {
+			} else if err := fastjson.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
 			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
@@ -185,7 +185,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				// This is a tweak to make it deterministic. Can be removed when
 				// we remove the legacy tracer.
 				var x callTrace
-				err = json.Unmarshal(res, &x)
+				err = fastjson.Unmarshal(res, &x)
 				require.NoError(t, err)
 				res, err = fastjson.Marshal(x)
 				require.NoError(t, err)
@@ -202,7 +202,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				GasUsed hexutil.Uint64
 			}
 			var topCall simpleResult
-			if err := json.Unmarshal(res, &topCall); err != nil {
+			if err := fastjson.Unmarshal(res, &topCall); err != nil {
 				t.Fatalf("failed to unmarshal top calls gasUsed: %v", err)
 			}
 			if uint64(topCall.GasUsed) != vmRet.GasUsed {
@@ -228,7 +228,7 @@ func BenchmarkTracers(b *testing.B) {
 				b.Fatalf("failed to read testcase: %v", err)
 			}
 			test := new(callTracerTest)
-			if err := json.Unmarshal(blob, test); err != nil {
+			if err := fastjson.Unmarshal(blob, test); err != nil {
 				b.Fatalf("failed to parse testcase: %v", err)
 			}
 			benchTracer(b, "callTracer", test)

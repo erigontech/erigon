@@ -17,7 +17,6 @@
 package downloader
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -215,7 +214,7 @@ func (tf *AtomicTorrentFS) prohibitNewDownloads(t string) error {
 		return fmt.Errorf("read file: %w", err)
 	}
 	if len(torrentListJsonBytes) > 0 {
-		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
+		if err := fastjson.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
 			return fmt.Errorf("unmarshal: %w", err)
 		}
 	}
@@ -260,7 +259,7 @@ func (tf *AtomicTorrentFS) newDownloadsAreProhibited(name string) (bool, error) 
 		return false, fmt.Errorf("NewDownloadsAreProhibited: read file: %w", err)
 	}
 	if len(torrentListJsonBytes) > 0 {
-		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
+		if err := fastjson.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
 			return false, fmt.Errorf("NewDownloadsAreProhibited: unmarshal: %w", err)
 		}
 	}

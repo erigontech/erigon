@@ -3,8 +3,6 @@
 package types
 
 import (
-	"encoding/json"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/fastjson"
@@ -37,7 +35,7 @@ func (w *Withdrawal) UnmarshalJSON(input []byte) error {
 		Amount    *hexutil.Uint64 `json:"amount"`
 	}
 	var dec Withdrawal
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Index != nil {

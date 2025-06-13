@@ -94,7 +94,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			// Call tracer test found, read if from disk
 			if blob, err := os.ReadFile(filepath.Join("testdata", dirPath, file.Name())); err != nil {
 				t.Fatalf("failed to read testcase: %v", err)
-			} else if err := json.Unmarshal(blob, test); err != nil {
+			} else if err := fastjson.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
 			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
@@ -173,7 +173,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 				// This is a tweak to make it deterministic. Can be removed when
 				// we remove the legacy tracer.
 				var x prestateTrace
-				if err := json.Unmarshal(res, &x); err != nil {
+				if err := fastjson.Unmarshal(res, &x); err != nil {
 					t.Fatalf("prestateTrace tweak Unmarshal: %v", err)
 				}
 				if res, err = fastjson.Marshal(x); err != nil {

@@ -232,7 +232,7 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 		return &body, nil
 	}
 	if err := fastjson.Unmarshal(bytes, &body); err != nil {
-		log.Warn("[mev builder] json.Unmarshal error", "err", err, "content", string(bytes))
+		log.Warn("[mev builder] fastjson.Unmarshal error", "err", err, "content", string(bytes))
 		return nil, err
 	}
 	return &body, nil

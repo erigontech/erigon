@@ -21,7 +21,6 @@ package types
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -588,7 +588,7 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum
 
 // TODO: maybe make it more prettier (only for debug purposes)
 func (r *Receipt) String() string {
-	j, err := json.Marshal(r)
+	j, err := fastjson.Marshal(r)
 	if err != nil {
 		return fmt.Sprintf("Error during JSON marshalling, receipt: %+v, error: %s", *r, err)
 	}

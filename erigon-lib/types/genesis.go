@@ -22,7 +22,6 @@ package types
 import (
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
@@ -87,7 +87,7 @@ type GenesisAlloc map[common.Address]GenesisAccount
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	m := make(map[common.UnprefixedAddress]GenesisAccount)
-	if err := json.Unmarshal(data, &m); err != nil {
+	if err := fastjson.Unmarshal(data, &m); err != nil {
 		return err
 	}
 	*ga = make(GenesisAlloc)
@@ -100,12 +100,12 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 func DecodeGenesisAlloc(i interface{}) (GenesisAlloc, error) {
 	var alloc GenesisAlloc
 
-	b, err := json.Marshal(i)
+	b, err := fastjson.Marshal(i)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := json.Unmarshal(b, &alloc); err != nil {
+	if err := fastjson.Unmarshal(b, &alloc); err != nil {
 		return nil, err
 	}
 

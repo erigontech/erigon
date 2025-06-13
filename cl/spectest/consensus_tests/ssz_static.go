@@ -189,7 +189,7 @@ func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 			// make sure object data stay the same after marshal and unmarshal
 			jsonBytes, err := fastjson.Marshal(object)
 			require.NoError(t, err, "json.Marshal failed")
-			require.NoError(t, fastjson.Unmarshal(jsonBytes, jsonObject), "json.Unmarshal failed")
+			require.NoError(t, fastjson.Unmarshal(jsonBytes, jsonObject), "fastjson.Unmarshal failed")
 			// check hash root again
 			hashRoot, err := jsonObject.HashSSZ()
 			require.NoError(t, err, "failed in HashSSZ")

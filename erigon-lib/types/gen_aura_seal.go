@@ -3,10 +3,9 @@
 package types
 
 import (
-	"encoding/json"
-
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 // MarshalJSON marshals as JSON.
@@ -19,7 +18,7 @@ func (a AuRaSeal) MarshalJSON() ([]byte, error) {
 	}
 	var enc AuRaSeal
 	enc.AuthorityRound = a.AuthorityRound
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -31,7 +30,7 @@ func (a *AuRaSeal) UnmarshalJSON(input []byte) error {
 		} `json:"authorityRound"`
 	}
 	var dec AuRaSeal
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.AuthorityRound != nil {

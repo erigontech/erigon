@@ -17,7 +17,6 @@
 package diagnostics
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"time"
@@ -113,7 +112,7 @@ func ParseData(data []byte, v interface{}) {
 		return
 	}
 
-	err := json.Unmarshal(data, &v)
+	err := fastjson.Unmarshal(data, &v)
 	if err != nil {
 		log.Warn("[Diagnostics] Failed to parse data", "data", string(data), "type", reflect.TypeOf(v))
 	}
