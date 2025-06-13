@@ -120,31 +120,31 @@ func WithSaltFile(saltFile string) EntityIdOption {
 	}
 }
 
-func (r registry) Name(a ForkableId) string {
+func (r *registry) Name(a ForkableId) string {
 	return r.entityRegistry[a].name
 }
 
-func (r registry) SnapshotTag(a ForkableId) string {
+func (r *registry) SnapshotTag(a ForkableId) string {
 	return r.entityRegistry[a].snapshotDataFileTag
 }
 
-func (r registry) IndexFileTag(a ForkableId) []string {
+func (r *registry) IndexFileTag(a ForkableId) []string {
 	return r.entityRegistry[a].indexFileTag
 }
 
-func (r registry) Dirs(a ForkableId) datadir.Dirs {
+func (r *registry) Dirs(a ForkableId) datadir.Dirs {
 	return r.entityRegistry[a].dirs
 }
 
-func (r registry) String(a ForkableId) string {
+func (r *registry) String(a ForkableId) string {
 	return r.entityRegistry[a].name
 }
 
-func (r registry) SnapshotConfig(a ForkableId) *SnapshotConfig {
+func (r *registry) SnapshotConfig(a ForkableId) *SnapshotConfig {
 	return r.entityRegistry[a].snapshotConfig
 }
 
-func (r registry) Salt(a ForkableId) (uint32, error) {
+func (r *registry) Salt(a ForkableId) (uint32, error) {
 	// not computing salt an EntityId inception
 	// since salt file might not be downloaded yet.
 	saltFile := r.entityRegistry[a].saltFile
