@@ -32,6 +32,7 @@ func NewDataColumnSidecarService(
 	ethClock eth_clock.EthereumClock,
 	forkChoice forkchoice.ForkChoiceStorage,
 	syncDataManager synced_data.SyncedData,
+	columnSidecarStorage blob_storage.DataCloumnStorage,
 ) DataColumnSidecarService {
 	size := cfg.NumberOfColumns * cfg.SlotsPerEpoch * 4
 	seenSidecar, err := lru.New[seenSidecarKey, struct{}]("seenDataColumnSidecar", int(size))
@@ -39,11 +40,12 @@ func NewDataColumnSidecarService(
 		panic(err)
 	}
 	return &dataColumnSidecarService{
-		cfg:             cfg,
-		ethClock:        ethClock,
-		forkChoice:      forkChoice,
-		syncDataManager: syncDataManager,
-		seenSidecar:     seenSidecar,
+		cfg:                  cfg,
+		ethClock:             ethClock,
+		forkChoice:           forkChoice,
+		syncDataManager:      syncDataManager,
+		seenSidecar:          seenSidecar,
+		columnSidecarStorage: columnSidecarStorage,
 	}
 }
 
@@ -132,7 +134,11 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		return fmt.Errorf("invalid kzg proofs for data column sidecar")
 	}
 
-	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, msg.SignedBlockHeader.Header.Root, int64(msg.Index), msg); err != nil {
+	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to get block root: %v", err)
+	}
+	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
 	}
 	return nil
