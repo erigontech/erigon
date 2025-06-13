@@ -44,10 +44,11 @@ func init() {
 }
 
 type callLog struct {
-	Index   uint64         `json:"index"`
-	Address common.Address `json:"address"`
-	Topics  []common.Hash  `json:"topics"`
-	Data    hexutil.Bytes  `json:"data"`
+	Index    uint64         `json:"index"`
+	Address  common.Address `json:"address"`
+	Topics   []common.Hash  `json:"topics"`
+	Data     hexutil.Bytes  `json:"data"`
+	Position hexutil.Uint   `json:"position"`
 }
 
 type callFrame struct {
@@ -179,6 +180,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Ad
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
 func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+
 	if len(t.callstack) == 0 {
 		// can happen if top-level is a call to precompile
 		// and includePrecompiles is false
@@ -303,7 +305,7 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if atomic.LoadUint32(&t.interrupt) > 0 {
 		return
 	}
-	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: t.logIndex})
+	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: t.logIndex, Position: hexutil.Uint(len(t.callstack[len(t.callstack)-1].Calls))})
 	t.logIndex++
 }
 

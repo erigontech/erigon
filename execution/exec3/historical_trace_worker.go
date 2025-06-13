@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -483,7 +482,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.BlockReader))
 
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
@@ -646,7 +645,7 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader int
 	}
 	return b, err
 }
-func BlkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+func BlkRangeToSteps(tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return 0, 0, err
@@ -656,12 +655,12 @@ func BlkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.T
 		return 0, 0, err
 	}
 
-	stepSize := libstate.AggTx(tx).StepSize()
+	stepSize := tx.Debug().StepSize()
 	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
 }
 
-func BlkRangeToStepsOnDB(db kv.RoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	tx, err := db.BeginRo(context.Background())
+func BlkRangeToStepsOnDB(db kv.TemporalRoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+	tx, err := db.BeginTemporalRo(context.Background())
 	if err != nil {
 		return 0, 0, err
 	}

@@ -474,7 +474,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	br := m.BlockReader
-	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), br))
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), br))
 	require := require.New(t)
 	ctx := m.Ctx
 
@@ -544,6 +544,10 @@ func TestBlockReceiptStorage(t *testing.T) {
 		}
 		sd.SetTxNum(base + uint64(len(receipts)) + 1)
 		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+uint64(len(receipts))+1))
+
+		_, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment")
+		require.NoError(err)
+
 		require.NoError(sd.Flush(ctx, tx))
 	}
 

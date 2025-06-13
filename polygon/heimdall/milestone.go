@@ -131,18 +131,26 @@ func (m *Milestone) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type MilestoneResponse struct {
+type MilestoneResponseV1 struct {
 	Height string    `json:"height"`
 	Result Milestone `json:"result"`
+}
+
+type MilestoneResponseV2 struct {
+	Milestone Milestone `json:"milestone"`
 }
 
 type MilestoneCount struct {
 	Count int64 `json:"count"`
 }
 
-type MilestoneCountResponse struct {
+type MilestoneCountResponseV1 struct {
 	Height string         `json:"height"`
 	Result MilestoneCount `json:"result"`
+}
+
+type MilestoneCountResponseV2 struct {
+	Count int64 `json:"count"`
 }
 
 type MilestoneLastNoAck struct {

@@ -91,7 +91,6 @@ func CalculateTime(amountLeft, rate uint64) string {
 	if hours == 0 && minutes == 0 {
 		return fmt.Sprintf("%ds", timeLeftInSeconds)
 	} else if hours == 0 {
-		//sec := timeLeftInSeconds % 60
 		return fmt.Sprintf("%dm:%ds", minutes, timeLeftInSeconds%60)
 	}
 
