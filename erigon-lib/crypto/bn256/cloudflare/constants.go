@@ -25,6 +25,14 @@ var Order = bigFromBase10("21888242871839275222246405745257275088548364400416034
 // P is a prime over which we form a basic field: 36u⁴+36u³+24u²+6u+1.
 var P = bigFromBase10("21888242871839275222246405745257275088696311157297823662689037894645226208583")
 
+var P_words = gfP{0x30644e72e131a029, 0xb85045b68181585d, 0x97816a916871ca8d, 0x3c208c16d87cfd47}
+
+// Precompute inverse of 2 modulo mod: inv2 * 2 % mod == 1.
+// The 1/2 is inexact division which can be fixed by adding "0" to the numerator
+// and making it even: (mod + 1) / 2. To avoid potential overflow of (1 + mod)
+// we rewrite it further to (mod - 1 + 2) / 2 = (mod - 1) / 2 + 1 = ⌊mod / 2⌋ + 1.
+var inv2 = gfP{0x183227397098d014, 0xdc2822db40c0ac2e, 0xcbc0b548b438e546, 0x9e10460b6c3e7ea4}
+
 // p2 is p, represented as little-endian 64-bit words.
 var p2 = [4]uint64{0x3c208c16d87cfd47, 0x97816a916871ca8d, 0xb85045b68181585d, 0x30644e72e131a029}
 
