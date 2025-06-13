@@ -1353,7 +1353,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 		cfg.Enums, cfg.LessFalsePositives = true, true
 	}
-	if err := buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger); err != nil {
+	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger); err != nil {
 		return err
 	}
 	if ii.iiCfg.Accessors.Has(AccessorExistence) {
