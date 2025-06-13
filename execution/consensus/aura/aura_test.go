@@ -23,16 +23,17 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -56,10 +57,10 @@ func TestEmptyBlock(t *testing.T) {
 
 	time := uint64(1539016985)
 	header := core.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
-	header.UncleHash = types.EmptyUncleHash
+	header.UncleHash = empty.UncleHash
 	header.TxHash = trie.EmptyRoot
 	header.ReceiptHash = trie.EmptyRoot
-	header.Coinbase = libcommon.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")
+	header.Coinbase = common.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")
 	header.Difficulty = engine.CalcDifficulty(nil, time,
 		0,
 		genesisBlock.Difficulty(),
@@ -84,7 +85,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	require := require.New(t)
 	genesis := core.GnosisGenesisBlock()
 	genesis.Config.TerminalTotalDifficultyPassed = false
-	genesis.Config.Aura.BlockGasLimitContractTransitions = map[uint64]libcommon.Address{0: libcommon.HexToAddress("0x4000000000000000000000000000000000000001")}
+	genesis.Config.Aura.BlockGasLimitContractTransitions = map[uint64]common.Address{0: common.HexToAddress("0x4000000000000000000000000000000000000001")}
 
 	chainConfig := genesis.Config
 	auraDB := memdb.NewTestDB(t, kv.ChainDB)
@@ -97,12 +98,12 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	//Populate a sample valid header for a Pre-merge block
 	// - actually sampled from 5000th block in chiado
 	validPreMergeHeader := &types.Header{
-		ParentHash:  libcommon.HexToHash("0x102482332de853f2f8967263e77e71d4fddf68fd5d84b750b2ddb7e501052097"),
-		UncleHash:   libcommon.HexToHash("0x0"),
-		Coinbase:    libcommon.HexToAddress("0x14747a698Ec1227e6753026C08B29b4d5D3bC484"),
-		Root:        libcommon.HexToHash("0x0"),
-		TxHash:      libcommon.HexToHash("0x0"),
-		ReceiptHash: libcommon.HexToHash("0x0"),
+		ParentHash:  common.HexToHash("0x102482332de853f2f8967263e77e71d4fddf68fd5d84b750b2ddb7e501052097"),
+		UncleHash:   common.HexToHash("0x0"),
+		Coinbase:    common.HexToAddress("0x14747a698Ec1227e6753026C08B29b4d5D3bC484"),
+		Root:        common.HexToHash("0x0"),
+		TxHash:      common.HexToHash("0x0"),
+		ReceiptHash: common.HexToHash("0x0"),
 		Bloom:       types.BytesToBloom(nil),
 		Difficulty:  difficlty,
 		Number:      big.NewInt(5000),
@@ -113,7 +114,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 		Nonce:       [8]byte{0, 0, 0, 0, 0, 0, 0, 0},
 	}
 
-	syscallCustom := func(libcommon.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
+	syscallCustom := func(common.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
 		//Packing as constructor gives the same effect as unpacking the returned value
 		json := `[{"inputs": [{"internalType": "uint256","name": "blockGasLimit","type": "uint256"}],"stateMutability": "nonpayable","type": "constructor"}]`
 		fakeAbi, err := abi.JSON(strings.NewReader(json))

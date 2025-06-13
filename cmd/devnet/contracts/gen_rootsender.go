@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const RootSenderABI = "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"st
 var RootSenderBin = "0x608060405234801561001057600080fd5b506040516102fb3803806102fb83398101604081905261002f9161007c565b600080546001600160a01b039384166001600160a01b031991821617909155600180549290931691161790556100af565b80516001600160a01b038116811461007757600080fd5b919050565b6000806040838503121561008f57600080fd5b61009883610060565b91506100a660208401610060565b90509250929050565b61023d806100be6000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c8063513e29ff1461003b5780637bf786f814610050575b600080fd5b61004e610049366004610139565b610082565b005b61007061005e366004610152565b60026020526000908152604090205481565b60405190815260200160405180910390f35b3360009081526002602052604090205461009c8282610182565b33600081815260026020908152604080832094909455905460015484519283019390935281840186905283518083038501815260608301948590526316f1983160e01b9094526001600160a01b03908116936316f1983193610103939216916064016101a9565b600060405180830381600087803b15801561011d57600080fd5b505af1158015610131573d6000803e3d6000fd5b505050505050565b60006020828403121561014b57600080fd5b5035919050565b60006020828403121561016457600080fd5b81356001600160a01b038116811461017b57600080fd5b9392505050565b808201808211156101a357634e487b7160e01b600052601160045260246000fd5b92915050565b60018060a01b038316815260006020604081840152835180604085015260005b818110156101e5578581018301518582016060015282016101c9565b506000606082860101526060601f19601f83011685010192505050939250505056fea2646970667358221220fa5fa4e9dd64f8da1ad4844228b4671828b48d8de1f8d3f92ba0e5551ce1e47c64736f6c63430008140033"
 
 // DeployRootSender deploys a new Ethereum contract, binding an instance of RootSender to it.
-func DeployRootSender(auth *bind.TransactOpts, backend bind.ContractBackend, stateSender_ libcommon.Address, childStateReceiver_ libcommon.Address) (libcommon.Address, types.Transaction, *RootSender, error) {
+func DeployRootSender(auth *bind.TransactOpts, backend bind.ContractBackend, stateSender_ common.Address, childStateReceiver_ common.Address) (common.Address, types.Transaction, *RootSender, error) {
 	parsed, err := abi.JSON(strings.NewReader(RootSenderABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(RootSenderBin), backend, stateSender_, childStateReceiver_)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(RootSenderBin), backend, stateSender_, childStateReceiver_)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &RootSender{RootSenderCaller: RootSenderCaller{contract: contract}, RootSenderTransactor: RootSenderTransactor{contract: contract}, RootSenderFilterer: RootSenderFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type RootSenderTransactorRaw struct {
 }
 
 // NewRootSender creates a new instance of RootSender, bound to a specific deployed contract.
-func NewRootSender(address libcommon.Address, backend bind.ContractBackend) (*RootSender, error) {
+func NewRootSender(address common.Address, backend bind.ContractBackend) (*RootSender, error) {
 	contract, err := bindRootSender(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewRootSender(address libcommon.Address, backend bind.ContractBackend) (*Ro
 }
 
 // NewRootSenderCaller creates a new read-only instance of RootSender, bound to a specific deployed contract.
-func NewRootSenderCaller(address libcommon.Address, caller bind.ContractCaller) (*RootSenderCaller, error) {
+func NewRootSenderCaller(address common.Address, caller bind.ContractCaller) (*RootSenderCaller, error) {
 	contract, err := bindRootSender(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewRootSenderCaller(address libcommon.Address, caller bind.ContractCaller) 
 }
 
 // NewRootSenderTransactor creates a new write-only instance of RootSender, bound to a specific deployed contract.
-func NewRootSenderTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*RootSenderTransactor, error) {
+func NewRootSenderTransactor(address common.Address, transactor bind.ContractTransactor) (*RootSenderTransactor, error) {
 	contract, err := bindRootSender(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewRootSenderTransactor(address libcommon.Address, transactor bind.Contract
 }
 
 // NewRootSenderFilterer creates a new log filterer instance of RootSender, bound to a specific deployed contract.
-func NewRootSenderFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*RootSenderFilterer, error) {
+func NewRootSenderFilterer(address common.Address, filterer bind.ContractFilterer) (*RootSenderFilterer, error) {
 	contract, err := bindRootSender(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewRootSenderFilterer(address libcommon.Address, filterer bind.ContractFilt
 }
 
 // bindRootSender binds a generic wrapper to an already deployed contract.
-func bindRootSender(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindRootSender(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(RootSenderABI))
 	if err != nil {
 		return nil, err
@@ -195,7 +195,7 @@ func (_RootSender *RootSenderTransactorRaw) Transact(opts *bind.TransactOpts, me
 // Sent is a free data retrieval call binding the contract method 0x7bf786f8.
 //
 // Solidity: function sent(address ) view returns(uint256)
-func (_RootSender *RootSenderCaller) Sent(opts *bind.CallOpts, arg0 libcommon.Address) (*big.Int, error) {
+func (_RootSender *RootSenderCaller) Sent(opts *bind.CallOpts, arg0 common.Address) (*big.Int, error) {
 	var out []interface{}
 	err := _RootSender.contract.Call(opts, &out, "sent", arg0)
 
@@ -212,14 +212,14 @@ func (_RootSender *RootSenderCaller) Sent(opts *bind.CallOpts, arg0 libcommon.Ad
 // Sent is a free data retrieval call binding the contract method 0x7bf786f8.
 //
 // Solidity: function sent(address ) view returns(uint256)
-func (_RootSender *RootSenderSession) Sent(arg0 libcommon.Address) (*big.Int, error) {
+func (_RootSender *RootSenderSession) Sent(arg0 common.Address) (*big.Int, error) {
 	return _RootSender.Contract.Sent(&_RootSender.CallOpts, arg0)
 }
 
 // Sent is a free data retrieval call binding the contract method 0x7bf786f8.
 //
 // Solidity: function sent(address ) view returns(uint256)
-func (_RootSender *RootSenderCallerSession) Sent(arg0 libcommon.Address) (*big.Int, error) {
+func (_RootSender *RootSenderCallerSession) Sent(arg0 common.Address) (*big.Int, error) {
 	return _RootSender.Contract.Sent(&_RootSender.CallOpts, arg0)
 }
 

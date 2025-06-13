@@ -17,6 +17,7 @@ on:
 jobs:
   bisect:
     runs-on: [self-hosted, qa, long-running]
+    timeout-minutes: 7200  # 5 days
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa

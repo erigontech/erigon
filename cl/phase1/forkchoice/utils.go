@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/transition"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -72,7 +72,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	f.childrens.Range(func(k, v any) bool {
 		if v.(childrens).parentSlot <= newFinalized.Epoch*f.beaconCfg.SlotsPerEpoch {
 			f.childrens.Delete(k)
-			delete(f.headSet, k.(libcommon.Hash))
+			delete(f.headSet, k.(common.Hash))
 		}
 		return true
 	})
@@ -110,16 +110,16 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 }
 
 // Ancestor returns the ancestor to the given root.
-func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.Hash {
+func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) common.Hash {
 	header, has := f.forkGraph.GetHeader(root)
 	if !has {
-		return libcommon.Hash{}
+		return common.Hash{}
 	}
 	for header.Slot > slot {
 		root = header.ParentRoot
 		header, has = f.forkGraph.GetHeader(header.ParentRoot)
 		if !has {
-			return libcommon.Hash{}
+			return common.Hash{}
 		}
 	}
 	return root

@@ -19,10 +19,9 @@ package forkchoice
 import (
 	"errors"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 var (
@@ -40,7 +39,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.headHash = libcommon.Hash{}
+	f.headHash = common.Hash{}
 	data := attestation.Data
 	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err
@@ -218,7 +217,7 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 	// LMD vote must be consistent with FFG vote target
 	targetSlot := f.computeStartSlotAtEpoch(target.Epoch)
 	ancestorRoot := f.Ancestor(attestation.Data.BeaconBlockRoot, targetSlot)
-	if ancestorRoot == (libcommon.Hash{}) {
+	if ancestorRoot == (common.Hash{}) {
 		return errors.New("could not retrieve ancestor")
 	}
 	if ancestorRoot != target.Root {

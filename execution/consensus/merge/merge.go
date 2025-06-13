@@ -26,11 +26,12 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
@@ -40,7 +41,7 @@ import (
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
 var (
-	ProofOfStakeDifficulty = libcommon.Big0     // PoS block's difficulty is always 0
+	ProofOfStakeDifficulty = common.Big0        // PoS block's difficulty is always 0
 	ProofOfStakeNonce      = types.BlockNonce{} // PoS block's have all-zero nonces
 )
 
@@ -88,7 +89,7 @@ func (s *Merge) Type() chain.ConsensusName {
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-stake verified author of the block.
 // This is thread-safe (only access the header.Coinbase or the underlying engine's thread-safe method)
-func (s *Merge) Author(header *types.Header) (libcommon.Address, error) {
+func (s *Merge) Author(header *types.Header) (common.Address, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Author(header)
 	}
@@ -163,11 +164,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	for _, r := range rewards {
 		switch r.Kind {
 		case consensus.RewardAuthor:
-			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
 		case consensus.RewardUncle:
-			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineUncle)
+			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineUncle)
 		default:
-			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceChangeUnspecified)
+			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceChangeUnspecified)
 		}
 	}
 
@@ -178,15 +179,18 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			}
 		} else {
 			for _, w := range withdrawals {
-				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(libcommon.GWei))
-				state.AddBalance(w.Address, amountInWei, tracing.BalanceIncreaseWithdrawal)
+				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
+				state.AddBalance(w.Address, *amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}
 	}
 
 	var rs types.FlatRequests
-	arbOsVersion := types.GetArbOSVersion(header, config)
-	if config.IsPrague(header.Time, arbOsVersion) && !skipReceiptsEval {
+	var arbosVersion uint64
+	if config.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	if config.IsPrague(header.Time, arbosVersion) && !skipReceiptsEval {
 		rs = make(types.FlatRequests, 0)
 		allLogs := make(types.Logs, 0)
 		for i, rec := range receipts {
@@ -202,11 +206,17 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
 		}
-		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
+		withdrawalReq, err := misc.DequeueWithdrawalRequests7002(syscall, state)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		if withdrawalReq != nil {
 			rs = append(rs, *withdrawalReq)
 		}
-		consolidations := misc.DequeueConsolidationRequests7251(syscall)
+		consolidations, err := misc.DequeueConsolidationRequests7251(syscall, state)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		if consolidations != nil {
 			rs = append(rs, *consolidations)
 		}
@@ -233,18 +243,21 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	arbOsVersion := types.GetArbOSVersion(header, config)
-	if config.IsPrague(header.Time, arbOsVersion) {
+	var arbosVersion uint64
+	if config.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	if config.IsPrague(header.Time, arbosVersion) {
 		header.RequestsHash = outRequests.Hash()
 	}
 	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, outRequests, nil
 }
 
-func (s *Merge) SealHash(header *types.Header) (hash libcommon.Hash) {
+func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Merge) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int {
+func (s *Merge) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
 		return nil
@@ -253,6 +266,10 @@ func (s *Merge) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTi
 		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
 	}
 	return ProofOfStakeDifficulty
+}
+
+func (c *Merge) TxDependencies(h *types.Header) [][]int {
+	return nil
 }
 
 // verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
@@ -276,8 +293,8 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	// Verify that the gas limit is within cap
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	if header.GasLimit > params.MaxBlockGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxBlockGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
@@ -285,11 +302,11 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	// Verify that the block number is parent's +1
-	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(libcommon.Big1) != 0 {
+	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(common.Big1) != 0 {
 		return consensus.ErrInvalidNumber
 	}
 
-	if header.UncleHash != types.EmptyUncleHash {
+	if header.UncleHash != empty.UncleHash {
 		return errInvalidUncleHash
 	}
 
@@ -297,9 +314,13 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return err
 	}
 
-	arbOsVersion := types.GetArbOSVersion(header, chain.Config())
+	var arbosVersion uint64
+	if chain.Config().IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+
 	// Verify existence / non-existence of withdrawalsHash
-	shanghai := chain.Config().IsShanghai(header.Time, arbOsVersion)
+	shanghai := chain.Config().IsShanghai(header.Time, arbosVersion)
 	if shanghai && header.WithdrawalsHash == nil {
 		return errors.New("missing withdrawalsHash")
 	}
@@ -307,7 +328,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	if !chain.Config().IsCancun(header.Time, arbOsVersion) {
+	if !chain.Config().IsCancun(header.Time, arbosVersion) {
 		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
 	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
@@ -319,7 +340,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	// Verify existence / non-existence of requestsHash
-	prague := chain.Config().IsPrague(header.Time, arbOsVersion)
+	prague := chain.Config().IsPrague(header.Time, arbosVersion)
 	if prague && header.RequestsHash == nil {
 		return errors.New("missing requestsHash")
 	}
@@ -350,7 +371,7 @@ func (s *Merge) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types
 	return nil
 }
 
-func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+func (s *Merge) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 
@@ -360,13 +381,18 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 	if !misc.IsPoSHeader(header) {
 		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
-	arbOsVersion := types.GetArbOSVersion(header, config)
-	if chain.Config().IsCancun(header.Time, arbOsVersion) {
-		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr libcommon.Address, data []byte) ([]byte, error) {
+
+	var arbosVersion uint64
+	if config.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+
+	if chain.Config().IsCancun(header.Time, arbosVersion) {
+		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr common.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
-	if chain.Config().IsPrague(header.Time, arbOsVersion) {
+	if chain.Config().IsPrague(header.Time, arbosVersion) {
 		misc.StoreBlockHashesEip2935(header, state, config, chain)
 	}
 }
@@ -390,7 +416,7 @@ func (s *Merge) Close() error {
 // IsTTDReached checks if the TotalTerminalDifficulty has been surpassed on the `parentHash` block.
 // It depends on the parentHash already being stored in the database.
 // If the total difficulty is not stored in the database a ErrUnknownAncestorTD error is returned.
-func IsTTDReached(chain consensus.ChainHeaderReader, parentHash libcommon.Hash, number uint64) (bool, error) {
+func IsTTDReached(chain consensus.ChainHeaderReader, parentHash common.Hash, number uint64) (bool, error) {
 	if chain.Config().TerminalTotalDifficulty == nil {
 		return false, nil
 	}

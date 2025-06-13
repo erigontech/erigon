@@ -32,7 +32,7 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
@@ -59,7 +59,7 @@ var BridgeEvents = struct {
 }
 
 type syncRecordKey struct {
-	hash  libcommon.Hash
+	hash  common.Hash
 	index uint64
 }
 
@@ -97,9 +97,9 @@ type Heimdall struct {
 	spans              map[heimdall.SpanId]*heimdall.Span
 	logger             log.Logger
 	cancelFunc         context.CancelFunc
-	syncSenderAddress  libcommon.Address
+	syncSenderAddress  common.Address
 	syncSenderBinding  *contracts.TestStateSender
-	rootChainAddress   libcommon.Address
+	rootChainAddress   common.Address
 	rootChainBinding   *contracts.TestRootChain
 	syncSubscription   ethereum.Subscription
 	rootHeaderBlockSub ethereum.Subscription
@@ -295,7 +295,7 @@ func (h *Heimdall) unsubscribe() {
 	}
 }
 
-func (h *Heimdall) StateSenderAddress() libcommon.Address {
+func (h *Heimdall) StateSenderAddress() common.Address {
 	return h.syncSenderAddress
 }
 
@@ -303,7 +303,7 @@ func (f *Heimdall) StateSenderContract() *contracts.TestStateSender {
 	return f.syncSenderBinding
 }
 
-func (h *Heimdall) RootChainAddress() libcommon.Address {
+func (h *Heimdall) RootChainAddress() common.Address {
 	return h.rootChainAddress
 }
 
@@ -388,7 +388,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 	}
 }
 
-func (h *Heimdall) addValidator(validatorAddress libcommon.Address, votingPower int64, proposerPriority int64) {
+func (h *Heimdall) addValidator(validatorAddress common.Address, votingPower int64, proposerPriority int64) {
 
 	if h.validatorSet == nil {
 		h.validatorSet = valset.NewValidatorSet([]*valset.Validator{
@@ -630,7 +630,7 @@ func (h *Heimdall) AwaitCheckpoint(ctx context.Context, blockNumber *big.Int) er
 	return nil
 }
 
-func (h *Heimdall) isOldTx(txHash libcommon.Hash, logIndex uint64, eventType BridgeEvent, event interface{}) (bool, error) {
+func (h *Heimdall) isOldTx(txHash common.Hash, logIndex uint64, eventType BridgeEvent, event interface{}) (bool, error) {
 
 	// define the endpoint based on the type of event
 	var status bool

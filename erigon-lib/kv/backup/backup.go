@@ -27,7 +27,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 
-	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
@@ -101,7 +101,7 @@ func backupTable(ctx context.Context, srcTx kv.Tx, dst kv.RwDB, table string, lo
 	total, _ = srcTx.Count(table)
 
 	if err := dst.Update(ctx, func(tx kv.RwTx) error {
-		return tx.ClearBucket(table)
+		return tx.ClearTable(table)
 	}); err != nil {
 		return err
 	}
@@ -143,8 +143,8 @@ func backupTable(ctx context.Context, srcTx kv.Tx, dst kv.RwDB, table string, lo
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
 				logger.Info("Progress", "table", table, "progress",
-					fmt.Sprintf("%s/%s", common2.PrettyCounter(i), common2.PrettyCounter(total)), "key", hex.EncodeToString(k),
-					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+					fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(total)), "key", hex.EncodeToString(k),
+					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			default:
 			}
 		}
@@ -169,7 +169,7 @@ const ReadAheadThreads = 2048
 func ClearTables(ctx context.Context, tx kv.RwTx, tables ...string) error {
 	for _, tbl := range tables {
 		log.Info("Clear", "table", tbl)
-		if err := tx.ClearBucket(tbl); err != nil {
+		if err := tx.ClearTable(tbl); err != nil {
 			return err
 		}
 	}

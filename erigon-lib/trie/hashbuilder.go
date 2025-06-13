@@ -23,13 +23,12 @@ import (
 	"io"
 	"math/bits"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	length2 "github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/rlphacks"
 	"github.com/erigontech/erigon-lib/types/accounts"
@@ -37,7 +36,7 @@ import (
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
 
-var EmptyCodeHash = crypto.Keccak256Hash(nil) //c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+var emptyCodeHash = empty.CodeHash
 
 // HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
@@ -100,11 +99,11 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 		return fmt.Errorf("length %d", length)
 	}
 	if hb.proofElement != nil {
-		hb.proofElement.storageKey = libcommon.CopyBytes(keyHex[:len(keyHex)-1])
+		hb.proofElement.storageKey = common.CopyBytes(keyHex[:len(keyHex)-1])
 		hb.proofElement.storageValue = new(uint256.Int).SetBytes(val.RawBytes())
 	}
 	key := keyHex[len(keyHex)-length:]
-	s := &ShortNode{Key: libcommon.CopyBytes(key), Val: ValueNode(libcommon.CopyBytes(val.RawBytes()))}
+	s := &ShortNode{Key: common.CopyBytes(key), Val: ValueNode(common.CopyBytes(val.RawBytes()))}
 	hb.nodeStack = append(hb.nodeStack, s)
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
 		return err
@@ -238,7 +237,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	fullKey := keyHex[:len(keyHex)-1]
 	key := keyHex[len(keyHex)-length:]
 	copy(hb.acc.Root[:], EmptyRoot[:])
-	copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
+	copy(hb.acc.CodeHash[:], emptyCodeHash[:])
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
@@ -252,7 +251,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if root == nil {
-				root = &HashNode{hash: libcommon.CopyBytes(hb.acc.Root[:])}
+				root = &HashNode{hash: common.CopyBytes(hb.acc.Root[:])}
 			}
 		}
 		popped++
@@ -261,7 +260,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	if fieldSet&uint32(8) != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		var ok bool
-		if !bytes.Equal(hb.acc.CodeHash[:], EmptyCodeHash[:]) {
+		if !bytes.Equal(hb.acc.CodeHash[:], emptyCodeHash[:]) {
 			stackTop := hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if stackTop != nil { // if we don't have any stack top it might be okay because we didn't resolve the code yet (stateful resolver)
 				// but if we have something on top of the stack that isn't `nil`, it has to be a codeNode
@@ -279,18 +278,18 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		// we capture it with the account proof element.  Note, we also store the
 		// full key as this root could be for a different account in the negative
 		// case.
-		hb.proofElement.storageRootKey = libcommon.CopyBytes(fullKey)
+		hb.proofElement.storageRootKey = common.CopyBytes(fullKey)
 		hb.proofElement.storageRoot = hb.acc.Root
 	}
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
 
-	if !bytes.Equal(accCopy.CodeHash[:], EmptyCodeHash[:]) && accountCode != nil {
+	if !bytes.Equal(accCopy.CodeHash[:], emptyCodeHash[:]) && accountCode != nil {
 		accountCodeSize = len(accountCode)
 	}
 
 	a := &AccountNode{accCopy, root, true, accountCode, accountCodeSize}
-	s := &ShortNode{Key: libcommon.CopyBytes(key), Val: a}
+	s := &ShortNode{Key: common.CopyBytes(key), Val: a}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,
 	// pushing resulting hash to the hash stack, and nil to the node stack
 	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
@@ -328,7 +327,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	} else {
-		copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
+		copy(hb.acc.CodeHash[:], emptyCodeHash[:])
 	}
 
 	return hb.accountLeafHashWithKey(key, popped)
@@ -394,10 +393,10 @@ func (hb *HashBuilder) extension(key []byte) error {
 	var s *ShortNode
 	switch n := nd.(type) {
 	case nil:
-		branchHash := libcommon.CopyBytes(hb.hashStack[len(hb.hashStack)-length2.Hash:])
-		s = &ShortNode{Key: libcommon.CopyBytes(key), Val: &HashNode{hash: branchHash}}
+		branchHash := common.CopyBytes(hb.hashStack[len(hb.hashStack)-length2.Hash:])
+		s = &ShortNode{Key: common.CopyBytes(key), Val: &HashNode{hash: branchHash}}
 	case *FullNode:
-		s = &ShortNode{Key: libcommon.CopyBytes(key), Val: n}
+		s = &ShortNode{Key: common.CopyBytes(key), Val: n}
 	default:
 		return fmt.Errorf("wrong Val type for an extension: %T", nd)
 	}
@@ -474,7 +473,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	}
 	var capture []byte //nolint: used for tracing
 	if hb.trace {
-		capture = libcommon.CopyBytes(branchHash[:length2.Hash+1])
+		capture = common.CopyBytes(branchHash[:length2.Hash+1])
 	}
 	if _, err := writer.Write(branchHash[:length2.Hash+1]); err != nil {
 		return err
@@ -512,7 +511,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	for digit := uint(0); digit < 16; digit++ {
 		if ((1 << digit) & set) != 0 {
 			if nodes[i] == nil {
-				f.Children[digit] = &HashNode{hash: libcommon.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
+				f.Children[digit] = &HashNode{hash: common.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
 			} else {
 				f.Children[digit] = nodes[i]
 			}
@@ -642,7 +641,7 @@ func (hb *HashBuilder) code(code []byte) error {
 	if hb.trace {
 		fmt.Printf("CODE\n")
 	}
-	codeCopy := libcommon.CopyBytes(code)
+	codeCopy := common.CopyBytes(code)
 	n := CodeNode(codeCopy)
 	hb.nodeStack = append(hb.nodeStack, n)
 	hb.sha.Reset()
@@ -669,15 +668,15 @@ func (hb *HashBuilder) emptyRoot() {
 	hb.hashStack = append(hb.hashStack, hash[:]...)
 }
 
-func (hb *HashBuilder) RootHash() (libcommon.Hash, error) {
+func (hb *HashBuilder) RootHash() (common.Hash, error) {
 	if !hb.hasRoot() {
-		return libcommon.Hash{}, errors.New("no root in the tree")
+		return common.Hash{}, errors.New("no root in the tree")
 	}
 	return hb.rootHash(), nil
 }
 
-func (hb *HashBuilder) rootHash() libcommon.Hash {
-	var hash libcommon.Hash
+func (hb *HashBuilder) rootHash() common.Hash {
+	var hash common.Hash
 	top := hb.topHash()
 	if len(top) == 33 {
 		copy(hash[:], top[1:])

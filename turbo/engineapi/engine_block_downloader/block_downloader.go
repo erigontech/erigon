@@ -25,15 +25,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/adapter"
@@ -110,7 +110,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 
 func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	requestId int,
-	hashToDownload libcommon.Hash,
+	hashToDownload common.Hash,
 	heightToDownload uint64,
 ) bool {
 	if e.hd.PosStatus() != headerdownload.Idle {
@@ -160,7 +160,7 @@ func (e *EngineBlockDownloader) waitForEndOfHeadersDownload(ctx context.Context)
 
 // waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
 func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uint64, toBlock uint64, err error) {
-	var lastValidHash libcommon.Hash
+	var lastValidHash common.Hash
 	var badChainError error // TODO(yperbasis): this is not set anywhere
 	var foundPow bool
 	var found bool
@@ -215,7 +215,7 @@ func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uin
 	return
 }
 
-func saveHeader(db kv.RwTx, header *types.Header, hash libcommon.Hash) error {
+func saveHeader(db kv.RwTx, header *types.Header, hash common.Hash) error {
 	blockHeight := header.Number.Uint64()
 	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)

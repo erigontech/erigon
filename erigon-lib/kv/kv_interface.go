@@ -25,10 +25,11 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 //Variables Naming:
@@ -228,7 +229,7 @@ const (
 	CaplinDB        = "caplin"
 	TemporaryDB     = "temporary"
 	ArbitrumDB      = "arbitrum"
-	ArbWasmDB       = "arb-wasm" // ArbWasmDB - is a separate DB for arbitrum Wasm code
+	ArbWasmDB       = "arb-wasm" // ArbWasmDB - is a separate DB for arbitrum Wasm cod
 	ArbClassicDB    = "arb-classic"
 )
 
@@ -305,9 +306,9 @@ type Closer interface {
 	Close()
 }
 
-type OnFreezeFunc func(frozenFileNames []string)
+type OnFilesChange func(frozenFileNames []string)
 type SnapshotNotifier interface {
-	OnFreeze(f OnFreezeFunc)
+	OnFilesChange(f OnFilesChange)
 }
 
 // RoDB - Read-only version of KV.
@@ -426,7 +427,9 @@ type Tx interface {
 	BucketSize(table string) (uint64, error)
 	Count(bucket string) (uint64, error)
 
-	ListBuckets() ([]string, error)
+	ListTables() ([]string, error)
+
+	Apply(ctx context.Context, f func(tx Tx) error) error
 }
 
 // RwTx
@@ -444,6 +447,8 @@ type RwTx interface {
 	RwCursorDupSort(table string) (RwCursorDupSort, error)
 
 	Commit() error // Commit all the operations of a transaction into the database.
+
+	ApplyRw(ctx context.Context, f func(tx RwTx) error) error
 }
 
 // Cursor - class for navigating through a database
@@ -534,11 +539,12 @@ type (
 	Domain      uint16
 	Appendable  uint16
 	History     string
-	InvertedIdx string
+	InvertedIdx uint16
 )
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
+	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 }
 type TemporalTx interface {
 	Tx
@@ -584,12 +590,15 @@ type TemporalDebugTx interface {
 
 	DomainFiles(domain ...Domain) VisibleFiles
 
-	GreedyPruneHistory(ctx context.Context, domain Domain) error
-	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
+	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
 type TemporalDebugDB interface {
-	DomainTables(domain ...Domain) []string
+	DomainTables(names ...Domain) []string
+	InvertedIdxTables(names ...InvertedIdx) []string
+	ReloadSalt() error
+	BuildMissedAccessors(ctx context.Context, workers int) error
+	ReloadFiles() error
 }
 
 type WithFreezeInfo interface {
@@ -606,6 +615,8 @@ type TemporalRwTx interface {
 	TemporalTx
 	TemporalPutDel
 
+	GreedyPruneHistory(ctx context.Context, domain Domain) error
+	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
 
@@ -614,15 +625,16 @@ type TemporalPutDel interface {
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
-	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error
+	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
-	DomainDelPrefix(domain Domain, prefix []byte) error
+	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error
+	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
 type TemporalRoDB interface {
@@ -636,6 +648,7 @@ type TemporalRwDB interface {
 	RwDB
 	TemporalRoDB
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
+	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 }
 
 // ---- non-importnt utilites
@@ -648,11 +661,11 @@ type HasSpaceDirty interface {
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
-	ListBuckets() ([]string, error)
-	DropBucket(string) error
-	CreateBucket(string) error
-	ExistsBucket(string) (bool, error)
-	ClearBucket(string) error
+	ListTables() ([]string, error)
+	DropTable(string) error
+	CreateTable(string) error
+	ExistsTable(string) (bool, error)
+	ClearTable(string) error
 }
 
 // PendingMutations in-memory storage of changes

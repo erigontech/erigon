@@ -266,7 +266,7 @@ func (i *typeinfo) generate(typ reflect.Type, tags tags) {
 // as an empty string or empty list.
 func defaultNilKind(typ reflect.Type) Kind {
 	k := typ.Kind()
-	if isUint(k) || k == reflect.String || k == reflect.Bool || isByteArray(typ) {
+	if isInt(k) || isUint(k) || k == reflect.String || k == reflect.Bool || isByteArray(typ) {
 		return String
 	}
 	return List
@@ -274,6 +274,10 @@ func defaultNilKind(typ reflect.Type) Kind {
 
 func isUint(k reflect.Kind) bool {
 	return k >= reflect.Uint && k <= reflect.Uintptr
+}
+
+func isInt(k reflect.Kind) bool {
+	return k >= reflect.Int && k <= reflect.Int8
 }
 
 func isByte(typ reflect.Type) bool {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
 	"math"
 	"math/big"

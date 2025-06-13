@@ -36,7 +36,7 @@ func testDynamicTx(t *testing.T, ctx context.Context) {
 		services.InitSubscriptions(ctx, []requests.SubMethod{requests.Methods.ETHNewHeads})
 	})
 	t.Run("PingErigonRpc", func(t *testing.T) {
-		require.Nil(t, admin.PingErigonRpc(ctx))
+		require.NoError(t, admin.PingErigonRpc(ctx))
 	})
 	t.Run("CheckTxPoolContent", func(t *testing.T) {
 		transactions.CheckTxPoolContent(ctx, 0, 0, 0)
@@ -48,7 +48,7 @@ func testDynamicTx(t *testing.T, ctx context.Context) {
 		require.NoError(t, err)
 	})
 	t.Run("AwaitBlocks", func(t *testing.T) {
-		require.Nil(t, transactions.AwaitBlocks(ctx, 2*time.Second))
+		require.NoError(t, transactions.AwaitBlocks(ctx, 2*time.Second))
 	})
 }
 

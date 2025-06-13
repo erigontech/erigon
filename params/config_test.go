@@ -38,8 +38,8 @@ func TestCheckCompatible(t *testing.T) {
 		wantErr     *chain.ConfigCompatError
 	}
 	tests := []test{
-		{stored: AllProtocolChanges, new: AllProtocolChanges, head: 0, wantErr: nil},
-		{stored: AllProtocolChanges, new: AllProtocolChanges, head: 100, wantErr: nil},
+		{stored: chain.AllProtocolChanges, new: chain.AllProtocolChanges, head: 0, wantErr: nil},
+		{stored: chain.AllProtocolChanges, new: chain.AllProtocolChanges, head: 100, wantErr: nil},
 		{
 			stored:  &chain.Config{TangerineWhistleBlock: big.NewInt(10)},
 			new:     &chain.Config{TangerineWhistleBlock: big.NewInt(20)},
@@ -47,7 +47,7 @@ func TestCheckCompatible(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			stored: AllProtocolChanges,
+			stored: chain.AllProtocolChanges,
 			new:    &chain.Config{HomesteadBlock: nil},
 			head:   3,
 			wantErr: &chain.ConfigCompatError{
@@ -58,7 +58,7 @@ func TestCheckCompatible(t *testing.T) {
 			},
 		},
 		{
-			stored: AllProtocolChanges,
+			stored: chain.AllProtocolChanges,
 			new:    &chain.Config{HomesteadBlock: big.NewInt(1)},
 			head:   3,
 			wantErr: &chain.ConfigCompatError{
@@ -143,37 +143,31 @@ func TestGetBurntContract(t *testing.T) {
 }
 
 func TestMainnetBlobSchedule(t *testing.T) {
+	c := MainnetChainConfig
 	// Original EIP-4844 values
-	assert.Equal(t, uint64(6), MainnetChainConfig.GetMaxBlobsPerBlock(0, 0))
-	assert.Equal(t, uint64(786432), MainnetChainConfig.GetMaxBlobGasPerBlock(0, 0))
-	assert.Equal(t, uint64(393216), MainnetChainConfig.GetTargetBlobGasPerBlock(0, 0))
-	assert.Equal(t, uint64(3338477), MainnetChainConfig.GetBlobGasPriceUpdateFraction(0, 0))
-
-	b := MainnetChainConfig.BlobSchedule
-	isPrague := false
-	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(isPrague))
+	time := c.CancunTime.Uint64()
+	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(time))
+	assert.Equal(t, uint64(3), c.GetTargetBlobsPerBlock(time))
+	assert.Equal(t, uint64(3338477), c.GetBlobGasPriceUpdateFraction(time))
 
 	// EIP-7691: Blob throughput increase
-	isPrague = true
-	assert.Equal(t, uint64(6), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(9), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(5007716), b.BaseFeeUpdateFraction(isPrague))
+	time = c.PragueTime.Uint64()
+	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
+	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(time))
+	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 }
 
 func TestGnosisBlobSchedule(t *testing.T) {
-	b := GnosisChainConfig.BlobSchedule
+	c := GnosisChainConfig
 
 	// Cancun values
-	isPrague := false
-	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(isPrague))
+	time := c.CancunTime.Uint64()
+	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time))
+	assert.Equal(t, uint64(1), c.GetTargetBlobsPerBlock(time))
+	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time))
 
 	// should remain the same in Pectra for Gnosis
-	isPrague = true
-	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(isPrague))
+	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time))
+	assert.Equal(t, uint64(1), c.GetTargetBlobsPerBlock(time))
+	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time))
 }

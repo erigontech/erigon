@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -172,7 +172,7 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 			func(validatorIndex uint64, withdrawableEpoch uint64) error {
 				return validatorsTable.AddWithdrawableEpoch(validatorIndex, slot, withdrawableEpoch)
 			},
-			func(validatorIndex uint64, withdrawalCredentials libcommon.Hash) error {
+			func(validatorIndex uint64, withdrawalCredentials common.Hash) error {
 				return validatorsTable.AddWithdrawalCredentials(validatorIndex, slot, withdrawalCredentials)
 			},
 			func(validatorIndex uint64, activationEpoch uint64) error {
@@ -292,8 +292,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		},
 		OnNewValidatorWithdrawalCredentials: func(index int, wc []byte) error {
 			changedValidators.Store(uint64(index), struct{}{})
-			events.ChangeWithdrawalCredentials(uint64(index), libcommon.BytesToHash(wc))
-			return s.validatorsTable.AddWithdrawalCredentials(uint64(index), slot, libcommon.BytesToHash(wc))
+			events.ChangeWithdrawalCredentials(uint64(index), common.BytesToHash(wc))
+			return s.validatorsTable.AddWithdrawalCredentials(uint64(index), slot, common.BytesToHash(wc))
 		},
 		OnEpochBoundary: func(epoch uint64) error {
 			if err := stateAntiquaryCollector.storeEpochData(s.currentState); err != nil {
@@ -322,10 +322,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			return nil
 		},
-		OnNewBlockRoot: func(index int, root libcommon.Hash) error {
+		OnNewBlockRoot: func(index int, root common.Hash) error {
 			return stateAntiquaryCollector.collectBlockRoot(s.currentState.Slot(), root)
 		},
-		OnNewStateRoot: func(index int, root libcommon.Hash) error {
+		OnNewStateRoot: func(index int, root common.Hash) error {
 			return stateAntiquaryCollector.collectStateRoot(s.currentState.Slot(), root)
 		},
 		OnNewNextSyncCommittee: func(committee *solid.SyncCommittee) error {
@@ -516,7 +516,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err = validator.WriteTo(buf); err != nil {
 			return false
 		}
-		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), libcommon.Copy(buf.Bytes())); err != nil {
+		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(buf.Bytes())); err != nil {
 			return false
 		}
 		return true
@@ -533,7 +533,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 
-	log.Info("[Caplin-Archive] Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
+	log.Info("[Caplin-Archive] Historical states antiquated", "slot", s.currentState.Slot(), "root", common.Hash(stateRoot), "latency", endTime)
 	if s.stateSn != nil {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err

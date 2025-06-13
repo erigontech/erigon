@@ -17,21 +17,31 @@
 package misc
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
-func DequeueConsolidationRequests7251(syscall consensus.SystemCall) *types.FlatRequest {
+// See https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md#system-call
+func DequeueConsolidationRequests7251(syscall consensus.SystemCall, state *state.IntraBlockState) (*types.FlatRequest, error) {
+	codeSize, err := state.GetCodeSize(params.ConsolidationRequestAddress)
+	if err != nil {
+		return nil, err
+	}
+	if codeSize == 0 {
+		return nil, fmt.Errorf("[EIP-7251] Syscall failure: Empty Code at ConsolidationRequestAddress=%x", params.ConsolidationRequestAddress)
+	}
+
 	res, err := syscall(params.ConsolidationRequestAddress, nil)
 	if err != nil {
-		log.Warn("Err with syscall to ConsolidationRequestAddress", "err", err)
-		return nil
+		return nil, fmt.Errorf("[EIP-7251] Unprecedented Syscall failure: ConsolidationRequestAddress=%x error=%s ", params.ConsolidationRequestAddress, err.Error())
 	}
 	if res != nil {
 		// Just append the contract output as the request data
-		return &types.FlatRequest{Type: types.ConsolidationRequestType, RequestData: res}
+		return &types.FlatRequest{Type: types.ConsolidationRequestType, RequestData: res}, nil
 	}
-	return nil
+	return nil, nil
 }

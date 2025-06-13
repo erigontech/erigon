@@ -20,10 +20,10 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/stretchr/testify/require"
 )
@@ -167,15 +167,15 @@ func TestSearchTransactionsBefore(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
 
-	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 	t.Run("small page size", func(t *testing.T) {
 		require := require.New(t)
 		results, err := api.SearchTransactionsBefore(m.Ctx, addr, 10, 2)
 		require.NoError(err)
 		require.False(results.FirstPage)
 		require.False(results.LastPage)
-		require.Equal(2, len(results.Txs))
-		require.Equal(2, len(results.Receipts))
+		require.Len(results.Txs, 2)
+		require.Len(results.Receipts, 2)
 	})
 	t.Run("big page size", func(t *testing.T) {
 		require := require.New(t)
@@ -183,8 +183,8 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.NoError(err)
 		require.False(results.FirstPage)
 		require.True(results.LastPage)
-		require.Equal(3, len(results.Txs))
-		require.Equal(3, len(results.Receipts))
+		require.Len(results.Txs, 3)
+		require.Len(results.Receipts, 3)
 	})
 	t.Run("filter last block", func(t *testing.T) {
 		require := require.New(t)
@@ -193,21 +193,21 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.NoError(err)
 		require.False(results.FirstPage)
 		require.True(results.LastPage)
-		require.Equal(2, len(results.Txs))
-		require.Equal(2, len(results.Receipts))
+		require.Len(results.Txs, 2)
+		require.Len(results.Receipts, 2)
 
 		require.Equal(4, int(results.Txs[0].BlockNumber.ToInt().Uint64()))
 		require.Equal(0, int(results.Txs[0].Nonce))
 		require.Equal(4, int(results.Receipts[0]["blockNumber"].(hexutil.Uint64)))
-		require.Equal(libcommon.HexToHash("0x79491e16fd1b1ceea44c46af850b2ef121683055cd579fd4d877beba22e77c1c"), results.Receipts[0]["transactionHash"].(libcommon.Hash))
-		require.Equal(libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"), results.Receipts[0]["from"].(libcommon.Address))
-		require.Equal(addr, *results.Receipts[0]["to"].(*libcommon.Address))
+		require.Equal(common.HexToHash("0x79491e16fd1b1ceea44c46af850b2ef121683055cd579fd4d877beba22e77c1c"), results.Receipts[0]["transactionHash"].(common.Hash))
+		require.Equal(common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"), results.Receipts[0]["from"].(common.Address))
+		require.Equal(addr, *results.Receipts[0]["to"].(*common.Address))
 
 		require.Equal(3, int(results.Txs[1].BlockNumber.ToInt().Uint64()))
 		require.Equal(2, int(results.Txs[1].Nonce))
 		require.Equal(3, int(results.Receipts[1]["blockNumber"].(hexutil.Uint64)))
-		require.Equal(libcommon.HexToHash("0x6e25f89e24254ba3eb460291393a4715fd3c33d805334cbd05c1b2efe1080f18"), results.Receipts[1]["transactionHash"].(libcommon.Hash))
-		require.Equal(libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"), results.Receipts[1]["from"].(libcommon.Address))
-		require.Nil(results.Receipts[1]["to"].(*libcommon.Address))
+		require.Equal(common.HexToHash("0x6e25f89e24254ba3eb460291393a4715fd3c33d805334cbd05c1b2efe1080f18"), results.Receipts[1]["transactionHash"].(common.Hash))
+		require.Equal(common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"), results.Receipts[1]["from"].(common.Address))
+		require.Nil(results.Receipts[1]["to"].(*common.Address))
 	})
 }

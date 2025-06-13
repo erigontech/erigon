@@ -20,10 +20,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -62,7 +62,7 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	require.NoError(t, err)
 	_, err = postState.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, libcommon.Hash(postHash), blocks[len(blocks)-1].Block.StateRoot)
+	require.Equal(t, common.Hash(postHash), blocks[len(blocks)-1].Block.StateRoot)
 }
 
 func TestStateAntiquaryCapella(t *testing.T) {

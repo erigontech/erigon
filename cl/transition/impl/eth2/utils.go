@@ -19,13 +19,12 @@ package eth2
 import (
 	"encoding/binary"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-func computeSigningRootEpoch(epoch uint64, domain []byte) (libcommon.Hash, error) {
+func computeSigningRootEpoch(epoch uint64, domain []byte) (common.Hash, error) {
 	b := make([]byte, 32)
 	binary.LittleEndian.PutUint64(b, epoch)
 	return utils.Sha256(b, domain), nil
@@ -36,7 +35,7 @@ func transitionSlot(s abstract.BeaconState) error {
 	slot := s.Slot()
 	previousStateRoot := s.PreviousStateRoot()
 	var err error
-	if previousStateRoot == (libcommon.Hash{}) {
+	if previousStateRoot == (common.Hash{}) {
 		previousStateRoot, err = s.HashSSZ()
 		if err != nil {
 			return err

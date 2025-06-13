@@ -26,7 +26,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type ArbEVMLogger interface {

@@ -79,7 +79,7 @@ func TestFreezingRangeWithPreverified(t *testing.T) {
 	cfg := createConfig(t)
 	cfg.LoadPreverified([]snapcfg.PreverifiedItem{
 		{
-			Name: "v1-000000-000500-bodies.seg",
+			Name: "v1.0-000000-000500-bodies.seg",
 			Hash: "blahblah",
 		},
 	})

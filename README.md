@@ -80,8 +80,8 @@ System Requirements
 RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
-- ArchiveNode Ethereum Mainnet: 2TB (April 2024). FullNode: 1.1TB (June 2024)
-- ArchiveNode Gnosis: 1.7TB (March 2024). FullNode: 300GB (June 2024)
+- ArchiveNode Ethereum Mainnet: 2TB (May 2025). FullNode: 1.1TB (May 2025)
+- ArchiveNode Gnosis: 640GB (May 2025). FullNode: 300GB (June 2024)
 - ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
@@ -415,7 +415,7 @@ make erigon rpcdaemon
 ```
 
 - Supported JSON-RPC
-  calls: [eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)
+  calls: [eth](./rpc/jsonrpc/eth_api.go), [debug](./rpc/jsonrpc/debug_api.go), [net](./rpc/jsonrpc/net_api.go), [web3](./rpc/jsonrpc/web3_api.go)
 - increase throughput by: `--rpc.batch.concurrency`, `--rpc.batch.limit`, `--db.read.concurrency`
 - increase throughput by disabling: `--http.compression`, `--ws.compression`
 
@@ -769,7 +769,6 @@ What can do:
 - increase RAM
 - if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 - Use `--db.pagesize=64kb` (less fragmentation, more IO)
-- Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
 - Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
 ### Filesystem's background features are expensive

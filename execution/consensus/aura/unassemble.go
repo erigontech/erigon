@@ -19,14 +19,14 @@ package aura
 import (
 	"container/list"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // nolint
 type unAssembledHeader struct {
-	hash    libcommon.Hash
+	hash    common.Hash
 	number  uint64
-	signers []libcommon.Address
+	signers []common.Address
 }
 type unAssembledHeaders struct {
 	l *list.List

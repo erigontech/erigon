@@ -25,9 +25,8 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -262,37 +261,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
 	}
 	_ = chainId
-	// Sanitize prune flag
-	if ctx.String(PruneModeFlag.Name) != "archive" && (ctx.IsSet(PruneBlocksDistanceFlag.Name) || ctx.IsSet(PruneDistanceFlag.Name)) {
-		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
-	}
-	distance := ctx.Uint64(PruneDistanceFlag.Name)
-	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 
-	if !ctx.IsSet(PruneBlocksDistanceFlag.Name) {
-		blockDistance = math.MaxUint64
-	}
-	if !ctx.IsSet(PruneDistanceFlag.Name) {
-		distance = math.MaxUint64
-	}
-	mode, err := prune.FromCli(distance, blockDistance)
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), ctx.Uint64(PruneDistanceFlag.Name), ctx.Uint64(PruneBlocksDistanceFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	// Full mode prunes all but the latest state
-	if ctx.String(PruneModeFlag.Name) == "full" {
-		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	}
-	// Minimal mode prunes all but the latest state including blocks
-	if ctx.String(PruneModeFlag.Name) == "minimal" {
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	}
 
-	if err != nil {
-		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
 	cfg.Prune = mode
 	if ctx.String(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
@@ -355,7 +329,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		if err != nil {
 			logger.Warn("Error decoding block hash", "hash", ctx.String(BadBlockFlag.Name), "err", err)
 		} else {
-			cfg.BadBlockHash = libcommon.BytesToHash(bytes)
+			cfg.BadBlockHash = common.BytesToHash(bytes)
 		}
 	}
 
@@ -391,24 +365,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		distance = *pruneDistance
 	}
 
-	mode, err := prune.FromCli(distance, blockDistance)
+	mode, err := prune.FromCli(*pruneMode, distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	switch *pruneMode {
-	case "archive":
-	case "full":
-		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	case "minimal":
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	default:
-		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
-	}
-	mode.Blocks = prune.Distance(blockDistance)
-	mode.History = prune.Distance(distance)
-
 	cfg.Prune = mode
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
@@ -474,10 +434,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		JWTSecretPath:            jwtSecretPath,
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
 		DebugSingleRequest:       ctx.Bool(utils.HTTPDebugSingleFlag.Name),
-		HttpCORSDomain:           libcommon.CliString2Array(ctx.String(utils.HTTPCORSDomainFlag.Name)),
-		HttpVirtualHost:          libcommon.CliString2Array(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
-		AuthRpcVirtualHost:       libcommon.CliString2Array(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),
-		API:                      libcommon.CliString2Array(apis),
+		HttpCORSDomain:           common.CliString2Array(ctx.String(utils.HTTPCORSDomainFlag.Name)),
+		HttpVirtualHost:          common.CliString2Array(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
+		AuthRpcVirtualHost:       common.CliString2Array(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),
+		API:                      common.CliString2Array(apis),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.Duration(HTTPReadTimeoutFlag.Name),
 			WriteTimeout: ctx.Duration(HTTPWriteTimeoutFlag.Name),
@@ -488,16 +448,15 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
 			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
 		},
-		EvmCallTimeout:                    ctx.Duration(EvmCallTimeoutFlag.Name),
-		OverlayGetLogsTimeout:             ctx.Duration(OverlayGetLogsFlag.Name),
-		OverlayReplayBlockTimeout:         ctx.Duration(OverlayReplayBlockFlag.Name),
-		WebsocketPort:                     ctx.Int(utils.WSPortFlag.Name),
-		WebsocketEnabled:                  ctx.IsSet(utils.WSEnabledFlag.Name),
-		WebsocketSubscribeLogsChannelSize: ctx.Int(utils.WSSubscribeLogsChannelSize.Name),
-		RpcBatchConcurrency:               ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
-		RpcStreamingDisable:               ctx.Bool(utils.RpcStreamingDisableFlag.Name),
-		DBReadConcurrency:                 ctx.Int(utils.DBReadConcurrencyFlag.Name),
-		RpcAllowListFilePath:              ctx.String(utils.RpcAccessListFlag.Name),
+		EvmCallTimeout:            ctx.Duration(EvmCallTimeoutFlag.Name),
+		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),
+		OverlayReplayBlockTimeout: ctx.Duration(OverlayReplayBlockFlag.Name),
+		WebsocketPort:             ctx.Int(utils.WSPortFlag.Name),
+		WebsocketEnabled:          ctx.IsSet(utils.WSEnabledFlag.Name),
+		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
+		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
 			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
 			RpcSubscriptionFiltersMaxHeaders:   ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
@@ -519,6 +478,12 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 		StateCache:          kvcache.DefaultCoherentConfig,
 		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
+	}
+
+	if ctx.IsSet(utils.WSSubscribeLogsChannelSize.Name) {
+		c.WebsocketSubscribeLogsChannelSize = ctx.Int(utils.WSSubscribeLogsChannelSize.Name)
+	} else {
+		c.WebsocketSubscribeLogsChannelSize = 8192
 	}
 
 	if c.Enabled {
