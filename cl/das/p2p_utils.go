@@ -61,7 +61,8 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 
 	ckzgCells := make([]ckzg.Cell, sidecar.Column.Len())
 	for i := range ckzgCells {
-		ckzgCells[i] = ckzg.Cell(sidecar.Column.Get(i))
+		cell := sidecar.Column.Get(i)
+		copy(ckzgCells[i][:], cell[:])
 	}
 
 	ckzgProofs := make([]ckzg.Bytes48, sidecar.KzgProofs.Len())
