@@ -18,16 +18,14 @@ package app
 
 import (
 	"bufio"
-	"encoding/json"
-	"fmt"
-	"io"
 	"os"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
@@ -36,7 +34,11 @@ import (
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/turbo/debug"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var jsoniterAPI = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var initCommand = cli.Command{
 	Action:    MigrateFlags(initGenesis),
@@ -56,11 +58,10 @@ participating.
 It expects the genesis file as argument.`,
 }
 
-const largeGenesisFileThreshold = 100 * 1024 * 1024 // 100MB
-
 // initGenesis will initialise the given JSON format genesis file and writes it as
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
 func initGenesis(cliCtx *cli.Context) error {
+
 	var logger log.Logger
 	var tracer *tracers.Tracer
 	var err error
@@ -79,20 +80,67 @@ func initGenesis(cliCtx *cli.Context) error {
 	}
 	defer file.Close()
 
+	reader := bufio.NewReader(file)
+	iter := jsoniter.Parse(jsoniterAPI, reader, 4096)
+	defer jsoniterAPI.ReturnIterator(iter)
+
 	genesis := new(types.Genesis)
 
-	// Check file size to determine if we should use streaming
-	fileInfo, err := file.Stat()
-	if err != nil {
-		utils.Fatalf("Failed to stat genesis file: %v", err)
-	}
-	if fileInfo.Size() > largeGenesisFileThreshold {
-		logger.Info("Using streaming JSON parser for large genesis file", "size", fileInfo.Size())
-		if err := parseGenesisStreaming(file, genesis, logger); err != nil {
-			utils.Fatalf("invalid genesis file: %v", err)
+	for field := iter.ReadObject(); field != ""; field = iter.ReadObject() {
+		switch field {
+		case "config":
+			genesis.Config = new(chain.Config)
+			iter.ReadVal(genesis.Config)
+		case "nonce":
+			genesis.Nonce = math.MustParseUint64(iter.ReadString())
+		case "timestamp":
+			genesis.Timestamp = math.MustParseUint64(iter.ReadString())
+		case "extraData":
+			genesis.ExtraData = common.FromHex(iter.ReadString())
+		case "gasLimit":
+			genesis.GasLimit = math.MustParseUint64(iter.ReadString())
+		case "difficulty":
+			genesis.Difficulty = math.MustParseBig256(iter.ReadString())
+		case "mixhash":
+			genesis.Mixhash = common.HexToHash(iter.ReadString())
+		case "coinbase":
+			genesis.Coinbase = common.HexToAddress(iter.ReadString())
+		case "alloc":
+			genesis.Alloc = make(types.GenesisAlloc)
+			var storageKey string
+			var storageValue []byte
+
+			for addr := iter.ReadObject(); addr != ""; addr = iter.ReadObject() {
+				address := common.HexToAddress(addr)
+				account := types.GenesisAccount{}
+
+				for accountField := iter.ReadObject(); accountField != ""; accountField = iter.ReadObject() {
+					switch accountField {
+					case "balance":
+						account.Balance = math.MustParseBig256(iter.ReadString())
+					case "nonce":
+						account.Nonce = math.MustParseUint64(iter.ReadString())
+					case "code":
+						account.Code = common.FromHex(iter.ReadString())
+					case "storage":
+						account.Storage = make(map[common.Hash]common.Hash)
+						for storageKey = iter.ReadObject(); storageKey != ""; storageKey = iter.ReadObject() {
+							storageValue = iter.ReadStringAsSlice()
+							account.Storage[common.HexToHash(storageKey)] = common.CastToHash(storageValue)
+						}
+					default:
+						iter.Skip()
+					}
+				}
+				genesis.Alloc[address] = account
+			}
+		default:
+			iter.Skip()
 		}
-	} else if err = json.NewDecoder(file).Decode(genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
+	}
+
+	if iter.Error != nil {
+		utils.Fatalf("invalid genesis file: %v", iter.Error)
 	}
 
 	// Open and initialise both full and light databases
@@ -112,7 +160,6 @@ func initGenesis(cliCtx *cli.Context) error {
 			tracer.Hooks.OnBlockchainInit(genesis.Config)
 		}
 	}
-
 	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
@@ -120,120 +167,4 @@ func initGenesis(cliCtx *cli.Context) error {
 	chaindb.Close()
 	logger.Info("Successfully wrote genesis state", "hash", hash.Hash())
 	return nil
-}
-
-// parseGenesisStreaming decodes a large genesis file using streaming to reduce memory usage.
-func parseGenesisStreaming(r io.Reader, genesis *types.Genesis, logger log.Logger) error {
-	decoder := json.NewDecoder(bufio.NewReaderSize(r, 1024*1024)) // 1MB buffer
-	genesis.Alloc = make(types.GenesisAlloc)
-
-	// Handlers map defines how to parse each field of the genesis JSON.
-	handlers := map[string]func(*json.Decoder) error{
-		"config":     func(d *json.Decoder) error { return d.Decode(&genesis.Config) },
-		"nonce":      makeStringParser(func(s string) { genesis.Nonce = math.MustParseUint64(s) }),
-		"timestamp":  makeStringParser(func(s string) { genesis.Timestamp = math.MustParseUint64(s) }),
-		"extraData":  makeStringParser(func(s string) { genesis.ExtraData = common.FromHex(s) }),
-		"gasLimit":   makeStringParser(func(s string) { genesis.GasLimit = math.MustParseUint64(s) }),
-		"difficulty": makeStringParser(func(s string) { genesis.Difficulty = math.MustParseBig256(s) }),
-		"mixhash":    makeStringParser(func(s string) { genesis.Mixhash = common.HexToHash(s) }),
-		"coinbase":   makeStringParser(func(s string) { genesis.Coinbase = common.HexToAddress(s) }),
-		"parentHash": makeStringParser(func(s string) { genesis.ParentHash = common.HexToHash(s) }),
-		"alloc":      func(d *json.Decoder) error { return parseAllocStreaming(d, genesis.Alloc, logger) },
-	}
-
-	return parseObject(decoder, handlers, logger, "genesis file")
-}
-
-// parseAllocStreaming parses the alloc section of genesis file entry by entry.
-func parseAllocStreaming(decoder *json.Decoder, alloc types.GenesisAlloc, logger log.Logger) error {
-	handler := func(addrStr string, d *json.Decoder, l log.Logger) error {
-		addr := common.HexToAddress(addrStr)
-		account, err := parseGenesisAccountStreaming(d, l)
-		if err != nil {
-			return fmt.Errorf("failed to parse account for address %s: %w", addrStr, err)
-		}
-		alloc[addr] = account
-		return nil
-	}
-	return streamObjectFields(decoder, handler, logger, "alloc section")
-}
-
-// parseGenesisAccountStreaming parses a GenesisAccount using a streaming decoder.
-func parseGenesisAccountStreaming(decoder *json.Decoder, logger log.Logger) (types.GenesisAccount, error) {
-	var account types.GenesisAccount
-	handlers := map[string]func(*json.Decoder) error{
-		"balance":     makeStringParser(func(s string) { account.Balance = math.MustParseBig256(s) }),
-		"nonce":       makeStringParser(func(s string) { account.Nonce = math.MustParseUint64(s) }),
-		"code":        makeStringParser(func(s string) { account.Code = common.FromHex(s) }),
-		"constructor": makeStringParser(func(s string) { account.Constructor = common.FromHex(s) }),
-		"storage": func(d *json.Decoder) error {
-			account.Storage = make(map[common.Hash]common.Hash)
-			return d.Decode(&account.Storage)
-		},
-	}
-	err := parseObject(decoder, handlers, logger, "account")
-	return account, err
-}
-
-// parseObject parses a JSON object using a map of handlers for known keys.
-func parseObject(decoder *json.Decoder, handlers map[string]func(*json.Decoder) error, logger log.Logger, contextType string) error {
-	handler := func(key string, d *json.Decoder, l log.Logger) error {
-		if h, ok := handlers[key]; ok {
-			return h(d)
-		}
-		// Skip unknown fields
-		var skip json.RawMessage
-		return d.Decode(&skip)
-	}
-	return streamObjectFields(decoder, handler, logger, contextType)
-}
-
-// streamObjectFields parses a JSON object, calling the handler for each key-value pair.
-func streamObjectFields(decoder *json.Decoder, handler func(key string, d *json.Decoder, l log.Logger) error, logger log.Logger, contextType string) error {
-	token, err := decoder.Token()
-	if err != nil {
-		return fmt.Errorf("failed to read opening token for %s: %w", contextType, err)
-	}
-	if delim, ok := token.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("expected '{' for %s, got %v", contextType, token)
-	}
-
-	for decoder.More() {
-		token, err = decoder.Token()
-		if err != nil {
-			return fmt.Errorf("failed to read key token for %s: %w", contextType, err)
-		}
-		key, ok := token.(string)
-		if !ok {
-			return fmt.Errorf("expected string key for %s, got %T", contextType, token)
-		}
-		if err = handler(key, decoder, logger); err != nil {
-			return fmt.Errorf("error processing key '%s' in %s: %w", key, contextType, err)
-		}
-	}
-
-	token, err = decoder.Token()
-	if err != nil {
-		return fmt.Errorf("failed to read closing token for %s: %w", contextType, err)
-	}
-	if delim, ok := token.(json.Delim); !ok || delim != '}' {
-		return fmt.Errorf("expected '}' for %s, got %v", contextType, token)
-	}
-	return nil
-}
-
-// makeStringParser is a helper factory that creates a JSON field parser for string-based values.
-func makeStringParser(setter func(s string)) func(d *json.Decoder) error {
-	return func(d *json.Decoder) error {
-		token, err := d.Token()
-		if err != nil {
-			return err
-		}
-		s, ok := token.(string)
-		if !ok {
-			return fmt.Errorf("expected string, got %T", token)
-		}
-		setter(s)
-		return nil
-	}
 }
