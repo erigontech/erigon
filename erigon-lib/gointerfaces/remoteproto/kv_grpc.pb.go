@@ -21,17 +21,19 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	KV_Version_FullMethodName      = "/remote.KV/Version"
-	KV_Tx_FullMethodName           = "/remote.KV/Tx"
-	KV_StateChanges_FullMethodName = "/remote.KV/StateChanges"
-	KV_Snapshots_FullMethodName    = "/remote.KV/Snapshots"
-	KV_Range_FullMethodName        = "/remote.KV/Range"
-	KV_Sequence_FullMethodName     = "/remote.KV/Sequence"
-	KV_GetLatest_FullMethodName    = "/remote.KV/GetLatest"
-	KV_HistorySeek_FullMethodName  = "/remote.KV/HistorySeek"
-	KV_IndexRange_FullMethodName   = "/remote.KV/IndexRange"
-	KV_HistoryRange_FullMethodName = "/remote.KV/HistoryRange"
-	KV_RangeAsOf_FullMethodName    = "/remote.KV/RangeAsOf"
+	KV_Version_FullMethodName          = "/remote.KV/Version"
+	KV_Tx_FullMethodName               = "/remote.KV/Tx"
+	KV_StateChanges_FullMethodName     = "/remote.KV/StateChanges"
+	KV_Snapshots_FullMethodName        = "/remote.KV/Snapshots"
+	KV_Range_FullMethodName            = "/remote.KV/Range"
+	KV_Sequence_FullMethodName         = "/remote.KV/Sequence"
+	KV_GetLatest_FullMethodName        = "/remote.KV/GetLatest"
+	KV_HistorySeek_FullMethodName      = "/remote.KV/HistorySeek"
+	KV_IndexRange_FullMethodName       = "/remote.KV/IndexRange"
+	KV_HistoryRange_FullMethodName     = "/remote.KV/HistoryRange"
+	KV_RangeAsOf_FullMethodName        = "/remote.KV/RangeAsOf"
+	KV_HasPrefix_FullMethodName        = "/remote.KV/HasPrefix"
+	KV_HistoryStartFrom_FullMethodName = "/remote.KV/HistoryStartFrom"
 )
 
 // KVClient is the client API for KV service.
@@ -63,6 +65,8 @@ type KVClient interface {
 	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
 	HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error)
 	RangeAsOf(ctx context.Context, in *RangeAsOfReq, opts ...grpc.CallOption) (*Pairs, error)
+	HasPrefix(ctx context.Context, in *HasPrefixReq, opts ...grpc.CallOption) (*HasPrefixReply, error)
+	HistoryStartFrom(ctx context.Context, in *HistoryStartFromReq, opts ...grpc.CallOption) (*HistoryStartFromReply, error)
 }
 
 type kVClient struct {
@@ -195,6 +199,26 @@ func (c *kVClient) RangeAsOf(ctx context.Context, in *RangeAsOfReq, opts ...grpc
 	return out, nil
 }
 
+func (c *kVClient) HasPrefix(ctx context.Context, in *HasPrefixReq, opts ...grpc.CallOption) (*HasPrefixReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HasPrefixReply)
+	err := c.cc.Invoke(ctx, KV_HasPrefix_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVClient) HistoryStartFrom(ctx context.Context, in *HistoryStartFromReq, opts ...grpc.CallOption) (*HistoryStartFromReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HistoryStartFromReply)
+	err := c.cc.Invoke(ctx, KV_HistoryStartFrom_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KVServer is the server API for KV service.
 // All implementations must embed UnimplementedKVServer
 // for forward compatibility.
@@ -224,6 +248,8 @@ type KVServer interface {
 	IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error)
 	HistoryRange(context.Context, *HistoryRangeReq) (*Pairs, error)
 	RangeAsOf(context.Context, *RangeAsOfReq) (*Pairs, error)
+	HasPrefix(context.Context, *HasPrefixReq) (*HasPrefixReply, error)
+	HistoryStartFrom(context.Context, *HistoryStartFromReq) (*HistoryStartFromReply, error)
 	mustEmbedUnimplementedKVServer()
 }
 
@@ -266,6 +292,12 @@ func (UnimplementedKVServer) HistoryRange(context.Context, *HistoryRangeReq) (*P
 }
 func (UnimplementedKVServer) RangeAsOf(context.Context, *RangeAsOfReq) (*Pairs, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RangeAsOf not implemented")
+}
+func (UnimplementedKVServer) HasPrefix(context.Context, *HasPrefixReq) (*HasPrefixReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HasPrefix not implemented")
+}
+func (UnimplementedKVServer) HistoryStartFrom(context.Context, *HistoryStartFromReq) (*HistoryStartFromReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HistoryStartFrom not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 func (UnimplementedKVServer) testEmbeddedByValue()            {}
@@ -468,6 +500,42 @@ func _KV_RangeAsOf_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KV_HasPrefix_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HasPrefixReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).HasPrefix(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_HasPrefix_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).HasPrefix(ctx, req.(*HasPrefixReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KV_HistoryStartFrom_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HistoryStartFromReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).HistoryStartFrom(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_HistoryStartFrom_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).HistoryStartFrom(ctx, req.(*HistoryStartFromReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KV_ServiceDesc is the grpc.ServiceDesc for KV service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -510,6 +578,14 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RangeAsOf",
 			Handler:    _KV_RangeAsOf_Handler,
+		},
+		{
+			MethodName: "HasPrefix",
+			Handler:    _KV_HasPrefix_Handler,
+		},
+		{
+			MethodName: "HistoryStartFrom",
+			Handler:    _KV_HistoryStartFrom_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

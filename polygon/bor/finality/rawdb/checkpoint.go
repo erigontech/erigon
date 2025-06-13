@@ -20,7 +20,7 @@ package rawdb
 import (
 	"errors"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 var (
@@ -44,6 +44,6 @@ func (c *Checkpoint) clone() *Checkpoint {
 	return &Checkpoint{}
 }
 
-func (c *Checkpoint) block() (uint64, libcommon.Hash) {
+func (c *Checkpoint) block() (uint64, common.Hash) {
 	return c.Block, c.Hash
 }

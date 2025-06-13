@@ -23,7 +23,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // keystoreWallet implements the Account interface for the original

@@ -20,7 +20,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,25 +31,25 @@ func TestRecentLogs(t *testing.T) {
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}})
-		require.Equal(t, 3, len(e.receipts))
+		require.Len(t, e.receipts, 3)
 
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(31)}})
-		require.Equal(t, 1, len(e.receipts))
+		require.Len(t, e.receipts, 1)
 	})
 	t.Run("Nil", func(t *testing.T) {
 		e := NewRecentLogs(3)
 		e.Add(types.Receipts{nil, {BlockNumber: big.NewInt(1)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}, nil})
 		e.Add(types.Receipts{nil, nil, {BlockNumber: big.NewInt(31)}})
-		require.Equal(t, 3, len(e.receipts))
+		require.Len(t, e.receipts, 3)
 	})
 	t.Run("Order", func(t *testing.T) {
 		e := NewRecentLogs(3)
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
-		require.Equal(t, 2, len(e.receipts))
+		require.Len(t, e.receipts, 2)
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
-		require.Equal(t, 2, len(e.receipts))
+		require.Len(t, e.receipts, 2)
 	})
 }

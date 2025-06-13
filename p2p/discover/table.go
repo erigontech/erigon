@@ -36,12 +36,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/netutil"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/netutil"
 )
 
 const (
@@ -51,7 +50,7 @@ const (
 
 	// We keep buckets for the upper 1/15 of distances because
 	// it's very unlikely we'll ever encounter a node that's closer.
-	hashBits          = len(libcommon.Hash{}) * 8
+	hashBits          = len(common.Hash{}) * 8
 	nBuckets          = hashBits / 15       // Number of buckets
 	bucketMinDistance = hashBits - nBuckets // Log distance of closest bucket
 

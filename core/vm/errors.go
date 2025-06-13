@@ -85,6 +85,11 @@ type ErrInvalidOpCode struct {
 
 func (e *ErrInvalidOpCode) Error() string { return fmt.Sprintf("invalid opcode: %s", e.opcode) }
 
+func (m *ErrInvalidOpCode) Is(target error) bool {
+	_, is := target.(*ErrInvalidOpCode)
+	return is
+}
+
 // rpcError is the same interface as the one defined in rpc/errors.go
 // but we do not want to depend on rpc package here so we redefine it.
 //

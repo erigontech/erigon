@@ -6,11 +6,6 @@ func (in *EVMInterpreter) Config() *Config {
 }
 
 // Depth returns the current call stack depth.
-func (in *EVMInterpreter) Depth() int {
-	return in.depth
-}
-
-// Depth returns the current call stack depth.
 func (in *EVMInterpreter) IncrementDepth() {
 	in.depth++
 }

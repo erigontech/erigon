@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 )
 

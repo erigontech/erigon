@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
@@ -87,6 +87,12 @@ type BlobAndProofV1 struct {
 	Proof hexutil.Bytes `json:"proof" gencodec:"required"`
 }
 
+// BlobAndProofV2 holds one item for engine_getBlobsV1
+type BlobAndProofV2 struct {
+	Blob       hexutil.Bytes   `json:"blob" gencodec:"required"`
+	CellProofs []hexutil.Bytes `json:"proofs" gencodec:"required"`
+}
+
 type ExecutionPayloadBody struct {
 	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
@@ -96,7 +102,7 @@ type PayloadStatus struct {
 	Status          EngineStatus      `json:"status" gencodec:"required"`
 	ValidationError *StringifiedError `json:"validationError"`
 	LatestValidHash *common.Hash      `json:"latestValidHash"`
-	CriticalError   error
+	CriticalError   error             `json:"-"`
 }
 
 type ForkChoiceUpdatedResponse struct {

@@ -19,18 +19,18 @@ package cltypes
 import (
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/core/types"
 )
 
 type Withdrawal struct {
-	Index     uint64            `json:"index,string"`           // monotonically increasing identifier issued by consensus layer
-	Validator uint64            `json:"validator_index,string"` // index of validator associated with withdrawal
-	Address   libcommon.Address `json:"address"`                // target address for withdrawn ether
-	Amount    uint64            `json:"amount,string"`          // value of withdrawal in GWei
+	Index     uint64         `json:"index,string"`           // monotonically increasing identifier issued by consensus layer
+	Validator uint64         `json:"validator_index,string"` // index of validator associated with withdrawal
+	Address   common.Address `json:"address"`                // target address for withdrawn ether
+	Amount    uint64         `json:"amount,string"`          // value of withdrawal in GWei
 }
 
 func (obj *Withdrawal) EncodeSSZ(buf []byte) ([]byte, error) {

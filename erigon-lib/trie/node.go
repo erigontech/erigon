@@ -23,8 +23,7 @@ import (
 	"bytes"
 	"io"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/rlp"
@@ -169,8 +168,8 @@ func resetRefs(nd Node) {
 // nodeRef might contain node's RLP or hash thereof.
 // Used instead of []byte in order to reduce GC churn.
 type nodeRef struct {
-	data libcommon.Hash // cached RLP of the node or hash thereof
-	len  byte           // length of the data (0 indicates invalid data)
+	data common.Hash // cached RLP of the node or hash thereof
+	len  byte        // length of the data (0 indicates invalid data)
 }
 
 func (n HashNode) reference() []byte      { return n.hash }

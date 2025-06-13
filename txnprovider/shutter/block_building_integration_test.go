@@ -23,20 +23,27 @@ import (
 	"fmt"
 	"math/big"
 	"path"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	params2 "github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
@@ -44,12 +51,10 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/engineapi"
-	"github.com/erigontech/erigon/turbo/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -59,6 +64,10 @@ import (
 func TestShutterBlockBuilding(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
+	}
+	if runtime.GOOS == "darwin" {
+		// We run race detector for medium tests which fails on macOS.
+		t.Skip("issue #15007")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -207,15 +216,15 @@ type blockBuildingUniverse struct {
 	contractsDeployer    testhelpers.ContractsDeployer
 	contractsDeployment  testhelpers.ContractsDeployment
 	acc1PrivKey          *ecdsa.PrivateKey
-	acc1                 libcommon.Address
+	acc1                 common.Address
 	acc2PrivKey          *ecdsa.PrivateKey
-	acc2                 libcommon.Address
+	acc2                 common.Address
 	acc3PrivKey          *ecdsa.PrivateKey
-	acc3                 libcommon.Address
+	acc3                 common.Address
 	acc4PrivKey          *ecdsa.PrivateKey
-	acc4                 libcommon.Address
+	acc4                 common.Address
 	acc5PrivKey          *ecdsa.PrivateKey
-	acc5                 libcommon.Address
+	acc5                 common.Address
 	transactor           testhelpers.EncryptedTransactor
 	txnInclusionVerifier testhelpers.TxnInclusionVerifier
 	shutterConfig        shuttercfg.Config
@@ -323,7 +332,8 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	}
 	t.Cleanup(cleanNode(ethNode))
 
-	chainConfig := *params.ChiadoChainConfig
+	var chainConfig chain.Config
+	copier.Copy(&chainConfig, params.ChiadoChainConfig)
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = chainId
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
@@ -333,6 +343,18 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	genesis := core.ChiadoGenesisBlock()
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Config = &chainConfig
+	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
+	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
 	// 1_000 ETH in wei in the bank
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
 	bank.RegisterGenesisAlloc(genesis)

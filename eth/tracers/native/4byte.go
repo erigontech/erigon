@@ -26,9 +26,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -52,10 +52,10 @@ func init() {
 //	  0xc281d19e-0: 1
 //	}
 type fourByteTracer struct {
-	ids               map[string]int      // ids aggregates the 4byte ids found
-	interrupt         uint32              // Atomic flag to signal execution interruption
-	reason            error               // Textual reason for the interruption
-	activePrecompiles []libcommon.Address // Updated on tx start based on given rules
+	ids               map[string]int   // ids aggregates the 4byte ids found
+	interrupt         uint32           // Atomic flag to signal execution interruption
+	reason            error            // Textual reason for the interruption
+	activePrecompiles []common.Address // Updated on tx start based on given rules
 }
 
 // newFourByteTracer returns a native go tracer which collects
@@ -75,7 +75,7 @@ func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer
 }
 
 // isPrecompiled returns whether the addr is a precompile. Logic borrowed from newJsTracer in eth/tracers/js/tracer.go
-func (t *fourByteTracer) isPrecompiled(addr libcommon.Address) bool {
+func (t *fourByteTracer) isPrecompiled(addr common.Address) bool {
 	for _, p := range t.activePrecompiles {
 		if p == addr {
 			return true
@@ -90,12 +90,12 @@ func (t *fourByteTracer) store(id []byte, size int) {
 	t.ids[key] += 1
 }
 
-func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	rules := env.ChainConfig.Rules(env.BlockNumber, env.Time, env.ArbOSVersion)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
-func (t *fourByteTracer) OnEnter(depth int, opcode byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) { // Skip if tracing was interrupted
+func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) { // Skip if tracing was interrupted
 	// Skip if tracing was interrupted
 	if atomic.LoadUint32(&t.interrupt) > 0 {
 		return
@@ -133,5 +133,5 @@ func (t *fourByteTracer) Stop(err error) {
 }
 
 func bytesToHex(s []byte) string {
-	return "0x" + libcommon.Bytes2Hex(s)
+	return "0x" + common.Bytes2Hex(s)
 }

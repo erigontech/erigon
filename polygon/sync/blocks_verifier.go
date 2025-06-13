@@ -17,7 +17,7 @@
 package sync
 
 import (
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor"
 )
 

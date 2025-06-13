@@ -42,37 +42,37 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)
 	require.Nil(a)
-	require.Nil(err)
+	require.NoError(err)
 
 	b, err := api.GetTransactionByBlockHashAndIndex(ctx, common.Hash{}, 1)
 	require.Nil(b)
-	require.Nil(err)
+	require.NoError(err)
 
 	c, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)
 	require.Nil(c)
-	require.Nil(err)
+	require.NoError(err)
 
 	d, err := api.GetTransactionReceipt(ctx, common.Hash{})
 	require.Nil(d)
-	require.Nil(err)
+	require.NoError(err)
 
 	e, err := api.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(common.Hash{}, true), false)
 	require.Nil(e)
-	require.Nil(err)
+	require.NoError(err)
 
 	f, err := api.GetBlockByNumber(ctx, 10_000, false)
 	require.Nil(f)
-	require.Nil(err)
+	require.NoError(err)
 
 	g, err := api.GetUncleByBlockHashAndIndex(ctx, common.Hash{}, 1)
 	require.Nil(g)
-	require.Nil(err)
+	require.NoError(err)
 
 	h, err := api.GetUncleByBlockNumberAndIndex(ctx, 10_000, 1)
 	require.Nil(h)
-	require.Nil(err)
+	require.NoError(err)
 
 	j, err := api.GetBlockTransactionCountByNumber(ctx, 10_000)
 	require.Nil(j)
-	require.Nil(err)
+	require.NoError(err)
 }

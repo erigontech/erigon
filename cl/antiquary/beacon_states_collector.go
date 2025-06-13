@@ -25,7 +25,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/klauspost/compress/zstd"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -316,20 +316,20 @@ func (i *beaconStatesCollector) collectPendingWithdrawalsDump(slot uint64, pendi
 	return antiquateListSSZ(context.Background(), slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
 }
 
-func (i *beaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao libcommon.Hash) error {
+func (i *beaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao common.Hash) error {
 	return i.intraRandaoMixesCollector.Collect(base_encoding.Encode64ToBytes4(slot), randao[:])
 }
 
-func (i *beaconStatesCollector) collectEpochRandaoMix(epoch uint64, randao libcommon.Hash) error {
+func (i *beaconStatesCollector) collectEpochRandaoMix(epoch uint64, randao common.Hash) error {
 	slot := epoch * i.beaconCfg.SlotsPerEpoch
 	return i.randaoMixesCollector.Collect(base_encoding.Encode64ToBytes4(slot), randao[:])
 }
 
-func (i *beaconStatesCollector) collectStateRoot(slot uint64, stateRoot libcommon.Hash) error {
+func (i *beaconStatesCollector) collectStateRoot(slot uint64, stateRoot common.Hash) error {
 	return i.stateRootsCollector.Collect(base_encoding.Encode64ToBytes4(slot), stateRoot[:])
 }
 
-func (i *beaconStatesCollector) collectBlockRoot(slot uint64, blockRoot libcommon.Hash) error {
+func (i *beaconStatesCollector) collectBlockRoot(slot uint64, blockRoot common.Hash) error {
 	return i.blockRootsCollector.Collect(base_encoding.Encode64ToBytes4(slot), blockRoot[:])
 }
 

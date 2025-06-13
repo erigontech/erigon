@@ -134,7 +134,7 @@ func bytes2bool(in []byte) bool {
 var ErrChanged = errors.New("key must not change")
 
 // EnsureNotChangedBool - used to store immutable config flags in db. protects from human mistakes
-func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (ok, enabled bool, err error) {
+func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (notChanged, enabled bool, err error) {
 	vBytes, err := tx.GetOne(bucket, k)
 	if err != nil {
 		return false, enabled, err
@@ -276,7 +276,7 @@ type DomainDiff struct {
 	prevValues    map[string][]byte
 	prevValsSlice []DomainEntryDiff
 
-	prevStepBuf, keyBuf []byte
+	prevStepBuf, currentStepBuf, keyBuf []byte
 }
 
 func (d *DomainDiff) Copy() *DomainDiff {
@@ -284,16 +284,18 @@ func (d *DomainDiff) Copy() *DomainDiff {
 }
 
 // RecordDelta records a state change.
-func (d *DomainDiff) DomainUpdate(key1, key2, prevValue, stepBytes []byte, prevStep uint64) {
+func (d *DomainDiff) DomainUpdate(k []byte, step uint64, prevValue []byte, prevStep uint64) {
 	if d.keys == nil {
 		d.keys = make(map[string][]byte, 16)
 		d.prevValues = make(map[string][]byte, 16)
 		d.prevStepBuf = make([]byte, 8)
+		d.currentStepBuf = make([]byte, 8)
 	}
 	binary.BigEndian.PutUint64(d.prevStepBuf, ^prevStep)
+	binary.BigEndian.PutUint64(d.currentStepBuf, ^step)
 
-	d.keyBuf = append(append(append(d.keyBuf[:0], key1...), key2...), stepBytes...)
-	key := toStringZeroCopy(d.keyBuf[:len(key1)+len(key2)])
+	d.keyBuf = append(append(d.keyBuf[:0], k...), d.currentStepBuf...)
+	key := toStringZeroCopy(d.keyBuf[:len(k)])
 	if _, ok := d.keys[key]; !ok {
 		d.keys[strings.Clone(key)] = common.Copy(d.prevStepBuf)
 	}
@@ -301,7 +303,7 @@ func (d *DomainDiff) DomainUpdate(key1, key2, prevValue, stepBytes []byte, prevS
 	valsKey := toStringZeroCopy(d.keyBuf)
 	if _, ok := d.prevValues[valsKey]; !ok {
 		valsKeySCopy := strings.Clone(valsKey)
-		if bytes.Equal(stepBytes, d.prevStepBuf) {
+		if bytes.Equal(d.currentStepBuf, d.prevStepBuf) {
 			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
 		} else {
 			d.prevValues[valsKeySCopy] = []byte{} // We need to delete the current step but restore the previous one

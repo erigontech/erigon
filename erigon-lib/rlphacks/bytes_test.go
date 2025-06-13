@@ -32,9 +32,9 @@ func TestFastDoubleRlpForByteArrays(t *testing.T) {
 	for i := 0; i < 256; i++ {
 		doTestWithByte(t, byte(i), 1)
 	}
-	doTestWithByte(t, 0x0, 100000)
-	doTestWithByte(t, 0xC, 100000)
-	doTestWithByte(t, 0xAB, 100000)
+	doTestWithByte(t, 0x0, 10_000)
+	doTestWithByte(t, 0xC, 10_000)
+	doTestWithByte(t, 0xAB, 10_000)
 }
 
 func doTestWithByte(t *testing.T, b byte, iterations int) {

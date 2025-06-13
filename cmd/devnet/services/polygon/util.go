@@ -23,10 +23,10 @@ import (
 	"reflect"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // UnpackLog unpacks log
@@ -49,8 +49,8 @@ func UnpackLog(abiObject *abi.ABI, out interface{}, event string, log *types.Log
 }
 
 var (
-	reflectHash    = reflect.TypeOf(libcommon.Hash{})
-	reflectAddress = reflect.TypeOf(libcommon.Address{})
+	reflectHash    = reflect.TypeOf(common.Hash{})
+	reflectAddress = reflect.TypeOf(common.Address{})
 	reflectBigInt  = reflect.TypeOf(new(big.Int))
 )
 
@@ -58,7 +58,7 @@ var (
 //
 // Note, dynamic types cannot be reconstructed since they get mapped to Keccak256
 // hashes as the topic value!
-func parseTopics(out interface{}, fields abi.Arguments, topics []libcommon.Hash) error {
+func parseTopics(out interface{}, fields abi.Arguments, topics []common.Hash) error {
 	// Sanity check that the fields and topics match up
 	if len(fields) != len(topics) {
 		return errors.New("topic/field count mismatch")
@@ -108,7 +108,7 @@ func parseTopics(out interface{}, fields abi.Arguments, topics []libcommon.Hash)
 			case reflectHash: // Also covers all dynamic types
 				field.Set(reflect.ValueOf(topics[0]))
 			case reflectAddress:
-				var addr libcommon.Address
+				var addr common.Address
 
 				copy(addr[:], topics[0][length.Hash-length.Addr:])
 

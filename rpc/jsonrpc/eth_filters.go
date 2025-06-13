@@ -18,11 +18,12 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -90,8 +91,8 @@ func (api *APIImpl) UninstallFilter(_ context.Context, index string) (isDeleted 
 }
 
 // GetFilterChanges implements eth_getFilterChanges.
-// Polling method for a previously-created filter
-// returns an array of logs, block headers, or pending transactions which occurred since last poll.
+// Polling method for a previously created filter
+// returns an array of logs, block headers, or pending transactions which have occurred since the last poll.
 func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
@@ -120,22 +121,21 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 		}
 		return stub, nil
 	}
-	return stub, nil
+	return nil, errors.New("filter not found")
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
-// Polling method for a previously-created filter
-// returns an array of logs which occurred since last poll.
+// Polling method for a previously created filter
+// returns an array of logs which have occurred since the last poll.
 func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
-	logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex))
-	if len(logs) == 0 || !ok {
-		return []*types.Log{}, nil
+	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
+		return logs, nil
 	}
-	return logs, nil
+	return nil, errors.New("filter not found")
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.

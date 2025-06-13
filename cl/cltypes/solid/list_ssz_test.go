@@ -35,7 +35,7 @@ func TestNewDynamicListSSZ(t *testing.T) {
 	dynamicList := NewDynamicListSSZ[Validator](limit)
 
 	assert.Equal(t, 0, dynamicList.Len())
-	assert.Equal(t, false, dynamicList.Static())
+	assert.False(t, dynamicList.Static())
 }
 
 func TestNewStaticListSSZ(t *testing.T) {
@@ -44,7 +44,7 @@ func TestNewStaticListSSZ(t *testing.T) {
 	staticList := NewStaticListSSZ[Validator](limit, bytesPerElement)
 
 	assert.Equal(t, 0, staticList.Len())
-	assert.Equal(t, false, staticList.Static())
+	assert.False(t, staticList.Static())
 }
 
 func TestListSSZAppendAndClear(t *testing.T) {

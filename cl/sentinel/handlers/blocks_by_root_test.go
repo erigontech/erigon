@@ -30,7 +30,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -70,7 +70,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	count := uint64(10)
 
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
-	var blockRoots []libcommon.Hash
+	var blockRoots []common.Hash
 	blockRoots, _, _ = beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, startSlot, startSlot+count)
 	tx.Commit()
 
@@ -99,7 +99,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		return
 	}
 
-	reqData := libcommon.CopyBytes(reqBuf.Bytes())
+	reqData := common.CopyBytes(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
 	require.NoError(t, err)
 

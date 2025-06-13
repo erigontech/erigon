@@ -1,6 +1,6 @@
 package beaconevents
 
-import ethevent "github.com/erigontech/erigon/event"
+import ethevent "github.com/erigontech/erigon-p2p/event"
 
 type operationFeed struct {
 	feed *ethevent.Feed
@@ -17,6 +17,13 @@ func (f *operationFeed) Subscribe(channel chan *EventStream) ethevent.Subscripti
 }
 
 func (f *operationFeed) SendAttestation(value *AttestationData) int {
+	return f.feed.Send(&EventStream{
+		Event: OpAttestation,
+		Data:  value,
+	})
+}
+
+func (f *operationFeed) SendSingleAttestation(value *SingleAttestationData) int {
 	return f.feed.Send(&EventStream{
 		Event: OpAttestation,
 		Data:  value,

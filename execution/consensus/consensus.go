@@ -26,13 +26,12 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -55,16 +54,16 @@ type ChainHeaderReader interface {
 	CurrentSafeHeader() *types.Header
 
 	// GetHeader retrieves a block header from the database by hash and number.
-	GetHeader(hash libcommon.Hash, number uint64) *types.Header
+	GetHeader(hash common.Hash, number uint64) *types.Header
 
 	// GetHeaderByNumber retrieves a block header from the database by number.
 	GetHeaderByNumber(number uint64) *types.Header
 
 	// GetHeaderByHash retrieves a block header from the database by its hash.
-	GetHeaderByHash(hash libcommon.Hash) *types.Header
+	GetHeaderByHash(hash common.Hash) *types.Header
 
 	// GetTd retrieves the total difficulty from the database by hash and number.
-	GetTd(hash libcommon.Hash, number uint64) *big.Int
+	GetTd(hash common.Hash, number uint64) *big.Int
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
@@ -79,19 +78,19 @@ type ChainReader interface {
 	ChainHeaderReader
 
 	// GetBlock retrieves a block from the database by hash and number.
-	GetBlock(hash libcommon.Hash, number uint64) *types.Block
+	GetBlock(hash common.Hash, number uint64) *types.Block
 
-	HasBlock(hash libcommon.Hash, number uint64) bool
+	HasBlock(hash common.Hash, number uint64) bool
 
-	BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue
-	BorStartEventId(hash libcommon.Hash, number uint64) uint64
+	BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue
+	BorStartEventId(hash common.Hash, number uint64) uint64
 }
 
-type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
+type SystemCall func(contract common.Address, data []byte) ([]byte, error)
 
 // Use more options to call contract
-type SysCallCustom func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
-type Call func(contract libcommon.Address, data []byte) ([]byte, error)
+type SysCallCustom func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
+type Call func(contract common.Address, data []byte) ([]byte, error)
 
 // RewardKind - The kind of block reward.
 // Depending on the consensus engine the allocated block reward might have
@@ -110,7 +109,7 @@ const (
 )
 
 type Reward struct {
-	Beneficiary libcommon.Address
+	Beneficiary common.Address
 	Kind        RewardKind
 	Amount      uint256.Int
 }
@@ -127,10 +126,15 @@ type EngineReader interface {
 	// Author retrieves the Ethereum address of the account that minted the given
 	// block, which may be different from the header's coinbase if a consensus
 	// engine is based on signatures.
-	Author(header *types.Header) (libcommon.Address, error)
+	Author(header *types.Header) (common.Address, error)
+
+	// Dependencies retrives the dependencies between transactions
+	// included in the block accosiated with this header a nil return
+	// implies no dependencies are known
+	TxDependencies(header *types.Header) [][]int
 
 	// Service transactions are free and don't pay baseFee after EIP-1559
-	IsServiceTransaction(sender libcommon.Address, syscall SystemCall) bool
+	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
 
 	Type() chain.ConsensusName
 
@@ -187,12 +191,12 @@ type EngineWriter interface {
 	Seal(chain ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error
 
 	// SealHash returns the hash of a block prior to it being sealed.
-	SealHash(header *types.Header) libcommon.Hash
+	SealHash(header *types.Header) common.Hash
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
 	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
-		parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
+		parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
@@ -207,12 +211,12 @@ type PoW interface {
 }
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) error {
+func Transfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) error {
 	if !bailout {
-		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
 		if err != nil {
 			return err
 		}
 	}
-	return db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	return db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
 }

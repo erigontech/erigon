@@ -27,8 +27,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/testlog"
 )
 
 type emptyBodyReadCloser struct{}
@@ -42,6 +41,10 @@ func (ebrc emptyBodyReadCloser) Close() error {
 }
 
 func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
 	requestHandler := NewMockhttpRequestHandler(ctrl)

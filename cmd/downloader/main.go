@@ -29,10 +29,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	_ "github.com/erigontech/erigon/core/snaptype"    //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
-
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -49,7 +45,9 @@ import (
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
@@ -57,15 +55,16 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common/paths"
+	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
+
+	_ "github.com/erigontech/erigon-db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
 func main() {
@@ -133,7 +132,7 @@ func init() {
 	withFile(createTorrent)
 	withChainFlag(createTorrent)
 	rootCmd.AddCommand(createTorrent)
-	createTorrent.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
+	createTorrent.Flags().BoolVar(&all, "all", true, "Produce all possible .torrent files")
 
 	rootCmd.AddCommand(torrentCat)
 	rootCmd.AddCommand(torrentMagnet)
@@ -144,7 +143,7 @@ func init() {
 	withDataDir(manifestCmd)
 	withChainFlag(manifestCmd)
 	rootCmd.AddCommand(manifestCmd)
-	manifestCmd.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
+	manifestCmd.Flags().BoolVar(&all, "all", true, "Produce all possible .torrent files")
 
 	manifestVerifyCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	manifestVerifyCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
@@ -153,7 +152,7 @@ func init() {
 
 	withDataDir(printTorrentHashes)
 	withChainFlag(printTorrentHashes)
-	printTorrentHashes.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
+	printTorrentHashes.Flags().BoolVar(&all, "all", true, "Produce all possible .torrent files")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
@@ -351,8 +350,9 @@ var manifestCmd = &cobra.Command{
 }
 
 var manifestVerifyCmd = &cobra.Command{
-	Use:     "manifest-verify",
-	Example: "go run ./cmd/downloader manifest-verify --chain <chain> [--webseed 'a','b','c']",
+	Use:     "manifest_verify",
+	Aliases: []string{"manifest-verify"},
+	Example: "go run ./cmd/downloader manifest_verify --chain <chain> [--webseed 'a','b','c']",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
 		if err := manifestVerify(cmd.Context(), logger); err != nil {

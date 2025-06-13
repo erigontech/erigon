@@ -30,7 +30,6 @@ import (
 func DefaultStages(ctx context.Context,
 	snapshots SnapshotsCfg,
 	headers HeadersCfg,
-	borHeimdallCfg BorHeimdallCfg,
 	blockHashCfg BlockHashesCfg,
 	bodies BodiesCfg,
 	senders SendersCfg,
@@ -66,22 +65,6 @@ func DefaultStages(ctx context.Context,
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return HeadersUnwind(ctx, u, s, txc.Tx, headers, test)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return nil
-			},
-		},
-		{
-			ID:          stages.BorHeimdall,
-			Description: "Download Bor-specific data from Heimdall",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if badBlockUnwind {
-					return nil
-				}
-				return BorHeimdallForward(s, u, ctx, txc.Tx, borHeimdallCfg, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return nil
@@ -446,102 +429,6 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 	}
 }
 
-func PolygonSyncStages(
-	ctx context.Context,
-	snapshots SnapshotsCfg,
-	polygonSyncStageCfg PolygonSyncStageCfg,
-	senders SendersCfg,
-	exec ExecuteBlockCfg,
-	txLookup TxLookupCfg,
-	finish FinishCfg,
-) []*Stage {
-	return []*Stage{
-		{
-			ID:          stages.Snapshots,
-			Description: "Download snapshots",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if badBlockUnwind {
-					return nil
-				}
-				return SpawnStageSnapshots(s, ctx, txc.Tx, snapshots, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return nil
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return SnapshotsPrune(p, snapshots, ctx, tx, logger)
-			},
-		},
-		{
-			ID:          stages.PolygonSync,
-			Description: "Use polygon sync component to sync headers, bodies and heimdall data",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return ForwardPolygonSyncStage(ctx, txc.Tx, s, u, polygonSyncStageCfg)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindPolygonSyncStage(ctx, txc.Tx, u, polygonSyncStageCfg)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return nil
-			},
-		},
-		{
-			ID:          stages.Senders,
-			Description: "Recover senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnRecoverSendersStage(senders, s, u, txc.Tx, 0, ctx, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindSendersStage(u, txc.Tx, senders, ctx)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return nil
-			},
-		},
-		{
-			ID:          stages.Execution,
-			Description: "Execute blocks w/o hash checks",
-			Disabled:    dbg.StagesOnlyBlocks,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, txc, 0, ctx, exec, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx, logger)
-			},
-		},
-		{
-			ID:          stages.TxLookup,
-			Description: "Generate txn lookup index",
-			Disabled:    dbg.StagesOnlyBlocks,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnTxLookup(s, txc.Tx, 0 /* toBlock */, txLookup, ctx, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindTxLookup(u, s, txc.Tx, txLookup, ctx, logger)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneTxLookup(p, tx, txLookup, ctx, logger)
-			},
-		},
-		{
-			ID:          stages.Finish,
-			Description: "Final: update current block for the RPC API",
-			Forward: func(badBlockUnwind bool, s *StageState, _ Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return FinishForward(s, txc.Tx, finish)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindFinish(u, txc.Tx, finish, ctx)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneFinish(p, tx, finish, ctx)
-			},
-		},
-	}
-}
-
 func DownloadSyncStages(
 	ctx context.Context,
 	snapshots SnapshotsCfg,
@@ -569,7 +456,6 @@ func DownloadSyncStages(
 var DefaultForwardOrder = UnwindOrder{
 	stages.Snapshots,
 	stages.Headers,
-	stages.BorHeimdall,
 	stages.BlockHashes,
 	stages.Bodies,
 
@@ -598,7 +484,6 @@ var DefaultUnwindOrder = UnwindOrder{
 
 	stages.Bodies,
 	stages.BlockHashes,
-	stages.BorHeimdall,
 	stages.Headers,
 }
 
@@ -637,7 +522,6 @@ var DefaultPruneOrder = PruneOrder{
 
 	stages.Bodies,
 	stages.BlockHashes,
-	stages.BorHeimdall,
 	stages.Headers,
 	stages.Snapshots,
 }

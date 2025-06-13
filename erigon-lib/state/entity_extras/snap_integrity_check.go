@@ -3,7 +3,7 @@ package entity_extras
 import (
 	"os"
 
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // Example: if 0-1.commitment.kv is visible and has foreign keys to 0-1.account.kv -
@@ -35,7 +35,7 @@ func NewReferencingIntegrityChecker(dependents ...SnapNameSchema) *ReferencingIn
 
 func (r *ReferencingIntegrityChecker) Check(fromRootNum, toRootNum RootNum) (fine bool) {
 	for _, dependent := range r.dependents {
-		fullpath := dependent.DataFile(snaptype.Version(1), fromRootNum, toRootNum)
+		fullpath := dependent.DataFile(version.V1_0, fromRootNum, toRootNum)
 		if _, err := os.Stat(fullpath); os.IsNotExist(err) {
 			return false
 		}

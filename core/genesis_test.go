@@ -27,17 +27,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -50,7 +51,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 
 	t.Parallel()
 	logger := log.New()
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
 		genesis := core.GenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
@@ -62,7 +63,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
-		require.EqualValues(t, block.Hash(), *expect, network)
+		require.Equal(t, block.Hash(), *expect, network)
 	}
 	for _, network := range networkname.All {
 		check(network)
@@ -72,9 +73,9 @@ func TestGenesisBlockHashes(t *testing.T) {
 func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
-	var err error
 
-	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err := core.GenesisToBlock(core.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	require.NoError(err)
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
@@ -100,17 +101,17 @@ func TestGenesisBlockRoots(t *testing.T) {
 	block, _, err = core.GenesisToBlock(core.TestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	if block.Root() != params.TestGenesisStateRoot {
-		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
+		t.Errorf("wrong test genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
 	}
 	if block.Hash() != params.TestGenesisHash {
-		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
+		t.Errorf("wrong test genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
 	}
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -136,12 +137,12 @@ func TestAllocConstructor(t *testing.T) {
 
 	// This deployment code initially sets contract's 0th storage to 0x2a
 	// and its 1st storage to 0x01c9.
-	deploymentCode := libcommon.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
+	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
 
 	funds := big.NewInt(1000000000)
-	address := libcommon.HexToAddress("0x1000000000000000000000000000000000000001")
+	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	genSpec := &types.Genesis{
-		Config: params.AllProtocolChanges,
+		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			address: {Constructor: deploymentCode, Balance: funds},
 		},
@@ -155,7 +156,7 @@ func TestAllocConstructor(t *testing.T) {
 	defer tx.Rollback()
 
 	//TODO: support historyV3
-	reader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, genSpec.Config.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
 	balance, err := state.GetBalance(address)
@@ -163,15 +164,15 @@ func TestAllocConstructor(t *testing.T) {
 	assert.Equal(funds, balance.ToBig())
 	code, err := state.GetCode(address)
 	require.NoError(err)
-	assert.Equal(libcommon.FromHex("5f355f55"), code)
+	assert.Equal(common.FromHex("5f355f55"), code)
 
-	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
+	key0 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}
-	state.GetState(address, &key0, storage0)
+	state.GetState(address, key0, storage0)
 	assert.Equal(uint256.NewInt(0x2a), storage0)
-	key1 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
+	key1 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
 	storage1 := &uint256.Int{}
-	state.GetState(address, &key1, storage1)
+	state.GetState(address, key1, storage1)
 	assert.Equal(uint256.NewInt(0x01c9), storage1)
 }
 

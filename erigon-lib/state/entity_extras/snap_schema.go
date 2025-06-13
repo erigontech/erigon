@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // each entitiy has a data_file (e.g. is .seg, .v, .kv; and even .ef for ii), this could be fed to
@@ -119,7 +119,7 @@ func (s *E2SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 	}
 
 	var err error
-	res.Version, err = snaptype.ParseVersion(parts[0])
+	res.Version, err = version.ParseVersion(parts[0])
 	if err != nil {
 		return res, false
 	}
@@ -304,28 +304,28 @@ func (b *E3SnapSchemaBuilder) checkPresence(check Accessors, met *_fileMetadata)
 
 var _ SnapNameSchema = (*E3SnapSchema)(nil)
 
-var stateFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
+var stateFileRegex = regexp.MustCompile("^v([0-9]+).([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
 // fileName assumes no folderName in it
 func (s *E3SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 	info := &SnapInfo{Name: fileName}
 
 	subs := stateFileRegex.FindStringSubmatch(fileName)
-	if len(subs) != 6 {
+	if len(subs) != 7 {
 		return nil, false
 	}
 
-	info.FileType = subs[2]
+	info.FileType = subs[3]
 	if strings.Compare(info.FileType, s.dataFileTag) != 0 {
 		return nil, false
 	}
 
-	fromStep, err := strconv.ParseUint(subs[3], 10, 64)
+	fromStep, err := strconv.ParseUint(subs[4], 10, 64)
 	if err != nil {
 		return nil, false
 	}
 
-	toStep, err := strconv.ParseUint(subs[4], 10, 64)
+	toStep, err := strconv.ParseUint(subs[5], 10, 64)
 	if err != nil {
 		return nil, false
 	}
@@ -333,12 +333,12 @@ func (s *E3SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 	info.From = fromStep * s.stepSize
 	info.To = toStep * s.stepSize
 
-	info.Version, err = snaptype.ParseVersion("v" + subs[1])
+	info.Version, err = version.ParseVersion(fmt.Sprintf("v%s.%s", subs[1], subs[2]))
 	if err != nil {
 		return nil, false
 	}
 
-	info.Ext = "." + subs[5]
+	info.Ext = "." + subs[6]
 
 	if s.dataExtension.Equals(info.Ext) {
 		return info, true

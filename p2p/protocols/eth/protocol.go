@@ -24,12 +24,12 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/p2p/forkid"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/forkid"
 )
 
 var ProtocolToString = map[uint]string{
@@ -137,15 +137,15 @@ type StatusPacket struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
 	TD              *big.Int
-	Head            libcommon.Hash
-	Genesis         libcommon.Hash
+	Head            common.Hash
+	Genesis         common.Hash
 	ForkID          forkid.ID
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
 type NewBlockHashesPacket []struct {
-	Hash   libcommon.Hash // Hash of one particular block being announced
-	Number uint64         // Number of one particular block being announced
+	Hash   common.Hash // Hash of one particular block being announced
+	Number uint64      // Number of one particular block being announced
 }
 
 // GetBlockHeadersPacket represents a block header query.
@@ -164,14 +164,14 @@ type GetBlockHeadersPacket66 struct {
 
 // HashOrNumber is a combined field for specifying an origin block.
 type HashOrNumber struct {
-	Hash   libcommon.Hash // Block hash from which to retrieve headers (excludes Number)
-	Number uint64         // Block hash from which to retrieve headers (excludes Hash)
+	Hash   common.Hash // Block hash from which to retrieve headers (excludes Number)
+	Number uint64      // Block hash from which to retrieve headers (excludes Hash)
 }
 
 // EncodeRLP is a specialized encoder for HashOrNumber to encode only one of the
 // two contained union fields.
 func (hn *HashOrNumber) EncodeRLP(w io.Writer) error {
-	if hn.Hash == (libcommon.Hash{}) {
+	if hn.Hash == (common.Hash{}) {
 		return rlp.Encode(w, hn.Number)
 	}
 	if hn.Number != 0 {
@@ -224,7 +224,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	if nbp.TD != nil {
 		tdBitLen = nbp.TD.BitLen()
 		if tdBitLen >= 8 {
-			tdLen = libcommon.BitLenToByteLen(tdBitLen)
+			tdLen = common.BitLenToByteLen(tdBitLen)
 		}
 	}
 	encodingSize += tdLen
@@ -285,7 +285,7 @@ func (request *NewBlockPacket) SanityCheck() error {
 }
 
 // GetBlockBodiesPacket represents a block body query.
-type GetBlockBodiesPacket []libcommon.Hash
+type GetBlockBodiesPacket []common.Hash
 
 // GetBlockBodiesPacket represents a block body query over eth/66.
 type GetBlockBodiesPacket66 struct {
@@ -337,7 +337,7 @@ func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.
 }
 
 // GetReceiptsPacket represents a block receipts query.
-type GetReceiptsPacket []libcommon.Hash
+type GetReceiptsPacket []common.Hash
 
 // GetReceiptsPacket66 represents a block receipts query over eth/66.
 type GetReceiptsPacket66 struct {

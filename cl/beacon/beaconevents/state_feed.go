@@ -1,7 +1,7 @@
 package beaconevents
 
 import (
-	ethevent "github.com/erigontech/erigon/event"
+	ethevent "github.com/erigontech/erigon-p2p/event"
 )
 
 type stateFeed struct {

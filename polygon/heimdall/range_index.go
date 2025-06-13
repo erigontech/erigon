@@ -30,9 +30,9 @@ type RangeIndex interface {
 	Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error)
 }
 
-type TransactionalRangeIndex interface {
-	RangeIndex
-	WithTx(tx kv.Tx) RangeIndex
+type TransactionalRangeIndexer interface {
+	RangeIndexer
+	WithTx(tx kv.Tx) RangeIndexer
 }
 
 type RangeIndexFunc func(ctx context.Context, blockNum uint64) (uint64, bool, error)
@@ -44,6 +44,7 @@ func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, bo
 type RangeIndexer interface {
 	RangeIndex
 	Put(ctx context.Context, r ClosedRange, id uint64) error
+	GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, error)
 }
 
 type dbRangeIndex struct {
@@ -56,16 +57,16 @@ type txRangeIndex struct {
 	tx kv.Tx
 }
 
-func NewRangeIndex(db *polygoncommon.Database, table string) RangeIndex {
+func NewRangeIndex(db *polygoncommon.Database, table string) *dbRangeIndex {
 	return &dbRangeIndex{db, table}
 }
 
-func NewTxRangeIndex(db kv.RoDB, table string, tx kv.Tx) RangeIndex {
-	return txRangeIndex{&dbRangeIndex{polygoncommon.AsDatabase(db.(kv.RwDB)), table}, tx}
+func NewTxRangeIndex(db kv.RoDB, table string, tx kv.Tx) *txRangeIndex {
+	return &txRangeIndex{&dbRangeIndex{polygoncommon.AsDatabase(db.(kv.RwDB)), table}, tx}
 }
 
-func (i *dbRangeIndex) WithTx(tx kv.Tx) RangeIndex {
-	return txRangeIndex{i, tx}
+func (i *dbRangeIndex) WithTx(tx kv.Tx) RangeIndexer {
+	return &txRangeIndex{i, tx}
 }
 
 func rangeIndexKey(blockNum uint64) [8]byte {
@@ -84,6 +85,10 @@ func rangeIndexValueParse(value []byte) uint64 {
 	return binary.BigEndian.Uint64(value)
 }
 
+func rangeIndexKeyParse(key []byte) uint64 {
+	return binary.BigEndian.Uint64(key)
+}
+
 // Put a mapping from a range to an id.
 func (i *dbRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
 	tx, err := i.db.BeginRw(ctx)
@@ -92,14 +97,14 @@ func (i *dbRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error 
 	}
 	defer tx.Rollback()
 
-	if err := i.WithTx(tx).(RangeIndexer).Put(ctx, r, id); err != nil {
+	if err := i.WithTx(tx).Put(ctx, r, id); err != nil {
 		return err
 	}
 
 	return tx.Commit()
 }
 
-func (i txRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
+func (i *txRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
 	key := rangeIndexKey(r.End)
 	value := rangeIndexValue(id)
 	tx, ok := i.tx.(kv.RwTx)
@@ -124,7 +129,7 @@ func (i *dbRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, boo
 	return id, ok, err
 }
 
-func (i txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+func (i *txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	cursor, err := i.tx.Cursor(i.table)
 	if err != nil {
 		return 0, false, err
@@ -143,4 +148,48 @@ func (i txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool
 
 	id := rangeIndexValueParse(value)
 	return id, true, err
+}
+
+// Lookup ids for the given range [blockFrom, blockTo)
+func (i *dbRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, error) {
+	var ids []uint64
+
+	err := i.db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		ids, err = i.WithTx(tx).GetIDsBetween(ctx, blockFrom, blockTo)
+		return err
+	})
+	return ids, err
+}
+
+func (i *txRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, error) {
+	cursor, err := i.tx.Cursor(i.table)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close()
+
+	key := rangeIndexKey(blockFrom)
+	k, value, err := cursor.Seek(key[:])
+	if err != nil {
+		return nil, err
+	}
+
+	var ids []uint64
+
+	for k != nil {
+		intervalBlock := rangeIndexKeyParse(k)
+		if intervalBlock >= blockTo {
+			break
+		}
+
+		ids = append(ids, rangeIndexValueParse(value))
+
+		k, value, err = cursor.Next()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return ids, err
 }

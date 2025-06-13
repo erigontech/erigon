@@ -19,8 +19,8 @@ package aura
 import (
 	"sync/atomic"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type StepDurationInfo struct {
@@ -45,13 +45,13 @@ type ValidatorSetProof struct {
 // FirstValidatorSetProof state-dependent proofs for the safe contract:
 // only "first" proofs are such.
 type FirstValidatorSetProof struct { // TODO: whaaat? here is no state!
-	ContractAddress libcommon.Address
+	ContractAddress common.Address
 	Header          *types.Header
 }
 
 type EpochTransition struct {
 	/// Block hash at which the transition occurred.
-	BlockHash libcommon.Hash
+	BlockHash common.Hash
 	/// Block number at which the transition occurred.
 	BlockNumber uint64
 	/// "transition/epoch" proof from the engine combined with a finality proof.
@@ -59,14 +59,14 @@ type EpochTransition struct {
 }
 
 type epochReader interface {
-	GetEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	GetPendingEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error)
+	GetEpoch(blockHash common.Hash, blockN uint64) (transitionProof []byte, err error)
+	GetPendingEpoch(blockHash common.Hash, blockN uint64) (transitionProof []byte, err error)
+	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error)
 }
 type epochWriter interface {
 	epochReader
-	PutEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
-	PutPendingEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
+	PutEpoch(blockHash common.Hash, blockN uint64, transitionProof []byte) (err error)
+	PutPendingEpoch(blockHash common.Hash, blockN uint64, transitionProof []byte) (err error)
 }
 
 type PermissionedStep struct {

@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -156,6 +157,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 		return err
 	}
 
+	signatures := [][]byte{}
 	committee := getSyncCommitteeFromState(headState).GetCommittee()
 	subCommitteeSize := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
 	startSubCommittee := subCommittee * subCommitteeSize
@@ -165,14 +167,17 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 				return nil
 			}
 			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
+			// Note: it's possible that one validator appears multiple times in the subcommittee.
+			signatures = append(signatures, common.CopyBytes(message.Signature[:]))
 		}
 	}
-
+	if len(signatures) == 0 {
+		log.Warn("Validator not found in sync committee", "validatorIndex", message.ValidatorIndex, "subCommittee", subCommittee, "slot", message.Slot, "beaconBlockRoot", message.BeaconBlockRoot)
+		return errors.New("validator not found in sync committee")
+	}
 	// Compute the aggregated signature.
-	aggregatedSignature, err := bls.AggregateSignatures([][]byte{
-		contribution.Signature[:],
-		message.Signature[:],
-	})
+	signatures = append(signatures, common.CopyBytes(contribution.Signature[:]))
+	aggregatedSignature, err := bls.AggregateSignatures(signatures)
 	if err != nil {
 		return err
 	}

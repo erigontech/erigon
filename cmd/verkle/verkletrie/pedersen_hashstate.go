@@ -25,7 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -87,13 +87,13 @@ func RegeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workers uint64, ver
 				codeSize = uint64(len(code))
 			}
 			jobs <- &regeneratePedersenAccountsJob{
-				address:  libcommon.BytesToAddress(k),
+				address:  common.BytesToAddress(k),
 				account:  acc,
 				codeSize: codeSize,
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("[Pedersen Account Hashing] Current progress in Collection Phase", "address", "0x"+libcommon.Bytes2Hex(k))
+				log.Info("[Pedersen Account Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k))
 			default:
 			}
 		}
@@ -146,7 +146,7 @@ func RegeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workers uint64, verk
 		}
 	}()
 
-	var address libcommon.Address
+	var address common.Address
 	var incarnation uint64
 	for k, v, err := plainStateCursor.First(); k != nil; k, v, err = plainStateCursor.Next() {
 		if err != nil {
@@ -164,7 +164,7 @@ func RegeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workers uint64, verk
 			}
 			select {
 			case <-logInterval.C:
-				log.Info("[Pedersen Storage Hashing] Current progress in Collection Phase", "address", "0x"+libcommon.Bytes2Hex(k[:20]))
+				log.Info("[Pedersen Storage Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k[:20]))
 			default:
 			}
 		} else if len(k) == 20 {
@@ -173,7 +173,7 @@ func RegeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workers uint64, verk
 				return err
 			}
 			incarnation = acc.Incarnation
-			address = libcommon.BytesToAddress(k)
+			address = common.BytesToAddress(k)
 		}
 	}
 
@@ -249,12 +249,12 @@ func RegeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleW
 		}
 
 		jobs <- &regeneratePedersenCodeJob{
-			address: libcommon.BytesToAddress(k),
-			code:    libcommon.CopyBytes(code),
+			address: common.BytesToAddress(k),
+			code:    common.CopyBytes(code),
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("[Pedersen Code Hashing] Current progress in Collection Phase", "address", "0x"+libcommon.Bytes2Hex(k))
+			log.Info("[Pedersen Code Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k))
 		default:
 		}
 	}

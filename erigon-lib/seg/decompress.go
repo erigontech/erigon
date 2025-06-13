@@ -135,7 +135,7 @@ type Decompressor struct {
 	serializedDictSize uint64
 	dictWords          int
 
-	filePath, FileName1 string
+	filePath, fileName string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
@@ -182,8 +182,8 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	var err error
 	var validationPassed = false
 	d := &Decompressor{
-		filePath:  compressedFilePath,
-		FileName1: fName,
+		filePath: compressedFilePath,
+		fileName: fName,
 	}
 
 	defer func() {
@@ -219,7 +219,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
-	defer d.EnableMadvNormal().DisableReadAhead() //speedup opening on slow drives
+	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
@@ -489,14 +489,14 @@ func (d *Decompressor) Close() {
 }
 
 func (d *Decompressor) FilePath() string { return d.filePath }
-func (d *Decompressor) FileName() string { return d.FileName1 }
+func (d *Decompressor) FileName() string { return d.fileName }
 
 // WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
 func (d *Decompressor) WithReadAhead(f func() error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.MadvSequential().DisableReadAhead()
 	return f()
 }
 
@@ -519,7 +519,7 @@ func (d *Decompressor) DisableReadAhead() {
 	_ = mmap.MadviseRandom(d.mmapHandle1)
 }
 
-func (d *Decompressor) EnableReadAhead() *Decompressor {
+func (d *Decompressor) MadvSequential() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
@@ -527,7 +527,7 @@ func (d *Decompressor) EnableReadAhead() *Decompressor {
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
 }
-func (d *Decompressor) EnableMadvNormal() *Decompressor {
+func (d *Decompressor) MadvNormal() MadvDisabler {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
@@ -535,7 +535,7 @@ func (d *Decompressor) EnableMadvNormal() *Decompressor {
 	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
-func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
+func (d *Decompressor) MadvWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
@@ -554,10 +554,17 @@ type Getter struct {
 	dataP       uint64
 	dataBit     int // Value 0..7 - position of the bit
 	trace       bool
+	d           *Decompressor
 }
 
-func (g *Getter) Trace(t bool)     { g.trace = t }
-func (g *Getter) FileName() string { return g.fName }
+func (g *Getter) MadvNormal() MadvDisabler {
+	g.d.MadvNormal()
+	return g
+}
+func (g *Getter) DisableReadAhead() { g.d.DisableReadAhead() }
+func (g *Getter) Trace(t bool)      { g.trace = t }
+func (g *Getter) Count() int        { return g.d.Count() }
+func (g *Getter) FileName() string  { return g.fName }
 
 func (g *Getter) nextPos(clean bool) (pos uint64) {
 	defer func() {
@@ -659,10 +666,11 @@ func (d *Decompressor) EmptyWordsCount() int { return int(d.emptyWordsCount) }
 // for the same decompressor
 func (d *Decompressor) MakeGetter() *Getter {
 	return &Getter{
+		d:           d,
 		posDict:     d.posDict,
 		data:        d.data[d.wordsStart:],
 		patternDict: d.dict,
-		fName:       d.FileName1,
+		fName:       d.FileName(),
 	}
 }
 

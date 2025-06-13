@@ -19,17 +19,18 @@ package exec3
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -46,7 +47,7 @@ type Resetable interface {
 type TraceWorker struct {
 	stateReader  *state.HistoryReaderV3
 	engine       consensus.EngineReader
-	headerReader services.HeaderReader
+	headerReader interfaces.HeaderReader
 	tx           kv.Getter
 	chainConfig  *chain.Config
 	tracer       GenericTracer
@@ -63,7 +64,7 @@ type TraceWorker struct {
 	vmConfig  *vm.Config
 }
 
-func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineReader, br services.HeaderReader, tracer GenericTracer) *TraceWorker {
+func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineReader, br interfaces.HeaderReader, tracer GenericTracer) *TraceWorker {
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
 
@@ -85,7 +86,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 }
 
 func (e *TraceWorker) Close() {
-	e.evm.JumpDestCache.LogStats()
+	e.evm.Config().JumpDestCache.LogStats()
 }
 
 func (e *TraceWorker) ChangeBlock(header *types.Header) {
@@ -109,14 +110,14 @@ func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint
 	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
 }
 
-func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) (*evmtypes.ExecutionResult, error) {
+func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) error {
 	e.stateReader.SetTxNum(txNum)
 	e.ibs.Reset()
-	e.ibs.SetTxContext(txIndex)
+	e.ibs.SetTxContext(e.blockNum, txIndex)
 
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
-	if err != nil {
-		return nil, err
+	if txn.Type() != types.AccountAbstractionTxType && err != nil {
+		return err
 	}
 	msg.SetCheckNonce(!e.vmConfig.StatelessExec)
 
@@ -127,10 +128,26 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
 
 	gp := new(core.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
-	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
-	if err != nil {
-		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
+
+	if txn.Type() == types.AccountAbstractionTxType {
+		aaTxn := txn.(*types.AccountAbstractionTransaction)
+		evm := vm.NewEVM(*e.blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
+		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, e.ibs, gp, e.header, evm, e.chainConfig)
+		if err != nil {
+			return err
+		}
+
+		_, _, err = aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gp, evm, e.header, e.ibs)
+		if err != nil {
+			return err
+		}
+	} else {
+		result, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
+		if err != nil {
+			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, result.Err)
+		}
 	}
+
 	e.ibs.SoftFinalise()
 	if e.vmConfig.Tracer != nil {
 		if e.tracer.Found() {
@@ -138,5 +155,5 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 		}
 	}
 
-	return res, nil
+	return nil
 }

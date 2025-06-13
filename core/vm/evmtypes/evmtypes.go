@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 )
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -69,14 +69,16 @@ type TxContext struct {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas             uint64 // Total used gas but include the refunded gas
-	Err                 error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	Reverted            bool   // Whether the execution was aborted by `REVERT`
-	ReturnData          []byte // Returned data from evm(function result or data supplied with revert opcode)
-	SenderInitBalance   *uint256.Int
-	CoinbaseInitBalance *uint256.Int
-	FeeTipped           *uint256.Int
-	EvmRefund           uint64 // Gas refunded by EVM without considering refundQuotient
+	GasUsed              uint64 // Total used gas but include the refunded gas
+	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	Reverted             bool   // Whether the execution was aborted by `REVERT`
+	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
+	SenderInitBalance    uint256.Int
+	CoinbaseInitBalance  uint256.Int
+	FeeTipped            uint256.Int
+	FeeBurnt             uint256.Int
+	BurntContractAddress common.Address
+	EvmRefund            uint64 // Gas refunded by EVM without considering refundQuotient
 
 	// Arbitrum: a tx may yield others that need to run afterward (see retryables)
 	ScheduledTxes types.Transactions
@@ -120,7 +122,7 @@ type (
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
-	GetHashFunc func(uint64) common.Hash
+	GetHashFunc func(uint64) (common.Hash, error)
 
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
 	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
@@ -129,11 +131,22 @@ type (
 
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
+	SubBalance(common.Address, uint256.Int, tracing.BalanceChangeReason) error
+	AddBalance(common.Address, uint256.Int, tracing.BalanceChangeReason) error
+	GetBalance(common.Address) (uint256.Int, error)
+
+	AddLog(*types.Log)
+
+	SetHooks(hooks *tracing.Hooks)
+	Trace() bool
+	TxIndex() int
+	Incarnation() int
+
+	// Arbitrum deprecated API
 	CreateAccount(common.Address, bool) error
 
-	SubBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
-	AddBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
-	GetBalance(common.Address) (*uint256.Int, error)
+	RemoveEscrowProtection(addr common.Address)
+	ExpectBalanceBurn(amount *uint256.Int)
 
 	GetNonce(common.Address) (uint64, error)
 	SetNonce(common.Address, uint64) error
@@ -149,12 +162,12 @@ type IntraBlockState interface {
 	GetDelegatedDesignation(common.Address) (common.Address, bool, error)
 
 	AddRefund(uint64)
-	SubRefund(uint64)
 	GetRefund() uint64
+	SubRefund(gas uint64) error
 
-	GetCommittedState(common.Address, *common.Hash, *uint256.Int) error
-	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int) error
-	SetState(common.Address, *common.Hash, uint256.Int) error
+	GetCommittedState(common.Address, common.Hash, *uint256.Int) error
+	GetState(address common.Address, slot common.Hash, outValue *uint256.Int) error
+	SetState(common.Address, common.Hash, uint256.Int) error
 
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int
 	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)
@@ -181,14 +194,6 @@ type IntraBlockState interface {
 	// even if the feature/fork is not active yet
 	AddSlotToAccessList(addr common.Address, slot common.Hash) (addrMod, slotMod bool)
 
-	RevertToSnapshot(int)
+	RevertToSnapshot(int, error)
 	Snapshot() int
-
-	AddLog(*types.Log)
-
-	SetHooks(hooks *tracing.Hooks)
-
-	// Arbitrum
-	RemoveEscrowProtection(addr common.Address)
-	ExpectBalanceBurn(amount *uint256.Int)
 }

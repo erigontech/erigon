@@ -25,6 +25,7 @@ jobs:
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
+      ERIGON_ASSERT: true
       CHAIN: bor-mainnet
 
     steps:

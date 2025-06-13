@@ -102,6 +102,8 @@ type Compressor struct {
 	uncompressedFile *RawWordsFile
 	tmpDir           string // temporary directory to use for ETL when building dictionary
 	logPrefix        string
+
+	outputFileName   string
 	outputFile       string // File where to output the dictionary and compressed data
 	tmpOutFilePath   string // File where to output the dictionary and compressed data
 	suffixCollectors []*etl.Collector
@@ -112,7 +114,6 @@ type Compressor struct {
 	superstring      []byte
 	wordsCount       uint64
 	superstringCount uint64
-	superstringLen   int
 	Ratio            CompressionRatio
 	lvl              log.Lvl
 	trace            bool
@@ -141,19 +142,20 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
-		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger) //nolint:gocritic
+		collector := etl.NewCollectorWithAllocator(logPrefix+"_dict", tmpDir, etl.SmallSortableBuffers, logger) //nolint:gocritic
 		collector.SortAndFlushInBackground(true)
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
 		go extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, wg, logger)
 	}
-
+	_, outputFileName := filepath.Split(outputFile)
 	return &Compressor{
 		Cfg:              cfg,
 		uncompressedFile: uncompressedFile,
 		tmpOutFilePath:   tmpOutFilePath,
 		outputFile:       outputFile,
+		outputFileName:   outputFileName,
 		tmpDir:           tmpDir,
 		logPrefix:        logPrefix,
 		ctx:              ctx,
@@ -174,6 +176,7 @@ func (c *Compressor) Close() {
 }
 
 func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
+func (c *Compressor) FileName() string    { return c.outputFileName }
 func (c *Compressor) WorkersAmount() int  { return c.Workers }
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
@@ -189,24 +192,26 @@ func (c *Compressor) ReadFrom(g *Getter) error {
 	return nil
 }
 
+var superStringsPool = sync.Pool{New: func() any { return make([]byte, 0, superstringLimit) }}
+
 func (c *Compressor) AddWord(word []byte) error {
-	select {
-	case <-c.ctx.Done():
-		return c.ctx.Err()
-	default:
+	c.wordsCount++
+	if c.wordsCount%1024 == 0 {
+		select {
+		case <-c.ctx.Done():
+			return c.ctx.Err()
+		default:
+		}
 	}
 
-	c.wordsCount++
 	l := 2*len(word) + 2
-	if c.superstringLen+l > superstringLimit {
+	if len(c.superstring)+l > superstringLimit {
 		if c.superstringCount%c.SamplingFactor == 0 {
 			c.superstrings <- c.superstring
 		}
 		c.superstringCount++
-		c.superstring = make([]byte, 0, 1024*1024)
-		c.superstringLen = 0
+		c.superstring = superStringsPool.Get().([]byte)[:0]
 	}
-	c.superstringLen += l
 
 	if c.superstringCount%c.SamplingFactor == 0 {
 		for _, a := range word {
@@ -219,13 +224,15 @@ func (c *Compressor) AddWord(word []byte) error {
 }
 
 func (c *Compressor) AddUncompressedWord(word []byte) error {
-	select {
-	case <-c.ctx.Done():
-		return c.ctx.Err()
-	default:
+	c.wordsCount++
+	if c.wordsCount%1024 == 0 {
+		select {
+		case <-c.ctx.Done():
+			return c.ctx.Err()
+		default:
+		}
 	}
 
-	c.wordsCount++
 	return c.uncompressedFile.AppendUncompressed(word)
 }
 
@@ -355,11 +362,21 @@ func (db *DictionaryBuilder) Pop() interface{} {
 }
 
 func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
-	heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
-	if db.Len() > db.softLimit {
-		// Remove the element with smallest score
-		heap.Pop(db)
+	if db.Len()+1 <= db.softLimit {
+		heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
+		return
 	}
+
+	// Remove the element with smallest score
+	elem := heap.Pop(db).(*Pattern)
+	if elem == nil {
+		heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
+		return
+	}
+	elem.word = append(elem.word[:0], chars...)
+	elem.score = score
+	heap.Push(db, elem)
+	return
 }
 
 func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {

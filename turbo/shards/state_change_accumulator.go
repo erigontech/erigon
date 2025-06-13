@@ -19,10 +19,10 @@ package shards
 import (
 	"context"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
@@ -30,8 +30,8 @@ type Accumulator struct {
 	plainStateID       uint64
 	changes            []*remote.StateChange
 	latestChange       *remote.StateChange
-	accountChangeIndex map[libcommon.Address]int // For the latest changes, allows finding account change by account's address
-	storageChangeIndex map[libcommon.Address]map[libcommon.Hash]int
+	accountChangeIndex map[common.Address]int // For the latest changes, allows finding account change by account's address
+	storageChangeIndex map[common.Address]map[common.Hash]int
 }
 
 func NewAccumulator() *Accumulator {
@@ -75,18 +75,18 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	} else {
 		a.latestChange.Direction = remote.Direction_FORWARD
 	}
-	a.accountChangeIndex = make(map[libcommon.Address]int)
-	a.storageChangeIndex = make(map[libcommon.Address]map[libcommon.Hash]int)
+	a.accountChangeIndex = make(map[common.Address]int)
+	a.storageChangeIndex = make(map[common.Address]map[common.Hash]int)
 	if txs != nil {
 		a.latestChange.Txs = make([][]byte, len(txs))
 		for i := range txs {
-			a.latestChange.Txs[i] = libcommon.Copy(txs[i])
+			a.latestChange.Txs[i] = common.Copy(txs[i])
 		}
 	}
 }
 
 // ChangeAccount adds modification of account balance or nonce (or both) to the latest change
-func (a *Accumulator) ChangeAccount(address libcommon.Address, incarnation uint64, data []byte) {
+func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, data []byte) {
 	i, ok := a.accountChangeIndex[address]
 	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
@@ -109,7 +109,7 @@ func (a *Accumulator) ChangeAccount(address libcommon.Address, incarnation uint6
 }
 
 // DeleteAccount marks account as deleted
-func (a *Accumulator) DeleteAccount(address libcommon.Address) {
+func (a *Accumulator) DeleteAccount(address common.Address) {
 	i, ok := a.accountChangeIndex[address]
 	if !ok {
 		// Account has not been changed in the latest block yet
@@ -129,7 +129,7 @@ func (a *Accumulator) DeleteAccount(address libcommon.Address) {
 }
 
 // ChangeCode adds code to the latest change
-func (a *Accumulator) ChangeCode(address libcommon.Address, incarnation uint64, code []byte) {
+func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, code []byte) {
 	i, ok := a.accountChangeIndex[address]
 	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
@@ -151,7 +151,7 @@ func (a *Accumulator) ChangeCode(address libcommon.Address, incarnation uint64, 
 	accountChange.Code = code
 }
 
-func (a *Accumulator) ChangeStorage(address libcommon.Address, incarnation uint64, location libcommon.Hash, data []byte) {
+func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, location common.Hash, data []byte) {
 	i, ok := a.accountChangeIndex[address]
 	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
@@ -167,7 +167,7 @@ func (a *Accumulator) ChangeStorage(address libcommon.Address, incarnation uint6
 	accountChange.Incarnation = incarnation
 	si, ok1 := a.storageChangeIndex[address]
 	if !ok1 {
-		si = make(map[libcommon.Hash]int)
+		si = make(map[common.Hash]int)
 		a.storageChangeIndex[address] = si
 	}
 	j, ok2 := si[location]

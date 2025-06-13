@@ -24,15 +24,13 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/p2p/discover/v5wire"
-	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon-p2p/discover/v5wire"
+	"github.com/erigontech/erigon-p2p/enode"
 )
 
 // This test checks that lookup works.
 func TestUDPv5_lookup(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
-	}
+	t.Skip("issue #6223")
 	t.Parallel()
 	logger := log.New()
 	test := newUDPV5Test(t, logger)

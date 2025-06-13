@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -36,11 +37,11 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/tests/bor/helper"
-	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 const (
@@ -70,6 +71,10 @@ var (
 func TestMiningBenchmark(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
+	}
+	if runtime.GOOS == "darwin" {
+		// We run race detector for medium tests which fails on macOS.
+		t.Skip("issue #15007")
 	}
 
 	//usually 15sec is enough

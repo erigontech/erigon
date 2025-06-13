@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const ChildSenderABI = "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"c
 var ChildSenderBin = "0x608060405234801561001057600080fd5b506040516102b33803806102b383398101604081905261002f91610054565b600080546001600160a01b0319166001600160a01b0392909216919091179055610084565b60006020828403121561006657600080fd5b81516001600160a01b038116811461007d57600080fd5b9392505050565b610220806100936000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80637bf786f81461003b5780638152e5021461006d575b600080fd5b61005b61004936600461012c565b60016020526000908152604090205481565b60405190815260200160405180910390f35b61008061007b36600461015c565b610082565b005b3360009081526001602052604090205461009c8282610175565b33600081815260016020908152604080832094909455905483516001600160a01b039091169181019190915291820152606081018390526100ee906080016040516020818303038152906040526100f2565b5050565b7f8c5261668696ce22758910d05bab8f186d6eb247ceac2af2e82c7dc17669b03681604051610121919061019c565b60405180910390a150565b60006020828403121561013e57600080fd5b81356001600160a01b038116811461015557600080fd5b9392505050565b60006020828403121561016e57600080fd5b5035919050565b8082018082111561019657634e487b7160e01b600052601160045260246000fd5b92915050565b600060208083528351808285015260005b818110156101c9578581018301518582016040015282016101ad565b506000604082860101526040601f19601f830116850101925050509291505056fea26469706673582212202b5e4ad44349bb7aa70272a65afd939d928b9e646835ef4b7e65acff3d07b21364736f6c63430008140033"
 
 // DeployChildSender deploys a new Ethereum contract, binding an instance of ChildSender to it.
-func DeployChildSender(auth *bind.TransactOpts, backend bind.ContractBackend, childStateReceiver_ libcommon.Address) (libcommon.Address, types.Transaction, *ChildSender, error) {
+func DeployChildSender(auth *bind.TransactOpts, backend bind.ContractBackend, childStateReceiver_ common.Address) (common.Address, types.Transaction, *ChildSender, error) {
 	parsed, err := abi.JSON(strings.NewReader(ChildSenderABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(ChildSenderBin), backend, childStateReceiver_)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(ChildSenderBin), backend, childStateReceiver_)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &ChildSender{ChildSenderCaller: ChildSenderCaller{contract: contract}, ChildSenderTransactor: ChildSenderTransactor{contract: contract}, ChildSenderFilterer: ChildSenderFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type ChildSenderTransactorRaw struct {
 }
 
 // NewChildSender creates a new instance of ChildSender, bound to a specific deployed contract.
-func NewChildSender(address libcommon.Address, backend bind.ContractBackend) (*ChildSender, error) {
+func NewChildSender(address common.Address, backend bind.ContractBackend) (*ChildSender, error) {
 	contract, err := bindChildSender(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewChildSender(address libcommon.Address, backend bind.ContractBackend) (*C
 }
 
 // NewChildSenderCaller creates a new read-only instance of ChildSender, bound to a specific deployed contract.
-func NewChildSenderCaller(address libcommon.Address, caller bind.ContractCaller) (*ChildSenderCaller, error) {
+func NewChildSenderCaller(address common.Address, caller bind.ContractCaller) (*ChildSenderCaller, error) {
 	contract, err := bindChildSender(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewChildSenderCaller(address libcommon.Address, caller bind.ContractCaller)
 }
 
 // NewChildSenderTransactor creates a new write-only instance of ChildSender, bound to a specific deployed contract.
-func NewChildSenderTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*ChildSenderTransactor, error) {
+func NewChildSenderTransactor(address common.Address, transactor bind.ContractTransactor) (*ChildSenderTransactor, error) {
 	contract, err := bindChildSender(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewChildSenderTransactor(address libcommon.Address, transactor bind.Contrac
 }
 
 // NewChildSenderFilterer creates a new log filterer instance of ChildSender, bound to a specific deployed contract.
-func NewChildSenderFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*ChildSenderFilterer, error) {
+func NewChildSenderFilterer(address common.Address, filterer bind.ContractFilterer) (*ChildSenderFilterer, error) {
 	contract, err := bindChildSender(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewChildSenderFilterer(address libcommon.Address, filterer bind.ContractFil
 }
 
 // bindChildSender binds a generic wrapper to an already deployed contract.
-func bindChildSender(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindChildSender(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(ChildSenderABI))
 	if err != nil {
 		return nil, err
@@ -195,7 +195,7 @@ func (_ChildSender *ChildSenderTransactorRaw) Transact(opts *bind.TransactOpts, 
 // Sent is a free data retrieval call binding the contract method 0x7bf786f8.
 //
 // Solidity: function sent(address ) view returns(uint256)
-func (_ChildSender *ChildSenderCaller) Sent(opts *bind.CallOpts, arg0 libcommon.Address) (*big.Int, error) {
+func (_ChildSender *ChildSenderCaller) Sent(opts *bind.CallOpts, arg0 common.Address) (*big.Int, error) {
 	var out []interface{}
 	err := _ChildSender.contract.Call(opts, &out, "sent", arg0)
 
@@ -212,14 +212,14 @@ func (_ChildSender *ChildSenderCaller) Sent(opts *bind.CallOpts, arg0 libcommon.
 // Sent is a free data retrieval call binding the contract method 0x7bf786f8.
 //
 // Solidity: function sent(address ) view returns(uint256)
-func (_ChildSender *ChildSenderSession) Sent(arg0 libcommon.Address) (*big.Int, error) {
+func (_ChildSender *ChildSenderSession) Sent(arg0 common.Address) (*big.Int, error) {
 	return _ChildSender.Contract.Sent(&_ChildSender.CallOpts, arg0)
 }
 
 // Sent is a free data retrieval call binding the contract method 0x7bf786f8.
 //
 // Solidity: function sent(address ) view returns(uint256)
-func (_ChildSender *ChildSenderCallerSession) Sent(arg0 libcommon.Address) (*big.Int, error) {
+func (_ChildSender *ChildSenderCallerSession) Sent(arg0 common.Address) (*big.Int, error) {
 	return _ChildSender.Contract.Sent(&_ChildSender.CallOpts, arg0)
 }
 
@@ -354,8 +354,8 @@ type ChildSenderMessageSent struct {
 	Raw     types.Log // Blockchain specific contextual infos
 }
 
-func (_ChildSender *ChildSenderFilterer) MessageSentEventID() libcommon.Hash {
-	return libcommon.HexToHash("0x8c5261668696ce22758910d05bab8f186d6eb247ceac2af2e82c7dc17669b036")
+func (_ChildSender *ChildSenderFilterer) MessageSentEventID() common.Hash {
+	return common.HexToHash("0x8c5261668696ce22758910d05bab8f186d6eb247ceac2af2e82c7dc17669b036")
 }
 
 // FilterMessageSent is a free log retrieval operation binding the contract event 0x8c5261668696ce22758910d05bab8f186d6eb247ceac2af2e82c7dc17669b036.

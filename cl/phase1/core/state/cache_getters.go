@@ -16,9 +16,7 @@
 
 package state
 
-import (
-	libcommon "github.com/erigontech/erigon-lib/common"
-)
+import "github.com/erigontech/erigon-lib/common"
 
 func (b *CachingBeaconState) ValidatorIndexByPubkey(key [48]byte) (uint64, bool) {
 	val, ok := b.publicKeyIndicies[key]
@@ -26,8 +24,8 @@ func (b *CachingBeaconState) ValidatorIndexByPubkey(key [48]byte) (uint64, bool)
 }
 
 // PreviousStateRoot gets the previously saved state root and then deletes it.
-func (b *CachingBeaconState) PreviousStateRoot() libcommon.Hash {
+func (b *CachingBeaconState) PreviousStateRoot() common.Hash {
 	ret := b.previousStateRoot
-	b.previousStateRoot = libcommon.Hash{}
+	b.previousStateRoot = common.Hash{}
 	return ret
 }

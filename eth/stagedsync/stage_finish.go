@@ -20,11 +20,11 @@ import (
 	"context"
 	"encoding/binary"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 )
@@ -145,11 +145,11 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 		if blockNum >= notifyTo { //[from,to)
 			return nil
 		}
-		headerRLP := rawdb.ReadHeaderRLP(tx, libcommon.BytesToHash(hash), blockNum)
+		headerRLP := rawdb.ReadHeaderRLP(tx, common.BytesToHash(hash), blockNum)
 		if headerRLP != nil {
-			headersRlp = append(headersRlp, libcommon.CopyBytes(headerRLP))
+			headersRlp = append(headersRlp, common.CopyBytes(headerRLP))
 		}
-		return libcommon.Stopped(ctx.Done())
+		return common.Stopped(ctx.Done())
 	}); err != nil {
 		logger.Error("RPC Daemon notification failed", "err", err)
 		return err

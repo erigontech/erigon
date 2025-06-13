@@ -32,7 +32,7 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 	clearingRefund := params.SstoreClearsScheduleRefundEIP3529
 
 	current := new(uint256.Int)
-	if err := db.GetState(program, &key, current); err != nil {
+	if err := db.GetState(program, key, current); err != nil {
 		panic(err)
 	}
 
@@ -53,7 +53,7 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 		return cost + params.WarmStorageReadCostEIP2929 // SLOAD_GAS
 	}
 	original := uint256.NewInt(0)
-	if err := db.GetCommittedState(program, &key, original); err != nil {
+	if err := db.GetCommittedState(program, key, original); err != nil {
 		panic(err)
 	}
 	if original.Eq(current) {

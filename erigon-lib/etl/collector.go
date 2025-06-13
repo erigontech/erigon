@@ -22,14 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
-	"time"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -37,6 +34,26 @@ import (
 type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 type simpleLoadFunc func(k, v []byte) error
+
+type Allocator struct {
+	p *sync.Pool
+}
+
+func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
+func (a *Allocator) Put(b Buffer) {
+	if b == nil {
+		return
+	}
+	//if cast, ok := b.(*sortableBuffer); ok {
+	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
+	//}
+	a.p.Put(b)
+}
+func (a *Allocator) Get() Buffer {
+	b := a.p.Get().(Buffer)
+	b.Reset()
+	return b
+}
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
@@ -48,57 +65,30 @@ type Collector struct {
 	logLvl        log.Lvl
 	bufType       int
 	allFlushed    bool
-	autoClean     bool
 	logger        log.Logger
 
 	// sortAndFlushInBackground increase insert performance, but make RAM use less-predictable:
 	//   - if disk is over-loaded - app may have much background threads which waiting for flush - and each thread whill hold own `buf` (can't free RAM until flush is done)
 	//   - enable it only when writing to `etl` is a bottleneck and unlikely to have many parallel collectors (to not overload CPU/Disk)
 	sortAndFlushInBackground bool
+	allocator                *Allocator
 }
 
-// NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
-func NewCollectorFromFiles(logPrefix, tmpdir string, logger log.Logger) (*Collector, error) {
-	if _, err := os.Stat(tmpdir); os.IsNotExist(err) {
-		return nil, nil
-	}
-	dirEntries, err := dir.ReadDir(tmpdir)
-	if err != nil {
-		return nil, fmt.Errorf("collector from files - reading directory %s: %w", tmpdir, err)
-	}
-	if len(dirEntries) == 0 {
-		return nil, nil
-	}
-	dataProviders := make([]dataProvider, len(dirEntries))
-	for i, dirEntry := range dirEntries {
-		fileInfo, err := dirEntry.Info()
-		if err != nil {
-			return nil, fmt.Errorf("collector from files - reading file info %s: %w", dirEntry.Name(), err)
-		}
-		var dataProvider fileDataProvider
-		dataProvider.file, err = os.Open(filepath.Join(tmpdir, fileInfo.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("collector from files - opening file %s: %w", fileInfo.Name(), err)
-		}
-		dataProviders[i] = &dataProvider
-	}
-	return &Collector{dataProviders: dataProviders, allFlushed: true, autoClean: false, logPrefix: logPrefix}, nil
-}
-
-// NewCriticalCollector does not clean up temporary files if loading has failed
-func NewCriticalCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Logger) *Collector {
-	c := NewCollector(logPrefix, tmpdir, sortableBuffer, logger)
-	c.autoClean = false
+func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
+	c := NewCollector(logPrefix, tmpdir, allocator.Get(), logger)
+	c.Allocator(allocator)
 	return c
 }
-
 func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Logger) *Collector {
-	return &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
+	return &Collector{bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 }
 
 func (c *Collector) SortAndFlushInBackground(v bool) { c.sortAndFlushInBackground = v }
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
+	if c.buf == nil && c.allocator != nil {
+		c.buf = c.allocator.Get()
+	}
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
 		return nil
@@ -115,6 +105,10 @@ func (c *Collector) LogLvl(v log.Lvl) *Collector {
 	c.logLvl = v
 	return c
 }
+func (c *Collector) Allocator(a *Allocator) *Collector {
+	c.allocator = a
+	return c
+}
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf.Len() == 0 {
@@ -127,21 +121,23 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		provider = KeepInRAM(c.buf)
 		c.allFlushed = true
 	} else {
-		doFsync := !c.autoClean /* is critical collector */
 		var err error
 
 		if c.sortAndFlushInBackground {
 			fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
-			prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
-			c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()), c.buf)
-
-			provider, err = FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, doFsync, c.logLvl)
+			if c.allocator != nil {
+				c.buf = c.allocator.Get()
+			} else {
+				prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
+				c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()))
+				c.buf.Prealloc(prevLen/8, prevSize/8)
+			}
+			provider, err = FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator)
 			if err != nil {
 				return err
 			}
-			c.buf.Prealloc(prevLen/8, prevSize/8)
 		} else {
-			provider, err = FlushToDisk(c.logPrefix, c.buf, c.tmpdir, doFsync, c.logLvl)
+			provider, err = FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
 			if err != nil {
 				return err
 			}
@@ -167,9 +163,10 @@ func (c *Collector) Flush() error {
 }
 
 func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
-	if c.autoClean {
-		defer c.Close()
+	if c.buf == nil && c.allocator != nil {
+		c.buf = c.allocator.Get()
 	}
+	defer c.Close()
 	args.BufferType = c.bufType
 
 	if !c.allFlushed {
@@ -200,9 +197,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	var canUseAppend bool
 	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
 	i := 0
 	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
@@ -210,19 +204,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
 		}
 		i++
-
-		select {
-		default:
-		case <-logEvery.C:
-			logArs := []interface{}{"into", bucket}
-			if args.LogDetailsLoad != nil {
-				logArs = append(logArs, args.LogDetailsLoad(k, v)...)
-			} else {
-				logArs = append(logArs, "current_prefix", makeCurrentKeyStr(k))
-			}
-
-			c.logger.Log(c.logLvl, fmt.Sprintf("[%s] ETL [2/2] Loading", c.logPrefix), logArs...)
-		}
 
 		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
 			(c.bufType == SortableAppendBuffer && len(v) == 0) || //backward compatibility
@@ -273,19 +254,22 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	return nil
 }
 
-func (c *Collector) reset() {
-	if c.dataProviders != nil {
+func (c *Collector) Close() {
+	if c.buf != nil { //idempotency
+		if c.allocator != nil {
+			c.allocator.Put(c.buf)
+			c.buf = nil
+		} else {
+			c.buf.Reset()
+		}
+	}
+	if c.dataProviders != nil { //idempotency
 		for _, p := range c.dataProviders {
 			p.Dispose()
 		}
 		c.dataProviders = nil
 	}
-	c.buf.Reset()
 	c.allFlushed = false
-}
-
-func (c *Collector) Close() {
-	c.reset()
 }
 
 // mergeSortFiles uses merge-sort to order the elements stored within the slice of providers,
@@ -316,10 +300,14 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 	var prevK, prevV []byte
 
+	var i int
 	// Main loading loop
 	for h.Len() > 0 {
-		if err := common.Stopped(args.Quit); err != nil {
-			return err
+		i++
+		if i%1024 == 0 {
+			if err := common.Stopped(args.Quit); err != nil {
+				return err
+			}
 		}
 
 		element := heapPop(h)

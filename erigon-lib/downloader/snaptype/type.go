@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -36,36 +35,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
-type Version uint8
-
-func ParseVersion(v string) (Version, error) {
-	if strings.HasPrefix(v, "v") {
-		v, err := strconv.ParseUint(v[1:], 10, 8)
-
-		if err != nil {
-			return 0, fmt.Errorf("invalid version: %w", err)
-		}
-
-		return Version(v), nil
-	}
-
-	if len(v) == 0 {
-		return 0, errors.New("invalid version: no prefix")
-	}
-
-	return 0, fmt.Errorf("invalid version prefix: %s", v[0:1])
-}
-
-func (v Version) String() string {
-	return "v" + strconv.Itoa(int(v))
-}
-
-type Versions struct {
-	Current      Version
-	MinSupported Version
-}
+type Version = version.Version
+type Versions = version.Versions
 
 type FirstKeyGetter func(ctx context.Context) uint64
 
@@ -93,6 +67,10 @@ var saltMap = map[string]uint32{}
 var saltLock sync.RWMutex
 
 func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
+	// issue: https://github.com/erigontech/erigon/issues/14300
+	// NOTE: The salt value from this is read after snapshot stage AND the value is not
+	// cached before snapshot stage (which downloads salt-blocks.txt too), and therefore
+	// we're good as far as the above issue is concerned.
 	fpath := filepath.Join(baseDir, "salt-blocks.txt")
 	exists, err := dir.FileExist(fpath)
 	if err != nil {
@@ -137,12 +115,12 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 		return salt, nil
 	}
 
-	saltLock.Lock()
 	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
 	if err != nil {
 		return 0, err
 	}
 
+	saltLock.Lock()
 	saltMap[baseDir] = salt
 	saltLock.Unlock()
 
@@ -254,7 +232,7 @@ func (s snapType) RangeExtractor() RangeExtractor {
 }
 
 func (s snapType) FileName(version Version, from uint64, to uint64) string {
-	if version == 0 {
+	if version.Major == 0 && version.Minor == 0 {
 		version = s.versions.Current
 	}
 
@@ -453,9 +431,10 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 	if err != nil {
 		return err
 	}
+	defer rs.Close()
 	rs.LogLvl(lvl)
 
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.MadvSequential().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()
@@ -514,9 +493,10 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	if err != nil {
 		return err
 	}
+	defer rs.Close()
 	rs.LogLvl(lvl)
 
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.MadvSequential().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()
@@ -554,7 +534,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, indexBuilder IndexBuilder, firstKey FirstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.DefaultCfg, log.LvlTrace, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.DefaultCfg, lvl, logger)
 
 	if err != nil {
 		return lastKeyValue, err

@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const TestRootChainABI = "[{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"
 var TestRootChainBin = "0x6080604052612710600255600160035534801561001b57600080fd5b50610af88061002b6000396000f3fe608060405234801561001057600080fd5b50600436106100ea5760003560e01c8063b87e1b661161008c578063d5b844eb11610066578063d5b844eb1461020b578063ea0688b314610225578063ec7e485514610238578063fbc3dd361461024057600080fd5b8063b87e1b66146101e7578063cc79f97b146101ef578063cf24a0ea146101f857600080fd5b80635391f483116100c85780635391f483146101815780636a791f11146101a25780638d978d88146101b05780639025e64c146101b957600080fd5b80632da25de3146100ef57806341539d4a146100f15780634e43e4951461016e575b600080fd5b005b6101386100ff36600461072b565b6004602081905260009182526040909120805460018201546002830154600384015493909401549193909290916001600160a01b031685565b6040805195865260208601949094529284019190915260608301526001600160a01b0316608082015260a0015b60405180910390f35b6100ef61017c36600461078d565b610249565b61019461018f36600461072b565b61037b565b604051908152602001610165565b6100ef6100ea366004610827565b61019460025481565b6101da60405180604001604052806002815260200161053960f01b81525081565b60405161016591906108b7565b6101946104c5565b61019461053981565b6100ef61020636600461072b565b6104ea565b610213600281565b60405160ff9091168152602001610165565b6100ef610233366004610900565b6105c5565b6101946105f4565b61019460015481565b6000808080808061025c898b018b6109c9565b95509550955095509550955080610539146102b55760405162461bcd60e51b8152602060048201526014602482015273125b9d985b1a5908189bdc8818da185a5b881a5960621b60448201526064015b60405180910390fd5b6102c18686868661060b565b6103055760405162461bcd60e51b8152602060048201526015602482015274494e434f52524543545f4845414445525f4441544160581b60448201526064016102ac565b6002546040805187815260208101879052908101859052600091906001600160a01b038916907fba5de06d22af2685c6c7765f60067f7d2b08c2d29f53cdf14d67f6d1c9bfb5279060600160405180910390a4600254610367906127106106e4565b600255505060016003555050505050505050565b6005546040805162c9effd60e41b815290516000926001600160a01b031691630c9effd09160048083019260209291908290030181865afa1580156103c4573d6000803e3d6000fd5b505050506040513d601f19601f820116820180604052508101906103e89190610a15565b6001600160a01b0316336001600160a01b0316146104525760405162461bcd60e51b815260206004820152602160248201527f554e415554484f52495a45445f4445504f5349545f4d414e414745525f4f4e4c6044820152605960f81b60648201526084016102ac565b6104666003546104606105f4565b906106e4565b60035490915061047690836106e4565b600381905561271010156104c05760405162461bcd60e51b8152602060048201526011602482015270544f4f5f4d414e595f4445504f5349545360781b60448201526064016102ac565b919050565b6000600460006104d36105f4565b815260200190815260200160002060020154905090565b6104f661271082610a32565b156105335760405162461bcd60e51b815260206004820152600d60248201526c496e76616c69642076616c756560981b60448201526064016102ac565b805b60025481101561058a5760008181526004602081905260408220828155600181018390556002810183905560038101929092550180546001600160a01b031916905561058361271082610a6a565b9050610535565b5060028190556001600355604051819033907fca1d8316287f938830e225956a7bb10fd5a1a1506dd2eb3a476751a48811720590600090a350565b806040516020016105d69190610a7d565b60408051601f19818403018152919052805160209091012060015550565b60025460009061060690612710610708565b905090565b60008061271061ffff16600254111561064b576004600061062a6105f4565b81526020019081526020016000206002015460016106489190610a6a565b90505b84811461065c5760009150506106dc565b6040805160a081018252848152602080820193845281830187815242606084019081526001600160a01b038b811660808601908152600280546000908152600496879052979097209551865596516001808701919091559251958501959095555160038401559351910180546001600160a01b0319169190921617905590505b949350505050565b60006106f08284610a6a565b90508281101561070257610702610a99565b92915050565b60008282111561071a5761071a610a99565b6107248284610aaf565b9392505050565b60006020828403121561073d57600080fd5b5035919050565b60008083601f84011261075657600080fd5b50813567ffffffffffffffff81111561076e57600080fd5b60208301915083602082850101111561078657600080fd5b9250929050565b600080600080604085870312156107a357600080fd5b843567ffffffffffffffff808211156107bb57600080fd5b6107c788838901610744565b909650945060208701359150808211156107e057600080fd5b818701915087601f8301126107f457600080fd5b81358181111561080357600080fd5b88602060608302850101111561081857600080fd5b95989497505060200194505050565b6000806000806040858703121561083d57600080fd5b843567ffffffffffffffff8082111561085557600080fd5b61086188838901610744565b9096509450602087013591508082111561087a57600080fd5b5061088787828801610744565b95989497509550505050565b60005b838110156108ae578181015183820152602001610896565b50506000910152565b60208152600082518060208401526108d6816040850160208701610893565b601f01601f19169190910160400192915050565b634e487b7160e01b600052604160045260246000fd5b60006020828403121561091257600080fd5b813567ffffffffffffffff8082111561092a57600080fd5b818401915084601f83011261093e57600080fd5b813581811115610950576109506108ea565b604051601f8201601f19908116603f01168101908382118183101715610978576109786108ea565b8160405282815287602084870101111561099157600080fd5b826020860160208301376000928101602001929092525095945050505050565b6001600160a01b03811681146109c657600080fd5b50565b60008060008060008060c087890312156109e257600080fd5b86356109ed816109b1565b9860208801359850604088013597606081013597506080810135965060a00135945092505050565b600060208284031215610a2757600080fd5b8151610724816109b1565b600082610a4f57634e487b7160e01b600052601260045260246000fd5b500690565b634e487b7160e01b600052601160045260246000fd5b8082018082111561070257610702610a54565b60008251610a8f818460208701610893565b9190910192915050565b634e487b7160e01b600052600160045260246000fd5b8181038181111561070257610702610a5456fea2646970667358221220e8aee67b63507e8745850c7b73e998c6ef6b5d41b72b45f8f1316e80e79a1ec964736f6c63430008140033"
 
 // DeployTestRootChain deploys a new Ethereum contract, binding an instance of TestRootChain to it.
-func DeployTestRootChain(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *TestRootChain, error) {
+func DeployTestRootChain(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *TestRootChain, error) {
 	parsed, err := abi.JSON(strings.NewReader(TestRootChainABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(TestRootChainBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(TestRootChainBin), backend)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &TestRootChain{TestRootChainCaller: TestRootChainCaller{contract: contract}, TestRootChainTransactor: TestRootChainTransactor{contract: contract}, TestRootChainFilterer: TestRootChainFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type TestRootChainTransactorRaw struct {
 }
 
 // NewTestRootChain creates a new instance of TestRootChain, bound to a specific deployed contract.
-func NewTestRootChain(address libcommon.Address, backend bind.ContractBackend) (*TestRootChain, error) {
+func NewTestRootChain(address common.Address, backend bind.ContractBackend) (*TestRootChain, error) {
 	contract, err := bindTestRootChain(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewTestRootChain(address libcommon.Address, backend bind.ContractBackend) (
 }
 
 // NewTestRootChainCaller creates a new read-only instance of TestRootChain, bound to a specific deployed contract.
-func NewTestRootChainCaller(address libcommon.Address, caller bind.ContractCaller) (*TestRootChainCaller, error) {
+func NewTestRootChainCaller(address common.Address, caller bind.ContractCaller) (*TestRootChainCaller, error) {
 	contract, err := bindTestRootChain(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewTestRootChainCaller(address libcommon.Address, caller bind.ContractCalle
 }
 
 // NewTestRootChainTransactor creates a new write-only instance of TestRootChain, bound to a specific deployed contract.
-func NewTestRootChainTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*TestRootChainTransactor, error) {
+func NewTestRootChainTransactor(address common.Address, transactor bind.ContractTransactor) (*TestRootChainTransactor, error) {
 	contract, err := bindTestRootChain(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewTestRootChainTransactor(address libcommon.Address, transactor bind.Contr
 }
 
 // NewTestRootChainFilterer creates a new log filterer instance of TestRootChain, bound to a specific deployed contract.
-func NewTestRootChainFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*TestRootChainFilterer, error) {
+func NewTestRootChainFilterer(address common.Address, filterer bind.ContractFilterer) (*TestRootChainFilterer, error) {
 	contract, err := bindTestRootChain(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewTestRootChainFilterer(address libcommon.Address, filterer bind.ContractF
 }
 
 // bindTestRootChain binds a generic wrapper to an already deployed contract.
-func bindTestRootChain(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindTestRootChain(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(TestRootChainABI))
 	if err != nil {
 		return nil, err
@@ -355,7 +355,7 @@ func (_TestRootChain *TestRootChainCaller) HeaderBlocks(opts *bind.CallOpts, arg
 	Start     *big.Int
 	End       *big.Int
 	CreatedAt *big.Int
-	Proposer  libcommon.Address
+	Proposer  common.Address
 }, error) {
 	var out []interface{}
 	err := _TestRootChain.contract.Call(opts, &out, "headerBlocks", arg0)
@@ -365,7 +365,7 @@ func (_TestRootChain *TestRootChainCaller) HeaderBlocks(opts *bind.CallOpts, arg
 		Start     *big.Int
 		End       *big.Int
 		CreatedAt *big.Int
-		Proposer  libcommon.Address
+		Proposer  common.Address
 	})
 	if err != nil {
 		return *outstruct, err
@@ -375,7 +375,7 @@ func (_TestRootChain *TestRootChainCaller) HeaderBlocks(opts *bind.CallOpts, arg
 	outstruct.Start = *abi.ConvertType(out[1], new(*big.Int)).(**big.Int)
 	outstruct.End = *abi.ConvertType(out[2], new(*big.Int)).(**big.Int)
 	outstruct.CreatedAt = *abi.ConvertType(out[3], new(*big.Int)).(**big.Int)
-	outstruct.Proposer = *abi.ConvertType(out[4], new(libcommon.Address)).(*libcommon.Address)
+	outstruct.Proposer = *abi.ConvertType(out[4], new(common.Address)).(*common.Address)
 
 	return *outstruct, err
 
@@ -389,7 +389,7 @@ func (_TestRootChain *TestRootChainSession) HeaderBlocks(arg0 *big.Int) (struct 
 	Start     *big.Int
 	End       *big.Int
 	CreatedAt *big.Int
-	Proposer  libcommon.Address
+	Proposer  common.Address
 }, error) {
 	return _TestRootChain.Contract.HeaderBlocks(&_TestRootChain.CallOpts, arg0)
 }
@@ -402,7 +402,7 @@ func (_TestRootChain *TestRootChainCallerSession) HeaderBlocks(arg0 *big.Int) (s
 	Start     *big.Int
 	End       *big.Int
 	CreatedAt *big.Int
-	Proposer  libcommon.Address
+	Proposer  common.Address
 }, error) {
 	return _TestRootChain.Contract.HeaderBlocks(&_TestRootChain.CallOpts, arg0)
 }
@@ -822,7 +822,7 @@ func (it *TestRootChainNewHeaderBlockIterator) Close() error {
 
 // TestRootChainNewHeaderBlock represents a NewHeaderBlock event raised by the TestRootChain contract.
 type TestRootChainNewHeaderBlock struct {
-	Proposer      libcommon.Address
+	Proposer      common.Address
 	HeaderBlockId *big.Int
 	Reward        *big.Int
 	Start         *big.Int
@@ -831,14 +831,14 @@ type TestRootChainNewHeaderBlock struct {
 	Raw           types.Log // Blockchain specific contextual infos
 }
 
-func (_TestRootChain *TestRootChainFilterer) NewHeaderBlockEventID() libcommon.Hash {
-	return libcommon.HexToHash("0xba5de06d22af2685c6c7765f60067f7d2b08c2d29f53cdf14d67f6d1c9bfb527")
+func (_TestRootChain *TestRootChainFilterer) NewHeaderBlockEventID() common.Hash {
+	return common.HexToHash("0xba5de06d22af2685c6c7765f60067f7d2b08c2d29f53cdf14d67f6d1c9bfb527")
 }
 
 // FilterNewHeaderBlock is a free log retrieval operation binding the contract event 0xba5de06d22af2685c6c7765f60067f7d2b08c2d29f53cdf14d67f6d1c9bfb527.
 //
 // Solidity: event NewHeaderBlock(address indexed proposer, uint256 indexed headerBlockId, uint256 indexed reward, uint256 start, uint256 end, bytes32 root)
-func (_TestRootChain *TestRootChainFilterer) FilterNewHeaderBlock(opts *bind.FilterOpts, proposer []libcommon.Address, headerBlockId []*big.Int, reward []*big.Int) (*TestRootChainNewHeaderBlockIterator, error) {
+func (_TestRootChain *TestRootChainFilterer) FilterNewHeaderBlock(opts *bind.FilterOpts, proposer []common.Address, headerBlockId []*big.Int, reward []*big.Int) (*TestRootChainNewHeaderBlockIterator, error) {
 
 	var proposerRule []interface{}
 	for _, proposerItem := range proposer {
@@ -863,7 +863,7 @@ func (_TestRootChain *TestRootChainFilterer) FilterNewHeaderBlock(opts *bind.Fil
 // WatchNewHeaderBlock is a free log subscription operation binding the contract event 0xba5de06d22af2685c6c7765f60067f7d2b08c2d29f53cdf14d67f6d1c9bfb527.
 //
 // Solidity: event NewHeaderBlock(address indexed proposer, uint256 indexed headerBlockId, uint256 indexed reward, uint256 start, uint256 end, bytes32 root)
-func (_TestRootChain *TestRootChainFilterer) WatchNewHeaderBlock(opts *bind.WatchOpts, sink chan<- *TestRootChainNewHeaderBlock, proposer []libcommon.Address, headerBlockId []*big.Int, reward []*big.Int) (event.Subscription, error) {
+func (_TestRootChain *TestRootChainFilterer) WatchNewHeaderBlock(opts *bind.WatchOpts, sink chan<- *TestRootChainNewHeaderBlock, proposer []common.Address, headerBlockId []*big.Int, reward []*big.Int) (event.Subscription, error) {
 
 	var proposerRule []interface{}
 	for _, proposerItem := range proposer {
@@ -991,19 +991,19 @@ func (it *TestRootChainResetHeaderBlockIterator) Close() error {
 
 // TestRootChainResetHeaderBlock represents a ResetHeaderBlock event raised by the TestRootChain contract.
 type TestRootChainResetHeaderBlock struct {
-	Proposer      libcommon.Address
+	Proposer      common.Address
 	HeaderBlockId *big.Int
 	Raw           types.Log // Blockchain specific contextual infos
 }
 
-func (_TestRootChain *TestRootChainFilterer) ResetHeaderBlockEventID() libcommon.Hash {
-	return libcommon.HexToHash("0xca1d8316287f938830e225956a7bb10fd5a1a1506dd2eb3a476751a488117205")
+func (_TestRootChain *TestRootChainFilterer) ResetHeaderBlockEventID() common.Hash {
+	return common.HexToHash("0xca1d8316287f938830e225956a7bb10fd5a1a1506dd2eb3a476751a488117205")
 }
 
 // FilterResetHeaderBlock is a free log retrieval operation binding the contract event 0xca1d8316287f938830e225956a7bb10fd5a1a1506dd2eb3a476751a488117205.
 //
 // Solidity: event ResetHeaderBlock(address indexed proposer, uint256 indexed headerBlockId)
-func (_TestRootChain *TestRootChainFilterer) FilterResetHeaderBlock(opts *bind.FilterOpts, proposer []libcommon.Address, headerBlockId []*big.Int) (*TestRootChainResetHeaderBlockIterator, error) {
+func (_TestRootChain *TestRootChainFilterer) FilterResetHeaderBlock(opts *bind.FilterOpts, proposer []common.Address, headerBlockId []*big.Int) (*TestRootChainResetHeaderBlockIterator, error) {
 
 	var proposerRule []interface{}
 	for _, proposerItem := range proposer {
@@ -1024,7 +1024,7 @@ func (_TestRootChain *TestRootChainFilterer) FilterResetHeaderBlock(opts *bind.F
 // WatchResetHeaderBlock is a free log subscription operation binding the contract event 0xca1d8316287f938830e225956a7bb10fd5a1a1506dd2eb3a476751a488117205.
 //
 // Solidity: event ResetHeaderBlock(address indexed proposer, uint256 indexed headerBlockId)
-func (_TestRootChain *TestRootChainFilterer) WatchResetHeaderBlock(opts *bind.WatchOpts, sink chan<- *TestRootChainResetHeaderBlock, proposer []libcommon.Address, headerBlockId []*big.Int) (event.Subscription, error) {
+func (_TestRootChain *TestRootChainFilterer) WatchResetHeaderBlock(opts *bind.WatchOpts, sink chan<- *TestRootChainResetHeaderBlock, proposer []common.Address, headerBlockId []*big.Int) (event.Subscription, error) {
 
 	var proposerRule []interface{}
 	for _, proposerItem := range proposer {

@@ -20,24 +20,28 @@
 package core
 
 import (
+	"fmt"
 	"math/big"
+	"sync"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash,
-	engine consensus.EngineReader, author *libcommon.Address, config *chain.Config) evmtypes.BlockContext {
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
+	engine consensus.EngineReader, author *common.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
-	var beneficiary libcommon.Address
+	var beneficiary common.Address
 	if author == nil {
 		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 	} else {
@@ -51,10 +55,10 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		}
 	}
 
-	var prevRandDao *libcommon.Hash
+	var prevRandDao *common.Hash
 	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
-		prevRandDao = new(libcommon.Hash)
+		prevRandDao = new(common.Hash)
 		*prevRandDao = header.MixDigest
 	}
 
@@ -80,7 +84,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	// assert if network is ARB0 to change pervrandao
 	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
 	if arbOsVersion > chain.ArbosVersion_0 {
-		difficultyHash := libcommon.BigToHash(header.Difficulty)
+		difficultyHash := common.BigToHash(header.Difficulty)
 		prevRandDao = &difficultyHash
 	}
 	return evmtypes.BlockContext{
@@ -116,42 +120,90 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 }
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
-func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uint64) *types.Header) func(n uint64) libcommon.Hash {
-	// Cache will initially contain [refHash.parent],
-	// Then fill up with [refHash.p, refHash.pp, refHash.ppp, ...]
-	var cache []libcommon.Hash
+func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
+	refNumber := ref.Number.Uint64() - 1
+	refHash := ref.ParentHash
+	lastKnownNumber := refNumber
+	lastKnownHash := refHash
 
-	return func(n uint64) libcommon.Hash {
-		// If there's no hash cache yet, make one
-		if len(cache) == 0 {
-			cache = append(cache, ref.ParentHash)
+	// lru.New only returns err on -ve size
+	hashLookupCache, _ := lru.New[uint64, common.Hash](8192)
+	hashLookupCacheLock := sync.Mutex{}
+	hashLookupCache.Add(refNumber, refHash)
+
+	return func(n uint64) (common.Hash, error) {
+		hashLookupCacheLock.Lock()
+		defer hashLookupCacheLock.Unlock()
+
+		if n == lastKnownNumber {
+			//fmt.Println("GH-LN", n, refHash)
+			return lastKnownHash, nil
 		}
-		if idx := ref.Number.Uint64() - n - 1; idx < uint64(len(cache)) {
-			return cache[idx]
+
+		if n == refNumber {
+			//fmt.Println("GH-RF", n, refHash)
+			return refHash, nil
 		}
-		// No luck in the cache, but we can start iterating from the last element we already know
-		lastKnownHash := cache[len(cache)-1]
-		lastKnownNumber := ref.Number.Uint64() - uint64(len(cache))
+
+		if hash, ok := hashLookupCache.Get(n); ok {
+			//fmt.Println("GH-CA", n, hash)
+			return hash, nil
+		}
+
+		if n > lastKnownNumber {
+			if n > refNumber {
+				return common.Hash{}, fmt.Errorf("block number out of range: max=%d", refNumber)
+			}
+			lastKnownNumber = refNumber
+			lastKnownHash = refHash
+		}
 
 		for {
-			header := getHeader(lastKnownHash, lastKnownNumber)
+			for {
+				hash, ok := hashLookupCache.Get(lastKnownNumber - 1)
+
+				if !ok {
+					break
+				}
+
+				lastKnownHash = hash
+				lastKnownNumber = lastKnownNumber - 1
+				if n == lastKnownNumber {
+					//fmt.Println("GH-CA1", lastKnownNumber, lastKnownHash)
+					return lastKnownHash, nil
+				}
+			}
+
+			header, err := func() (*types.Header, error) {
+				hash, num := lastKnownHash, lastKnownNumber
+				hashLookupCacheLock.Unlock()
+				defer hashLookupCacheLock.Lock()
+				return getHeader(hash, num)
+			}()
+
+			if err != nil {
+				return common.Hash{}, err
+			}
 			if header == nil {
 				break
 			}
-			cache = append(cache, header.ParentHash)
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
+			hashLookupCache.Add(lastKnownNumber, lastKnownHash)
+
 			if n == lastKnownNumber {
-				return lastKnownHash
+				//fmt.Println("GH-DB", lastKnownNumber, lastKnownHash)
+				return lastKnownHash, nil
 			}
 		}
-		return libcommon.Hash{}
+
+		return common.Hash{}, nil
 	}
 }
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr libcommon.Address, amount *uint256.Int) (bool, error) {
+func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint256.Int) (bool, error) {
 	balance, err := db.GetBalance(addr)
 	if err != nil {
 		return false, err

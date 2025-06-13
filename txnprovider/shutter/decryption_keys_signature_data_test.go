@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 )
@@ -45,7 +45,7 @@ func TestDecryptionKeysSignatureDataWithInvalidPreimagesLength(t *testing.T) {
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)
 	_, err = sigData.HashSSZ()
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)
-	_, err = sigData.Verify(nil, libcommon.Address{})
+	_, err = sigData.Verify(nil, common.Address{})
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)
 	_, err = sigData.Sign(nil)
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)

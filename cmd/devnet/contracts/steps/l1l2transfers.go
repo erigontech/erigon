@@ -25,15 +25,15 @@ import (
 	"math"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/cmd/devnet/services"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -65,7 +65,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 	stateSender := heimdall.StateSenderContract()
 
 	receiver, _ := scenarios.Param[*contracts.ChildReceiver](ctx, "childReceiver")
-	receiverAddress, _ := scenarios.Param[libcommon.Address](ctx, "childReceiverAddress")
+	receiverAddress, _ := scenarios.Param[common.Address](ctx, "childReceiverAddress")
 
 	receivedChan := make(chan *contracts.ChildReceiverReceived)
 	receiverSubscription, err := receiver.WatchReceived(&bind.WatchOpts{}, receivedChan)
@@ -178,7 +178,7 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 		return nil, err
 	}
 
-	receiverAddress, _ := scenarios.Param[libcommon.Address](ctx, "childReceiverAddress")
+	receiverAddress, _ := scenarios.Param[common.Address](ctx, "childReceiverAddress")
 
 	heimdall := services.Heimdall(ctx)
 
@@ -242,7 +242,7 @@ func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransf
 	stateSender := services.Heimdall(ctx).StateSenderContract()
 
 	receiver, _ := scenarios.Param[*contracts.ChildReceiver](ctx, "childReceiver")
-	receiverAddress, _ := scenarios.Param[libcommon.Address](ctx, "childReceiverAddress")
+	receiverAddress, _ := scenarios.Param[common.Address](ctx, "childReceiverAddress")
 
 	receivedChan := make(chan *contracts.ChildReceiverReceived)
 	receiverSubscription, err := receiver.WatchReceived(&bind.WatchOpts{}, receivedChan)
@@ -325,10 +325,10 @@ func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransf
 					return fmt.Errorf("Failed unpack log args: %w", err)
 				}
 
-				sender, ok := values[0].(libcommon.Address)
+				sender, ok := values[0].(common.Address)
 
 				if !ok {
-					return fmt.Errorf("Unexpected arg type: expected: %T, got %T", libcommon.Address{}, values[0])
+					return fmt.Errorf("Unexpected arg type: expected: %T, got %T", common.Address{}, values[0])
 				}
 
 				sentAmount, ok := values[1].(*big.Int)
@@ -392,7 +392,7 @@ func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches i
 	stateSender := services.Heimdall(ctx).StateSenderContract()
 
 	receiver, _ := scenarios.Param[*contracts.ChildReceiver](ctx, "childReceiver")
-	receiverAddress, _ := scenarios.Param[libcommon.Address](ctx, "childReceiverAddress")
+	receiverAddress, _ := scenarios.Param[common.Address](ctx, "childReceiverAddress")
 
 	receivedChan := make(chan *contracts.ChildReceiverReceived)
 	receiverSubscription, err := receiver.WatchReceived(&bind.WatchOpts{}, receivedChan)
@@ -413,7 +413,7 @@ func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches i
 
 	for b := 0; b < batches; b++ {
 
-		hashes := make([]libcommon.Hash, transfersPerBatch)
+		hashes := make([]common.Hash, transfersPerBatch)
 
 		waiter, cancel := blocks.BlockWaiter(ctx, blocks.CompletionChecker)
 		defer cancel()
@@ -474,10 +474,10 @@ func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches i
 				return fmt.Errorf("Failed unpack log args: %w", err)
 			}
 
-			sender, ok := values[0].(libcommon.Address)
+			sender, ok := values[0].(common.Address)
 
 			if !ok {
-				return fmt.Errorf("Unexpected arg type: expected: %T, got %T", libcommon.Address{}, values[0])
+				return fmt.Errorf("Unexpected arg type: expected: %T, got %T", common.Address{}, values[0])
 			}
 
 			sentAmount, ok := values[1].(*big.Int)

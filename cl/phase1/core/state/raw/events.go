@@ -17,14 +17,14 @@
 package raw
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 type Events struct {
-	OnNewBlockRoot                           func(index int, root libcommon.Hash) error
-	OnNewStateRoot                           func(index int, root libcommon.Hash) error
+	OnNewBlockRoot                           func(index int, root common.Hash) error
+	OnNewStateRoot                           func(index int, root common.Hash) error
 	OnRandaoMixChange                        func(index int, mix [32]byte) error
 	OnNewValidator                           func(index int, v solid.Validator, balance uint64) error
 	OnNewValidatorBalance                    func(index int, balance uint64) error

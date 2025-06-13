@@ -22,10 +22,10 @@ import (
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -39,7 +39,7 @@ func (n NopRequestGenerator) PingErigonRpc() PingResult {
 	return PingResult{}
 }
 
-func (n NopRequestGenerator) GetBalance(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error) {
+func (n NopRequestGenerator) GetBalance(address common.Address, blockRef rpc.BlockReference) (*big.Int, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -51,19 +51,19 @@ func (n NopRequestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetTransactionByHash(hash libcommon.Hash) (*ethapi.RPCTransaction, error) {
+func (n NopRequestGenerator) GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error) {
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetTransactionReceipt(ctx context.Context, hash libcommon.Hash) (*types.Receipt, error) {
+func (n NopRequestGenerator) GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error) {
+func (n NopRequestGenerator) TraceTransaction(hash common.Hash) ([]TransactionTrace, error) {
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetTransactionCount(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error) {
+func (n NopRequestGenerator) GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*big.Int, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -71,8 +71,8 @@ func (n NopRequestGenerator) BlockNumber() (uint64, error) {
 	return 0, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) SendTransaction(signedTx types.Transaction) (libcommon.Hash, error) {
-	return libcommon.Hash{}, ErrNotImplemented
+func (n NopRequestGenerator) SendTransaction(signedTx types.Transaction) (common.Hash, error) {
+	return common.Hash{}, ErrNotImplemented
 }
 
 func (n NopRequestGenerator) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
@@ -99,11 +99,11 @@ func (n NopRequestGenerator) TraceCall(blockRef rpc.BlockReference, args ethapi.
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) DebugAccountAt(blockHash libcommon.Hash, txIndex uint64, account libcommon.Address) (*AccountResult, error) {
+func (n NopRequestGenerator) DebugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error) {
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error) {
+func (n NopRequestGenerator) GetCode(address common.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -115,6 +115,6 @@ func (n NopRequestGenerator) GasPrice() (*big.Int, error) {
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
-	return libcommon.Hash{}, ErrNotImplemented
+func (n NopRequestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
+	return common.Hash{}, ErrNotImplemented
 }

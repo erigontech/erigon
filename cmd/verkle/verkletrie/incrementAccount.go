@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/historyv2"
@@ -90,7 +90,7 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 		if blockNumber > to {
 			break
 		}
-		address := libcommon.BytesToAddress(addressBytes)
+		address := common.BytesToAddress(addressBytes)
 
 		marked, err := marker.IsMarked(addressBytes)
 		if err != nil {

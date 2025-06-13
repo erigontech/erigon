@@ -20,18 +20,19 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"
+
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
-	c := NewJumpDestCache()
+	c := NewJumpDestCache(128)
 	rapid.Check(t, func(t *rapid.T) {
-		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, Config{})
+		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 
 		isEVMSliceTest := rapid.SliceOfN(rapid.Bool(), 1, -1).Draw(t, "tevm")
 		readOnlySliceTest := rapid.SliceOfN(rapid.Bool(), len(isEVMSliceTest), len(isEVMSliceTest)).Draw(t, "readonly")
@@ -57,7 +58,7 @@ func TestInterpreterReadonly(t *testing.T) {
 
 		dummyContract := NewContract(
 			&dummyContractRef{},
-			libcommon.Address{},
+			common.Address{},
 			new(uint256.Int),
 			0,
 			false,
@@ -137,7 +138,7 @@ func TestInterpreterReadonly(t *testing.T) {
 
 func TestReadonlyBasicCases(t *testing.T) {
 	t.Parallel()
-	c := NewJumpDestCache()
+	c := NewJumpDestCache(128)
 
 	cases := []struct {
 		testName          string
@@ -291,7 +292,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 				t.Parallel()
 				readonlySliceTest := testcase.readonlySliceTest
 
-				env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, Config{})
+				env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 
 				readonliesGot := make([]*readOnlyState, len(testcase.readonlySliceTest))
 				isEVMGot := make([]bool, len(evmsTestcase.emvs))
@@ -315,7 +316,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 
 				dummyContract := NewContract(
 					&dummyContractRef{},
-					libcommon.Address{},
+					common.Address{},
 					new(uint256.Int),
 					0,
 					false,
@@ -405,17 +406,17 @@ func newTestSequential(env *EVM, currentIdx *int, readonlies []bool, isEVMCalled
 
 func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	*st.currentIdx++
-	c := NewJumpDestCache()
+	c := NewJumpDestCache(16)
 	nextContract := NewContract(
 		&dummyContractRef{},
-		libcommon.Address{},
+		common.Address{},
 		new(uint256.Int),
 		0,
 		false,
 		c,
 	)
 
-	return run(st.env, nextContract, nil, st.readOnlys[*st.currentIdx])
+	return st.env.interpreter.Run(nextContract, nil, st.readOnlys[*st.currentIdx])
 }
 
 func trace(isEVMSlice []bool, readOnlySlice []*readOnlyState) string {

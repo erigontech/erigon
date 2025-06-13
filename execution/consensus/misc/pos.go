@@ -17,13 +17,13 @@
 package misc
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
 var (
-	ProofOfStakeDifficulty = libcommon.Big0     // PoS block's difficulty is always 0
+	ProofOfStakeDifficulty = common.Big0        // PoS block's difficulty is always 0
 	ProofOfStakeNonce      = types.BlockNonce{} // PoS block's have all-zero nonces
 )
 

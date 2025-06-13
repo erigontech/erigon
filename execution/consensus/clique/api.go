@@ -25,10 +25,10 @@ import (
 
 	"github.com/erigontech/erigon/eth/consensuschain"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -73,7 +73,7 @@ func (api *API) GetSnapshot(ctx context.Context, number *rpc.BlockNumber) (*Snap
 }
 
 // GetSnapshotAtHash retrieves the state snapshot at a given block.
-func (api *API) GetSnapshotAtHash(ctx context.Context, hash libcommon.Hash) (*Snapshot, error) {
+func (api *API) GetSnapshotAtHash(ctx context.Context, hash common.Hash) (*Snapshot, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func (api *API) GetSnapshotAtHash(ctx context.Context, hash libcommon.Hash) (*Sn
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
-func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]libcommon.Address, error) {
+func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]common.Address, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]libc
 }
 
 // GetSignersAtHash retrieves the list of authorized signers at the specified block.
-func (api *API) GetSignersAtHash(ctx context.Context, hash libcommon.Hash) ([]libcommon.Address, error) {
+func (api *API) GetSignersAtHash(ctx context.Context, hash common.Hash) ([]common.Address, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -143,11 +143,11 @@ func (api *API) GetSignersAtHash(ctx context.Context, hash libcommon.Hash) ([]li
 }
 
 // Proposals returns the current proposals the node tries to uphold and vote on.
-func (api *API) Proposals() map[libcommon.Address]bool {
+func (api *API) Proposals() map[common.Address]bool {
 	api.clique.lock.RLock()
 	defer api.clique.lock.RUnlock()
 
-	proposals := make(map[libcommon.Address]bool)
+	proposals := make(map[common.Address]bool)
 	for address, auth := range api.clique.proposals {
 		proposals[address] = auth
 	}
@@ -156,7 +156,7 @@ func (api *API) Proposals() map[libcommon.Address]bool {
 
 // Propose injects a new authorization proposal that the signer will attempt to
 // push through.
-func (api *API) Propose(address libcommon.Address, auth bool) {
+func (api *API) Propose(address common.Address, auth bool) {
 	api.clique.lock.Lock()
 	defer api.clique.lock.Unlock()
 
@@ -165,7 +165,7 @@ func (api *API) Propose(address libcommon.Address, auth bool) {
 
 // Discard drops a currently running proposal, stopping the signer from casting
 // further votes (either for or against).
-func (api *API) Discard(address libcommon.Address) {
+func (api *API) Discard(address common.Address) {
 	api.clique.lock.Lock()
 	defer api.clique.lock.Unlock()
 
@@ -173,9 +173,9 @@ func (api *API) Discard(address libcommon.Address) {
 }
 
 type status struct {
-	InturnPercent float64                   `json:"inturnPercent"`
-	SigningStatus map[libcommon.Address]int `json:"sealerActivity"`
-	NumBlocks     uint64                    `json:"numBlocks"`
+	InturnPercent float64                `json:"inturnPercent"`
+	SigningStatus map[common.Address]int `json:"sealerActivity"`
+	NumBlocks     uint64                 `json:"numBlocks"`
 }
 
 // Status returns the status of the last N blocks,
@@ -209,7 +209,7 @@ func (api *API) Status(ctx context.Context) (*status, error) {
 		start = 1
 		numBlocks = end - start
 	}
-	signStatus := make(map[libcommon.Address]int)
+	signStatus := make(map[common.Address]int)
 	for _, s := range signers {
 		signStatus[s] = 0
 	}

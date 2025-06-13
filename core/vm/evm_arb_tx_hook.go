@@ -3,7 +3,7 @@ package vm
 import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/holiman/uint256"
 )
@@ -82,7 +82,7 @@ func (p DefaultTxProcessor) L1BlockNumber(blockCtx evmtypes.BlockContext) (uint6
 }
 
 func (p DefaultTxProcessor) L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKNumber uint64) (common.Hash, error) {
-	return blockCtx.GetHash(l1BlocKNumber), nil
+	return blockCtx.GetHash(l1BlocKNumber)
 }
 
 func (p DefaultTxProcessor) GasPriceOp(evm *EVM) *uint256.Int {

@@ -4,7 +4,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 )
 

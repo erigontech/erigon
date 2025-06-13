@@ -17,7 +17,6 @@
 package rpchelper
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -32,18 +31,17 @@ import (
 
 	"google.golang.org/grpc"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/concurrent"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
-
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
+	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // Filters holds the state for managing subscriptions to various Ethereum events.
@@ -292,7 +290,7 @@ func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 	if reply == nil || len(reply.RplBlock) == 0 {
 		return
 	}
-	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), b); err != nil {
+	if err := rlp.DecodeBytes(reply.RplBlock, b); err != nil {
 		ff.logger.Warn("OnNewPendingBlock rpc filters, unprocessable payload", "err", err)
 	}
 
@@ -340,7 +338,7 @@ func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
 		return
 	}
 	l := []*types.Log{}
-	if err := rlp.Decode(bytes.NewReader(reply.RplLogs), &l); err != nil {
+	if err := rlp.DecodeBytes(reply.RplLogs, &l); err != nil {
 		ff.logger.Warn("OnNewPendingLogs rpc filters, unprocessable payload", "err", err)
 	}
 	ff.pendingLogsSubs.Range(func(k PendingLogsSubID, v Sub[types.Logs]) error {
@@ -442,8 +440,8 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	id, f := ff.logsSubs.insertLogsFilter(sub)
 
 	// Initialize address and topic maps
-	f.addrs = concurrent.NewSyncMap[libcommon.Address, int]()
-	f.topics = concurrent.NewSyncMap[libcommon.Hash, int]()
+	f.addrs = concurrent.NewSyncMap[common.Address, int]()
+	f.topics = concurrent.NewSyncMap[common.Hash, int]()
 
 	// Handle addresses
 	if len(criteria.Addresses) == 0 {
@@ -469,9 +467,9 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	} else {
 		// Limit the number of topics
 		topicCount := 0
-		allowedTopics := [][]libcommon.Hash{}
+		allowedTopics := [][]common.Hash{}
 		for _, topics := range criteria.Topics {
-			allowedTopicsRow := []libcommon.Hash{}
+			allowedTopicsRow := []common.Hash{}
 			for _, topic := range topics {
 				if ff.config.RpcSubscriptionFiltersMaxTopics == 0 || topicCount < ff.config.RpcSubscriptionFiltersMaxTopics {
 					f.topics.Put(topic, 1)
@@ -619,7 +617,7 @@ func (ff *Filters) onNewHeader(event *remote.SubscribeReply) error {
 	if len(payload) == 0 {
 		return nil
 	}
-	err := rlp.Decode(bytes.NewReader(payload), &header)
+	err := rlp.DecodeBytes(payload, &header)
 	if err != nil {
 		return fmt.Errorf("unprocessable payload: %w", err)
 	}

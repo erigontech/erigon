@@ -576,7 +576,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	//err = state.LoadUnwindInfo(tx)
 	//require.NoError(t, err)
-	//state.UnwindTo(500, libcommon.Hash{})
+	//state.UnwindTo(500, common.Hash{})
 	_, err = state.Run(db, wrap.NewTxContainer(tx, nil), true /* initialCycle */, false)
 	require.NoError(t, err)
 

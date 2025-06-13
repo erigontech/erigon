@@ -288,7 +288,8 @@ var encTests = []encTest{
 	{val: simplestruct{A: 3, B: "foo"}, output: "C50383666F6F"},
 	{val: &recstruct{5, nil}, output: "C205C0"},
 	{val: &recstruct{5, &recstruct{4, &recstruct{3, nil}}}, output: "C605C404C203C0"},
-	{val: &intField{X: 3}, error: "rlp: type int is not RLP-serializable (struct field rlp.intField.X)"},
+	{val: &intField{X: -3}, error: "rlp: type reflect.Value -ve values are not RLP-serializable"},
+	{val: &intField{X: 3}, output: "C103"},
 
 	// struct tag "-"
 	{val: &ignoredField{A: 1, B: 2, C: 3}, output: "C20103"},

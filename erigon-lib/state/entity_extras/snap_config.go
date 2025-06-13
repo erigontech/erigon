@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // aggregate set level snapshot creation config
@@ -97,7 +97,7 @@ func (s *SnapshotConfig) LoadPreverified(pre snapcfg.Preverified) {
 // common representation for any snapshot files
 // seg, .v or indexes and existence filters, accessors.
 type SnapInfo struct {
-	Version  snaptype.Version
+	Version  version.Version
 	From, To uint64
 	Name     string // filename
 	FileType string
@@ -105,7 +105,7 @@ type SnapInfo struct {
 	Ext string // extenstion
 }
 
-type Version = snaptype.Version
+type Version = version.Version
 
 // func (f *SnapInfo) IsSeg() bool      { return strings.Compare(f.Ext, ".seg") == 0 }
 // func (f *SnapInfo) IsV() bool        { return strings.Compare(f.Ext, ".v") == 0 }

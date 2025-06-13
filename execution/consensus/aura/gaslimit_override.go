@@ -21,30 +21,29 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 )
 
 type GasLimitOverride struct {
-	cache *lru.Cache[libcommon.Hash, *uint256.Int]
+	cache *lru.Cache[common.Hash, *uint256.Int]
 }
 
 func NewGasLimitOverride() *GasLimitOverride {
 	// The number of recent block hashes for which the gas limit override is memoized.
 	const GasLimitOverrideCacheCapacity = 10
 
-	cache, err := lru.New[libcommon.Hash, *uint256.Int](GasLimitOverrideCacheCapacity)
+	cache, err := lru.New[common.Hash, *uint256.Int](GasLimitOverrideCacheCapacity)
 	if err != nil {
 		panic("error creating prefetching cache for blocks")
 	}
 	return &GasLimitOverride{cache: cache}
 }
 
-func (pb *GasLimitOverride) Pop(hash libcommon.Hash) *uint256.Int {
+func (pb *GasLimitOverride) Pop(hash common.Hash) *uint256.Int {
 	if val, ok := pb.cache.Get(hash); ok && val != nil {
 		pb.cache.Remove(hash)
 		return val
@@ -52,7 +51,7 @@ func (pb *GasLimitOverride) Pop(hash libcommon.Hash) *uint256.Int {
 	return nil
 }
 
-func (pb *GasLimitOverride) Add(hash libcommon.Hash, b *uint256.Int) {
+func (pb *GasLimitOverride) Add(hash common.Hash, b *uint256.Int) {
 	if b == nil {
 		return
 	}
@@ -77,7 +76,7 @@ func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain consensus.Chai
 	//IsPoSHeader check is necessary as merge.go calls Initialize on AuRa indiscriminately
 	gasLimitOverride := c.HasGasLimitContract() && !misc.IsPoSHeader(header)
 	if gasLimitOverride {
-		syscallPrevHeader := func(addr libcommon.Address, data []byte) ([]byte, error) {
+		syscallPrevHeader := func(addr common.Address, data []byte) ([]byte, error) {
 			return syscallCustom(addr, data, state, chain.GetHeaderByHash(header.ParentHash), true)
 		}
 		blockGasLimit := c.GetBlockGasLimitFromContract(config, syscallPrevHeader)

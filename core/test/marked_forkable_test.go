@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -17,9 +20,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
-	"github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type Num = state.Num
@@ -65,6 +66,7 @@ func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (F
 		state.App_WithFreezer(freezer),
 		state.App_WithPruneFrom(Num(1)),
 		state.App_WithIndexBuilders(builder),
+		state.App_WithUpdateCanonical(),
 	)
 	require.NoError(t, err)
 
@@ -107,7 +109,7 @@ func TestMarked_PutToDb(t *testing.T) {
 	dir, db, log := setup(t)
 	_, ma := setupHeader(t, log, dir, db)
 
-	ma_tx := ma.BeginFilesTx()
+	ma_tx := ma.BeginTemporalTx()
 	defer ma_tx.Close()
 	rwtx, err := db.BeginRw(context.Background())
 	defer rwtx.Rollback()
@@ -150,7 +152,7 @@ func TestPrune(t *testing.T) {
 			cfg := headerId.SnapshotConfig()
 			entries_count = cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
-			ma_tx := ma.BeginFilesTx()
+			ma_tx := ma.BeginTemporalTx()
 			defer ma_tx.Close()
 			rwtx, err := db.BeginRw(ctx)
 			defer rwtx.Rollback()
@@ -189,7 +191,7 @@ func TestPrune(t *testing.T) {
 			require.Equal(t, int64(del), max(0, min(int64(pruneTo), int64(entries_count))-cfgPruneFrom))
 
 			require.NoError(t, rwtx.Commit())
-			ma_tx = ma.BeginFilesTx()
+			ma_tx = ma.BeginTemporalTx()
 			defer ma_tx.Close()
 			rwtx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
@@ -218,7 +220,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	headerId, ma := setupHeader(t, log, dir, db)
 	ctx := context.Background()
 
-	ma_tx := ma.BeginFilesTx()
+	ma_tx := ma.BeginTemporalTx()
 	defer ma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
@@ -249,14 +251,24 @@ func TestBuildFiles_Marked(t *testing.T) {
 	ma_tx.Close()
 
 	ps := background.NewProgressSet()
-	files, err := ma.BuildFiles(ctx, 0, RootNum(entries_count), db, ps)
+	from, to := RootNum(0), RootNum(entries_count)
+	file, built, err := ma.BuildFile(ctx, from, to, db, 1, ps)
 	require.NoError(t, err)
-	require.True(t, len(files) == 1) // 1 snapshot made
+	require.NotNil(t, file)
+	require.True(t, built)
 
-	ma.IntegrateDirtyFiles(files)
+	_, end := file.Range()
+	from, to = RootNum(end), RootNum(entries_count)
+
+	file2, built, err := ma.BuildFile(ctx, from, to, db, 1, ps)
+	require.NoError(t, err)
+	require.Nil(t, file2)
+	require.False(t, built)
+
+	ma.IntegrateDirtyFile(file)
 	ma.RecalcVisibleFiles(RootNum(entries_count))
 
-	ma_tx = ma.BeginFilesTx()
+	ma_tx = ma.BeginTemporalTx()
 	defer ma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
@@ -269,7 +281,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	require.Equal(t, del, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
 
 	require.NoError(t, rwtx.Commit())
-	ma_tx = ma.BeginFilesTx()
+	ma_tx = ma.BeginTemporalTx()
 	defer ma_tx.Close()
 	rwtx, err = db.BeginRw(ctx)
 	require.NoError(t, err)

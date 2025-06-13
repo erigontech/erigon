@@ -23,9 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func makeEntities(count uint64) []*Checkpoint {
@@ -61,7 +60,7 @@ func testEntityFetcher_FetchAllEntities(t *testing.T, count uint64, fetchEntitie
 	expectedEntities := makeEntities(count)
 	servedEntities := make([]*Checkpoint, len(expectedEntities))
 	copy(servedEntities, expectedEntities)
-	libcommon.SliceShuffle(servedEntities)
+	common.SliceShuffle(servedEntities)
 	fetchEntitiesPage := makeFetchEntitiesPage(servedEntities)
 
 	fetcher := NewEntityFetcher[*Checkpoint](

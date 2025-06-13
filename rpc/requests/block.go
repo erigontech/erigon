@@ -21,10 +21,10 @@ import (
 	"encoding/json"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -58,8 +58,8 @@ var BlockNumbers = struct {
 
 type BlockWithTxHashes struct {
 	*types.Header
-	Hash              libcommon.Hash `json:"hash"`
-	TransactionHashes []libcommon.Hash
+	Hash              common.Hash `json:"hash"`
+	TransactionHashes []common.Hash
 }
 
 func (b *BlockWithTxHashes) UnmarshalJSON(input []byte) error {
@@ -69,8 +69,8 @@ func (b *BlockWithTxHashes) UnmarshalJSON(input []byte) error {
 	}
 
 	var bd struct {
-		Hash              libcommon.Hash   `json:"hash"`
-		TransactionHashes []libcommon.Hash `json:"transactions"`
+		Hash              common.Hash   `json:"hash"`
+		TransactionHashes []common.Hash `json:"transactions"`
 	}
 	if err := json.Unmarshal(input, &bd); err != nil {
 		return err
@@ -95,7 +95,7 @@ func (b *Block) UnmarshalJSON(input []byte) error {
 	}
 
 	var bd struct {
-		Hash         libcommon.Hash           `json:"hash"`
+		Hash         common.Hash              `json:"hash"`
 		Transactions []*ethapi.RPCTransaction `json:"transactions"`
 	}
 	if err := json.Unmarshal(input, &bd); err != nil {
@@ -107,7 +107,7 @@ func (b *Block) UnmarshalJSON(input []byte) error {
 	b.Transactions = bd.Transactions
 
 	if bd.Transactions != nil {
-		b.TransactionHashes = make([]libcommon.Hash, len(b.Transactions))
+		b.TransactionHashes = make([]common.Hash, len(b.Transactions))
 		for _, t := range bd.Transactions {
 			b.TransactionHashes = append(b.TransactionHashes, t.Hash)
 		}
@@ -148,12 +148,12 @@ func (reqGen *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum r
 	return &result, nil
 }
 
-func (req *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
+func (req *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
 	var result string
 
 	if err := req.rpcCall(ctx, &result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
-	return libcommon.HexToHash(result), nil
+	return common.HexToHash(result), nil
 }

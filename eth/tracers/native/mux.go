@@ -23,9 +23,9 @@ import (
 	"encoding/json"
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
@@ -62,18 +62,19 @@ func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, e
 	t := &muxTracer{names: names, tracers: objects}
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart:               t.OnTxStart,
-			OnTxEnd:                 t.OnTxEnd,
-			OnEnter:                 t.OnEnter,
-			OnExit:                  t.OnExit,
-			OnOpcode:                t.OnOpcode,
-			OnFault:                 t.OnFault,
-			OnGasChange:             t.OnGasChange,
-			OnBalanceChange:         t.OnBalanceChange,
-			OnNonceChange:           t.OnNonceChange,
-			OnCodeChange:            t.OnCodeChange,
-			OnStorageChange:         t.OnStorageChange,
-			OnLog:                   t.OnLog,
+			OnTxStart:       t.OnTxStart,
+			OnTxEnd:         t.OnTxEnd,
+			OnEnter:         t.OnEnter,
+			OnExit:          t.OnExit,
+			OnOpcode:        t.OnOpcode,
+			OnFault:         t.OnFault,
+			OnGasChange:     t.OnGasChange,
+			OnBalanceChange: t.OnBalanceChange,
+			OnNonceChange:   t.OnNonceChange,
+			OnCodeChange:    t.OnCodeChange,
+			OnStorageChange: t.OnStorageChange,
+			OnLog:           t.OnLog,
+
 			CaptureArbitrumTransfer: t.CaptureArbitrumTransfer,
 		},
 		GetResult: t.GetResult,
@@ -105,7 +106,7 @@ func (t *muxTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason)
 	}
 }
 
-func (t *muxTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *muxTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	for _, t := range t.tracers {
 		if t.OnEnter != nil {
 			t.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
@@ -121,7 +122,7 @@ func (t *muxTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, 
 	}
 }
 
-func (t *muxTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+func (t *muxTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	for _, t := range t.tracers {
 		if t.OnTxStart != nil {
 			t.OnTxStart(env, tx, from)
@@ -137,7 +138,7 @@ func (t *muxTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	}
 }
 
-func (t *muxTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+func (t *muxTracer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	for _, t := range t.tracers {
 		if t.OnBalanceChange != nil {
 			t.OnBalanceChange(a, prev, new, reason)
@@ -145,7 +146,7 @@ func (t *muxTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int,
 	}
 }
 
-func (t *muxTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {
+func (t *muxTracer) OnNonceChange(a common.Address, prev, new uint64) {
 	for _, t := range t.tracers {
 		if t.OnNonceChange != nil {
 			t.OnNonceChange(a, prev, new)
@@ -153,7 +154,7 @@ func (t *muxTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {
 	}
 }
 
-func (t *muxTracer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+func (t *muxTracer) OnCodeChange(a common.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
 	for _, t := range t.tracers {
 		if t.OnCodeChange != nil {
 			t.OnCodeChange(a, prevCodeHash, prev, codeHash, code)
@@ -161,7 +162,7 @@ func (t *muxTracer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Has
 	}
 }
 
-func (t *muxTracer) OnStorageChange(addr libcommon.Address, slot *libcommon.Hash, prev uint256.Int, new uint256.Int) {
+func (t *muxTracer) OnStorageChange(addr common.Address, slot common.Hash, prev uint256.Int, new uint256.Int) {
 	for _, t := range t.tracers {
 		if t.OnStorageChange != nil {
 			t.OnStorageChange(addr, slot, prev, new)
@@ -177,7 +178,7 @@ func (t *muxTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *muxTracer) CaptureArbitrumStorageGet(key libcommon.Hash, depth int, before bool) {
+func (t *muxTracer) CaptureArbitrumStorageGet(key common.Hash, depth int, before bool) {
 	for _, t := range t.tracers {
 		if t.CaptureArbitrumStorageGet != nil {
 			t.CaptureArbitrumStorageGet(key, depth, before)
@@ -185,7 +186,7 @@ func (t *muxTracer) CaptureArbitrumStorageGet(key libcommon.Hash, depth int, bef
 	}
 }
 
-func (t *muxTracer) CaptureArbitrumStorageSet(key, value libcommon.Hash, depth int, before bool) {
+func (t *muxTracer) CaptureArbitrumStorageSet(key, value common.Hash, depth int, before bool) {
 	for _, t := range t.tracers {
 		if t.CaptureArbitrumStorageSet != nil {
 			t.CaptureArbitrumStorageSet(key, value, depth, before)
@@ -193,7 +194,7 @@ func (t *muxTracer) CaptureArbitrumStorageSet(key, value libcommon.Hash, depth i
 	}
 }
 
-func (t *muxTracer) CaptureArbitrumTransfer(from, to *libcommon.Address, value *uint256.Int, before bool, reason string) {
+func (t *muxTracer) CaptureArbitrumTransfer(from, to *common.Address, value *uint256.Int, before bool, reason string) {
 	for _, t := range t.tracers {
 		if t.CaptureArbitrumTransfer != nil {
 			t.CaptureArbitrumTransfer(from, to, value, before, reason)

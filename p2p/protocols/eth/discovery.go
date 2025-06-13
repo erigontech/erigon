@@ -22,10 +22,10 @@ package eth
 import (
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/forkid"
+	"github.com/erigontech/erigon-p2p/enr"
+	"github.com/erigontech/erigon-p2p/forkid"
 )
 
 // enrEntry is the ENR entry which advertises `eth` protocol on the discovery.
@@ -42,7 +42,7 @@ func (e enrEntry) ENRKey() string {
 }
 
 // CurrentENREntryFromForks constructs an `eth` ENR entry based on the current state of the chain.
-func CurrentENREntryFromForks(heightForks, timeForks []uint64, genesisHash libcommon.Hash, headHeight, headTime uint64) *enrEntry {
+func CurrentENREntryFromForks(heightForks, timeForks []uint64, genesisHash common.Hash, headHeight, headTime uint64) *enrEntry {
 	return &enrEntry{
 		ForkID: forkid.NewIDFromForks(heightForks, timeForks, genesisHash, headHeight, headTime),
 	}

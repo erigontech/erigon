@@ -23,8 +23,8 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc/requests"
 	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
@@ -42,9 +42,9 @@ func NewTxnInclusionVerifier(rpcApiClient requests.RequestGenerator) TxnInclusio
 func (v TxnInclusionVerifier) VerifyTxnsInclusion(
 	ctx context.Context,
 	payload *enginetypes.ExecutionPayload,
-	inclusions ...libcommon.Hash,
+	inclusions ...common.Hash,
 ) error {
-	inclusionHashes := mapset.NewSet[libcommon.Hash](inclusions...)
+	inclusionHashes := mapset.NewSet[common.Hash](inclusions...)
 	for i, txnBytes := range payload.Transactions {
 		txn, err := types.DecodeTransaction(txnBytes)
 		if err != nil {
@@ -68,7 +68,7 @@ func (v TxnInclusionVerifier) VerifyTxnsInclusion(
 	}
 
 	err := errors.New("txns not found in block")
-	inclusionHashes.Each(func(txnHash libcommon.Hash) bool {
+	inclusionHashes.Each(func(txnHash common.Hash) bool {
 		err = fmt.Errorf("%w: %s", err, txnHash)
 		return true // continue
 	})
@@ -80,7 +80,7 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 	payload *enginetypes.ExecutionPayload,
 	inclusions ...OrderedInclusion,
 ) error {
-	orderedInclusions := make(map[uint64]libcommon.Hash, len(inclusions))
+	orderedInclusions := make(map[uint64]common.Hash, len(inclusions))
 	for _, inclusion := range inclusions {
 		orderedInclusions[inclusion.TxnIndex] = inclusion.TxnHash
 	}
@@ -121,6 +121,6 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 }
 
 type OrderedInclusion struct {
-	TxnHash  libcommon.Hash
+	TxnHash  common.Hash
 	TxnIndex uint64
 }

@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cmd/snapshots/flags"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -54,11 +55,11 @@ var (
 		Required: false,
 	}
 
-	VersionFlag = cli.IntFlag{
+	VersionFlag = cli.StringFlag{
 		Name:     "version",
 		Usage:    `File versions to copy`,
 		Required: false,
-		Value:    0,
+		Value:    "0.0",
 	}
 )
 
@@ -183,10 +184,10 @@ func copy(cliCtx *cli.Context) error {
 
 	var firstBlock, lastBlock uint64
 
-	version := cliCtx.Int(VersionFlag.Name)
+	versionStr := cliCtx.String(VersionFlag.Name)
 
-	if version != 0 {
-		dst.Version = snaptype.Version(version) //nolint:govet
+	if versionStr != "" && versionStr != "0.0" {
+		dst.Version, _ = version.ParseVersion("v" + versionStr) //nolint:govet
 	}
 
 	if cliCtx.Args().Len() > pos {
@@ -328,7 +329,7 @@ func selectFiles(entries []fs.DirEntry, version snaptype.Version, firstBlock, la
 
 			switch {
 			case snapInfo != nil && snapInfo.Type() != nil:
-				if (version == 0 || version == snapInfo.Version()) &&
+				if (version.IsZero() || version == snapInfo.Version()) &&
 					(firstBlock == 0 || snapInfo.From() >= firstBlock) &&
 					(lastBlock == 0 || snapInfo.From() < lastBlock) {
 

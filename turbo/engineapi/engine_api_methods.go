@@ -1,10 +1,26 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package engineapi
 
 import (
 	"context"
 	"encoding/binary"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/params"
 
@@ -24,10 +40,12 @@ var ourCapabilities = []string{
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
 	"engine_getPayloadV4",
+	"engine_getPayloadV5",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
+	"engine_getBlobsV2",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -74,6 +92,14 @@ func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes
 	return e.getPayload(ctx, decodedPayloadId, clparams.ElectraVersion)
 }
 
+// Same as [GetPayloadV4], but returning BlobsBundleV2 instead of BlobsBundleV1
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#engine_getpayloadv5
+func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	e.logger.Info("Received GetPayloadV5", "payloadId", decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.FuluVersion)
+}
+
 // Updates the forkchoice state after validating the headBlockHash
 // Additionally, builds and returns a unique identifier for an initial version of a payload
 // (asynchronously updated with transactions), if payloadAttributes is not nil and passes validation
@@ -109,14 +135,14 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, clparams.DenebVersion)
 }
 
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
 	// TODO(racytech): add proper version or refactor this part
 	// add all version ralated checks here so the newpayload doesn't have to deal with checks
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
@@ -124,7 +150,7 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 
 // Returns an array of execution payload bodies referenced by their block hashes
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1
-func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
+func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
 	return e.getPayloadBodiesByHash(ctx, hashes)
 }
 
@@ -168,7 +194,26 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	return ourCapabilities
 }
 
-func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Hash) ([]*engine_types.BlobAndProofV1, error) {
+func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	return e.getBlobs(ctx, blobHashes)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.CapellaVersion)
+	if err != nil {
+		return nil, err
+	}
+	if ret, ok := resp.([]*engine_types.BlobAndProofV1); ok {
+		return ret, err
+	}
+	return nil, err
+}
+
+func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
+	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
+	if err != nil {
+		return nil, err
+	}
+	if ret, ok := resp.([]*engine_types.BlobAndProofV2); ok {
+		return ret, err
+	}
+	return nil, err
 }

@@ -22,15 +22,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/core/types"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
 )
 
@@ -49,9 +46,9 @@ func createLog() *remote.SubscribeLogsReply {
 }
 
 var (
-	address1     = libcommon.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	address1     = common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	address1H160 = gointerfaces.ConvertAddressToH160(address1)
-	topic1       = libcommon.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	topic1       = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	topic1H256   = gointerfaces.ConvertHashToH256(topic1)
 )
 
@@ -81,11 +78,11 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 	config := FiltersConfig{}
 	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
-	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
+	subbedTopic := common.BytesToHash([]byte{10, 20})
 
 	criteria := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]libcommon.Hash{{subbedTopic}},
+		Topics:    [][]common.Hash{{subbedTopic}},
 	}
 
 	outChan, _ := f.SubscribeLogs(10, criteria)
@@ -114,12 +111,12 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 	config := FiltersConfig{}
 	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
-	var nilTopic libcommon.Hash
-	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
+	var nilTopic common.Hash
+	subbedTopic := common.BytesToHash([]byte{10, 20})
 
 	criteria := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]libcommon.Hash{{nilTopic, subbedTopic, nilTopic}},
+		Topics:    [][]common.Hash{{nilTopic, subbedTopic, nilTopic}},
 	}
 
 	outChan, _ := f.SubscribeLogs(10, criteria)
@@ -150,11 +147,11 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]libcommon.Hash{},
+		Topics:    [][]common.Hash{},
 	}
 	criteria2 := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]libcommon.Hash{{topic1}},
+		Topics:    [][]common.Hash{{topic1}},
 	}
 
 	chan1, _ := f.SubscribeLogs(256, criteria1)
@@ -191,15 +188,15 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]libcommon.Hash{},
+		Topics:    [][]common.Hash{},
 	}
 	criteria2 := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]libcommon.Hash{{topic1}},
+		Topics:    [][]common.Hash{{topic1}},
 	}
 	criteria3 := filters.FilterCriteria{
-		Addresses: []libcommon.Address{libcommon.HexToAddress(address1.String())},
-		Topics:    [][]libcommon.Hash{},
+		Addresses: []common.Address{common.HexToAddress(address1.String())},
+		Topics:    [][]common.Hash{},
 	}
 
 	chan1, _ := f.SubscribeLogs(256, criteria1)
@@ -222,7 +219,7 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	}
 
 	// now a log that the subscription cares about
-	var a libcommon.Address
+	var a common.Address
 	a.SetBytes(address1.Bytes())
 	log.Address = gointerfaces.ConvertAddressToH160(a)
 
@@ -268,8 +265,8 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 
 	// first request has no filters
 	criteria1 := filters.FilterCriteria{
-		Addresses: []libcommon.Address{},
-		Topics:    [][]libcommon.Hash{},
+		Addresses: []common.Address{},
+		Topics:    [][]common.Hash{},
 	}
 	_, id1 := f.SubscribeLogs(1, criteria1)
 
@@ -283,8 +280,8 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 
 	// second request filters on an address
 	criteria2 := filters.FilterCriteria{
-		Addresses: []libcommon.Address{address1},
-		Topics:    [][]libcommon.Hash{},
+		Addresses: []common.Address{address1},
+		Topics:    [][]common.Hash{},
 	}
 	_, id2 := f.SubscribeLogs(1, criteria2)
 
@@ -301,8 +298,8 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 
 	// third request filters on topic
 	criteria3 := filters.FilterCriteria{
-		Addresses: []libcommon.Address{},
-		Topics:    [][]libcommon.Hash{{topic1}},
+		Addresses: []common.Address{},
+		Topics:    [][]common.Hash{{topic1}},
 	}
 	_, id3 := f.SubscribeLogs(1, criteria3)
 
@@ -390,7 +387,7 @@ func TestFilters_AddLogs(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: tt.maxLogs}
 			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 			logID := LogsSubID("test-log")
-			logEntry := &types.Log{Address: libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}
+			logEntry := &types.Log{Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}
 
 			for i := 0; i < tt.numToAdd; i++ {
 				f.AddLogs(logID, logEntry)
@@ -459,8 +456,8 @@ func TestFilters_AddPendingTxs(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxTxs: tt.maxTxs}
 			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 			txID := PendingTxsSubID("test-tx")
-			var txn types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
-			txn, _ = txn.WithSignature(*types.LatestSignerForChainID(nil), libcommon.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
+			var txn types.Transaction = types.NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
+			txn, _ = txn.WithSignature(*types.LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 
 			// Testing for panic
 			if tt.name == "TriggerPanic" {

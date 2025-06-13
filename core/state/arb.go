@@ -13,8 +13,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/lru"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 )
@@ -93,10 +93,10 @@ type IntraBlockStateArbitrum interface {
 	// SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription
 	SetArbFinalizer(f func(*ArbitrumExtraData))
 
-	SetTxContext(ti int)
+	SetTxContext(bn uint64, ti int)
 	IntermediateRoot(_ bool) common.Hash
 	GetReceiptsByHash(hash common.Hash) types.Receipts
-	SetBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error
+	SetBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error
 	Commit(bn uint64, _ bool) (common.Hash, error)
 	FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error
 	GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs

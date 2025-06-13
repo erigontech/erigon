@@ -26,20 +26,22 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/jinzhu/copier"
+
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/execution/consensus/clique"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -58,7 +60,7 @@ func newTesterAccountPool() *testerAccountPool {
 // checkpoint creates a Clique checkpoint signer section from the provided list
 // of authorized signers and embeds it into the provided header.
 func (ap *testerAccountPool) checkpoint(header *types.Header, signers []string) {
-	auths := make([]libcommon.Address, len(signers))
+	auths := make([]common.Address, len(signers))
 	for i, signer := range signers {
 		auths[i] = ap.address(signer)
 	}
@@ -70,10 +72,10 @@ func (ap *testerAccountPool) checkpoint(header *types.Header, signers []string) 
 
 // address retrieves the Ethereum address of a tester account by label, creating
 // a new account if no previous one exists yet.
-func (ap *testerAccountPool) address(account string) libcommon.Address {
+func (ap *testerAccountPool) address(account string) common.Address {
 	// Return the zero account for non-addresses
 	if account == "" {
-		return libcommon.Address{}
+		return common.Address{}
 	}
 	// Ensure we have a persistent key for the account
 	if ap.accounts[account] == nil {
@@ -404,7 +406,7 @@ func TestClique(t *testing.T) {
 			// Create the account pool and generate the initial set of signers
 			accounts := newTesterAccountPool()
 
-			signers := make([]libcommon.Address, len(tt.signers))
+			signers := make([]common.Address, len(tt.signers))
 			for j, signer := range tt.signers {
 				signers[j] = accounts.address(signer)
 			}
@@ -425,7 +427,8 @@ func TestClique(t *testing.T) {
 			}
 
 			// Assemble a chain of headers from the cast votes
-			config := *params.AllCliqueProtocolChanges
+			var config chain.Config
+			copier.Copy(&config, params.AllCliqueProtocolChanges)
 			config.Clique = &chain.CliqueConfig{
 				Period: 1,
 				Epoch:  tt.epoch,
@@ -519,7 +522,7 @@ func TestClique(t *testing.T) {
 			var snap *clique.Snapshot
 			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 				chainReader := stagedsync.ChainReader{
-					Cfg:         config,
+					Cfg:         &config,
 					Db:          tx,
 					BlockReader: m.BlockReader,
 					Logger:      logger,
@@ -537,7 +540,7 @@ func TestClique(t *testing.T) {
 			}
 
 			// Verify the final list of signers against the expected ones
-			signers = make([]libcommon.Address, len(tt.results))
+			signers = make([]common.Address, len(tt.results))
 			for j, signer := range tt.results {
 				signers[j] = accounts.address(signer)
 			}

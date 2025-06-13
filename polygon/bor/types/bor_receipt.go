@@ -21,10 +21,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 const BorTxKeyPrefix string = "matic-bor-receipt-"
@@ -35,22 +35,22 @@ func BorReceiptKey(number uint64) []byte {
 }
 
 // ComputeBorTxHash get derived txn hash from block number and hash
-func ComputeBorTxHash(blockNumber uint64, blockHash libcommon.Hash) libcommon.Hash {
+func ComputeBorTxHash(blockNumber uint64, blockHash common.Hash) common.Hash {
 	txKeyPlain := make([]byte, 0, len(BorTxKeyPrefix)+8+32)
 	txKeyPlain = append(txKeyPlain, BorTxKeyPrefix...)
 	txKeyPlain = append(txKeyPlain, BorReceiptKey(blockNumber)...)
 	txKeyPlain = append(txKeyPlain, blockHash.Bytes()...)
-	return libcommon.BytesToHash(crypto.Keccak256(txKeyPlain))
+	return common.BytesToHash(crypto.Keccak256(txKeyPlain))
 }
 
 // NewBorTransaction create new bor transaction for bor receipt
 func NewBorTransaction() *types.LegacyTx {
-	return types.NewTransaction(0, libcommon.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 0))
+	return types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 0))
 }
 
 // DeriveFieldsForBorReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func DeriveFieldsForBorReceipt(receipt *types.Receipt, blockHash libcommon.Hash, blockNumber uint64, receipts types.Receipts) {
+func DeriveFieldsForBorReceipt(receipt *types.Receipt, blockHash common.Hash, blockNumber uint64, receipts types.Receipts) {
 	txHash := ComputeBorTxHash(blockNumber, blockHash)
 	txIndex := uint(len(receipts))
 

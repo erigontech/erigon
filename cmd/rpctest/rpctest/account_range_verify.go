@@ -28,7 +28,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -91,7 +91,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				spew.Dump(ar)
 				return fmt.Errorf("response error %v", ar.Error)
 			}
-			var addr libcommon.Address
+			var addr common.Address
 			var acc state.DumpAccount
 			for addr, acc = range ar.Result.Accounts {
 				i++
@@ -172,14 +172,14 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 	tgMissed := 0
 	gethMissed := 0
 	for {
-		cmp, br := libcommon.KeyCmp(tgKey, gethKey)
+		cmp, br := common.KeyCmp(tgKey, gethKey)
 		if br {
 			break
 		}
 		if cmp == 0 {
 			if !bytes.Equal(tgVal, gethVal) {
 				errsNum++
-				fmt.Println(libcommon.Bytes2Hex(tgKey))
+				fmt.Println(common.Bytes2Hex(tgKey))
 				fmt.Println(string(tgVal))
 				fmt.Println(string(gethVal))
 			}

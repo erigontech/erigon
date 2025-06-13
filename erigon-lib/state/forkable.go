@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -28,9 +29,14 @@ type Forkable[T ForkableBaseTxI] struct {
 	*ProtoForkable
 
 	canonicalTbl string // for marked structures
-	valsTbl      string
 
-	ts4Bytes   bool               // caplin entities are encoded as 4 bytes
+	// whether this forkable is responsible for updating the canonical table (multiple forkables can share the same canonical table)
+	// only one forkable should be responsible for updating the canonical table.
+	updateCanonical bool
+
+	valsTbl string
+
+	//	ts4Bytes   bool               // caplin entities are encoded as 4 bytes
 	pruneFrom  Num                // should this be rootnum? Num is fine for now.
 	beginTxGen func(files bool) T // returns a tx, with "files ro tx" or not
 
@@ -51,15 +57,15 @@ func App_WithIndexBuilders(builders ...AccessorIndexBuilder) AppOpts {
 	}
 }
 
-func App_WithTs4Bytes(ts4Bytes bool) AppOpts {
-	return func(a ForkableConfig) {
-		a.SetTs4Bytes(ts4Bytes)
-	}
-}
-
 func App_WithPruneFrom(pruneFrom Num) AppOpts {
 	return func(a ForkableConfig) {
 		a.SetPruneFrom(pruneFrom)
+	}
+}
+
+func App_WithUpdateCanonical() AppOpts {
+	return func(a ForkableConfig) {
+		a.UpdateCanonicalTbl()
 	}
 }
 
@@ -157,10 +163,32 @@ func (a *Forkable[T]) PruneFrom() Num {
 }
 
 func (a *Forkable[T]) encTs(ts ee.EncToBytesI) []byte {
-	return ts.EncToBytes(!a.ts4Bytes)
+	return ts.EncToBytes(true)
 }
 
-func (a *Forkable[T]) BeginFilesTx() T {
+func (a *Forkable[MarkedTxI]) valsTblKey(ts Num, hash []byte) []byte {
+	// key for valsTbl
+	// relevant only for marked forkable
+	// assuming hash is common.Hash which is 32 bytes
+	const HashBytes = 32
+	k := make([]byte, 8+HashBytes)
+	binary.BigEndian.PutUint64(k, uint64(ts))
+	copy(k[8:], hash)
+	return k
+}
+
+func (a *Forkable[MarkedTxI]) valsTblKey2(ts []byte, hash []byte) []byte {
+	// key for valsTbl
+	// relevant only for marked forkable
+	// assuming hash is common.Hash which is 32 bytes
+	const HashBytes = 32
+	k := make([]byte, 8+HashBytes)
+	copy(k, ts)
+	copy(k[8:], hash)
+	return k
+}
+
+func (a *Forkable[T]) BeginTemporalTx() T {
 	return a.beginTxGen(true)
 }
 
@@ -180,8 +208,18 @@ func (a *Forkable[T]) SetPruneFrom(pruneFrom Num) {
 	a.pruneFrom = pruneFrom
 }
 
-func (a *Forkable[T]) SetTs4Bytes(ts4Bytes bool) {
-	a.ts4Bytes = ts4Bytes
+func (a *Forkable[T]) UpdateCanonicalTbl() {
+	a.updateCanonical = true
+}
+
+// align the snapshots of this forkable entity
+// with others members of entity set
+func (a *Forkable[T]) Aligned(aligned bool) {
+	a.unaligned = !aligned
+}
+
+func (a *Forkable[T]) Repo() *SnapshotRepo {
+	return a.snaps
 }
 
 // marked tx
@@ -213,17 +251,19 @@ func (m *MarkedTx) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 		}
 		hash = canHash
 	}
-	return tx.GetOne(a.valsTbl, m.combK(num, hash))
+	return tx.GetOne(a.valsTbl, m.ap.valsTblKey(num, hash))
 }
 
 func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
 	// can then val
 	a := m.ap
-	if err := tx.Append(a.canonicalTbl, a.encTs(num), hash); err != nil {
-		return err
+	if m.ap.updateCanonical {
+		if err := tx.Append(a.canonicalTbl, a.encTs(num), hash); err != nil {
+			return err
+		}
 	}
 
-	key := m.combK(num, hash)
+	key := m.ap.valsTblKey(num, hash)
 	return tx.Put(a.valsTbl, key, val)
 }
 
@@ -253,14 +293,19 @@ func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.Rw
 	return ee.DeleteRangeFromTbl(a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, tx)
 }
 
-func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
-	// relevant only for marked forkable
-	// assuming hash is common.Hash which is 32 bytes
-	const HashBytes = 32
-	k := make([]byte, 8+HashBytes)
-	binary.BigEndian.PutUint64(k, uint64(ts))
-	copy(k[8:], hash)
-	return k
+func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
+	a := m.ap
+	lastNum, _ := kv.LastKey(tx, a.canonicalTbl)
+	if len(lastNum) == 0 {
+		return false, nil
+	}
+	iLastNum := binary.BigEndian.Uint64(lastNum)
+	eto, err := a.rel.RootNum2Num(to, tx)
+	if err != nil {
+		return false, fmt.Errorf("err RootNum2Num %v %w", to, err)
+	}
+
+	return iLastNum+1 >= eto.Uint64(), nil
 }
 
 func (m *MarkedTx) DebugFiles() ForkableFilesTxI {
@@ -319,6 +364,21 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)
 	return ee.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
+}
+
+func (m *UnmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
+	a := m.ap
+	lastNum, _ := kv.LastKey(tx, a.valsTbl)
+	if len(lastNum) == 0 {
+		return false, nil
+	}
+	iLastNum := binary.BigEndian.Uint64(lastNum)
+	eto, err := a.rel.RootNum2Num(to, tx)
+	if err != nil {
+		return false, fmt.Errorf("err RootNum2Num %v %w", to, err)
+	}
+
+	return iLastNum >= eto.Uint64(), nil
 }
 
 func (m *UnmarkedTx) DebugFiles() ForkableFilesTxI {
@@ -390,6 +450,21 @@ func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 func (m *BufferedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	// no op
 	return nil
+}
+
+func (m *BufferedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
+	a := m.ap
+	lastNum, _ := kv.LastKey(tx, a.valsTbl)
+	if len(lastNum) == 0 {
+		return false, nil
+	}
+	iLastNum := binary.BigEndian.Uint64(lastNum)
+	eto, err := a.rel.RootNum2Num(to, tx)
+	if err != nil {
+		return false, fmt.Errorf("err RootNum2Num %v %w", to, err)
+	}
+
+	return iLastNum >= eto.Uint64(), nil
 }
 
 func (m *BufferedTx) Close() {

@@ -30,11 +30,11 @@ import (
 	"github.com/holiman/uint256"
 
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 )
 
 // SignerFn is a signer function callback when a contract requires a method to
@@ -48,7 +48,7 @@ type CallOpts struct {
 	BlockNumber *big.Int        // Optional the block number on which the call should be performed
 	Context     context.Context // Network context to support cancellation and timeouts (nil = no timeout)
 
-	BlockHash   common.Hash     // Arbitrum; Optional the block hash on which the call should be performed
+	BlockHash common.Hash // Arbitrum; Optional the block hash on which the call should be performed
 }
 
 // TransactOpts is the collection of authorization data required to create a
@@ -61,6 +61,7 @@ type TransactOpts struct {
 	Value    *big.Int // Funds to transfer along the transaction (nil = 0 = no funds)
 	GasPrice *big.Int // Gas price to use for the transaction execution (nil = gas price oracle)
 	GasLimit uint64   // Gas limit to set for the transaction execution (0 = estimate)
+
 	Context context.Context // Network context to support cancellation and timeouts (nil = no timeout)
 
 	// Arbitrum specific fields
@@ -110,6 +111,7 @@ func (m *MetaData) GetAbi() (*abi.ABI, error) {
 	}
 	return m.ab, nil
 }
+
 // End of Arbitrum
 
 // BoundContract is the base wrapper object that reflects a contract on the

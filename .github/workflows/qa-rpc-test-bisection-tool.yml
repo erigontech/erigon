@@ -15,7 +15,7 @@ on:
 
 jobs:
   bisect:
-    runs-on: [self-hosted, qa, Erigon3]
+    runs-on: [self-hosted, qa, RpcSpecific]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -39,7 +39,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf $GITHUB_WORKSPACE/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.0.0 https://github.com/erigontech/rpc-tests $GITHUB_WORKSPACE/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.61.0 https://github.com/erigontech/rpc-tests $GITHUB_WORKSPACE/rpc-tests
           cd $GITHUB_WORKSPACE/rpc-tests
           pip3 install -r requirements.txt
 

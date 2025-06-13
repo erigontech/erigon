@@ -23,8 +23,8 @@ import (
 
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
@@ -32,13 +32,12 @@ type ChainEventNotifier interface {
 	OnNewHeader(newHeadersRlp [][]byte)
 	OnNewPendingLogs(types.Logs)
 	OnLogs([]*remote.SubscribeLogsReply)
-	HasLogSubsriptions() bool
+	HasLogSubscriptions() bool
 }
 
 func MiningStages(
 	ctx context.Context,
 	createBlockCfg MiningCreateBlockCfg,
-	borHeimdallCfg BorHeimdallCfg,
 	executeBlockCfg ExecuteBlockCfg,
 	sendersCfg SendersCfg,
 	execCfg MiningExecCfg,
@@ -56,23 +55,6 @@ func MiningStages(
 				return nil
 			},
 			Prune: func(u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
-		},
-		{
-			ID:          stages.MiningBorHeimdall,
-			Description: "Download Bor-specific data from Heimdall",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if badBlockUnwind {
-					return nil
-				}
-				return MiningBorHeimdallForward(ctx, borHeimdallCfg, s, u, txc.Tx, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return nil
-			},
-			Disabled: astridEnabled,
 		},
 		{
 			ID:          stages.MiningExecution,

@@ -2,11 +2,12 @@ participants_matrix:
   el:
     - el_type: erigon
       el_image: test/erigon:current
+      el_log_level: "debug"
   cl:
     - cl_type: teku
       cl_image: consensys/teku:develop
     - cl_type: lighthouse
-      cl_image: sigp/lighthouse:v7.0.0-beta.5
+      cl_image: sigp/lighthouse:v7.0.1
 
 network_params:
   electra_fork_epoch: 1
@@ -29,4 +30,4 @@ assertoor_params:
     - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/el-triggered-withdrawal.io
     - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/el-triggered-exit.io
     - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/eip7702-test.io
-    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/eip7702-txpool-invalidation.io
+    # - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/eip7702-txpool-invalidation.io

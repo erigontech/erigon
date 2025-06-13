@@ -11,7 +11,19 @@ on:
       - main
       - 'release/3.*'
     types:
+      - opened
+      - reopened
+      - synchronize
       - ready_for_review
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: >-
+    ${{
+      !startsWith(github.ref, 'refs/heads/release/') &&
+      github.ref != 'refs/heads/main'
+    }}
+
 
 jobs:
   integration-test-suite:
@@ -20,6 +32,7 @@ jobs:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
 
@@ -30,7 +43,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch remove_aura_fields_from_mainnet https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.63.1  https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
@@ -64,6 +77,7 @@ jobs:
           RPC_DAEMON_PID=$!          
           RPC_DAEMON_EXIT_STATUS=$?
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
+          echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
           sleep 5
           tail erigon.log
@@ -124,10 +138,11 @@ jobs:
           fi
 
       - name: Stop Erigon RpcDaemon
+        if: always()
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           # Clean up rpcdaemon process if it's still running
-          if kill -0 $RPC_DAEMON_PID 2> /dev/null; then
+          if [ -n "$RPC_DAEMON_PID" ] && kill -0 $RPC_DAEMON_PID 2> /dev/null; then
             echo "RpcDaemon stopping..."
             kill $RPC_DAEMON_PID
             echo "RpcDaemon stopped"

@@ -24,7 +24,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v27.1/protoc-27.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
@@ -47,8 +47,13 @@ $(OPENZEPPELIN):
 	cp -R $(OPENZEPPELIN_TMP_DIR)/openzeppelin-contracts-$(LATEST_VERSION_NUM)/* $(OPENZEPPELIN)
 	rm -rf "$(OPENZEPPELIN_TMP_DIR)"
 
+.PHONY: protoc-clean
+protoc-clean:
+	rm -f "$(GOBIN)/protoc"*
+	rm -rf "$(PROTOC_INCLUDE)"
+
 .PHONY: proto
-proto: $(GOBINREL)/protoc $(GOBINREL)/protoc-gen-go
+proto: protoc-clean $(GOBINREL)/protoc $(GOBINREL)/protoc-gen-go
 	PATH="$(GOBIN):$(PATH)" protoc -I=$(PROTO_DIR) --go_out=$(PROTO_DIR) $(PROTO_DIR)/shutter.proto
 
 .PHONY: contracts

@@ -13,7 +13,7 @@ import (
 
 func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs.FS) {
 	cases, err := ReadTestCases(root)
-	require.Nil(t, err, "reading cases")
+	require.NoError(t, err, "reading cases")
 	// prepare for gore.....
 	type (
 		K1 = string

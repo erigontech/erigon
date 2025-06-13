@@ -28,15 +28,14 @@ import (
 	"sync"
 	"unicode"
 
-	jsoniter "github.com/json-iterator/go"
-
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (
 	contextType      = reflect.TypeOf((*context.Context)(nil)).Elem()
-	jsonStreamType   = reflect.TypeOf(&jsoniter.Stream{})
+	jsonStreamType   = reflect.TypeOf((*jsonstream.Stream)(nil)).Elem()
 	errorType        = reflect.TypeOf((*error)(nil)).Elem()
 	subscriptionType = reflect.TypeOf(Subscription{})
 	stringType       = reflect.TypeOf("")
@@ -169,7 +168,7 @@ func newCallback(receiver, fn reflect.Value, name string, logger log.Logger) *ca
 		}
 		c.errPos = 1
 	}
-	// If there is only one return value (error), and the last argument is *jsoniter.Stream, mark it as streamable
+	// If there is only one return value (error), and the last argument is jsonstream.Stream, mark it as streamable
 	if len(outs) != 1 && c.streamable {
 		log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - streamable method may only return 1 value (error)", name))
 		return nil
@@ -203,7 +202,7 @@ func (c *callback) makeArgTypes() {
 }
 
 // call invokes the callback.
-func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream *jsoniter.Stream) (res interface{}, errRes error) {
+func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream jsonstream.Stream) (res interface{}, errRes error) {
 	// Create the argument slice.
 	fullargs := make([]reflect.Value, 0, 2+len(args))
 	if c.rcvr.IsValid() {

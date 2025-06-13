@@ -75,7 +75,7 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "")
 		require.NoError(t, err)
 		require.Len(t, rootHashUpdate, length.Hash, "invalid root hash length")
-		require.EqualValues(t, rootHashDirect, rootHashUpdate, "storage-based and update-based rootHash mismatch")
+		require.Equal(t, rootHashDirect, rootHashUpdate, "storage-based and update-based rootHash mismatch")
 	})
 }
 
@@ -168,7 +168,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 				t.Logf("Update %d/%d %x", i+1, len(plainKeys), plainKeys[i])
 				t.Logf("%s", updates[i].String())
 			}
-			require.EqualValues(t, rootHashDirect, rootHashAnother, "storage-based and update-based rootHash mismatch")
+			require.Equal(t, rootHashDirect, rootHashAnother, "storage-based and update-based rootHash mismatch")
 		}
 
 	})

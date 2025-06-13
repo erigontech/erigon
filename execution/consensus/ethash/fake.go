@@ -21,10 +21,9 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 )
@@ -104,7 +103,7 @@ func (f *FakeEthash) VerifyUncles(chain consensus.ChainReader, header *types.Hea
 	return nil
 }
 
-func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Header, uncle *types.Header, uncles mapset.Set[libcommon.Hash], ancestors map[libcommon.Hash]*types.Header, seal bool) error {
+func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Header, uncle *types.Header, uncles mapset.Set[common.Hash], ancestors map[common.Hash]*types.Header, seal bool) error {
 	err := f.Ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, false)
 	if err != nil {
 		return err
@@ -134,7 +133,7 @@ func (f *FakeEthash) Seal(_ consensus.ChainHeaderReader, blockWithReceipts *type
 	block := blockWithReceipts.Block
 	receipts := blockWithReceipts.Receipts
 	header := block.Header()
-	header.Nonce, header.MixDigest = types.BlockNonce{}, libcommon.Hash{}
+	header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
 
 	select {
 	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:

@@ -32,12 +32,12 @@ import (
 	"github.com/valyala/fastjson"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -70,27 +70,27 @@ func (e EthError) Error() string {
 
 type RequestGenerator interface {
 	PingErigonRpc() PingResult
-	GetBalance(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)
+	GetBalance(address common.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
 	GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
-	GetTransactionByHash(hash libcommon.Hash) (*ethapi.RPCTransaction, error)
-	GetTransactionReceipt(ctx context.Context, hash libcommon.Hash) (*types.Receipt, error)
-	TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error)
-	GetTransactionCount(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)
+	GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error)
+	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error)
+	TraceTransaction(hash common.Hash) ([]TransactionTrace, error)
+	GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	BlockNumber() (uint64, error)
-	SendTransaction(signedTx types.Transaction) (libcommon.Hash, error)
+	SendTransaction(signedTx types.Transaction) (common.Hash, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
 	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
 	Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error)
 	TxpoolContent() (int, int, int, error)
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
-	DebugAccountAt(blockHash libcommon.Hash, txIndex uint64, account libcommon.Address) (*AccountResult, error)
-	GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error)
+	DebugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
+	GetCode(address common.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error)
 	EstimateGas(args ethereum.CallMsg, blockNum BlockNumber) (uint64, error)
 	GasPrice() (*big.Int, error)
 
-	GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error)
+	GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error)
 }
 
 type requestGenerator struct {

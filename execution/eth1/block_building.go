@@ -23,12 +23,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/rpc"
@@ -46,7 +46,7 @@ func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdraw
 }
 
 func (e *EthereumExecutionModule) evictOldBuilders() {
-	ids := libcommon.SortedKeys(e.builders)
+	ids := common.SortedKeys(e.builders)
 
 	// remove old builders so that at most MaxBuilders - 1 remain
 	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
@@ -76,7 +76,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	}
 
 	if req.ParentBeaconBlockRoot != nil {
-		pbbr := libcommon.Hash(gointerfaces.ConvertH256ToHash(req.ParentBeaconBlockRoot))
+		pbbr := common.Hash(gointerfaces.ConvertH256ToHash(req.ParentBeaconBlockRoot))
 		param.ParentBeaconBlockRoot = &pbbr
 	}
 
@@ -193,7 +193,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		}
 		versionedHashes, commitments, proofs, blobs := blobTx.GetBlobHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
 		lenCheck := len(versionedHashes)
-		if lenCheck != len(commitments) || lenCheck != len(proofs) || lenCheck != len(blobs) {
+		if lenCheck != len(commitments) || (lenCheck != len(proofs) && blobTx.WrapperVersion == 0) || lenCheck != len(blobs) {
 			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+
 				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
 		}

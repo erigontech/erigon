@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -43,15 +43,15 @@ const ValidatorRegistryABI = "[{\"anonymous\":false,\"inputs\":[{\"indexed\":fal
 var ValidatorRegistryBin = "0x6080604052348015600e575f5ffd5b506105d18061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061003e575f3560e01c8062c7c0191461004257806332cb25be146100575780633f37dce214610077575b5f5ffd5b5f546040519081526020015b60405180910390f35b61006a61006536600461029a565b61008c565b60405161004e91906102df565b61008a6100853660046103bf565b6101ef565b005b60408051808201909152606080825260208201525f82815481106100b2576100b2610424565b905f5260205f2090600202016040518060400160405290815f820180546100d890610438565b80601f016020809104026020016040519081016040528092919081815260200182805461010490610438565b801561014f5780601f106101265761010080835404028352916020019161014f565b820191905f5260205f20905b81548152906001019060200180831161013257829003601f168201915b5050505050815260200160018201805461016890610438565b80601f016020809104026020016040519081016040528092919081815260200182805461019490610438565b80156101df5780601f106101b6576101008083540402835291602001916101df565b820191905f5260205f20905b8154815290600101906020018083116101c257829003601f168201915b5050505050815250509050919050565b60408051808201909152828152602081018290525f8054600181018255908052815160029091027f290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e5630190819061024590826104bc565b506020820151600182019061025a90826104bc565b5050507f9796f15c93411b364b7f09bb591d0f77aa4dc399cf0481b8de1c3ce9f10a3a87828260405161028e929190610577565b60405180910390a15050565b5f602082840312156102aa575f5ffd5b5035919050565b5f81518084528060208401602086015e5f602082860101526020601f19601f83011685010191505092915050565b602081525f8251604060208401526102fa60608401826102b1565b90506020840151601f1984830301604085015261031782826102b1565b95945050505050565b634e487b7160e01b5f52604160045260245ffd5b5f82601f830112610343575f5ffd5b813567ffffffffffffffff81111561035d5761035d610320565b604051601f8201601f19908116603f0116810167ffffffffffffffff8111828210171561038c5761038c610320565b6040528181528382016020018510156103a3575f5ffd5b816020850160208301375f918101602001919091529392505050565b5f5f604083850312156103d0575f5ffd5b823567ffffffffffffffff8111156103e6575f5ffd5b6103f285828601610334565b925050602083013567ffffffffffffffff81111561040e575f5ffd5b61041a85828601610334565b9150509250929050565b634e487b7160e01b5f52603260045260245ffd5b600181811c9082168061044c57607f821691505b60208210810361046a57634e487b7160e01b5f52602260045260245ffd5b50919050565b601f8211156104b757805f5260205f20601f840160051c810160208510156104955750805b601f840160051c820191505b818110156104b4575f81556001016104a1565b50505b505050565b815167ffffffffffffffff8111156104d6576104d6610320565b6104ea816104e48454610438565b84610470565b6020601f82116001811461051c575f83156105055750848201515b5f19600385901b1c1916600184901b1784556104b4565b5f84815260208120601f198516915b8281101561054b578785015182556020948501946001909201910161052b565b508482101561056857868401515f19600387901b60f8161c191681555b50505050600190811b01905550565b604081525f61058960408301856102b1565b828103602084015261031781856102b156fea264697066735822122067d82a92125d8b8abb771d1653b4e7dc1bf7bb36c4a98edadd7c6310fa391c0c64736f6c634300081c0033"
 
 // DeployValidatorRegistry deploys a new Ethereum contract, binding an instance of ValidatorRegistry to it.
-func DeployValidatorRegistry(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *ValidatorRegistry, error) {
+func DeployValidatorRegistry(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *ValidatorRegistry, error) {
 	parsed, err := abi.JSON(strings.NewReader(ValidatorRegistryABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(ValidatorRegistryBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(ValidatorRegistryBin), backend)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &ValidatorRegistry{ValidatorRegistryCaller: ValidatorRegistryCaller{contract: contract}, ValidatorRegistryTransactor: ValidatorRegistryTransactor{contract: contract}, ValidatorRegistryFilterer: ValidatorRegistryFilterer{contract: contract}}, nil
 }
@@ -116,7 +116,7 @@ type ValidatorRegistryTransactorRaw struct {
 }
 
 // NewValidatorRegistry creates a new instance of ValidatorRegistry, bound to a specific deployed contract.
-func NewValidatorRegistry(address libcommon.Address, backend bind.ContractBackend) (*ValidatorRegistry, error) {
+func NewValidatorRegistry(address common.Address, backend bind.ContractBackend) (*ValidatorRegistry, error) {
 	contract, err := bindValidatorRegistry(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -125,7 +125,7 @@ func NewValidatorRegistry(address libcommon.Address, backend bind.ContractBacken
 }
 
 // NewValidatorRegistryCaller creates a new read-only instance of ValidatorRegistry, bound to a specific deployed contract.
-func NewValidatorRegistryCaller(address libcommon.Address, caller bind.ContractCaller) (*ValidatorRegistryCaller, error) {
+func NewValidatorRegistryCaller(address common.Address, caller bind.ContractCaller) (*ValidatorRegistryCaller, error) {
 	contract, err := bindValidatorRegistry(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -134,7 +134,7 @@ func NewValidatorRegistryCaller(address libcommon.Address, caller bind.ContractC
 }
 
 // NewValidatorRegistryTransactor creates a new write-only instance of ValidatorRegistry, bound to a specific deployed contract.
-func NewValidatorRegistryTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*ValidatorRegistryTransactor, error) {
+func NewValidatorRegistryTransactor(address common.Address, transactor bind.ContractTransactor) (*ValidatorRegistryTransactor, error) {
 	contract, err := bindValidatorRegistry(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -143,7 +143,7 @@ func NewValidatorRegistryTransactor(address libcommon.Address, transactor bind.C
 }
 
 // NewValidatorRegistryFilterer creates a new log filterer instance of ValidatorRegistry, bound to a specific deployed contract.
-func NewValidatorRegistryFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*ValidatorRegistryFilterer, error) {
+func NewValidatorRegistryFilterer(address common.Address, filterer bind.ContractFilterer) (*ValidatorRegistryFilterer, error) {
 	contract, err := bindValidatorRegistry(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func NewValidatorRegistryFilterer(address libcommon.Address, filterer bind.Contr
 }
 
 // bindValidatorRegistry binds a generic wrapper to an already deployed contract.
-func bindValidatorRegistry(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindValidatorRegistry(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(ValidatorRegistryABI))
 	if err != nil {
 		return nil, err
@@ -394,8 +394,8 @@ type ValidatorRegistryUpdated struct {
 	Raw       types.Log // Blockchain specific contextual infos
 }
 
-func (_ValidatorRegistry *ValidatorRegistryFilterer) UpdatedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0x9796f15c93411b364b7f09bb591d0f77aa4dc399cf0481b8de1c3ce9f10a3a87")
+func (_ValidatorRegistry *ValidatorRegistryFilterer) UpdatedEventID() common.Hash {
+	return common.HexToHash("0x9796f15c93411b364b7f09bb591d0f77aa4dc399cf0481b8de1c3ce9f10a3a87")
 }
 
 // FilterUpdated is a free log retrieval operation binding the contract event 0x9796f15c93411b364b7f09bb591d0f77aa4dc399cf0481b8de1c3ce9f10a3a87.

@@ -19,48 +19,48 @@ package verkletrie
 import (
 	"context"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/trie/vtree"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 type regeneratePedersenAccountsJob struct {
-	address  libcommon.Address
+	address  common.Address
 	account  accounts.Account
 	codeSize uint64
 }
 
 type regeneratePedersenAccountsOut struct {
-	versionHash libcommon.Hash
-	address     libcommon.Address
+	versionHash common.Hash
+	address     common.Address
 	account     accounts.Account
 	codeSize    uint64
 }
 
 type regeneratePedersenStorageJob struct {
-	storageVerkleKey libcommon.Hash
+	storageVerkleKey common.Hash
 	storageKey       *uint256.Int
 	storageValue     []byte
-	address          libcommon.Address
+	address          common.Address
 }
 
 type regeneratePedersenCodeJob struct {
-	address libcommon.Address
+	address common.Address
 	code    []byte
 }
 
 type regeneratePedersenCodeOut struct {
 	chunks     [][]byte
-	address    libcommon.Address
+	address    common.Address
 	chunksKeys [][]byte
 	codeSize   int
 }
 
 type regenerateIncrementalPedersenAccountsJob struct {
 	// Update
-	address       libcommon.Address
+	address       common.Address
 	account       accounts.Account
 	code          []byte // New code
 	isContract    bool
@@ -68,7 +68,7 @@ type regenerateIncrementalPedersenAccountsJob struct {
 }
 
 type regenerateIncrementalPedersenAccountsOut struct {
-	address       libcommon.Address
+	address       common.Address
 	versionHash   []byte
 	account       accounts.Account
 	codeSize      uint64
@@ -99,7 +99,7 @@ func pedersenAccountWorker(ctx context.Context, logPrefix string, in chan *regen
 
 		// prevent sending to close channel
 		out <- &regeneratePedersenAccountsOut{
-			versionHash: libcommon.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
+			versionHash: common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
 			account:     job.account,
 			address:     job.address,
 			codeSize:    job.codeSize,
@@ -123,7 +123,7 @@ func pedersenStorageWorker(ctx context.Context, logPrefix string, in, out chan *
 			return
 		}
 		out <- &regeneratePedersenStorageJob{
-			storageVerkleKey: libcommon.BytesToHash(vtree.GetTreeKeyStorageSlot(job.address[:], job.storageKey)),
+			storageVerkleKey: common.BytesToHash(vtree.GetTreeKeyStorageSlot(job.address[:], job.storageKey)),
 			storageKey:       job.storageKey,
 			address:          job.address,
 			storageValue:     job.storageValue,
@@ -164,16 +164,16 @@ func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regenera
 		currentKey := vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
 		// Write code chunks
 		for i := 0; i < len(chunkedCode); i += 32 {
-			chunks = append(chunks, libcommon.CopyBytes(chunkedCode[i:i+32]))
+			chunks = append(chunks, common.CopyBytes(chunkedCode[i:i+32]))
 			if currentKey[31]+offset < currentKey[31] || offsetOverflow {
 				currentKey = vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
-				chunkKeys = append(chunkKeys, libcommon.CopyBytes(currentKey))
+				chunkKeys = append(chunkKeys, common.CopyBytes(currentKey))
 				offset = 1
 				offsetOverflow = false
 			} else {
-				codeKey := libcommon.CopyBytes(currentKey)
+				codeKey := common.CopyBytes(currentKey)
 				codeKey[31] += offset
-				chunkKeys = append(chunkKeys, libcommon.CopyBytes(codeKey))
+				chunkKeys = append(chunkKeys, common.CopyBytes(codeKey))
 				offset += 1
 				// If offset overflows, handle it.
 				offsetOverflow = offset == 0
@@ -203,7 +203,7 @@ func incrementalAccountWorker(ctx context.Context, logPrefix string, in chan *re
 		case <-ctx.Done():
 			return
 		}
-		versionKey := libcommon.BytesToHash(vtree.GetTreeKeyVersion(job.address[:]))
+		versionKey := common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:]))
 		if job.absentInState {
 			out <- &regenerateIncrementalPedersenAccountsOut{
 				versionHash:   versionKey[:],
@@ -222,8 +222,8 @@ func incrementalAccountWorker(ctx context.Context, logPrefix string, in chan *re
 		currentKey := vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
 		// Write code chunks
 		for i := 0; i < len(chunkedCode); i += 32 {
-			chunks = append(chunks, libcommon.CopyBytes(chunkedCode[i:i+32]))
-			codeKey := libcommon.CopyBytes(currentKey)
+			chunks = append(chunks, common.CopyBytes(chunkedCode[i:i+32]))
+			codeKey := common.CopyBytes(currentKey)
 			if currentKey[31]+offset < currentKey[31] || offsetOverflow {
 				currentKey = vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
 				chunkKeys = append(chunkKeys, codeKey)

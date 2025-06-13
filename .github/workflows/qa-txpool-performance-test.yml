@@ -3,45 +3,205 @@ name: QA - TxPool performance test
 on:
   workflow_call:
   workflow_dispatch:
-  # push:
-  #   branches:
-  #       - main
-  #       - release/*
-  #       - docker_pectra
+  push:
+    branches:
+      - "release/3.*"
+  schedule:
+    - cron: "0 0 * * 0"
 
 jobs:
-  assertoor_test:
-    runs-on: ubuntu-latest
+  tx_pool_assertoor_test:
+    runs-on: [self-hosted, qa, X64, long-running]
+    env:
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}"
 
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v4
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+
       - name: Docker build current branch
         run: |
           docker build -t test/erigon:current .
 
-      - name: Docker build noku-team/assertoor image
-        run: |
-          git clone https://github.com/noku-team/assertoor.git
-          cd assertoor
-          docker build -t test/assertoor:current .
-          cd ..
-
-      - name: Run regular Kurtosis + assertoor tests
-        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+      - name: Run self hosted Kurtosis + assertoor tests
+        id: noku_kurtosis_test
+        uses: noku-team/kurtosis-assertoor-github-action@v1.1.7
         with:
-            enclave_name: "kurtosis-run1-${{ github.run_id }}"
-            ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
-            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
-            persistent_logs: "true"
+          enclave_name: ${{ env.ENCLAVE_NAME }}
+          ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
+          kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+          persistent_logs: "true"
+          clean_docker: "true"
 
-      # todo: save result on mongodb
+      - name: Parse Kurtosis output log and create JSON
+        if: always()
+        id: parse_kurtosis_output
+        run: |
+          # Find the folder starting with 'assertoor--'
+          assertoor_folder=$(find ${{ runner.temp }}/${{ env.ENCLAVE_NAME }}/dump -type d -name 'assertoor--*' | head -n 1)
 
-      # - name: Run Pectra Kurtosis + assertoor tests
-      #   uses: ethpandaops/kurtosis-assertoor-github-action@v1
-      #   with:
-      #       enclave_name: "kurtosis-run2-${{ github.run_id }}"
-      #       ethereum_package_args: ".github/workflows/kurtosis/pectra.io"
-      #       kurtosis_extra_args: --verbosity detailed --cli-log-level trace
-      #       persistent_logs: "true"
+          # Exit if no assertoor folder is found
+          if [ -z "$assertoor_folder" ]; then
+            echo "No directory starting with 'assertoor--' found. Skipping."
+            exit 0
+          fi
+
+          # Parse the output.log file within the assertoor-- folder
+          output_log="${assertoor_folder}/output.log"
+          echo "Parsing file: $output_log"
+
+          # Create an empty JSON file if there are no results
+          output_json="${{ github.workspace }}/outputs_kurtosis.json"
+          echo "{}" > $output_json
+
+          # Create a temporary directory
+          tmp_dir=$(mktemp -d)
+
+          # Parse the output.log file to find lines with msg="outputs_json"
+          while IFS= read -r line; do
+            if [[ "$line" == *'msg="outputs_json:'* ]]; then
+              # Extract the JSON object and unescape the quotes
+              json_str=$(echo "$line" | sed 's/.*msg="outputs_json: \(.*\)".*/\1/' | sed 's/\\"/"/g')
+              
+              # Extract the task value from the log line
+              task=$(echo "$line" | sed -n 's/.*task=\([^ ]*\).*/\1/p')
+              
+              # Skip if task is empty
+              if [ -n "$task" ]; then
+                # Create or append to task file
+                if [ -f "$tmp_dir/$task" ]; then
+                  echo "," >> "$tmp_dir/$task"
+                fi
+                echo "$json_str" >> "$tmp_dir/$task"
+              fi
+            fi
+          done < "$output_log"
+
+          # Write the JSON object to the final file
+          echo "{" > $output_json
+          first_task=true
+          for task_file in "$tmp_dir"/*; do
+            [ -f "$task_file" ] || continue
+            
+            task=$(basename "$task_file")
+            
+            # Add comma for all but first task
+            if [ "$first_task" = true ]; then
+              first_task=false
+            else
+              echo "," >> $output_json
+            fi
+            
+            # Write the task array to the file
+            echo "\"$task\": [$(cat "$task_file")]" >> $output_json
+          done
+          echo "}" >> $output_json
+
+          echo "outputs_kurtosis.json: $output_json"
+
+          echo "success=true" >> $GITHUB_OUTPUT
+
+          # Clean up
+          rm -rf "$tmp_dir"
+          echo "cleaned up"
+
+      - name: Upload outputs_kurtosis.json as artifact
+        if: always() && steps.parse_kurtosis_output.outputs.success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs_kurtosis.json
+          path: outputs_kurtosis.json
+
+      - name: Create HDR plots PNG artifacts
+        id: create_hdr_plots
+        if: always() && steps.parse_kurtosis_output.outputs.success == 'true'
+        run: |
+          # Check if the JSON file exists
+          output_json="${{ github.workspace }}/outputs_kurtosis.json"
+          if [ ! -f "$output_json" ]; then
+            echo "JSON file not found, skipping"
+            exit 0
+          fi
+
+          # Check if tx_pool_latency_analysis array exists in the JSON
+          if ! jq -e '.tx_pool_latency_analysis' "$output_json" > /dev/null 2>&1; then
+            echo "tx_pool_latency_analysis array not found in JSON, skipping"
+            exit 0
+          fi
+
+          # Get the array length
+          array_length=$(jq '.tx_pool_latency_analysis | length' "$output_json")
+
+          # Loop through each element in the array
+          for ((i=0; i<array_length; i++)); do
+            # Get tx_count for this element
+            tx_count=$(jq -r ".tx_pool_latency_analysis[$i].tx_count" "$output_json")
+            
+            # Check if tx_pool_latency_hdr_plot exists for this element
+            if jq -e ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json" > /dev/null 2>&1; then
+              # Extract the plot data to a CSV file
+              csv_file="tx_pool_latency_analysis_${i}_${tx_count}.csv"
+              
+              # Extract the plot data, replace literal '\n' with actual newlines and '\t' with actual tabs,
+              # and remove all lines starting with '#'
+              jq -r ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json" | \
+                sed 's/\\n/\n/g; s/\\t/\t/g' | grep -v "^#" > "$csv_file"
+              
+              # Call the Python script to process the CSV file
+              python3 $ERIGON_QA_PATH/test_system/qa-tests/tx-pool/hdr_plot.py \
+                --input_file "$csv_file" \
+                --output_file "tx_pool_latency_analysis_${i}_${tx_count}.png"
+              
+              # Delete the CSV file after processing
+              rm -f "$csv_file"
+              
+              echo "Processed tx_pool_latency_analysis[$i] with tx_count=$tx_count"
+            else
+              echo "tx_pool_latency_hdr_plot not found for element $i, skipping"
+            fi
+          done
+          # Set an output to indicate we processed at least one element
+          echo "processed=true" >> $GITHUB_OUTPUT
+
+      - name: Upload PNG images as artifacts
+        if: always() && steps.create_hdr_plots.outputs.processed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tx-pool-latency-plots
+          path: tx_pool_latency_analysis_*.png
+          if-no-files-found: ignore
+
+      - name: Clean up PNG files
+        if: always() && steps.create_hdr_plots.outputs.processed == 'true'
+        run: |
+          # Remove all generated PNG files
+          rm -f tx_pool_latency_analysis_*.png
+
+      - name: Save test results
+        if: always()
+        env:
+          TEST_RESULT: ${{ steps.noku_kurtosis_test.outputs.test_result || 'failure' }}
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch ${{ github.ref_name }} \
+            --test_name txpool-performance \
+            --runner ${{ runner.name }} \
+            --outcome $TEST_RESULT \
+            --result_file ${{ github.workspace }}/outputs_kurtosis.json
+
+      - name: Clean test results
+        uses: gacts/run-and-post-run@v1.4.2
+        if: always()
+        with:
+          post: |
+            rm -rf kurtosis_artifacts
+            rm -f outputs_kurtosis.json
