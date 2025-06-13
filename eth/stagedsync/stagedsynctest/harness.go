@@ -643,13 +643,6 @@ func (h *Harness) mockHeimdallClient() {
 			return []*heimdall.EventRecordWithTime{&newEvent}, nil
 		}).
 		AnyTimes()
-	h.heimdallClient.
-		EXPECT().
-		FetchStateSyncEvent(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ uint64) (*heimdall.EventRecordWithTime, error) {
-			return nil, heimdall.ErrEventRecordNotFound
-		}).
-		AnyTimes()
 }
 
 func (h *Harness) runSyncStageForwardWithErrorIs(

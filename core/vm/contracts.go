@@ -31,6 +31,8 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/holiman/uint256"
 
+	evmone "github.com/erigontech/evmone_precompiles"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -603,17 +605,14 @@ func newTwistPoint(blob []byte) (*bn256.G2, error) {
 // runBn256Add implements the Bn256Add precompile, referenced by both
 // Byzantium and Istanbul operations.
 func runBn256Add(input []byte) ([]byte, error) {
-	x, err := newCurvePoint(getData(input, 0, 64))
-	if err != nil {
-		return nil, err
+	x := getData(input, 0, 64)
+	y := getData(input, 64, 64)
+	var out [64]byte
+	if evmone.EcAdd(&out, (*[64]byte)(x), (*[64]byte)(y)) {
+		return out[:], nil
+	} else {
+		return nil, errors.New("bn256: invalid point")
 	}
-	y, err := newCurvePoint(getData(input, 64, 64))
-	if err != nil {
-		return nil, err
-	}
-	res := new(bn256.G1)
-	res.Add(x, y)
-	return res.Marshal(), nil
 }
 
 // bn256Add implements a native elliptic curve point addition conforming to

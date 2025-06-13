@@ -557,3 +557,21 @@ func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error 
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
+func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.Tx)
+}
+func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.RwTx)
+}
+func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.Tx)
+}
+func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.RwTx)
+}
+func (tx *Tx) StepSize() uint64 {
+	return tx.aggtx.StepSize()
+}
+func (tx *RwTx) StepSize() uint64 {
+	return tx.aggtx.StepSize()
+}

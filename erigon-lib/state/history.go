@@ -134,7 +134,7 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 	if h.version.AccessorVI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
 	}
-	h.InvertedIndex.name = h.name
+	h.InvertedIndex.name = h.historyIdx
 
 	return &h, nil
 }
@@ -1160,6 +1160,9 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			vv, err := valsCDup.SeekBothRange(k, txnm)
 			if err != nil {
 				return err
+			}
+			if len(vv) < 8 {
+				return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.filenameBase, len(vv))
 			}
 			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.filenameBase, vtx, txNum)

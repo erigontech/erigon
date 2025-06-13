@@ -18,6 +18,7 @@ package rpctest
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -143,7 +144,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 	return nil
 }
 
-func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64) error {
+func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64) error {
 	setRoutes(erigonURL, gethURL)
 
 	reqGen := &RequestGenerator{}
@@ -249,6 +250,8 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 			select {
 			case <-logEvery.C:
 				log.Info("[ethGetLogsInvariants]", "block_num", bn)
+			case <-ctx.Done():
+				return ctx.Err()
 			default:
 			}
 

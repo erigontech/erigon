@@ -39,30 +39,30 @@ func TestName(t *testing.T) {
 		require.NoError(TxNums.Append(tx, 1, 99))
 		require.NoError(TxNums.Append(tx, 2, 100))
 
-		_, n, err := TxNums.FindBlockNum(tx, 10)
+		n, _, err := TxNums.FindBlockNum(tx, 10)
 		require.NoError(err)
 		require.Equal(1, int(n))
 
-		_, n, err = TxNums.FindBlockNum(tx, 0)
+		n, _, err = TxNums.FindBlockNum(tx, 0)
 		require.NoError(err)
 		require.Equal(0, int(n))
 
-		_, n, err = TxNums.FindBlockNum(tx, 3)
+		n, _, err = TxNums.FindBlockNum(tx, 3)
 		require.NoError(err)
 		require.Equal(0, int(n))
-		_, n, err = TxNums.FindBlockNum(tx, 4)
+		n, _, err = TxNums.FindBlockNum(tx, 4)
 		require.NoError(err)
 		require.Equal(1, int(n))
 
-		_, n, err = TxNums.FindBlockNum(tx, 99)
+		n, _, err = TxNums.FindBlockNum(tx, 99)
 		require.NoError(err)
 		require.Equal(1, int(n))
 
-		_, n, err = TxNums.FindBlockNum(tx, 100)
+		n, _, err = TxNums.FindBlockNum(tx, 100)
 		require.NoError(err)
 		require.Equal(2, int(n))
 
-		ok, _, err := TxNums.FindBlockNum(tx, 101)
+		_, ok, err := TxNums.FindBlockNum(tx, 101)
 		require.NoError(err)
 		require.False(ok)
 		return nil
