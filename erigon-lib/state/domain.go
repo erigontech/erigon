@@ -1432,15 +1432,13 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 	return nil
 }
 
-func buildExistanceFilter(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, salt uint32, ps *background.ProgressSet) error {
+func buildExistanceFilter(ctx context.Context, g *seg.Reader, compressed seg.FileCompression, idxPath string, salt uint32, ps *background.ProgressSet) error {
 	_, fileName := filepath.Split(idxPath)
-	count := d.Count() / 2
+	count := g.Count() / 2
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
 
-	defer d.MadvNormal().DisableReadAhead()
-
-	g := seg.NewReader(d.MakeGetter(), compressed)
+	defer g.MadvNormal().DisableReadAhead()
 
 	useFuse := true
 	existenceFilter, err := existence.NewFilter(uint64(count), idxPath, useFuse)
