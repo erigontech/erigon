@@ -17,9 +17,8 @@
 package solid
 
 import (
-	"encoding/json"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -385,12 +384,12 @@ func (v *ValidatorSet) MarshalJSON() ([]byte, error) {
 	for i := 0; i < v.l; i++ {
 		validators[i] = v.Get(i)
 	}
-	return json.Marshal(validators)
+	return fastjson.Marshal(validators)
 }
 
 func (v *ValidatorSet) UnmarshalJSON(data []byte) error {
 	var validators []Validator
-	if err := json.Unmarshal(data, &validators); err != nil {
+	if err := fastjson.Unmarshal(data, &validators); err != nil {
 		return err
 	}
 	v.Clear()

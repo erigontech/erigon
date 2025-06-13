@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 var _ = (*genesisAccountMarshaling)(nil)
@@ -36,7 +37,7 @@ func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 	enc.Balance = (*math.HexOrDecimal256)(g.Balance)
 	enc.Nonce = math.HexOrDecimal64(g.Nonce)
 	enc.PrivateKey = g.PrivateKey
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.

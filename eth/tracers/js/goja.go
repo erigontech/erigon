@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -390,7 +391,7 @@ func (t *jsTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, wrapError("result", err)
 	}
-	encoded, err := json.Marshal(res)
+	encoded, err := fastjson.Marshal(res)
 	if err != nil {
 		return nil, err
 	}

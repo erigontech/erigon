@@ -18,10 +18,10 @@ package consensus_tests
 
 import (
 	"bytes"
-	"encoding/json"
 	"io/fs"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -34,9 +34,10 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
+
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 type unmarshalerMarshalerHashable interface {
@@ -120,9 +121,9 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 			versionObj.SetVersion(c.Version())
 		}
 		// test json
-		jsonBlock, err := json.Marshal(object)
+		jsonBlock, err := fastjson.Marshal(object)
 		require.NoError(t, err)
-		require.NoError(t, json.Unmarshal(jsonBlock, obj2))
+		require.NoError(t, fastjson.Unmarshal(jsonBlock, obj2))
 
 		haveRoot, err = obj2.(unmarshalerMarshalerHashable).HashSSZ()
 		require.NoError(t, err)
@@ -186,9 +187,9 @@ func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 		if testOptions.testJson {
 			jsonObject := newObjFunc(c.Version())
 			// make sure object data stay the same after marshal and unmarshal
-			jsonBytes, err := json.Marshal(object)
+			jsonBytes, err := fastjson.Marshal(object)
 			require.NoError(t, err, "json.Marshal failed")
-			require.NoError(t, json.Unmarshal(jsonBytes, jsonObject), "json.Unmarshal failed")
+			require.NoError(t, fastjson.Unmarshal(jsonBytes, jsonObject), "json.Unmarshal failed")
 			// check hash root again
 			hashRoot, err := jsonObject.HashSSZ()
 			require.NoError(t, err, "failed in HashSSZ")

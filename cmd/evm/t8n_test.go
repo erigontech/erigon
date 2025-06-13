@@ -21,13 +21,13 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/internal/reexec"
 	"github.com/erigontech/erigon/turbo/cmdtest"
 )
@@ -308,10 +308,10 @@ func TestEvmRun(t *testing.T) {
 // cmpJson compares the JSON in two byte slices.
 func cmpJson(a, b []byte) (bool, error) {
 	var j, j2 interface{}
-	if err := json.Unmarshal(a, &j); err != nil {
+	if err := fastjson.Unmarshal(a, &j); err != nil {
 		return false, err
 	}
-	if err := json.Unmarshal(b, &j2); err != nil {
+	if err := fastjson.Unmarshal(b, &j2); err != nil {
 		return false, err
 	}
 

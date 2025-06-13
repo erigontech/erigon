@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
@@ -132,7 +133,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		t.Fatalf("failed to retrieve trace result: %v", err)
 	}
 	ret := make(map[string]interface{})
-	if err := json.Unmarshal(res, &ret); err != nil {
+	if err := fastjson.Unmarshal(res, &ret); err != nil {
 		t.Fatalf("failed to unmarshal trace result: %v", err)
 	}
 	if _, has := ret["0x60f3f640a8508fc6a86d45df051962668e1e8ac7"]; !has {

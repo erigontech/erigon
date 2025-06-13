@@ -27,6 +27,7 @@ import (
 	"net/url"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -72,7 +73,7 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 	if len(registers) == 0 {
 		return errors.New("empty registers")
 	}
-	payload, err := json.Marshal(registers)
+	payload, err := fastjson.Marshal(registers)
 	if err != nil {
 		return err
 	}
@@ -114,7 +115,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	// https://ethereum.github.io/builder-specs/#/Builder/submitBlindedBlocks
 	path := "/eth/v1/builder/blinded_blocks"
 	url := b.url.JoinPath(path).String()
-	payload, err := json.Marshal(block)
+	payload, err := fastjson.Marshal(block)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -133,7 +134,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	switch resp.Version {
 	case "bellatrix", "capella":
 		eth1Block = &cltypes.Eth1Block{}
-		if err := json.Unmarshal(resp.Data, block); err != nil {
+		if err := fastjson.Unmarshal(resp.Data, block); err != nil {
 			return nil, nil, nil, err
 		}
 	case "deneb":
@@ -144,7 +145,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 			ExecutionPayload: cltypes.NewEth1Block(clparams.DenebVersion, b.beaconConfig),
 			BlobsBundle:      &engine_types.BlobsBundleV1{},
 		}
-		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
+		if err := fastjson.Unmarshal(resp.Data, denebResp); err != nil {
 			return nil, nil, nil, err
 		}
 		eth1Block = denebResp.ExecutionPayload
@@ -159,7 +160,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 			BlobsBundle:       &engine_types.BlobsBundleV1{},
 			ExecutionRequests: cltypes.NewExecutionRequests(b.beaconConfig),
 		}
-		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
+		if err := fastjson.Unmarshal(resp.Data, denebResp); err != nil {
 			return nil, nil, nil, err
 		}
 		eth1Block = denebResp.ExecutionPayload
@@ -230,7 +231,7 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	if len(bytes) == 0 {
 		return &body, nil
 	}
-	if err := json.Unmarshal(bytes, &body); err != nil {
+	if err := fastjson.Unmarshal(bytes, &body); err != nil {
 		log.Warn("[mev builder] json.Unmarshal error", "err", err, "content", string(bytes))
 		return nil, err
 	}

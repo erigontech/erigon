@@ -3,12 +3,12 @@
 package tests
 
 import (
-	"encoding/json"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 )
 
@@ -63,7 +63,7 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(b.ExcessBlobGas)
 	enc.ParentBeaconBlockRoot = b.ParentBeaconBlockRoot
 	enc.RequestsHash = b.RequestsHash
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -93,7 +93,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		RequestsHash          *common.Hash
 	}
 	var dec btHeader
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Bloom != nil {

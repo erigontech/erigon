@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/version"
 )
@@ -304,7 +305,7 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 	var requestBodyReader io.Reader
 
 	if args != nil {
-		requestBody, err := json.Marshal(args)
+		requestBody, err := fastjson.Marshal(args)
 
 		if err != nil {
 			return nil, err
@@ -347,7 +348,7 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 		if err := json.NewDecoder(response.Body).Decode(&responseBody); err == nil && len(responseBody.Error) > 0 {
 			var argsJson string
 
-			if bytes, err := json.Marshal(args); err == nil {
+			if bytes, err := fastjson.Marshal(args); err == nil {
 				argsJson = string(bytes)
 			}
 
@@ -357,7 +358,7 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 
 		var argsJson string
 
-		if bytes, err := json.Marshal(args); err == nil {
+		if bytes, err := fastjson.Marshal(args); err == nil {
 			argsJson = string(bytes)
 		}
 
@@ -699,7 +700,7 @@ func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.D
 	c.Unlock()
 
 	if fileCount == 0 || refresh {
-		listBody, err := json.Marshal(struct {
+		listBody, err := fastjson.Marshal(struct {
 			Fs     string `json:"fs"`
 			Remote string `json:"remote"`
 		}{

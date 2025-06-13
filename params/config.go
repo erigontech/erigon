@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/paths"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
@@ -52,7 +53,7 @@ func readChainSpec(filename string) *chain.Config {
 
 	if spec.BorJSON != nil {
 		borConfig := &borcfg.BorConfig{}
-		err = json.Unmarshal(spec.BorJSON, borConfig)
+		err = fastjson.Unmarshal(spec.BorJSON, borConfig)
 		if err != nil {
 			panic(fmt.Sprintf("Could not parse 'bor' chainspec for %s: %v", filename, err))
 		}

@@ -38,6 +38,7 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -276,7 +277,7 @@ func (s *Service) readLoop(conn *connWrapper) {
 		}
 		// If the network packet is a system ping, respond to it directly
 		var ping string
-		if err := json.Unmarshal(blob, &ping); err == nil && strings.HasPrefix(ping, "primus::ping::") {
+		if err := fastjson.Unmarshal(blob, &ping); err == nil && strings.HasPrefix(ping, "primus::ping::") {
 			if err := conn.WriteJSON(strings.ReplaceAll(ping, "ping", "pong")); err != nil {
 				log.Warn("Failed to respond to system ping message", "err", err)
 				return
@@ -285,7 +286,7 @@ func (s *Service) readLoop(conn *connWrapper) {
 		}
 		// Not a system ping, try to decode an actual state message
 		var msg map[string][]interface{}
-		if err := json.Unmarshal(blob, &msg); err != nil {
+		if err := fastjson.Unmarshal(blob, &msg); err != nil {
 			log.Warn("Failed to decode stats server message", "err", err)
 			return
 		}
@@ -505,7 +506,7 @@ type uncleStats []*types.Header
 
 func (s uncleStats) MarshalJSON() ([]byte, error) {
 	if uncles := ([]*types.Header)(s); len(uncles) > 0 {
-		return json.Marshal(uncles)
+		return fastjson.Marshal(uncles)
 	}
 	return []byte("[]"), nil
 }

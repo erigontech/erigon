@@ -3,12 +3,12 @@
 package logger
 
 import (
-	"encoding/json"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -52,7 +52,7 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 	enc.Err = s.Err
 	enc.OpName = s.OpName()
 	enc.ErrorString = s.ErrorString()
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -72,7 +72,7 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		Err           error                       `json:"-"`
 	}
 	var dec StructLog
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Pc != nil {

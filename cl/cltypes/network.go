@@ -17,11 +17,11 @@
 package cltypes
 
 import (
-	"encoding/json"
 	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
@@ -72,7 +72,7 @@ func (m *Metadata) MarshalJSON() ([]byte, error) {
 		out["syncnets"] = hexutil.Bytes(m.Syncnets[:])
 	}
 	// Attnets and syncnets are hex encoded
-	return json.Marshal(out)
+	return fastjson.Marshal(out)
 }
 
 // Ping is a test P2P message, used to test out liveness of our peer/signaling disconnection.

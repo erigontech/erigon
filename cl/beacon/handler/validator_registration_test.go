@@ -18,7 +18,6 @@ package handler
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -26,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 )
@@ -45,7 +45,7 @@ func TestPostEthV1ValidatorPreparation(t *testing.T) {
 		},
 	}
 
-	reqByte, err := json.Marshal(req)
+	reqByte, err := fastjson.Marshal(req)
 	require.NoError(t, err)
 
 	resp, err := http.Post(server.URL+"/eth/v1/validator/prepare_beacon_proposer", "application/json", bytes.NewBuffer(reqByte))

@@ -18,7 +18,6 @@ package core_test
 
 import (
 	"context"
-	"encoding/json"
 	"math/big"
 	"os"
 	"testing"
@@ -32,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
@@ -182,7 +182,7 @@ func TestDecodeBalance0(t *testing.T) {
 	require.NoError(t, err)
 
 	genesis := &types.Genesis{}
-	err = json.Unmarshal(genesisData, genesis)
+	err = fastjson.Unmarshal(genesisData, genesis)
 	require.NoError(t, err)
 	_ = genesisData
 }

@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -38,7 +39,7 @@ func ReadDataFromTable(tx kv.Tx, table string, key []byte) ([]byte, error) {
 
 func PutDataToTable(table string, key []byte, info any) func(tx kv.RwTx) error {
 	return func(tx kv.RwTx) error {
-		infoBytes, err := json.Marshal(info)
+		infoBytes, err := fastjson.Marshal(info)
 
 		if err != nil {
 			return err

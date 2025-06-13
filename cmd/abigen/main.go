@@ -20,7 +20,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/compiler"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -228,7 +228,7 @@ func abigen(c *cli.Context) error {
 			if exclude[strings.ToLower(name)] {
 				continue
 			}
-			abi, err := json.Marshal(contract.Info.AbiDefinition) // Flatten the compiler parse
+			abi, err := fastjson.Marshal(contract.Info.AbiDefinition) // Flatten the compiler parse
 			if err != nil {
 				utils.Fatalf("Failed to parse ABIs from compiler output: %v", err)
 			}

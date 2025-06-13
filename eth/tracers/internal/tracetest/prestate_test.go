@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
@@ -175,11 +176,11 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 				if err := json.Unmarshal(res, &x); err != nil {
 					t.Fatalf("prestateTrace tweak Unmarshal: %v", err)
 				}
-				if res, err = json.Marshal(x); err != nil {
+				if res, err = fastjson.Marshal(x); err != nil {
 					t.Fatalf("prestateTrace tweak Marshal: %v", err)
 				}
 			}
-			want, err := json.Marshal(test.Result)
+			want, err := fastjson.Marshal(test.Result)
 			if err != nil {
 				t.Fatalf("failed to marshal test: %v", err)
 			}

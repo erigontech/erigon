@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -63,7 +64,7 @@ func (p *Printer) OnEnter(depth int, typ byte, from common.Address, to common.Ad
 }
 
 func (p *Printer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
-	buf, err := json.Marshal(tx)
+	buf, err := fastjson.Marshal(tx)
 	if err != nil {
 		fmt.Printf("err: %v\n", err)
 		return
@@ -77,7 +78,7 @@ func (p *Printer) OnTxEnd(receipt *types.Receipt, err error) {
 		fmt.Printf("CaptureTxEnd err: %v\n", err)
 		return
 	}
-	buf, err := json.Marshal(receipt)
+	buf, err := fastjson.Marshal(receipt)
 	if err != nil {
 		fmt.Printf("err: %v\n", err)
 		return
@@ -118,7 +119,7 @@ func (p *Printer) OnStorageChange(a common.Address, k common.Hash, prev, new uin
 }
 
 func (p *Printer) OnLog(l *types.Log) {
-	buf, err := json.Marshal(l)
+	buf, err := fastjson.Marshal(l)
 	if err != nil {
 		fmt.Printf("err: %v\n", err)
 		return

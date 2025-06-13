@@ -275,7 +275,7 @@ func TestAddMod(t *testing.T) {
 // Enable this test to generate the 'testcases_xx.json' files
 // func TestWriteExpectedValues(t *testing.T) {
 // 	for name, method := range twoOpMethods {
-// 		data, err := json.Marshal(getResult(commonParams, method))
+// 		data, err := fastjson.Marshal(getResult(commonParams, method))
 // 		if err != nil {
 // 			t.Fatal(err)
 // 		}

@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -103,7 +104,7 @@ func WriteLastFinality[T BlockFinality[T]](db kv.RwDB, block uint64, hash common
 
 	lastTV.set(block, hash)
 
-	enc, err := json.Marshal(lastTV)
+	enc, err := fastjson.Marshal(lastTV)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed to marshal the %s struct", string(key)), "err", err)
 
@@ -155,7 +156,7 @@ func WriteLockField(db kv.RwDB, val bool, block uint64, hash common.Hash, idList
 
 	key := lockFieldKey
 
-	enc, err := json.Marshal(lockField)
+	enc, err := fastjson.Marshal(lockField)
 	if err != nil {
 		log.Error("Failed to marshal the lock field struct", "err", err)
 
@@ -214,7 +215,7 @@ func WriteFutureMilestoneList(db kv.RwDB, order []uint64, list map[uint64]common
 
 	key := futureMilestoneKey
 
-	enc, err := json.Marshal(futureMilestoneField)
+	enc, err := fastjson.Marshal(futureMilestoneField)
 	if err != nil {
 		log.Error("Failed to marshal the future milestone field struct", "err", err)
 

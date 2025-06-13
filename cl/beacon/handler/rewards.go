@@ -17,13 +17,13 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -125,7 +125,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	}
 	// parse json body request
 	if len(jsonBytes) > 0 {
-		if err := json.Unmarshal(jsonBytes, &req); err != nil {
+		if err := fastjson.Unmarshal(jsonBytes, &req); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	}

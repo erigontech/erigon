@@ -17,9 +17,8 @@
 package solid
 
 import (
-	"encoding/json"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -62,11 +61,11 @@ func NewStaticListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *L
 }
 
 func (l ListSSZ[T]) MarshalJSON() ([]byte, error) {
-	return json.Marshal(l.list)
+	return fastjson.Marshal(l.list)
 }
 
 func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, &l.list)
+	return fastjson.Unmarshal(data, &l.list)
 }
 
 func NewDynamicListSSZFromList[T EncodableHashableSSZ](list []T, limit int) *ListSSZ[T] {

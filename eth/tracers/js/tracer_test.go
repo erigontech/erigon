@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -307,7 +308,7 @@ func TestSetup(t *testing.T) {
 		t.Error(err)
 	}
 
-	cfg, err := json.Marshal(map[string]string{"foo": "bar"})
+	cfg, err := fastjson.Marshal(map[string]string{"foo": "bar"})
 	if err != nil {
 		t.Fatal(err)
 	}

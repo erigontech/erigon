@@ -17,7 +17,6 @@
 package health
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/rpc"
@@ -153,7 +153,7 @@ func parseHealthCheckBody(reader io.Reader) (requestBody, error) {
 		return body, err
 	}
 
-	err = json.Unmarshal(bodyBytes, &body)
+	err = fastjson.Unmarshal(bodyBytes, &body)
 	if err != nil {
 		return body, err
 	}
@@ -213,7 +213,7 @@ func reportHealthFromHeaders(errCheckSynced, errCheckPeer, errCheckBlock, errChe
 func writeResponse(w http.ResponseWriter, errs map[string]string, statusCode int) error {
 	w.WriteHeader(statusCode)
 
-	bodyJson, err := json.Marshal(errs)
+	bodyJson, err := fastjson.Marshal(errs)
 	if err != nil {
 		return err
 	}

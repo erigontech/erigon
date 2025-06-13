@@ -27,11 +27,13 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
-	"github.com/stretchr/testify/require"
 )
 
 type mockRoundTripper func(req *http.Request) (*http.Response, error)
@@ -171,7 +173,7 @@ func TestRegisterValidator(t *testing.T) {
 				// read request body
 				bodyBytes, err := io.ReadAll(req.Body)
 				require.NoError(t, err)
-				mockValidatorsBytes, err := json.Marshal(mockValidators)
+				mockValidatorsBytes, err := fastjson.Marshal(mockValidators)
 				require.NoError(t, err)
 				require.Equal(t, mockValidatorsBytes, bodyBytes)
 				return &http.Response{
@@ -222,7 +224,7 @@ func TestGetHeader(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, header)
 		// marshal and unmarshal to compare
-		headerBytes, err := json.Marshal(header)
+		headerBytes, err := fastjson.Marshal(header)
 		require.NoError(t, err)
 		require.JSONEq(t, string(mockHeaderBytes), string(headerBytes))
 	})
@@ -256,7 +258,7 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 	expectMethod := http.MethodPost
 	expectPath := mockUrl.JoinPath("/eth/v1/builder/blinded_blocks").String()
 	mockBlindedBlock := &cltypes.SignedBlindedBeaconBlock{}
-	err := json.Unmarshal(mockBlindedBlockBytes, mockBlindedBlock)
+	err := fastjson.Unmarshal(mockBlindedBlockBytes, mockBlindedBlock)
 	require.NoError(t, err)
 
 	t.Run("post blinded block success", func(t *testing.T) {
@@ -299,7 +301,7 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 				BlobsBundle:      bundle,
 			},
 		}
-		resultBytes, err := json.Marshal(result)
+		resultBytes, err := fastjson.Marshal(result)
 		require.NoError(t, err)
 		require.JSONEq(t, string(mockBlindedResponseBytes), string(resultBytes))
 	})

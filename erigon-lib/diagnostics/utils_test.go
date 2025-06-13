@@ -1,11 +1,12 @@
 package diagnostics_test
 
 import (
-	"encoding/json"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 func TestParseData(t *testing.T) {
@@ -21,7 +22,7 @@ func TestParseData(t *testing.T) {
 		UsedPercent: 4,
 	}
 
-	data, err := json.Marshal(newv)
+	data, err := fastjson.Marshal(newv)
 	require.NoError(t, err)
 
 	diagnostics.ParseData(data, &v)

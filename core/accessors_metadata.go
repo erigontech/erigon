@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -67,7 +68,7 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	}
 
 	// Marshal json g
-	val, err := json.Marshal(g)
+	val, err := fastjson.Marshal(g)
 	if err != nil {
 		return err
 	}

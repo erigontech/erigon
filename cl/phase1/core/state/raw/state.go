@@ -17,12 +17,12 @@
 package raw
 
 import (
-	"encoding/json"
 	"strconv"
 	"sync"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -189,7 +189,7 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["pending_partial_withdrawals"] = b.pendingPartialWithdrawals
 		obj["pending_consolidations"] = b.pendingConsolidations
 	}
-	return json.Marshal(obj)
+	return fastjson.Marshal(obj)
 }
 
 // Get validators field

@@ -17,10 +17,10 @@
 package cltypes
 
 import (
-	"encoding/json"
 	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -73,7 +73,7 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 		Signature        common.Bytes96         `json:"signature"`
 	}
 	tmp.Data = &solid.AttestationData{}
-	if err := json.Unmarshal(buf, &tmp); err != nil {
+	if err := fastjson.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
 

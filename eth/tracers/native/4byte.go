@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -119,7 +120,7 @@ func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to
 // GetResult returns the json-encoded nested list of call traces, and any
 // error arising from the encoding or forceful termination (via `Stop`).
 func (t *fourByteTracer) GetResult() (json.RawMessage, error) {
-	res, err := json.Marshal(t.ids)
+	res, err := fastjson.Marshal(t.ids)
 	if err != nil {
 		return nil, err
 	}

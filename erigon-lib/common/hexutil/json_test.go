@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 func checkError(t *testing.T, input string, got, want error) {
@@ -113,7 +115,7 @@ func TestMarshalBig(t *testing.T) {
 	for idx, test := range encodeBigTests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
 			in := test.input.(*big.Int)
-			out, err := json.Marshal((*Big)(in))
+			out, err := fastjson.Marshal((*Big)(in))
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))
@@ -170,7 +172,7 @@ func TestMarshalUint64(t *testing.T) {
 	for idx, test := range encodeUint64Tests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
 			in := test.input.(uint64)
-			out, err := json.Marshal(Uint64(in))
+			out, err := fastjson.Marshal(Uint64(in))
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))
@@ -183,7 +185,7 @@ func TestMarshalUint(t *testing.T) {
 	for idx, test := range encodeUintTests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
 			in := test.input.(uint)
-			out, err := json.Marshal(Uint(in))
+			out, err := fastjson.Marshal(Uint(in))
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))

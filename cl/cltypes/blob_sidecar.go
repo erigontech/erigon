@@ -17,10 +17,9 @@
 package cltypes
 
 import (
-	"encoding/json"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -66,7 +65,7 @@ func (b *BlobSidecar) UnmarshalJSON(buf []byte) error {
 	}
 	tmp.Blob = &Blob{}
 	tmp.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
-	if err := json.Unmarshal(buf, &tmp); err != nil {
+	if err := fastjson.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
 	b.Index = tmp.Index

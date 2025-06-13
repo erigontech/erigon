@@ -20,11 +20,11 @@
 package rpc
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 func TestBlockNumberJSONUnmarshal(t *testing.T) {
@@ -54,7 +54,7 @@ func TestBlockNumberJSONUnmarshal(t *testing.T) {
 
 	for i, test := range tests {
 		var num BlockNumber
-		err := json.Unmarshal([]byte(test.input), &num)
+		err := fastjson.Unmarshal([]byte(test.input), &num)
 		if test.mustFail && err == nil {
 			t.Errorf("Test %d should fail", i)
 			continue
@@ -107,7 +107,7 @@ func TestBlockNumberOrHash_UnmarshalJSON(t *testing.T) {
 
 	for i, test := range tests {
 		var bnh BlockNumberOrHash
-		err := json.Unmarshal([]byte(test.input), &bnh)
+		err := fastjson.Unmarshal([]byte(test.input), &bnh)
 		if test.mustFail && err == nil {
 			t.Errorf("Test %d should fail", i)
 			continue

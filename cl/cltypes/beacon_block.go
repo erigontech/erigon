@@ -17,12 +17,12 @@
 package cltypes
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -447,7 +447,7 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	tmp.ExecutionRequests = NewExecutionRequests(b.beaconCfg)
 	tmp.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
 
-	if err := json.Unmarshal(buf, &tmp); err != nil {
+	if err := fastjson.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
 	tmp.AttesterSlashings.Range(func(_ int, value *AttesterSlashing, _ int) bool {

@@ -18,7 +18,6 @@ package polygon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"math/big"
 	"net"
@@ -33,6 +32,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
@@ -443,7 +443,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.Client) *chi.Mux {
 		resultEnvelope.Height = "0"
 		resultEnvelope.Result = result
 
-		response, err := json.Marshal(resultEnvelope)
+		response, err := fastjson.Marshal(resultEnvelope)
 		if err != nil {
 			http.Error(w, http.StatusText(500), 500)
 			return

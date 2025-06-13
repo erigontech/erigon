@@ -17,11 +17,11 @@
 package cli
 
 import (
-	"encoding/json"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -50,7 +50,7 @@ func parseAllowListForRPC(path string) (rpc.AllowList, error) {
 
 	var allowListFileObj allowListFile
 
-	err = json.Unmarshal(fileContents, &allowListFileObj)
+	err = fastjson.Unmarshal(fileContents, &allowListFileObj)
 	if err != nil {
 		return nil, err
 	}

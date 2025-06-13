@@ -19,7 +19,6 @@ package rpctest
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	libfastjson "github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/core/state"
 )
 
@@ -665,7 +665,7 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	if err != nil {
 		return err
 	}
-	err = json.Unmarshal(b, response)
+	err = libfastjson.Unmarshal(b, response)
 	if err != nil {
 		fmt.Printf("json: %s\n", string(b))
 		panic(err)

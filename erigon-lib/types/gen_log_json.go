@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 var _ = (*logMarshaling)(nil)
@@ -35,7 +36,7 @@ func (l Log) MarshalJSON() ([]byte, error) {
 	enc.BlockHash = l.BlockHash
 	enc.Index = hexutil.Uint(l.Index)
 	enc.Removed = l.Removed
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.

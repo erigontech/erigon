@@ -22,7 +22,6 @@ package core
 
 import (
 	"cmp"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"time"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -247,7 +247,7 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true))
 	}
 
-	result, err := json.Marshal(marshalled)
+	result, err := fastjson.Marshal(marshalled)
 	if err != nil {
 		logger.Error("marshalling error when logging receipts", "err", err)
 		return

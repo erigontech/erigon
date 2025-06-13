@@ -24,6 +24,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -108,7 +109,7 @@ func LoadSnapshot(config *borcfg.BorConfig, sigcache *lru.ARCCache[common.Hash, 
 
 // store inserts the snapshot into the database.
 func (s *Snapshot) Store(db kv.RwDB) error {
-	blob, err := json.Marshal(s)
+	blob, err := fastjson.Marshal(s)
 	if err != nil {
 		return err
 	}

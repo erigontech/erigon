@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 var _ = (*accountMarshaling)(nil)
@@ -25,7 +26,7 @@ func (a account) MarshalJSON() ([]byte, error) {
 	enc.Code = a.Code
 	enc.Nonce = a.Nonce
 	enc.Storage = a.Storage
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.

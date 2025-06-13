@@ -2,10 +2,10 @@ package cltypes
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -74,7 +74,7 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 		Withdrawals:    solid.NewStaticListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest),
 		Consolidations: solid.NewStaticListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest),
 	}
-	if err := json.Unmarshal(b, &c); err != nil {
+	if err := fastjson.Unmarshal(b, &c); err != nil {
 		return err
 	}
 

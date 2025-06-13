@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -207,7 +208,7 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 	switch {
 	case msg.isNotification():
 		var res subscriptionResult
-		if err := json.Unmarshal(msg.Params, &res); err != nil {
+		if err := fastjson.Unmarshal(msg.Params, &res); err != nil {
 			return nil, nil, fmt.Errorf("invalid subscription result: %w", err)
 		}
 		return nil, &res, nil
@@ -215,7 +216,7 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 		var c subConfirmation
 		if msg.Error != nil {
 			return nil, nil, msg.Error
-		} else if err := json.Unmarshal(msg.Result, &c.subid); err != nil {
+		} else if err := fastjson.Unmarshal(msg.Result, &c.subid); err != nil {
 			return nil, nil, fmt.Errorf("invalid response: %w", err)
 		} else {
 			json.Unmarshal(msg.ID, &c.reqid)

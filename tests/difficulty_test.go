@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/execution/testutil"
 )
 
@@ -40,7 +41,7 @@ func TestDifficulty(t *testing.T) {
 				continue
 			}
 			var tests map[string]DifficultyTest
-			if err := json.Unmarshal(rawTests, &tests); err != nil {
+			if err := fastjson.Unmarshal(rawTests, &tests); err != nil {
 				t.Error(err)
 				continue
 			}

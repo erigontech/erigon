@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
@@ -185,10 +186,10 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				var x callTrace
 				err = json.Unmarshal(res, &x)
 				require.NoError(t, err)
-				res, err = json.Marshal(x)
+				res, err = fastjson.Marshal(x)
 				require.NoError(t, err)
 			}
-			want, err := json.Marshal(test.Result)
+			want, err := fastjson.Marshal(test.Result)
 			if err != nil {
 				t.Fatalf("failed to marshal test: %v", err)
 			}

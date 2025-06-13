@@ -17,13 +17,14 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	event "github.com/erigontech/erigon/cl/beacon/beaconevents"
 )
@@ -92,7 +93,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			// marshal and send
-			buf, err := json.Marshal(e.Data)
+			buf, err := fastjson.Marshal(e.Data)
 			if err != nil {
 				log.Warn("failed to encode data", "err", err, "topic", e.Event)
 				continue

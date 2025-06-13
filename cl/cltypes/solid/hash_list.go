@@ -17,10 +17,9 @@
 package solid
 
 import (
-	"encoding/json"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -49,13 +48,13 @@ func (arr *hashList) MarshalJSON() ([]byte, error) {
 	for i := 0; i < arr.l; i++ {
 		list[i] = arr.Get(i)
 	}
-	return json.Marshal(list)
+	return fastjson.Marshal(list)
 }
 
 func (arr *hashList) UnmarshalJSON(buf []byte) error {
 	var list []common.Hash
 
-	if err := json.Unmarshal(buf, &list); err != nil {
+	if err := fastjson.Unmarshal(buf, &list); err != nil {
 		return err
 	}
 	arr.Clear()

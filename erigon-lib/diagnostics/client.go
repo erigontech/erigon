@@ -207,7 +207,7 @@ func (d *DiagnosticClient) logStr() {
 }
 
 func interfaceToJSONString(i interface{}) string {
-	b, err := json.Marshal(i)
+	b, err := fastjson.Marshal(i)
 	if err != nil {
 		return ""
 	}

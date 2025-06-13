@@ -26,10 +26,11 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/valyala/fastjson"
+	valyalafastjson "github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -131,7 +132,7 @@ func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
 	if tx.Protected() {
 		enc.ChainID = (*hexutil.Big)(tx.GetChainID().ToBig())
 	}
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 func (tx *AccessListTx) MarshalJSON() ([]byte, error) {
@@ -210,7 +211,7 @@ func (tx *BlobTxWrapper) MarshalJSON() ([]byte, error) {
 }
 
 func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
-	var p fastjson.Parser
+	var p valyalafastjson.Parser
 	v, err := p.ParseBytes(input)
 	if err != nil {
 		return nil, fmt.Errorf("parse transaction json: %w", err)

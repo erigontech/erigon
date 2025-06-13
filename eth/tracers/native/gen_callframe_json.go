@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -44,7 +45,7 @@ func (c callFrame) MarshalJSON() ([]byte, error) {
 	enc.Logs = c.Logs
 	enc.Value = (*hexutil.Big)(c.Value)
 	enc.TypeString = c.TypeString()
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.

@@ -19,7 +19,6 @@ package migrations
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -228,7 +228,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.Logge
 			}
 			callbackCalled = true
 
-			stagesProgress, err := json.Marshal(tx)
+			stagesProgress, err := fastjson.Marshal(tx)
 			if err != nil {
 				return err
 			}

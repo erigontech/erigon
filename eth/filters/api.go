@@ -20,13 +20,13 @@
 package filters
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 
 	"github.com/erigontech/erigon-lib/common/length"
 
@@ -492,7 +492,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 	}
 
 	var raw input
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := fastjson.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 

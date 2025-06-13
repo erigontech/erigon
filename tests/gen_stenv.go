@@ -3,12 +3,12 @@
 package tests
 
 import (
-	"encoding/json"
 	"errors"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 var _ = (*stEnvMarshaling)(nil)
@@ -34,7 +34,7 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 	enc.Timestamp = math.HexOrDecimal64(s.Timestamp)
 	enc.BaseFee = (*math.HexOrDecimal256)(s.BaseFee)
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(s.ExcessBlobGas)
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -50,7 +50,7 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		ExcessBlobGas *math.HexOrDecimal64      `json:"currentExcessBlobGas" gencodec:"optional"`
 	}
 	var dec stEnv
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Coinbase == nil {

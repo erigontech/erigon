@@ -33,8 +33,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/erigontech/erigon-lib/fastjson"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -982,7 +984,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	if r.Header.Get("Content-Type") == "application/json" {
-		if err := json.Unmarshal(b, signedBlindedBlock); err != nil {
+		if err := fastjson.Unmarshal(b, signedBlindedBlock); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	} else {

@@ -17,10 +17,9 @@
 package solid
 
 import (
-	"encoding/json"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -34,7 +33,7 @@ type TransactionsSSZ struct {
 func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
 	tmp := []hexutil.Bytes{}
 	t.root = common.Hash{}
-	if err := json.Unmarshal(buf, &tmp); err != nil {
+	if err := fastjson.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
 	t.underlying = nil
@@ -49,7 +48,7 @@ func (t TransactionsSSZ) MarshalJSON() ([]byte, error) {
 	for _, tx := range t.underlying {
 		tmp = append(tmp, tx)
 	}
-	return json.Marshal(tmp)
+	return fastjson.Marshal(tmp)
 }
 
 func (*TransactionsSSZ) Clone() clonable.Clonable {

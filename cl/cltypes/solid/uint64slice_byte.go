@@ -18,10 +18,10 @@ package solid
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"strconv"
 
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/utils"
@@ -96,13 +96,13 @@ func (arr *byteBasedUint64Slice) MarshalJSON() ([]byte, error) {
 	for i := 0; i < arr.l; i++ {
 		list[i] = strconv.FormatInt(int64(arr.Get(i)), 10)
 	}
-	return json.Marshal(list)
+	return fastjson.Marshal(list)
 }
 
 func (arr *byteBasedUint64Slice) UnmarshalJSON(buf []byte) error {
 	var list []uint64
 
-	if err := json.Unmarshal(buf, &list); err != nil {
+	if err := fastjson.Unmarshal(buf, &list); err != nil {
 		return err
 	}
 	arr.Clear()

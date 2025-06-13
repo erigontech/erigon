@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -41,7 +42,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 
 	// default values
 	var test0 FilterCriteria
-	if err := json.Unmarshal([]byte("{}"), &test0); err != nil {
+	if err := fastjson.Unmarshal([]byte("{}"), &test0); err != nil {
 		t.Fatal(err)
 	}
 	if test0.FromBlock != nil {
@@ -60,7 +61,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	// from, to block number
 	var test1 FilterCriteria
 	vector := fmt.Sprintf(`{"fromBlock":"0x%x","toBlock":"0x%x"}`, fromBlock.Int64(), toBlock.Int64())
-	if err := json.Unmarshal([]byte(vector), &test1); err != nil {
+	if err := fastjson.Unmarshal([]byte(vector), &test1); err != nil {
 		t.Fatal(err)
 	}
 	if test1.FromBlock.Int64() != fromBlock.Int64() {

@@ -17,13 +17,13 @@
 package cltypes
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -158,7 +158,7 @@ func (h *Eth1Header) Static() bool {
 }
 
 func (h *Eth1Header) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	return fastjson.Marshal(struct {
 		ParentHash       common.Hash      `json:"parent_hash"`
 		FeeRecipient     common.Address   `json:"fee_recipient"`
 		StateRoot        common.Hash      `json:"state_root"`
@@ -217,7 +217,7 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 		BlobGasUsed      uint64         `json:"blob_gas_used,string"`
 		ExcessBlobGas    uint64         `json:"excess_blob_gas,string"`
 	}
-	if err := json.Unmarshal(data, &aux); err != nil {
+	if err := fastjson.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	extra := solid.NewExtraData()

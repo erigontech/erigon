@@ -18,12 +18,12 @@ package engine_types
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -135,9 +135,9 @@ func NewStringifiedErrorFromString(err string) *StringifiedError {
 
 func (e *StringifiedError) MarshalJSON() ([]byte, error) {
 	if e.err == nil {
-		return json.Marshal(nil)
+		return fastjson.Marshal(nil)
 	}
-	return json.Marshal(e.err.Error())
+	return fastjson.Marshal(e.err.Error())
 }
 
 func (e *StringifiedError) UnmarshalJSON(data []byte) error {
@@ -145,7 +145,7 @@ func (e *StringifiedError) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	var errStr string
-	if err := json.Unmarshal(data, &errStr); err != nil {
+	if err := fastjson.Unmarshal(data, &errStr); err != nil {
 		return err
 	}
 	e.err = errors.New(errStr)

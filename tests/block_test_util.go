@@ -24,7 +24,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -58,7 +58,7 @@ type BlockTest struct {
 
 // UnmarshalJSON implements json.Unmarshaler interface.
 func (bt *BlockTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &bt.json)
+	return fastjson.Unmarshal(in, &bt.json)
 }
 
 type btJSON struct {

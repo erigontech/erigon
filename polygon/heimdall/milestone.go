@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 type MilestoneId uint64
@@ -89,7 +90,7 @@ func (m *Milestone) String() string {
 }
 
 func (m *Milestone) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	return fastjson.Marshal(struct {
 		Id          MilestoneId    `json:"id"`
 		MilestoneId string         `json:"milestone_id"`
 		Proposer    common.Address `json:"proposer"`

@@ -38,6 +38,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -127,7 +128,7 @@ func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg interface{}) e
 		return err
 	}
 	var respmsg jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsg); err != nil {
+	if err := fastjson.Unmarshal(respBody, &respmsg); err != nil {
 		return err
 	}
 	op.resp <- &respmsg
@@ -141,7 +142,7 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 		return err
 	}
 	var respmsgs []jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsgs); err != nil {
+	if err := fastjson.Unmarshal(respBody, &respmsgs); err != nil {
 		return err
 	}
 	for i := 0; i < len(respmsgs); i++ {
@@ -151,7 +152,7 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 }
 
 func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) ([]byte, error) {
-	body, err := json.Marshal(msg)
+	body, err := fastjson.Marshal(msg)
 	if err != nil {
 		return nil, err
 	}

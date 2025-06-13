@@ -34,13 +34,14 @@ import (
 	"text/template"
 
 	"github.com/Masterminds/sprig/v3"
-
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 type HarnessOption func(*Harness) error
@@ -295,7 +296,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		}
 		if !assert.True(t, bres, `expr: %s`, expr) {
 			if os.Getenv("HIDE_HARNESS_LOG") != "1" {
-				// b1, _ := json.Marshal(b)
+				// b1, _ := fastjson.Marshal(b)
 				// panic(string(b1))
 				t.Logf(`name: %s
 				expect%d: %v
@@ -419,7 +420,7 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 }
 
 func (s *Source) executeData(ctx context.Context) (json.RawMessage, int, error) {
-	ans, err := json.Marshal(s.Data)
+	ans, err := fastjson.Marshal(s.Data)
 	if err != nil {
 		return nil, 400, nil
 	}

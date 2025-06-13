@@ -3,12 +3,12 @@
 package t8ntool
 
 import (
-	"encoding/json"
 	"errors"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 )
 
@@ -53,7 +53,7 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 	enc.Withdrawals = s.Withdrawals
 	enc.WithdrawalsHash = s.WithdrawalsHash
 	enc.RequestsHash = s.RequestsHash
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -78,7 +78,7 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		RequestsHash     *common.Hash                        `json:"requestsHash,omitempty"`
 	}
 	var dec stEnv
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Coinbase == nil {

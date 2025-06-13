@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -391,7 +392,7 @@ func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.No
 	ret := make([]p2p.NodeInfo, 0, len(nodes.NodesInfo))
 	for _, node := range nodes.NodesInfo {
 		var rawProtocols map[string]json.RawMessage
-		if err = json.Unmarshal(node.Protocols, &rawProtocols); err != nil {
+		if err = fastjson.Unmarshal(node.Protocols, &rawProtocols); err != nil {
 			return nil, fmt.Errorf("cannot decode protocols metadata: %w", err)
 		}
 

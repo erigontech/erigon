@@ -18,7 +18,6 @@ package migrations
 
 import (
 	"context"
-	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -79,7 +79,7 @@ var ProhibitNewDownloadsLock2 = Migration{
 				}
 			}
 
-			newContent, err := json.Marshal(locked)
+			newContent, err := fastjson.Marshal(locked)
 			if err != nil {
 				return err
 			}

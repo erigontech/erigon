@@ -17,9 +17,8 @@
 package cltypes
 
 import (
-	"encoding/json"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
@@ -74,7 +73,7 @@ func (d *Deposit) UnmarshalJSON(buf []byte) error {
 	d.Proof = solid.NewHashVector(33)
 	d.Data = new(DepositData)
 
-	return json.Unmarshal(buf, &struct {
+	return fastjson.Unmarshal(buf, &struct {
 		Proof solid.HashVectorSSZ `json:"proof"`
 		Data  *DepositData        `json:"data"`
 	}{d.Proof, d.Data})

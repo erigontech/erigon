@@ -3,10 +3,10 @@
 package tests
 
 import (
-	"encoding/json"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 var _ = (*difficultyTestMarshaling)(nil)
@@ -28,7 +28,7 @@ func (d DifficultyTest) MarshalJSON() ([]byte, error) {
 	enc.CurrentTimestamp = math.HexOrDecimal64(d.CurrentTimestamp)
 	enc.CurrentBlockNumber = math.HexOrDecimal64(d.CurrentBlockNumber)
 	enc.CurrentDifficulty = (*math.HexOrDecimal256)(d.CurrentDifficulty)
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -42,7 +42,7 @@ func (d *DifficultyTest) UnmarshalJSON(input []byte) error {
 		CurrentDifficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
 	}
 	var dec DifficultyTest
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := fastjson.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.ParentTimestamp != nil {

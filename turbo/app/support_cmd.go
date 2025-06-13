@@ -35,6 +35,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -643,7 +644,7 @@ func copyResponseBody(buffer *bytes.Buffer, debugResponse *http.Response) error 
 		}
 		offset, _ := strconv.ParseInt(debugResponse.Header.Get("X-Offset"), 10, 64)
 		size, _ := strconv.ParseInt(debugResponse.Header.Get("X-Size"), 10, 64)
-		data, err := json.Marshal(struct {
+		data, err := fastjson.Marshal(struct {
 			Offset int64  `json:"offset"`
 			Size   int64  `json:"size"`
 			Data   []byte `json:"chunk"`
@@ -661,7 +662,7 @@ func copyResponseBody(buffer *bytes.Buffer, debugResponse *http.Response) error 
 		if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
 			return err
 		}
-		data, err := json.Marshal(struct {
+		data, err := fastjson.Marshal(struct {
 			Data []byte `json:"chunk"`
 		}{
 			Data: buffer.Bytes(),

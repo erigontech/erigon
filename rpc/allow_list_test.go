@@ -17,11 +17,12 @@
 package rpc
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 func TestAllowListMarshaling(t *testing.T) {
@@ -32,7 +33,7 @@ func TestAllowListUnmarshaling(t *testing.T) {
 	allowListJSON := `[ "one", "two", "three" ]`
 
 	var allowList AllowList
-	err := json.Unmarshal([]byte(allowListJSON), &allowList)
+	err := fastjson.Unmarshal([]byte(allowListJSON), &allowList)
 	require.NoError(t, err, "should unmarshal successfully")
 
 	m := map[string]struct{}{"one": {}, "two": {}, "three": {}}

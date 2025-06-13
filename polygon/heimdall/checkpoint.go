@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 type CheckpointId uint64
@@ -88,7 +89,7 @@ func (c *Checkpoint) String() string {
 }
 
 func (c *Checkpoint) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	return fastjson.Marshal(struct {
 		Id         CheckpointId   `json:"id"`
 		Proposer   common.Address `json:"proposer"`
 		StartBlock *big.Int       `json:"start_block"`

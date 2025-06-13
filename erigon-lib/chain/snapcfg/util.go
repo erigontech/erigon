@@ -19,7 +19,6 @@ package snapcfg
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/version"
 	ver "github.com/erigontech/erigon-lib/version"
@@ -341,13 +341,13 @@ func (p Preverified) MarshalJSON() ([]byte, error) {
 		out[i.Name] = i.Hash
 	}
 
-	return json.Marshal(out)
+	return fastjson.Marshal(out)
 }
 
 func (p *Preverified) UnmarshalJSON(data []byte) error {
 	var outMap map[string]string
 
-	if err := json.Unmarshal(data, &outMap); err != nil {
+	if err := fastjson.Unmarshal(data, &outMap); err != nil {
 		return err
 	}
 

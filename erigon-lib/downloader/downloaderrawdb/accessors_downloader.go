@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 )
 
@@ -50,7 +51,7 @@ func ReadTorrentInfoHash(downloaderDBTx kv.Tx, name string) (hashBytes []byte, e
 }
 
 func WriteTorrentInfo(tx kv.RwTx, info *TorrentInfo) error {
-	infoBytes, err := json.Marshal(info)
+	infoBytes, err := fastjson.Marshal(info)
 	if err != nil {
 		return err
 	}

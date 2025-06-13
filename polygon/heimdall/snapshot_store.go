@@ -3,7 +3,6 @@ package heimdall
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -14,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -169,7 +169,7 @@ func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 		result, _ := gg.Next(nil)
 
 		var span Span
-		if err := json.Unmarshal(result, &span); err != nil {
+		if err := fastjson.Unmarshal(result, &span); err != nil {
 			return nil, false, err
 		}
 
@@ -310,7 +310,7 @@ func (s *MilestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 		result, _ := gg.Next(nil)
 
 		var entity Milestone
-		if err := json.Unmarshal(result, &entity); err != nil {
+		if err := fastjson.Unmarshal(result, &entity); err != nil {
 			return nil, false, err
 		}
 
@@ -399,7 +399,7 @@ func (s *CheckpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 		result, _ := gg.Next(nil)
 
 		var entity Checkpoint
-		if err := json.Unmarshal(result, &entity); err != nil {
+		if err := fastjson.Unmarshal(result, &entity); err != nil {
 			return nil, false, err
 		}
 
@@ -483,7 +483,7 @@ func validateSnapshots[T Entity](
 		for segGetter.HasNext() {
 			buf, _ := segGetter.Next(nil)
 			entity := makeEntity()
-			if err := json.Unmarshal(buf, entity); err != nil {
+			if err := fastjson.Unmarshal(buf, entity); err != nil {
 				return err
 			}
 
@@ -604,7 +604,7 @@ OUTER:
 			gg.Reset(offset)
 			result, _ := gg.Next(nil)
 			entity := makeEntity()
-			if err := json.Unmarshal(result, &entity); err != nil {
+			if err := fastjson.Unmarshal(result, &entity); err != nil {
 				return nil, err
 			}
 

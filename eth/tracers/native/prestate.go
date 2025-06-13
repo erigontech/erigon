@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -84,7 +85,7 @@ type prestateTracerConfig struct {
 func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
 	var config prestateTracerConfig
 	if cfg != nil {
-		if err := json.Unmarshal(cfg, &config); err != nil {
+		if err := fastjson.Unmarshal(cfg, &config); err != nil {
 			return nil, err
 		}
 	}
@@ -259,12 +260,12 @@ func (t *prestateTracer) GetResult() (json.RawMessage, error) {
 	var res []byte
 	var err error
 	if t.config.DiffMode {
-		res, err = json.Marshal(struct {
+		res, err = fastjson.Marshal(struct {
 			Post state `json:"post"`
 			Pre  state `json:"pre"`
 		}{t.post, t.pre})
 	} else {
-		res, err = json.Marshal(t.pre)
+		res, err = fastjson.Marshal(t.pre)
 	}
 	if err != nil {
 		return nil, err

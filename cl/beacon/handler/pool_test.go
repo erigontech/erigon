@@ -26,6 +26,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
@@ -59,7 +60,7 @@ func TestPoolAttesterSlashings(t *testing.T) {
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
-	req, err := json.Marshal(attesterSlashing)
+	req, err := fastjson.Marshal(attesterSlashing)
 	require.NoError(t, err)
 	// post attester slashing
 	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/attester_slashings", "application/json", bytes.NewBuffer(req))
@@ -114,7 +115,7 @@ func TestPoolProposerSlashings(t *testing.T) {
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
-	req, err := json.Marshal(proposerSlashing)
+	req, err := fastjson.Marshal(proposerSlashing)
 	require.NoError(t, err)
 
 	// post attester slashing
@@ -160,7 +161,7 @@ func TestPoolVoluntaryExits(t *testing.T) {
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
-	req, err := json.Marshal(voluntaryExit)
+	req, err := fastjson.Marshal(voluntaryExit)
 	require.NoError(t, err)
 	// post attester slashing
 	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/voluntary_exits", "application/json", bytes.NewBuffer(req))
@@ -213,7 +214,7 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
-	req, err := json.Marshal(msg)
+	req, err := fastjson.Marshal(msg)
 	require.NoError(t, err)
 	// post attester slashing
 	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/bls_to_execution_changes", "application/json", bytes.NewBuffer(req))
@@ -277,7 +278,7 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
-	req, err := json.Marshal(msg)
+	req, err := fastjson.Marshal(msg)
 	require.NoError(t, err)
 	// post attester slashing
 	resp, err := server.Client().Post(server.URL+"/eth/v1/validator/aggregate_and_proofs", "application/json", bytes.NewBuffer(req))
@@ -319,7 +320,7 @@ func TestPoolSyncCommittees(t *testing.T) {
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
-	req, err := json.Marshal(msgs)
+	req, err := fastjson.Marshal(msgs)
 	require.NoError(t, err)
 	// post attester slashing
 	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/sync_committees", "application/json", bytes.NewBuffer(req))
@@ -368,7 +369,7 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
-	req, err := json.Marshal(msgs)
+	req, err := fastjson.Marshal(msgs)
 	require.NoError(t, err)
 	// post attester slashing
 	resp, err := server.Client().Post(server.URL+"/eth/v1/validator/contribution_and_proofs", "application/json", bytes.NewBuffer(req))

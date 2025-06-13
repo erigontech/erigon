@@ -18,7 +18,6 @@ package cltypes
 
 import (
 	_ "embed"
-	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -28,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -117,15 +117,15 @@ func TestBeaconBlockJson(t *testing.T) {
 	_, bc := clparams.GetConfigsByNetwork(networkid.GnosisChainID)
 	block := NewSignedBeaconBlock(bc, clparams.DenebVersion)
 	block.Block.Body.Version = clparams.DenebVersion
-	err := json.Unmarshal(beaconBodyJSON, block)
+	err := fastjson.Unmarshal(beaconBodyJSON, block)
 	require.NoError(t, err)
 	map1 := make(map[string]interface{})
 	map2 := make(map[string]interface{})
-	err = json.Unmarshal(beaconBodyJSON, &map1)
+	err = fastjson.Unmarshal(beaconBodyJSON, &map1)
 	require.NoError(t, err)
-	out, err := json.Marshal(block)
+	out, err := fastjson.Marshal(block)
 	require.NoError(t, err)
-	err = json.Unmarshal(out, &map2)
+	err = fastjson.Unmarshal(out, &map2)
 	require.NoError(t, err)
 
 	r, _ := block.Block.HashSSZ()

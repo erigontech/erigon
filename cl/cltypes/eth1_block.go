@@ -17,7 +17,6 @@
 package cltypes
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/big"
 
@@ -25,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -115,7 +115,7 @@ func (*Eth1Block) Static() bool {
 }
 
 func (b *Eth1Block) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	return fastjson.Marshal(struct {
 		ParentHash    common.Hash                 `json:"parent_hash"`
 		FeeRecipient  common.Address              `json:"fee_recipient"`
 		StateRoot     common.Hash                 `json:"state_root"`
@@ -175,7 +175,7 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 		ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
 	}
 	aux.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
-	if err := json.Unmarshal(data, &aux); err != nil {
+	if err := fastjson.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	b.ParentHash = aux.ParentHash

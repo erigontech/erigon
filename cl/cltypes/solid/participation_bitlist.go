@@ -17,10 +17,10 @@
 package solid
 
 import (
-	"encoding/json"
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/utils"
@@ -222,12 +222,12 @@ func (u *ParticipationBitList) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(hexutil.Bytes(enc))
+	return fastjson.Marshal(hexutil.Bytes(enc))
 }
 
 func (u *ParticipationBitList) UnmarshalJSON(input []byte) error {
 	var hex hexutil.Bytes
-	if err := json.Unmarshal(input, &hex); err != nil {
+	if err := fastjson.Unmarshal(input, &hex); err != nil {
 		return err
 	}
 	return u.DecodeSSZ(hex, 0)

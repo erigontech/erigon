@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -187,7 +188,7 @@ func (t *muxTracer) GetResult() (json.RawMessage, error) {
 		}
 		resObject[t.names[i]] = r
 	}
-	res, err := json.Marshal(resObject)
+	res, err := fastjson.Marshal(resObject)
 	if err != nil {
 		return nil, err
 	}

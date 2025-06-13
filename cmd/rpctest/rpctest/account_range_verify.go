@@ -19,7 +19,6 @@ package rpctest
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -29,10 +28,10 @@ import (
 	"github.com/davecgh/go-spew/spew"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/state"
 )
 
@@ -95,7 +94,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 			var acc state.DumpAccount
 			for addr, acc = range ar.Result.Accounts {
 				i++
-				b, innerErr := json.Marshal(acc)
+				b, innerErr := fastjson.Marshal(acc)
 				if innerErr != nil {
 					return innerErr
 				}

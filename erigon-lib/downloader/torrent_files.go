@@ -28,7 +28,9 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 // AtomicTorrentFS - does provide thread-safe CRUD operations on .torrent files
@@ -229,7 +231,7 @@ func (tf *AtomicTorrentFS) prohibitNewDownloads(t string) error {
 		return fmt.Errorf("open file for writing: %w", err)
 	}
 	defer f.Close()
-	prohibitedListJsonBytes, err := json.Marshal(prohibitedList)
+	prohibitedListJsonBytes, err := fastjson.Marshal(prohibitedList)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}

@@ -18,11 +18,11 @@ package solid
 
 import (
 	"encoding/binary"
-	"encoding/json"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
@@ -41,7 +41,7 @@ func NewExtraData() *ExtraData {
 }
 
 func (e *ExtraData) UnmarshalJSON(buf []byte) error {
-	if err := json.Unmarshal(buf, (*hexutil.Bytes)(&e.data)); err != nil {
+	if err := fastjson.Unmarshal(buf, (*hexutil.Bytes)(&e.data)); err != nil {
 		return err
 	}
 	e.l = len(e.data)
@@ -49,7 +49,7 @@ func (e *ExtraData) UnmarshalJSON(buf []byte) error {
 }
 
 func (e ExtraData) MarshalJSON() ([]byte, error) {
-	return json.Marshal(hexutil.Bytes(e.data[:e.l]))
+	return fastjson.Marshal(hexutil.Bytes(e.data[:e.l]))
 }
 
 // Clone creates a new instance of ExtraData.

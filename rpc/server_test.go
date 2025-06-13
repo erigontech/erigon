@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -117,7 +118,7 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 				sort.Slice(msgs, func(i, j int) bool {
 					return string(msgs[i].ID) < string(msgs[j].ID)
 				})
-				b, err := json.Marshal(msgs)
+				b, err := fastjson.Marshal(msgs)
 				if err != nil {
 					panic(err)
 				}
@@ -126,7 +127,7 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 				sort.Slice(msgs, func(i, j int) bool {
 					return string(msgs[i].ID) < string(msgs[j].ID)
 				})
-				b, err = json.Marshal(msgs)
+				b, err = fastjson.Marshal(msgs)
 				if err != nil {
 					panic(err)
 				}

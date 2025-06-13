@@ -19,7 +19,6 @@ package flow
 import (
 	"bufio"
 	"encoding/hex"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -31,6 +30,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/fastjson"
 
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon/cmd/hack/tool"
@@ -147,7 +147,7 @@ func worker(code []byte) {
 		metrics.OOM = true
 	}
 
-	b, err := json.Marshal(metrics)
+	b, err := fastjson.Marshal(metrics)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -211,7 +211,7 @@ func batchServer() {
 				out, oerr := cmd.Output()
 				if oerr == nil {
 					lines := strings.Split(string(out), "\n")
-					merr := json.Unmarshal([]byte(lines[len(lines)-1]), &metrics)
+					merr := fastjson.Unmarshal([]byte(lines[len(lines)-1]), &metrics)
 					if merr != nil {
 						fmt.Printf("Output:\n")
 						fmt.Printf("%v\n", string(out))

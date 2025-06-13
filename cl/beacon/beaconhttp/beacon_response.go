@@ -17,9 +17,9 @@
 package beaconhttp
 
 import (
-	"encoding/json"
 	"net/http"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 )
@@ -90,7 +90,7 @@ func (b *BeaconResponse) MarshalJSON() ([]byte, error) {
 	for k, v := range b.Extra {
 		o[k] = v
 	}
-	return json.Marshal(o)
+	return fastjson.Marshal(o)
 }
 
 func (b *BeaconResponse) EncodeSSZ(xs []byte) ([]byte, error) {

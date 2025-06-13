@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/stretchr/testify/assert"
@@ -376,7 +377,7 @@ func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
 func testExtractToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = v
-	out, err := json.Marshal(valueMap)
+	out, err := fastjson.Marshal(valueMap)
 	if err != nil {
 		return err
 	}
@@ -388,7 +389,7 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = append(v, 0xAA)
 	k1 := append(k, 0xAA)
-	out, err := json.Marshal(valueMap)
+	out, err := fastjson.Marshal(valueMap)
 	if err != nil {
 		panic(err)
 	}
@@ -401,7 +402,7 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
 	k2 := append(k, 0xBB)
-	out, err = json.Marshal(valueMap)
+	out, err = fastjson.Marshal(valueMap)
 	if err != nil {
 		panic(err)
 	}

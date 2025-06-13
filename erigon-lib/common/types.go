@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 // Lengths of hashes and addresses in bytes.
@@ -101,9 +102,9 @@ func (ma *MixedcaseAddress) UnmarshalJSON(input []byte) error {
 // MarshalJSON marshals the original value
 func (ma *MixedcaseAddress) MarshalJSON() ([]byte, error) {
 	if strings.HasPrefix(ma.original, "0x") || strings.HasPrefix(ma.original, "0X") {
-		return json.Marshal("0x" + ma.original[2:])
+		return fastjson.Marshal("0x" + ma.original[2:])
 	}
-	return json.Marshal("0x" + ma.original)
+	return fastjson.Marshal("0x" + ma.original)
 }
 
 // Address returns the address

@@ -16,13 +16,15 @@
 
 package rpc
 
-import "encoding/json"
+import (
+	"github.com/erigontech/erigon-lib/fastjson"
+)
 
 type AllowList map[string]struct{}
 
 func (a *AllowList) UnmarshalJSON(data []byte) error {
 	var keys []string
-	err := json.Unmarshal(data, &keys)
+	err := fastjson.Unmarshal(data, &keys)
 	if err != nil {
 		return err
 	}
@@ -47,7 +49,7 @@ func (a *AllowList) MarshalJSON() ([]byte, error) {
 		keys[i] = key
 		i++
 	}
-	return json.Marshal(keys)
+	return fastjson.Marshal(keys)
 }
 
 type ForbiddenList map[string]struct{}

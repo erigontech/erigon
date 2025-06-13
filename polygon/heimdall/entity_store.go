@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
@@ -353,7 +354,7 @@ func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity
 		return fmt.Errorf("put entity: %s needs an RwTx", s.table)
 	}
 
-	jsonBytes, err := json.Marshal(entity)
+	jsonBytes, err := fastjson.Marshal(entity)
 	if err != nil {
 		return err
 	}

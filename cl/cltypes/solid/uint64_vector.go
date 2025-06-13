@@ -17,8 +17,7 @@
 package solid
 
 import (
-	"encoding/json"
-
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 )
 
@@ -38,11 +37,11 @@ func NewUint64VectorSSZ(size int) Uint64VectorSSZ {
 }
 
 func (h uint64VectorSSZ) MarshalJSON() ([]byte, error) {
-	return json.Marshal(h.u)
+	return fastjson.Marshal(h.u)
 }
 
 func (h *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
-	return json.Unmarshal(buf, h.u)
+	return fastjson.Unmarshal(buf, h.u)
 }
 
 func (arr *uint64VectorSSZ) Clear() {

@@ -21,7 +21,6 @@ import (
 	"container/heap"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
@@ -1300,7 +1300,7 @@ func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_type
 		ListenerAddr: info.ListenAddr,
 	}
 
-	protos, err := json.Marshal(info.Protocols)
+	protos, err := fastjson.Marshal(info.Protocols)
 	if err != nil {
 		return nil, fmt.Errorf("cannot encode protocols map: %w", err)
 	}

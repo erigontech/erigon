@@ -17,9 +17,8 @@
 package solid
 
 import (
-	"encoding/json"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -110,7 +109,7 @@ func (s *SyncCommittee) Static() bool {
 }
 
 func (s *SyncCommittee) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	return fastjson.Marshal(struct {
 		Committee          []common.Bytes48 `json:"pubkeys"`
 		AggregatePublicKey common.Bytes48   `json:"aggregate_pubkey"`
 	}{
@@ -125,7 +124,7 @@ func (s *SyncCommittee) UnmarshalJSON(input []byte) error {
 		Committee          []common.Bytes48 `json:"pubkeys"`
 		AggregatePublicKey common.Bytes48   `json:"aggregate_pubkey"`
 	}
-	if err = json.Unmarshal(input, &tmp); err != nil {
+	if err = fastjson.Unmarshal(input, &tmp); err != nil {
 		return err
 	}
 	s.SetAggregatePublicKey(tmp.AggregatePublicKey)

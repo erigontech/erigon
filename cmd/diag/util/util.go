@@ -18,7 +18,6 @@ package util
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +28,8 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
@@ -55,7 +56,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 		return err
 	}
 
-	err = json.Unmarshal(body, &data)
+	err = fastjson.Unmarshal(body, &data)
 	if err != nil {
 		if err.Error() == "invalid character 'p' after top-level value" {
 			return errors.New("diagnostics was not initialized yet. Please try again in a few seconds")
@@ -68,7 +69,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 }
 
 func RenderJson(data interface{}) {
-	bytes, err := json.Marshal(data)
+	bytes, err := fastjson.Marshal(data)
 
 	if err == nil {
 		fmt.Println(string(bytes))

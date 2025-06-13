@@ -18,11 +18,11 @@ package solid
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -143,7 +143,7 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 		var temp tempAttestation
 		temp.AggregationBits = NewBitList(0, aggregationBitsSizeElectra)
 		temp.CommitteeBits = NewBitVector(maxCommitteesPerSlot)
-		if err := json.Unmarshal(data, &temp); err != nil {
+		if err := fastjson.Unmarshal(data, &temp); err != nil {
 			return err
 		}
 		a.AggregationBits = temp.AggregationBits
@@ -156,7 +156,7 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 	// Deneb case
 	var temp tempAttestation
 	temp.AggregationBits = NewBitList(0, aggregationBitsSizeDeneb)
-	if err := json.Unmarshal(data, &temp); err != nil {
+	if err := fastjson.Unmarshal(data, &temp); err != nil {
 		return err
 	}
 	// Copy the temporary struct into the actual struct

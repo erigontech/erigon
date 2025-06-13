@@ -18,13 +18,14 @@ package attestation_producer_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/stretchr/testify/require"
 )
 
 func TestAttestationProducer(t *testing.T) {
@@ -37,7 +38,7 @@ func TestAttestationProducer(t *testing.T) {
 	att, err := attProducer.ProduceAndCacheAttestationData(nil, headState, root, headState.Slot())
 	require.NoError(t, err)
 
-	attJson, err := json.Marshal(att)
+	attJson, err := fastjson.Marshal(att)
 	require.NoError(t, err)
 
 	// check if the json match with the expected value

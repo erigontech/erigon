@@ -32,6 +32,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -111,7 +112,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
 		return err
 	}
 	var stateTests map[string]tests.StateTest
-	if err = json.Unmarshal(src, &stateTests); err != nil {
+	if err = fastjson.Unmarshal(src, &stateTests); err != nil {
 		return err
 	}
 

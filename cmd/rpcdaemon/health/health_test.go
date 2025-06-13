@@ -18,7 +18,6 @@ package health
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -28,6 +27,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 
 	"github.com/erigontech/erigon/rpc"
 )
@@ -400,7 +400,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 		}
 
 		var body map[string]string
-		err = json.Unmarshal(bodyBytes, &body)
+		err = fastjson.Unmarshal(bodyBytes, &body)
 		if err != nil {
 			t.Errorf("%v: unmarshalling the response body: %s", idx, err)
 		}
@@ -560,7 +560,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 		}
 
 		var body map[string]string
-		err = json.Unmarshal(bodyBytes, &body)
+		err = fastjson.Unmarshal(bodyBytes, &body)
 		if err != nil {
 			t.Errorf("%v: unmarshalling the response body: %s", idx, err)
 		}

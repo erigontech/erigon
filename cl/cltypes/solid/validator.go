@@ -18,11 +18,11 @@ package solid
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -245,7 +245,7 @@ func (v Validator) IsSlashable(epoch uint64) bool {
 }
 
 func (v Validator) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	return fastjson.Marshal(struct {
 		PublicKey                  common.Bytes48 `json:"pubkey"`
 		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
 		EffectiveBalance           uint64         `json:"effective_balance,string"`
@@ -278,7 +278,7 @@ func (v *Validator) UnmarshalJSON(input []byte) error {
 		ExitEpoch                  uint64         `json:"exit_epoch,string"`
 		WithdrawableEpoch          uint64         `json:"withdrawable_epoch,string"`
 	}
-	if err = json.Unmarshal(input, &tmp); err != nil {
+	if err = fastjson.Unmarshal(input, &tmp); err != nil {
 		return err
 	}
 	*v = NewValidatorFromParameters(tmp.PublicKey, tmp.WithdrawalCredentials, tmp.EffectiveBalance, tmp.Slashed, tmp.ActivationEligibilityEpoch, tmp.ActivationEpoch, tmp.ExitEpoch, tmp.WithdrawableEpoch)

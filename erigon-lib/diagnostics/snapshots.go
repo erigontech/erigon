@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -118,7 +119,7 @@ func (d *DiagnosticClient) saveSnapshotStageStatsToDB() {
 // Deprecated - it's not thread-safe and used only in tests. Need introduce another method or add special methods for Tests.
 func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
 	var newStats SyncStatistics
-	statsBytes, err := json.Marshal(d.syncStats)
+	statsBytes, err := fastjson.Marshal(d.syncStats)
 	if err != nil {
 		return SyncStatistics{}
 	}

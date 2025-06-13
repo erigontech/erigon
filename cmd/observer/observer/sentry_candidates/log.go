@@ -19,7 +19,6 @@ package sentry_candidates
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"io"
 	"strconv"
 	"strings"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/nxadm/tail"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
@@ -56,7 +56,7 @@ func (log *Log) Read() (*LogEvent, error) {
 		}
 
 		lineData := []byte(*line)
-		if err := json.Unmarshal(lineData, &event); err != nil {
+		if err := fastjson.Unmarshal(lineData, &event); err != nil {
 			return nil, err
 		}
 	}

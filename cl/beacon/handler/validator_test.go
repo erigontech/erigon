@@ -17,19 +17,20 @@
 package handler
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	mockaggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/pool"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/mock/gomock"
 )
 
 type validatorTestSuite struct {
@@ -201,7 +202,7 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 
 		// check body by comparing map
 		jsonResp := map[string]any{}
-		err = json.Unmarshal(rr.Body.Bytes(), &jsonResp)
+		err = fastjson.Unmarshal(rr.Body.Bytes(), &jsonResp)
 		t.NoError(err)
 		t.Equal(tc.expBody, jsonResp)
 

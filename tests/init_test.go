@@ -34,6 +34,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 var (
@@ -50,7 +51,7 @@ func readJSON(reader io.Reader, value interface{}) error {
 	if err != nil {
 		return fmt.Errorf("error reading JSON file: %w", err)
 	}
-	if err = json.Unmarshal(data, &value); err != nil {
+	if err = fastjson.Unmarshal(data, &value); err != nil {
 		if syntaxerr, ok := err.(*json.SyntaxError); ok {
 			line := findLine(data, syntaxerr.Offset)
 			return fmt.Errorf("JSON syntax error at line %v: %w", line, err)

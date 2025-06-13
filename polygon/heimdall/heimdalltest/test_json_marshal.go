@@ -23,10 +23,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 func AssertJsonMarshalUnmarshal[T any](t *testing.T, value *T) {
-	jsonBytes, err := json.Marshal(value)
+	jsonBytes, err := fastjson.Marshal(value)
 	require.NoError(t, err)
 
 	decodedValue := new(T)

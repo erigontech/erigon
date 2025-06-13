@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 var _ = (*withdrawalMarshaling)(nil)
@@ -24,7 +25,7 @@ func (w Withdrawal) MarshalJSON() ([]byte, error) {
 	enc.Validator = hexutil.Uint64(w.Validator)
 	enc.Address = w.Address
 	enc.Amount = hexutil.Uint64(w.Amount)
-	return json.Marshal(&enc)
+	return fastjson.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.

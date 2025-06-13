@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
@@ -359,7 +360,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 		Key *common.Hash `json:"secretKey"`
 	}
 	var key sKey
-	if err := json.Unmarshal(input, &key); err != nil {
+	if err := fastjson.Unmarshal(input, &key); err != nil {
 		return err
 	}
 	if key.Key != nil {
@@ -374,7 +375,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	// Now, read the transaction itself
 	var txJson ethapi.RPCTransaction
 
-	if err := json.Unmarshal(input, &txJson); err != nil {
+	if err := fastjson.Unmarshal(input, &txJson); err != nil {
 		return err
 	}
 

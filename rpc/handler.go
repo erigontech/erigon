@@ -33,9 +33,9 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -108,7 +108,7 @@ func HandleError(err error, stream jsonstream.Stream) {
 		if ok {
 			stream.WriteMore()
 			stream.WriteObjectField("data")
-			data, derr := json.Marshal(de.ErrorData())
+			data, derr := fastjson.Marshal(de.ErrorData())
 			if derr == nil {
 				if _, err := stream.Write(data); err != nil {
 					stream.WriteNil()
@@ -254,7 +254,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			buffer, _ := json.Marshal(answer)
+			buffer, _ := fastjson.Marshal(answer)
 			stream.Write(buffer)
 		}
 		if needWriteStream {
@@ -369,7 +369,7 @@ func (h *handler) handleImmediate(msg *jsonrpcMessage) bool {
 // handleSubscriptionResult processes subscription notifications.
 func (h *handler) handleSubscriptionResult(msg *jsonrpcMessage) {
 	var result subscriptionResult
-	if err := json.Unmarshal(msg.Params, &result); err != nil {
+	if err := fastjson.Unmarshal(msg.Params, &result); err != nil {
 		h.logger.Trace("Dropping invalid subscription message")
 		return
 	}
@@ -399,7 +399,7 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 		op.err = msg.Error
 		return
 	}
-	if op.err = json.Unmarshal(msg.Result, &op.sub.subid); op.err == nil {
+	if op.err = fastjson.Unmarshal(msg.Result, &op.sub.subid); op.err == nil {
 		go op.sub.start()
 		h.clientSubs[op.sub.subid] = op.sub
 	}
