@@ -557,6 +557,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 						for protocol, count := range counts {
 							peerCountMap[protocol] += count
 						}
+						log.Debug("[p2p] find good peers", "peerCountMap", peerCountMap, "backend.networkID", backend.networkID, "srv", srv.GetStatus())
 					}
 					if len(peerCountMap) == 0 {
 						logger.Warn("[p2p] No GoodPeers")
