@@ -99,6 +99,10 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 		return err
 	}
 
+	if c.forkChoiceReader.GetPeerDas() == nil {
+		panic("peer das is nil")
+	}
+
 	cgc := c.forkChoiceReader.GetPeerDas().CustodyGroupCount()
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
 		SeqNumber:         c.me.Seq(),
