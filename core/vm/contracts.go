@@ -568,29 +568,26 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		exp  = getData(input, baseLen, expLen)
 		v    []byte
 	)
-
-	modBm, err := bigmod.NewModulus(getData(input, baseLen+expLen, modLen))
-	if err != nil {
-		return nil, err
-	}
-	baseBm, err := new(bigmod.Nat).SetBytes(getData(input, 0, baseLen), modBm)
-	if err != nil {
-		return nil, err
-	}
-
-	switch {
-	case modBm.BitLen() == 0:
+	modBig := new(big.Int).SetBytes(mod)
+	if modBig.BitLen() == 0 || modBig.Cmp(common.Big1) == 0 {
 		// Modulo 0 is undefined, return zero
+		// Modulo 1 needs nothing to be done
 		return common.LeftPadBytes([]byte{}, int(modLen)), nil
-	case baseBm.IsOne() == 1:
-		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
-		v = baseBm.Mod(baseBm, modBm).Bytes(modBm)
-	case modBm.Nat().IsOdd() == 1:
-		v = baseBm.Exp(baseBm, exp, modBm).Bytes(modBm)
-	default:
-		// Modulo is even
-		v = math.FastExp(new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp), new(big.Int).SetBytes(mod)).Bytes()
 	}
+	if modBig.Bit(0) == 0 {
+		v = math.FastExp(new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp), modBig).Bytes()
+		return common.LeftPadBytes(v, int(modLen)), nil
+	}
+	modBig = nil
+	modBm, err := bigmod.NewModulus(mod)
+	if err != nil {
+		return nil, err
+	}
+	baseBm, err := bigmod.NewNat().SetBytes(base, modBm)
+	if err != nil {
+		return nil, err
+	}
+	v = baseBm.Exp(baseBm, exp, modBm).Bytes(modBm)
 	return common.LeftPadBytes(v, int(modLen)), nil
 }
 
