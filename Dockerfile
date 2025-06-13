@@ -1,9 +1,10 @@
-## Custom Docker image could be built using following commands:
+## A custom Docker image can be built using the following commands:
 ##
 ##   1. docker build -t ${my-local-image-name}:${my-tag} .
 ## 
 ##   2. docker build --build-arg BINARIES="erigon downloader evm" \
 ##        --build-arg BUILD_DBTOOLS="true" \
+##        --build-arg BINARIES="erigon evm downloader"
 ##        --progress plain \
 ##        -t ${my-local-image-name}:${my-tag} .
 ##
@@ -21,7 +22,6 @@ ARG BUILDER_IMAGE="golang:1.24-bookworm" \
     GID_ERIGON=1000 \
     BUILD_SILKWORM="false" \
     VERSION=${VERSION} \
-    APPLICATION="erigon" \
     EXPOSED_PORTS="8545 \
        8551 \
        8546 \
@@ -86,7 +86,6 @@ ARG USER=erigon \
     GROUP=erigon \
     UID_ERIGON \
     GID_ERIGON \
-    APPLICATION \
     BUILD_SILKWORM \
     TARGETARCH \
     TARGET_BASE_IMAGE \
