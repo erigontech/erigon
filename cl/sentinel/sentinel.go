@@ -89,9 +89,10 @@ type Sentinel struct {
 
 	handshaker *handshake.HandShaker
 
-	blockReader freezeblocks.BeaconSnapshotReader
-	blobStorage blob_storage.BlobStorage
-	bwc         *metrics.BandwidthCounter
+	blockReader       freezeblocks.BeaconSnapshotReader
+	blobStorage       blob_storage.BlobStorage
+	dataColumnStorage blob_storage.DataCloumnStorage
+	bwc               *metrics.BandwidthCounter
 
 	indiciesDB kv.RoDB
 
@@ -187,7 +188,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		s.peers,
 		s.cfg.NetworkConfig,
 		localNode,
-		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.cfg.EnableBlocks).Start()
 
 	return net, err
 }
@@ -202,17 +203,19 @@ func New(
 	indiciesDB kv.RoDB,
 	logger log.Logger,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	dataColumnStorage blob_storage.DataCloumnStorage,
 ) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:              ctx,
-		cfg:              cfg,
-		blockReader:      blockReader,
-		indiciesDB:       indiciesDB,
-		metrics:          true,
-		logger:           logger,
-		forkChoiceReader: forkChoiceReader,
-		blobStorage:      blobStorage,
-		ethClock:         ethClock,
+		ctx:               ctx,
+		cfg:               cfg,
+		blockReader:       blockReader,
+		indiciesDB:        indiciesDB,
+		metrics:           true,
+		logger:            logger,
+		forkChoiceReader:  forkChoiceReader,
+		blobStorage:       blobStorage,
+		ethClock:          ethClock,
+		dataColumnStorage: dataColumnStorage,
 	}
 
 	// Setup discovery

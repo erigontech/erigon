@@ -109,15 +109,18 @@ func (s *dataCloumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		return err
 	}
 	curCount := uint32(0)
+	restBytes := []byte{}
 	if bytes != nil {
 		curCount = binary.LittleEndian.Uint32(bytes[0:4])
+		restBytes = bytes[4:]
 	}
 	curCount++
 	countBytes := make([]byte, 4)
 	columnIndexBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(countBytes, curCount)
 	binary.LittleEndian.PutUint32(columnIndexBytes, uint32(columnIndex))
-	newBytes := append(countBytes, bytes[4:]...)
+	// | column_count | column_index1 | column_index2 | ... | new_column_index |
+	newBytes := append(countBytes, restBytes...)
 	newBytes = append(newBytes, columnIndexBytes...)
 	if err := tx.Put(kv.BlockRootToDataColumnCount, blockRoot[:], newBytes); err != nil {
 		fh.Close()
