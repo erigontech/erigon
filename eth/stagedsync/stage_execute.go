@@ -463,10 +463,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	}
 	useExternalTx := txc.Tx != nil
 	if !useExternalTx {
-		txc.Tx, err = cfg.db.BeginRw(ctx)
+		tx, err := cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
+		txc.SetTx(tx)
 		defer txc.Tx.Rollback()
 	}
 	logPrefix := u.LogPrefix()
