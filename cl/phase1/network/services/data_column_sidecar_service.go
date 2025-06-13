@@ -152,7 +152,7 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 			return fmt.Errorf("unable to get domain: %v", err)
 		}
 		pk := proposer.PublicKey()
-		signingRoot, err := fork.ComputeSigningRoot(signedBlockHeader, domain)
+		signingRoot, err := fork.ComputeSigningRoot(signedBlockHeader.Header, domain)
 		if err != nil {
 			return fmt.Errorf("unable to compute signing root: %v", err)
 		}
