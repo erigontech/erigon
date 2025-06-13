@@ -195,8 +195,8 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	db.RwDB.Close()
 	db.agg.Close()
+	db.RwDB.Close()
 }
 
 func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
@@ -396,18 +396,6 @@ func (tx *RwTx) Commit() error {
 	t := tx.RwTx
 	tx.RwTx = nil
 	return t.Commit()
-}
-
-func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryStartFrom(name)
-}
-
-func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
-}
-
-func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
 }
 
 func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
@@ -610,4 +598,34 @@ func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv
 
 func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
 	return tx.forkaggs[tx.searchForkableAggIdx(id)]
+}
+func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
+	return tx.aggtx.HistoryStartFrom(name)
+}
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
+}
+func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
+}
+func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.Tx)
+}
+func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.RwTx)
+}
+func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.Tx)
+}
+func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.RwTx)
+}
+func (tx *tx) stepSize() uint64 {
+	return tx.aggtx.StepSize()
+}
+func (tx *Tx) StepSize() uint64 {
+	return tx.stepSize()
+}
+func (tx *RwTx) StepSize() uint64 {
+	return tx.stepSize()
 }
