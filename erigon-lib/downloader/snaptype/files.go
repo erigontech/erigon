@@ -119,7 +119,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	if isSaltFile(fileName) {
 		typeString := "salt"
 		// format for salt files is different: salt-<type>.txt
-		res.Type, ok = ParseFileType("salt")
+		res.Type, _ = ParseFileType(typeString)
 		res.CaplinTypeString = typeString
 		res.TypeString = typeString
 		return res, false, true
@@ -485,10 +485,6 @@ func ParseDir(name string) (res []FileInfo, err error) {
 		res = append(res, meta)
 	}
 	slices.SortFunc(res, func(i, j FileInfo) int {
-		if i.Version == j.Version && i.From == j.From && i.To == i.To &&
-			(i.Type == nil || j.Type == nil) {
-			println(i.name, j.name, i.Type, j.Type)
-		}
 		switch {
 		case i.Version != j.Version:
 			return i.Version.Cmp(j.Version)
