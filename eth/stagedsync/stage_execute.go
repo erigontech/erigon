@@ -467,8 +467,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		if err != nil {
 			return err
 		}
+		defer tx.Rollback()
 		txc.SetTx(tx)
-		defer txc.Tx.Rollback()
 	}
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
