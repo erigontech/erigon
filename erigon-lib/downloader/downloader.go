@@ -377,8 +377,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
 			if de.IsDir() {
 				return nil
 			}
-			// should need rel here.
-			//filepath.Rel()
+			// Don't need relative file path here because we did it with os.DirFS.
 			name, ok := strings.CutSuffix(path, ".torrent")
 			if !ok {
 				return nil
