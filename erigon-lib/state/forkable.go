@@ -275,12 +275,14 @@ func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 }
 
 func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
+	pruneTo := min(m.VisibleFilesMaxRootNum(), to)
 	a := m.ap
 	fromKeyPrefix := a.encTs(a.pruneFrom)
-	eto, err := a.rel.RootNum2Num(to, tx)
+	eto, err := a.rel.RootNum2Num(pruneTo, tx)
 	if err != nil {
 		return 0, err
 	}
+	log.Info("pruning", "forkable", ee.Registry.Name(a.a), "from", a.pruneFrom, "to", eto)
 	toKeyPrefix := a.encTs(eto)
 	if del, err := ee.DeleteRangeFromTbl(a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
 		return del, err
@@ -351,7 +353,8 @@ func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 
 func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toNum, err := ap.rel.RootNum2Num(to, tx)
+	pruneTo := min(m.VisibleFilesMaxRootNum(), to)
+	toNum, err := ap.rel.RootNum2Num(pruneTo, tx)
 	if err != nil {
 		return 0, err
 	}
@@ -432,7 +435,8 @@ func (m *BufferedTx) Flush(ctx context.Context, tx kv.RwTx) error {
 
 func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toNum, err := ap.rel.RootNum2Num(to, tx)
+	pruneTo := min(m.VisibleFilesMaxRootNum(), to)
+	toNum, err := ap.rel.RootNum2Num(pruneTo, tx)
 	if err != nil {
 		return 0, err
 	}
