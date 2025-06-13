@@ -279,15 +279,15 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
-func (tx *Tx) RoForkables(id kv.ForkableId) any {
+func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
 	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
 
-func (tx *Tx) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
+func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	return newUnmarkedTx(tx.Tx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
 }
 
-func (tx *RwTx) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
+func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
 }
 
@@ -295,7 +295,7 @@ func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
 	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
 }
 
-func (tx *RwTx) RoForkables(id kv.ForkableId) any {
+func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
 	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
 

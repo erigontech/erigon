@@ -249,15 +249,15 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
-func (tx *Tx) RoForkables(id kv.ForkableId) any {
+func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
 	panic("not implemented")
 }
 
-func (tx *Tx) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
+func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	panic("not implemented")
 }
 
-func (tx *RwTx) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
+func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	panic("not implemented")
 }
 
@@ -265,7 +265,7 @@ func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
 	panic("not implemented")
 }
 
-func (tx *RwTx) RoForkables(id kv.ForkableId) any {
+func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
 	panic("not implemented")
 }
 

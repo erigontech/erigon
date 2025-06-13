@@ -6,17 +6,7 @@ import (
 
 // forkables
 
-type ForkablesRoTx interface {
-	Marked() MarkedRoTx
-	Unmarked() UnmarkedRoTx
-}
-
-type ForkablesRwTx interface {
-	Marked() MarkedRwTx
-	Unmarked() UnmarkedRwTx
-}
-
-type ForkableRoTxCommons interface {
+type ForkableTxCommons interface {
 	GetFromFiles(entityNum Num) (v []byte, found bool, fileIdx int, err error) // snapshot only
 	Close()
 	VisibleFilesMaxRootNum() RootNum
@@ -30,50 +20,50 @@ type ForkableRoTxCommons interface {
 }
 
 // marked
-type MarkedDbRoTx interface {
+type MarkedDbTx interface {
 	GetDb(num Num, hash []byte) ([]byte, error) // db only (hash==nil => canonical value)
 }
 
 type MarkedDbRwTx interface {
-	MarkedDbRoTx
+	MarkedDbTx
 	Prune(ctx context.Context, to RootNum, limit uint64) (uint64, error)
 	Unwind(ctx context.Context, from RootNum) error
 }
 
-type MarkedRoTx interface {
+type MarkedTx interface {
 	Get(num Num) ([]byte, error)
 
-	Debug() ForkableRoTxCommons
-	RoDbDebug() MarkedDbRoTx
+	Debug() ForkableTxCommons
+	RoDbDebug() MarkedDbTx
 }
 
 type MarkedRwTx interface {
-	MarkedRoTx
+	MarkedTx
 	Put(num Num, hash []byte, value []byte) error
 
 	RwDbDebug() MarkedDbRwTx
 }
 
 // unmarked
-type UnmarkedDbRoTx interface {
+type UnmarkedDbTx interface {
 	GetDb(num Num) ([]byte, error)
 }
 
 type UnmarkedDbRwTx interface {
-	UnmarkedDbRoTx
+	UnmarkedDbTx
 	Prune(ctx context.Context, to RootNum, limit uint64) (uint64, error)
 	Unwind(ctx context.Context, from RootNum) error
 }
 
-type UnmarkedRoTx interface {
+type UnmarkedTx interface {
 	Get(num Num) ([]byte, error)
 
-	Debug() ForkableRoTxCommons
-	RoDbDebug() UnmarkedDbRoTx
+	Debug() ForkableTxCommons
+	RoDbDebug() UnmarkedDbTx
 }
 
 type UnmarkedRwTx interface {
-	UnmarkedRoTx
+	UnmarkedTx
 	RwDbDebug() UnmarkedDbRwTx
 	Append(num Num, value []byte) error
 }
