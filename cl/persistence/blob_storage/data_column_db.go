@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"strconv"
 	"sync"
 
@@ -154,7 +155,7 @@ func (s *dataCloumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 
 func (s *dataCloumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
 	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
-	if _, err := s.fs.Stat(filepath); err == afero.ErrFileNotFound {
+	if _, err := s.fs.Stat(filepath); os.IsNotExist(err) {
 		return false, nil
 	} else if err != nil {
 		return false, err
