@@ -10,12 +10,12 @@ import (
 	btree2 "github.com/tidwall/btree"
 )
 
-// high 16 bits specific domain/ii/forkables;
-// low 16 bits identifies "category" domain(0)/ii(1)/history(2)/forkables(3) etc.
+// high 16 bits: specify domain/ii/forkables identifier
+// low 16 bits: category - domain(0x0)/history(0x1)/ii(0x2)/forkables(0x3) etc.
 // e.g.
-// 0x0000000000000001 0000000000000000  - storage domain
-// 0x0000000000000001 0000000000000001  - storage history
-// 0x0000000000000001 0000000000000010  - storage ii
+// 0x0001 0000 - storage domain
+// 0x0001 0001 - storage history
+// 0x0001 0002 - storage ii
 
 type UniversalEntity uint32
 
@@ -24,18 +24,18 @@ func FromDomain(d kv.Domain) UniversalEntity {
 }
 
 func FromII(ii kv.InvertedIdx) UniversalEntity {
-	return UniversalEntity(uint32(ii)<<16 | 0x10)
+	return UniversalEntity(uint32(ii)<<16 | 0x02)
 }
 
 func (ue UniversalEntity) String() string {
 	category := ue & 0xFFFF
-	if category == 0 {
+	if category == 0x0 {
 		return fmt.Sprintf("domain:%s", kv.Domain(ue>>16))
 	}
-	if category == 1 {
+	if category == 0x1 {
 		return fmt.Sprintf("history:%s", kv.InvertedIdx(ue>>16))
 	}
-	if category == 2 {
+	if category == 0x2 {
 		return fmt.Sprintf("ii:%s", kv.InvertedIdx(ue>>16))
 	}
 	return fmt.Sprintf("unknown:%d", ue)
