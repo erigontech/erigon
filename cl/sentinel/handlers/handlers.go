@@ -93,7 +93,11 @@ func NewConsensusHandlers(
 	me *enode.LocalNode,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
-	hs *handshake.HandShaker, forkChoiceReader forkchoice.ForkChoiceStorageReader, blobsStorage blob_storage.BlobStorage, enabledBlocks bool) *ConsensusHandlers {
+	hs *handshake.HandShaker,
+	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	blobsStorage blob_storage.BlobStorage,
+	dataColumnStorage blob_storage.DataCloumnStorage,
+	enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		hs:                 hs,
@@ -108,6 +112,7 @@ func NewConsensusHandlers(
 		me:                 me,
 		netCfg:             netCfg,
 		blobsStorage:       blobsStorage,
+		dataColumnStorage:  dataColumnStorage,
 	}
 
 	hm := map[string]func(s network.Stream) error{
