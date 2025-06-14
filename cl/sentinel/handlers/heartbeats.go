@@ -17,7 +17,10 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-yamux/v4"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -41,7 +44,9 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 	if s.Conn().IsClosed() {
 		return nil
 	}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); errors.Is(err, yamux.ErrStreamReset) {
+		return nil
+	} else if err != nil {
 		return err
 	}
 
