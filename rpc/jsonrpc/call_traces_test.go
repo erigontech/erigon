@@ -75,7 +75,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 	}
 	s := jsoniter.ConfigDefault.BorrowStream(nil)
 	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.NewJsoniterStream(s)
+	stream := jsonstream.Wrap(s)
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
@@ -119,7 +119,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	}
 	s := jsoniter.ConfigDefault.BorrowStream(nil)
 	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.NewJsoniterStream(s)
+	stream := jsonstream.Wrap(s)
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
@@ -183,7 +183,7 @@ func TestFilterNoAddresses(t *testing.T) {
 	}
 	s := jsoniter.ConfigDefault.BorrowStream(nil)
 	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.NewJsoniterStream(s)
+	stream := jsonstream.Wrap(s)
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
@@ -232,7 +232,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 	t.Run("second", func(t *testing.T) {
 		s := jsoniter.ConfigDefault.BorrowStream(nil)
 		defer jsoniter.ConfigDefault.ReturnStream(s)
-		stream := jsonstream.NewJsoniterStream(s)
+		stream := jsonstream.Wrap(s)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   (*hexutil.Uint64)(&fromBlock),
@@ -249,7 +249,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 	t.Run("first", func(t *testing.T) {
 		s := jsoniter.ConfigDefault.BorrowStream(nil)
 		defer jsoniter.ConfigDefault.ReturnStream(s)
-		stream := jsonstream.NewJsoniterStream(s)
+		stream := jsonstream.Wrap(s)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   (*hexutil.Uint64)(&fromBlock),
@@ -266,7 +266,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		s := jsoniter.ConfigDefault.BorrowStream(nil)
 		defer jsoniter.ConfigDefault.ReturnStream(s)
-		stream := jsonstream.NewJsoniterStream(s)
+		stream := jsonstream.Wrap(s)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   (*hexutil.Uint64)(&fromBlock),
