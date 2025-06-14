@@ -1,7 +1,11 @@
 package cltypes
 
 import (
+	"encoding/json"
+	"reflect"
+
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -20,11 +24,15 @@ var (
 
 	_ ssz2.SizedObjectSSZ        = (*DataColumnsByRootIdentifier)(nil)
 	_ solid.EncodableHashableSSZ = (*DataColumnsByRootIdentifier)(nil)
+
+	_ ssz2.SizedObjectSSZ = (*MatrixEntry)(nil)
+
+	_ ssz2.SizedObjectSSZ = (*Cell)(nil)
 )
 
 type DataColumnSidecar struct {
 	Index                        uint64                         `json:"index"` // index of the column
-	Column                       *solid.ListSSZ[Cell]           `json:"column"`
+	Column                       *solid.ListSSZ[*Cell]          `json:"column"`
 	KzgCommitments               *solid.ListSSZ[*KZGCommitment] `json:"kzg_commitments"`
 	KzgProofs                    *solid.ListSSZ[*KZGProof]      `json:"kzg_proofs"`
 	SignedBlockHeader            *SignedBeaconBlockHeader       `json:"signed_block_header"`
@@ -38,20 +46,15 @@ func NewDataColumnSidecar() *DataColumnSidecar {
 }
 
 func (d *DataColumnSidecar) Clone() clonable.Clonable {
-	return &DataColumnSidecar{
-		Index:                        d.Index,
-		Column:                       d.Column.Clone().(*solid.ListSSZ[Cell]),
-		KzgCommitments:               d.KzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment]),
-		KzgProofs:                    d.KzgProofs.Clone().(*solid.ListSSZ[*KZGProof]),
-		SignedBlockHeader:            d.SignedBlockHeader.Clone().(*SignedBeaconBlockHeader),
-		KzgCommitmentsInclusionProof: solid.NewHashVector(KzgCommitmentsInclusionProofDepth),
-	}
+	newSidecar := &DataColumnSidecar{}
+	newSidecar.tryInit()
+	return newSidecar
 }
 
 func (d *DataColumnSidecar) tryInit() {
 	cfg := clparams.GetBeaconConfig()
 	if d.Column == nil {
-		d.Column = solid.NewStaticListSSZ[Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		d.Column = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
 	}
 	if d.KzgCommitments == nil {
 		d.KzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48)
@@ -69,7 +72,6 @@ func (d *DataColumnSidecar) tryInit() {
 }
 
 func (d *DataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
-	d.tryInit()
 	return ssz2.UnmarshalSSZ(buf, version, d.getSchema()...)
 }
 
@@ -78,6 +80,7 @@ func (d *DataColumnSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (d *DataColumnSidecar) getSchema() []interface{} {
+	d.tryInit()
 	return []interface{}{&d.Index, d.Column, d.KzgCommitments, d.KzgProofs, d.SignedBlockHeader, d.KzgCommitmentsInclusionProof}
 }
 
@@ -97,34 +100,38 @@ func (d *DataColumnSidecar) Static() bool {
 
 type Cell [BytesPerCell]byte
 
-func (c Cell) Clone() clonable.Clonable {
-	return c
+func (c *Cell) Clone() clonable.Clonable {
+	return &Cell{}
 }
 
-func (c Cell) DecodeSSZ(buf []byte, version int) error {
-	//return ssz2.UnmarshalSSZ(buf, version, c.getSchema()...)
-	// copy the buf to the cell
-	copy(c[:], buf)
-	return nil
+func (c *Cell) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, c[:])
 }
 
-func (c Cell) EncodingSizeSSZ() int {
-	return len(c)
+func (c *Cell) EncodingSizeSSZ() int {
+	return BytesPerCell
 }
 
-func (c Cell) EncodeSSZ(buf []byte) ([]byte, error) {
-	//return ssz2.MarshalSSZ(buf, c.getSchema()...)
-	// copy the cell to the buf
-	copy(buf, c[:])
-	return buf, nil
+func (c *Cell) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, c[:]...), nil
 }
 
-func (c Cell) getSchema() []interface{} {
-	return []interface{}{c}
+func (c *Cell) HashSSZ() ([32]byte, error) {
+	return merkle_tree.BytesRoot(c[:])
 }
 
-func (c Cell) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(c.getSchema()...)
+func (c *Cell) Static() bool {
+	return true
+}
+
+func (c *Cell) MarshalJSON() ([]byte, error) {
+	return json.Marshal(hexutil.Bytes(c[:]))
+}
+
+var cellType = reflect.TypeOf(Cell{})
+
+func (c *Cell) UnmarshalJSON(in []byte) error {
+	return hexutil.UnmarshalFixedJSON(cellType, in, c[:])
 }
 
 type MatrixEntry struct {
@@ -132,6 +139,30 @@ type MatrixEntry struct {
 	KzgProof    KZGProof    `json:"kzg_proof"`
 	ColumnIndex ColumnIndex `json:"column_index"`
 	RowIndex    RowIndex    `json:"row_index"`
+}
+
+func (m *MatrixEntry) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, m.Cell[:], m.KzgProof[:], m.ColumnIndex, m.RowIndex)
+}
+
+func (m *MatrixEntry) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, m.Cell[:], m.KzgProof[:], &m.ColumnIndex, &m.RowIndex)
+}
+
+func (m *MatrixEntry) EncodingSizeSSZ() int {
+	return 2048 + 48 + 8 + 8
+}
+
+func (m *MatrixEntry) Clone() clonable.Clonable {
+	return &MatrixEntry{}
+}
+
+func (m *MatrixEntry) Static() bool {
+	return false
+}
+
+func (m *MatrixEntry) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(m.Cell[:], m.KzgProof[:], m.ColumnIndex, m.RowIndex)
 }
 
 type (
