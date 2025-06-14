@@ -137,7 +137,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: progress=%d/%d, keys=%.2fm", prefixesDone.Load(), prefixesTotal.Load(), float64(keysCnt.Load())/1_000_000))
+			log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: progress=%d/%d, keys=%.3fm", prefixesDone.Load(), prefixesTotal.Load(), float64(keysCnt.Load())/1_000_000))
 		default:
 		}
 	}
