@@ -47,6 +47,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 
 	skipForPerf := 41
 	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 
 	for j := 0; j < 256; j++ {
 		j := j
@@ -72,8 +73,6 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 					return err
 				}
 				defer keys.Close()
-
-				txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 
 				for keys.HasNext() {
 					key, _, err := keys.Next()
