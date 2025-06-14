@@ -31,7 +31,8 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/holiman/uint256"
 
-	"github.com/consensys/gnark-crypto/ecc/bn254"
+	bn254 "github.com/consensys/gnark-crypto/ecc/bn254"
+	bn254fp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -602,6 +603,44 @@ func newTwistPoint(blob []byte) (*bn256.G2, error) {
 	return p, nil
 }
 
+func Add(p, q *bn254.G1Affine) *bn254.G1Affine {
+	// p is infinity, return q
+	if p.IsInfinity() {
+		return q
+	}
+	// q is infinity, return p
+	if q.IsInfinity() {
+		return p
+	}
+	// Use classic formula for point addition.
+	// https://en.wikipedia.org/wiki/Elliptic_curve_point_multiplication#Point_operations
+
+	dx := (&bn254fp.Element{}).Sub(&q.X, &p.X)
+	dy := (&bn254fp.Element{}).Sub(&q.Y, &p.Y)
+
+	if dx.IsZero() {
+		if !dy.IsZero() { // For opposite points
+			return &bn254.G1Affine{}
+		}
+
+		// For coincident points find the slope of the tangent line.
+		xx := new(bn254fp.Element).Square(&p.X)
+		dy.Add(dy.Add(xx, xx), xx)
+		dx.Add(&p.Y, &p.Y)
+	}
+
+	slope := new(bn254fp.Element).Div(dy, dx)
+	slopeSquared := new(bn254fp.Element).Square(slope)
+	xr := new(bn254fp.Element).Sub(slopeSquared, &p.X)
+	xr.Sub(xr, &q.X)
+
+	yr := new(bn254fp.Element).Sub(&p.X, xr)
+	yr.Mul(yr, slope)
+	yr.Sub(yr, &p.Y)
+
+	return &(bn254.G1Affine{X: *xr, Y: *yr})
+}
+
 // runBn256Add implements the Bn256Add precompile, referenced by both
 // Byzantium and Istanbul operations.
 func runBn256Add(input []byte) ([]byte, error) {
@@ -616,7 +655,7 @@ func runBn256Add(input []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	x = x.Add(x, y)
+	x = Add(x, y)
 	return x.Marshal(), nil
 }
 
