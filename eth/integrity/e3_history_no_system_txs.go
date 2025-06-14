@@ -44,7 +44,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
 
-	skipForPerf := 101
+	skipForPerf := 41
 	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 
