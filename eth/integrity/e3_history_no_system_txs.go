@@ -37,7 +37,7 @@ import (
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
 func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader) error {
-	defer log.Info("[integrity] HistoryCheckNoSystemTxs done")
+	defer func(t time.Time) { log.Info("[integrity] HistoryCheckNoSystemTxs done", "took", time.Since(t)) }(time.Now())
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
