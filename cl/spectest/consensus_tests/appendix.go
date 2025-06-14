@@ -196,5 +196,7 @@ func addSszTests() {
 		With("PendingConsolidation", sszStaticTestByEmptyObject(&solid.PendingConsolidation{}, runAfterVersion(clparams.ElectraVersion))).         // no need json test
 		With("PendingDeposit", sszStaticTestByEmptyObject(&solid.PendingDeposit{}, runAfterVersion(clparams.ElectraVersion))).                     // no need json test
 		With("PendingPartialWithdrawal", sszStaticTestByEmptyObject(&solid.PendingPartialWithdrawal{}, runAfterVersion(clparams.ElectraVersion))). // no need json test
-		With("DataColumnsByRootIdentifier", sszStaticTestByEmptyObject(&cltypes.DataColumnsByRootIdentifier{}, runAfterVersion(clparams.FuluVersion)))
+		With("DataColumnsByRootIdentifier", sszStaticTestByEmptyObject(&cltypes.DataColumnsByRootIdentifier{}, runAfterVersion(clparams.FuluVersion))).
+		With("MatrixEntry", sszStaticTestByEmptyObject(&cltypes.MatrixEntry{}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
+		With("DataColumnSidecar", sszStaticTestByEmptyObject(&cltypes.DataColumnSidecar{}, withTestJson(), runAfterVersion(clparams.FuluVersion)))
 }
