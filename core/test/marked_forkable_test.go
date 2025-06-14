@@ -62,7 +62,7 @@ func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (F
 	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId, log,
 		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
 
-	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, ee.IdentityRootRelationInstance, log,
+	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, state.IdentityRootRelationInstance, log,
 		state.App_WithFreezer(freezer),
 		state.App_WithPruneFrom(Num(1)),
 		state.App_WithIndexBuilders(builder),
@@ -133,7 +133,7 @@ func TestMarked_PutToDb(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, returnv == nil) // Equal fails
 
-	require.Equal(t, ma_tx.Type(), state.Marked)
+	require.Equal(t, ma_tx.Type(), kv.Marked)
 }
 
 func TestPrune(t *testing.T) {
@@ -149,7 +149,7 @@ func TestPrune(t *testing.T) {
 			headerId, ma := setupHeader(t, log, dir, db)
 
 			ctx := context.Background()
-			cfg := headerId.SnapshotConfig()
+			cfg := ee.Registry.SnapshotConfig(headerId)
 			entries_count = cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
 			ma_tx := ma.BeginTemporalTx()
@@ -225,7 +225,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
 	require.NoError(t, err)
-	cfg := headerId.SnapshotConfig()
+	cfg := ee.Registry.SnapshotConfig(headerId)
 	entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 2
 	buffer := &bytes.Buffer{}
 

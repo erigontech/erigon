@@ -2,7 +2,6 @@ package state
 
 import (
 	"github.com/erigontech/erigon-lib/kv"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 //// relations
@@ -37,7 +36,7 @@ func (r *ManyToOneRelation) RootNum2Num(inp RootNum, tx kv.Tx) (Num, error) {
 		return 0, err
 	}
 
-	return Num(ee.Decode64FromBytes(v, true)), nil
+	return Num(kv.Decode64FromBytes(v, true)), nil
 }
 
 //////////////////////////////////////////////
@@ -51,12 +50,12 @@ type OneToManyRelation struct {
 
 // returns 1st num present in the given inp RootNum
 func (r *OneToManyRelation) RootNum2Num(inp RootNum, tx kv.Tx) (Num, error) {
-	prevMaxNum, err := tx.GetOne(r.maxNumTbl, ee.EncToBytes(uint64(inp)-1, true))
+	prevMaxNum, err := tx.GetOne(r.maxNumTbl, kv.EncToBytes(uint64(inp)-1, true))
 	if err != nil {
 		return 0, err
 	}
 
-	return Num(ee.Decode64FromBytes(prevMaxNum, true) + 1), nil
+	return Num(kv.Decode64FromBytes(prevMaxNum, true) + 1), nil
 }
 
 // // 1: many; pure function

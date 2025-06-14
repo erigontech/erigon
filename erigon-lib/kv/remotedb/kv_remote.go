@@ -385,6 +385,14 @@ func (tx *tx) ListTables() ([]string, error) {
 	return nil, errors.New("function ListTables is not implemented for remoteTx")
 }
 
+func (tx *tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	panic("not implemented")
+}
+
+func (tx *tx) AggForkablesTx(id kv.ForkableId) any {
+	panic("not implemented")
+}
+
 // func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }
 // func (c *remoteCursor) PutNoOverwrite(k []byte, v []byte) error { panic("not supported") }
 // func (c *remoteCursor) Append(k []byte, v []byte) error         { panic("not supported") }

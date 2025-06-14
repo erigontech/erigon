@@ -12,7 +12,7 @@ import (
 type RootNum = ee.RootNum
 type Num = ee.Num
 type Id = ee.Id
-type EncToBytesI = ee.EncToBytesI
+type EncToBytesI = kv.EncToBytesI
 type ForkableId = ee.ForkableId
 type Bytes = ee.Bytes
 
@@ -53,7 +53,7 @@ type StartRoTx[T ForkableBaseTxI] interface {
 
 type ForkableTemporalCommonTxI interface {
 	Close()
-	Type() CanonicityStrategy
+	Type() kv.CanonicityStrategy
 }
 
 // no need to take mdbx tx
@@ -68,7 +68,7 @@ type ForkableFilesTxI interface {
 	vfs() visibleFiles
 	GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error)
 
-	Garbage(merged *filesItem) (outs []*filesItem)
+	Garbage(merged *FilesItem) (outs []*FilesItem)
 }
 
 type ForkableDbCommonTxI interface {
@@ -94,7 +94,6 @@ type ForkableDebugAPI[T ForkableDbCommonTxI] interface {
 type MarkedDbTxI interface {
 	ForkableDbCommonTxI
 	GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) // db only (hash==nil => canonical value)
-	Put(num Num, hash []byte, value Bytes, tx kv.RwTx) error
 }
 
 type MarkedTxI interface {
@@ -107,7 +106,6 @@ type MarkedTxI interface {
 type UnmarkedDbTxI interface {
 	ForkableDbCommonTxI
 	GetDb(num Num, tx kv.Tx) (Bytes, error)
-	Append(entityNum Num, value Bytes, tx kv.RwTx) error
 }
 
 type UnmarkedTxI interface {
@@ -132,21 +130,6 @@ type BufferedTxI interface {
 	Put(Num, Bytes) error
 	Flush(context.Context, kv.RwTx) error
 }
-
-type CanonicityStrategy uint8
-
-const (
-	// canonicalTbl & valsTbl
-	Marked CanonicityStrategy = iota
-
-	/*
-		valsTbl; storing only canonical values
-		unwinds are rare or values arrive far apart
-		and so unwind doesn't need to be very performant.
-	*/
-	Unmarked
-	Buffered
-)
 
 /////////////////// config
 

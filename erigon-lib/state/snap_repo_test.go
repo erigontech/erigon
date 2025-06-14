@@ -49,7 +49,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 	require.NoError(t, err)
 
 	// check dirty files
-	repo.dirtyFiles.Walk(func(items []*filesItem) bool {
+	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
@@ -103,7 +103,7 @@ func TestOpenFolder_CodeII(t *testing.T) {
 	require.NoError(t, err)
 
 	// check dirty files
-	repo.dirtyFiles.Walk(func(items []*filesItem) bool {
+	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
@@ -377,7 +377,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 
 	require.Equal(t, 2*stepSize, ccf[1].endTxNum)
 
-	mergeFile, found := accountsR.dirtyFiles.Get(&filesItem{startTxNum: 0, endTxNum: 2 * stepSize})
+	mergeFile, found := accountsR.dirtyFiles.Get(&FilesItem{startTxNum: 0, endTxNum: 2 * stepSize})
 	require.True(t, found)
 	require.Equal(t, uint64(0), mergeFile.startTxNum)
 	require.Equal(t, 2*stepSize, mergeFile.endTxNum)
@@ -398,7 +398,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	require.Equal(t, uint64(0), ccf[0].startTxNum)
 	require.Equal(t, 2*stepSize, ccf[0].endTxNum)
 
-	cMergeFile, found := commitmentR.dirtyFiles.Get(&filesItem{startTxNum: 0, endTxNum: 2 * stepSize})
+	cMergeFile, found := commitmentR.dirtyFiles.Get(&FilesItem{startTxNum: 0, endTxNum: 2 * stepSize})
 	require.True(t, found)
 	require.Equal(t, uint64(0), cMergeFile.startTxNum)
 	require.Equal(t, 2*stepSize, cMergeFile.endTxNum)
@@ -746,7 +746,7 @@ func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64
 	t.Helper()
 	stepSize := repo.stepSize
 	startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
-	_, found := repo.dirtyFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
+	_, found := repo.dirtyFiles.Get(&FilesItem{startTxNum: startTxNum, endTxNum: endTxNum})
 	require.Equal(t, found, isFound)
 
 	_, err := os.Stat(repo.cfg.Schema.DataFile(version.V1_0, ee.RootNum(startTxNum), ee.RootNum(endTxNum)))

@@ -3,7 +3,6 @@ package entity_extras
 import (
 	"crypto/rand"
 	"encoding/binary"
-	"math"
 	"os"
 	"path"
 	"sync"
@@ -11,15 +10,13 @@ import (
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 // ForkableId id as a uint64, returned by `RegisterForkable`. It is dependent on
 // the order of registration, and so counting on it being constant across reboots
 // might be tricky.
-type ForkableId uint16
-
-// all forkable id match this
-const AllForkableId = math.MaxUint16
+type ForkableId = kv.ForkableId
 
 type holder struct {
 	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1.0-007300-007400-bodies.seg" file
@@ -34,7 +31,12 @@ type holder struct {
 // keeping this fixed size, so that append() does not potentially re-allocate array
 // to a different address. This means that the "reads" (methods on ForkableId) can
 // be done without any locks.
-var entityRegistry [20]holder
+type registry struct {
+	entityRegistry [20]holder
+}
+
+var Registry = registry{}
+
 var curr uint16
 
 var mu sync.RWMutex
@@ -72,7 +74,7 @@ func RegisterForkable(name string, dirs datadir.Dirs, pre snapcfg.Preverified, o
 
 	mu.Lock()
 
-	entityRegistry[curr] = *h
+	Registry.entityRegistry[curr] = *h
 	id := ForkableId(curr)
 	h.snapshotConfig.LoadPreverified(pre)
 	curr++
@@ -118,38 +120,34 @@ func WithSaltFile(saltFile string) EntityIdOption {
 	}
 }
 
-func (a ForkableId) Id() uint64 {
-	return uint64(a)
+func (r *registry) Name(a ForkableId) string {
+	return r.entityRegistry[a].name
 }
 
-func (a ForkableId) Name() string {
-	return entityRegistry[a].name
+func (r *registry) SnapshotTag(a ForkableId) string {
+	return r.entityRegistry[a].snapshotDataFileTag
 }
 
-func (a ForkableId) SnapshotTag() string {
-	return entityRegistry[a].snapshotDataFileTag
+func (r *registry) IndexFileTag(a ForkableId) []string {
+	return r.entityRegistry[a].indexFileTag
 }
 
-func (a ForkableId) IndexFileTag() []string {
-	return entityRegistry[a].indexFileTag
+func (r *registry) Dirs(a ForkableId) datadir.Dirs {
+	return r.entityRegistry[a].dirs
 }
 
-func (a ForkableId) String() string {
-	return entityRegistry[a].name
+func (r *registry) String(a ForkableId) string {
+	return r.entityRegistry[a].name
 }
 
-func (a ForkableId) Dirs() datadir.Dirs {
-	return entityRegistry[a].dirs
+func (r *registry) SnapshotConfig(a ForkableId) *SnapshotConfig {
+	return r.entityRegistry[a].snapshotConfig
 }
 
-func (a ForkableId) SnapshotConfig() *SnapshotConfig {
-	return entityRegistry[a].snapshotConfig
-}
-
-func (a ForkableId) Salt() (uint32, error) {
+func (r *registry) Salt(a ForkableId) (uint32, error) {
 	// not computing salt an EntityId inception
 	// since salt file might not be downloaded yet.
-	saltFile := entityRegistry[a].saltFile
+	saltFile := r.entityRegistry[a].saltFile
 	baseDir := path.Dir(saltFile)
 	saltLock.RLock()
 	salt, ok := saltMap[baseDir]
@@ -168,10 +166,6 @@ func (a ForkableId) Salt() (uint32, error) {
 	saltLock.Unlock()
 
 	return salt, nil
-}
-
-func (a ForkableId) MatchAll() bool {
-	return a == AllForkableId
 }
 
 var saltMap = map[string]uint32{}

@@ -66,7 +66,6 @@ func NewForkableAgg(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger l
 		mergeWorkers:           1,
 		compressWorkers:        1,
 		ps:                     background.NewProgressSet(),
-
 		// marked:   ap.marked,
 		// unmarked: ap.unmarked,
 		// buffered: ap.buffered,
@@ -219,7 +218,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 		}
 	}()
 
-	mergeFn := func(proto *ProtoForkable, vfs VisibleFiles, repo *SnapshotRepo, mergedFileToSet **filesItem) {
+	mergeFn := func(proto *ProtoForkable, vfs VisibleFiles, repo *SnapshotRepo, mergedFileToSet **FilesItem) {
 		if len(vfs) == 0 {
 			return
 		}
@@ -306,8 +305,8 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 // multiple invocations will build subsequent files
 func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, err error) {
 	type wrappedFilesItem struct {
-		*filesItem
-		st CanonicityStrategy
+		*FilesItem
+		st kv.CanonicityStrategy
 		id ForkableId
 	}
 	var (
@@ -387,7 +386,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 	for _, df := range cfiles {
 		r.loop(func(p *ProtoForkable) error {
 			if p.a == df.id {
-				p.snaps.IntegrateDirtyFile(df.filesItem)
+				p.snaps.IntegrateDirtyFile(df.FilesItem)
 			}
 			return nil
 		})
@@ -538,7 +537,7 @@ type ForkableAggTemporalTx struct {
 	// TODO _leakId logic
 
 	mp map[ForkableId]uint32
-	// TODO map from forkableId -> stragety+index in array; strategy encoded in lowest 2-bits.
+	// map from forkableId -> stragety+index in array; strategy encoded in lowest 2-bits.
 }
 
 func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
@@ -549,17 +548,17 @@ func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 
 	for i, ap := range r.marked {
 		marked = append(marked, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(Marked)
+		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Marked)
 	}
 
 	for i, ap := range r.unmarked {
 		unmarked = append(unmarked, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(Unmarked)
+		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Unmarked)
 	}
 
 	for i, ap := range r.buffered {
 		buffered = append(buffered, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(Buffered)
+		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Buffered)
 	}
 
 	return &ForkableAggTemporalTx{
@@ -571,10 +570,15 @@ func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 	}
 }
 
+func (r *ForkableAggTemporalTx) IsForkablePresent(id ForkableId) bool {
+	_, ok := r.mp[id]
+	return ok
+}
+
 func (r *ForkableAggTemporalTx) Marked(id ForkableId) MarkedTxI {
 	index, ok := r.mp[id]
 	if !ok {
-		panic(fmt.Errorf("forkable %s not found", id))
+		panic(fmt.Errorf("forkable %s not found", ee.Registry.Name(id)))
 	}
 
 	return r.marked[index>>2]
@@ -583,7 +587,7 @@ func (r *ForkableAggTemporalTx) Marked(id ForkableId) MarkedTxI {
 func (r *ForkableAggTemporalTx) Unmarked(id ForkableId) UnmarkedTxI {
 	index, ok := r.mp[id]
 	if !ok {
-		panic(fmt.Errorf("forkable %s not found", id))
+		panic(fmt.Errorf("forkable %s not found", ee.Registry.Name(id)))
 	}
 	return r.unmarked[index>>2]
 }
@@ -591,7 +595,7 @@ func (r *ForkableAggTemporalTx) Unmarked(id ForkableId) UnmarkedTxI {
 func (r *ForkableAggTemporalTx) Buffered(id ForkableId) BufferedTxI {
 	index, ok := r.mp[id]
 	if !ok {
-		panic(fmt.Errorf("forkable %s not found", id))
+		panic(fmt.Errorf("forkable %s not found", ee.Registry.Name(id)))
 	}
 	return r.buffered[index>>2]
 }
@@ -603,7 +607,7 @@ func (r *ForkableAgg) BeginTemporalTx() *ForkableAggTemporalTx {
 func (r *ForkableAggTemporalTx) AlignedMaxRootNum() RootNum {
 	// return aligned max root num of "any" aligned forkable,
 	// which is ok since all are expected to be at same height
-	return loopOverDebugFiles(r, ee.AllForkableId, true, func(db ForkableFilesTxI) RootNum {
+	return loopOverDebugFiles(r, kv.AllForkableId, true, func(db ForkableFilesTxI) RootNum {
 		return db.VisibleFilesMaxRootNum()
 	})
 }
@@ -643,7 +647,7 @@ func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func
 		}
 	}
 
-	panic(fmt.Sprintf("no forkable with id %s", forId.String()))
+	panic(fmt.Sprintf("no forkable with id %s", ee.Registry.String(forId)))
 }
 
 func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipUnaligned bool, fn func(ForkableFilesTxI) R) R {
@@ -677,7 +681,7 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 		}
 	}
 
-	panic(fmt.Sprintf("no forkable with id %s", forId.String()))
+	panic(fmt.Sprintf("no forkable with id %s", ee.Registry.Name(forId)))
 }
 
 func (r *ForkableAggTemporalTx) Close() {
