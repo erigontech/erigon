@@ -78,7 +78,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		Port:          7070,
 		EnableBlocks:  true,
 		MaxPeerCount:  8883,
-	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil)
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
@@ -184,7 +184,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		Port:          7070,
 		EnableBlocks:  true,
 		MaxPeerCount:  8883,
-	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil)
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
@@ -295,7 +295,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 		Port:          7070,
 		EnableBlocks:  true,
 		MaxPeerCount:  8883,
-	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil)
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
