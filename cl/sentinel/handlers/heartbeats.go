@@ -43,9 +43,10 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 	if s.Conn().IsClosed() {
 		return nil
 	}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); strings.Contains(err.Error(), "stream reset") {
-		return nil
-	} else if err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); err != nil {
+		if strings.Contains(err.Error(), "stream reset") {
+			return nil
+		}
 		return err
 	}
 
