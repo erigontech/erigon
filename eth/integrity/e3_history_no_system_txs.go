@@ -46,6 +46,8 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	g.SetLimit(estimate.AlmostAllCPUs())
 
 	skipForPerf := 11
+	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
+
 	for j := 0; j < 256; j++ {
 		j := j
 		if j%skipForPerf != 0 {
@@ -53,7 +55,10 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 		}
 		for jj := 0; jj < 255; jj++ {
 			jj := jj
+			prefixesTotal.Add(1)
 			g.Go(func() error {
+				defer prefixesDone.Add(1)
+
 				tx, err := db.BeginTemporalRo(ctx)
 				if err != nil {
 					return err
@@ -105,7 +110,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 
 					select {
 					case <-logEvery.C:
-						log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: checked=%.2fm keys", float64(count.Load())/1_000_000))
+						log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: prefixesDone=%d/%d, keys=%.2fm", prefixesDone.Load(), prefixesTotal.Load(), float64(count.Load())/1_000_000))
 					default:
 					}
 				}
