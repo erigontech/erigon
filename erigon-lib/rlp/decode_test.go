@@ -560,7 +560,9 @@ var decodeTests = []decodeTest{
 	{
 		input: "C103",
 		ptr:   new(intField),
-		error: "rlp: type int is not RLP-serializable (struct field rlp.intField.X)",
+		value: func() interface{} {
+			return intField{X: 3}
+		}(),
 	},
 	{
 		input: "C50102C20102",

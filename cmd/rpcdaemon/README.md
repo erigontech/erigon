@@ -1,19 +1,19 @@
 - [Introduction](#introduction)
 - [Getting Started](#getting-started)
-  - [Running locally](#running-locally)
-  - [Running remotely](#running-remotely)
-  - [Healthcheck](#healthcheck)
-  - [Testing](#testing)
+    - [Running locally](#running-locally)
+    - [Running remotely](#running-remotely)
+    - [Healthcheck](#healthcheck)
+    - [Testing](#testing)
 - [FAQ](#faq)
-  - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-methods)
-  - [RPC Implementation Status](#rpc-implementation-status)
-  - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
-  - [Ethstats](#ethstats)
-  - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods-allowlist)
-  - [Server load too high](#server-load-too-high)
-  - [Faster Batch requests](#faster-batch-requests)
+    - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-methods)
+    - [RPC Implementation Status](#rpc-implementation-status)
+    - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
+    - [Ethstats](#ethstats)
+    - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods-allowlist)
+    - [Server load too high](#server-load-too-high)
+    - [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)
-  - [Code generation](#code-generation)
+    - [Code generation](#code-generation)
 
 ## Introduction
 
@@ -33,7 +33,8 @@ make rpcdaemon
 
 ### Running locally
 
-Run `rpcdaemon` on the same computer with Erigon. This is the default option because it uses Shared Memory access to Erigon's db -
+Run `rpcdaemon` on the same computer with Erigon. This is the default option because it uses Shared Memory access to
+Erigon's db -
 it's much faster than TCP access. Provide both `--datadir` and `--private.api.addr` flags:
 
 ```[bash]
@@ -235,7 +236,7 @@ Label "remote" means: `--private.api.addr` flag is required.
 The following table shows the current implementation status of Erigon's RPC daemon.
 
 | Command                                    | Avail   | Notes                                                 |
-| ------------------------------------------ | ------- | ----------------------------------------------------- |
+|--------------------------------------------|---------|-------------------------------------------------------|
 | admin_nodeInfo                             | Yes     |                                                       |
 | admin_peers                                | Yes     |                                                       |
 | admin_addPeer                              | Yes     |                                                       |
@@ -341,6 +342,11 @@ The following table shows the current implementation status of Erigon's RPC daem
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)                   |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)                   |
 | debug_traceCallMany                        | Yes     | Erigon Method PR#4567.                                |
+| debug_setMemoryLimit                       | Yes     |                                                       |
+| debug_setGCPercent                         | Yes     |                                                       |
+| debug_freeOSMemory                         | Yes     |                                                       |
+| debug_gcStats                              | Yes     |                                                       |
+| debug_memStats                             | Yes     |                                                       |
 |                                            |         |                                                       |
 | trace_call                                 | Yes     |                                                       |
 | trace_callMany                             | Yes     |                                                       |
@@ -389,7 +395,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 ### GraphQL
 
 | Command         | Avail | Notes |
-| --------------- | ----- | ----- |
+|-----------------|-------|-------|
 | GetBlockDetails | Yes   |       |
 | GetChainID      | Yes   |       |
 

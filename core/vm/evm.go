@@ -24,9 +24,10 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -410,8 +411,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if err != nil {
 		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if nonce != 0 ||
-		(contractHash != (common.Hash{}) && contractHash != empty.CodeHash) { // non-empty storage
+	hasStorage, err := evm.intraBlockState.HasStorage(address)
+	if err != nil {
+		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != empty.CodeHash) || hasStorage {
 		err = ErrContractAddressCollision
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining, 0, tracing.GasChangeCallFailedExecution)

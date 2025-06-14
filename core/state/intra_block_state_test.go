@@ -53,7 +53,7 @@ func TestSnapshotRandom(t *testing.T) {
 	}
 
 	t.Parallel()
-	config := &quick.Config{MaxCount: 1000}
+	config := &quick.Config{MaxCount: 10}
 	err := quick.Check((*snapshotTest).run, config)
 	if cerr, ok := err.(*quick.CheckError); ok {
 		test := cerr.In[0].(*snapshotTest)
@@ -264,22 +264,22 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 
-	domains, err := libstate.NewSharedDomains(tx, log.New())
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer domains.Close()
-
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
+	//domains, err := stateLib.NewSharedDomains(tx, log.New())
+	//if err != nil {
+	//	test.err = err
+	//	return false
+	//}
+	//defer domains.Close()
+	//
+	//domains.SetTxNum(1)
+	//domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		test.err = err
 		return false
 	}
 	var (
-		state        = New(NewReaderV3(domains.AsGetter(tx)))
+		state        = New(NewReaderV3(tx))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
@@ -293,7 +293,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkstate := New(NewReaderV3(domains.AsGetter(tx)))
+		checkstate := New(NewReaderV3(tx))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
 		}

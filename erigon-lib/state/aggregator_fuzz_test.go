@@ -138,19 +138,19 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 
 		// Check the history
-		roTx, err := db.BeginRo(context.Background())
+		roTx, err := db.BeginTemporalRo(context.Background())
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
-		v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey1, roTx)
+		v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
 		require.NoError(t, err)
-		require.Truef(t, ex, "key %x not found", commKey1)
+		require.NotNil(t, v, "key %x not found", commKey1)
 
 		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-		v, _, ex, err = AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey2, roTx)
+		v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 		require.NoError(t, err)
-		require.Truef(t, ex, "key %x not found", commKey2)
+		require.NotNil(t, v, "key %x not found", commKey2)
 
 		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 	})

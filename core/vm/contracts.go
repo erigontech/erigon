@@ -32,6 +32,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -172,23 +173,24 @@ var PrecompiledContractsPrague = map[common.Address]PrecompiledContract{
 }
 
 var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{0x01}): &ecrecover{},
-	common.BytesToAddress([]byte{0x02}): &sha256hash{},
-	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
-	common.BytesToAddress([]byte{0x04}): &dataCopy{},
-	common.BytesToAddress([]byte{0x05}): &bigModExp{osaka: true},
-	common.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{0x09}): &blake2F{},
-	common.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
-	common.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
-	common.BytesToAddress([]byte{0x0c}): &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{0x0d}): &bls12381G2Add{},
-	common.BytesToAddress([]byte{0x0e}): &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{0x0f}): &bls12381Pairing{},
-	common.BytesToAddress([]byte{0x10}): &bls12381MapFpToG1{},
-	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
+	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
+	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
+	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
+	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
+	common.BytesToAddress([]byte{0x05}):       &bigModExp{osaka: true},
+	common.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x09}):       &blake2F{},
+	common.BytesToAddress([]byte{0x0a}):       &pointEvaluation{},
+	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
+	common.BytesToAddress([]byte{0x0c}):       &bls12381G1MultiExp{},
+	common.BytesToAddress([]byte{0x0d}):       &bls12381G2Add{},
+	common.BytesToAddress([]byte{0x0e}):       &bls12381G2MultiExp{},
+	common.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
+	common.BytesToAddress([]byte{0x10}):       &bls12381MapFpToG1{},
+	common.BytesToAddress([]byte{0x11}):       &bls12381MapFp2ToG2{},
+	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
 var (
@@ -529,6 +531,58 @@ var (
 	errModExpModulusLengthTooLarge  = errors.New("modulus length is too large")
 )
 
+func (c *bigModExp) Run(input []byte) ([]byte, error) {
+	var (
+		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
+		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
+		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+	)
+	if c.osaka {
+		// EIP-7823: Set upper bounds for MODEXP
+		if baseLen > 1024 {
+			return nil, errModExpBaseLengthTooLarge
+		}
+		if expLen > 1024 {
+			return nil, errModExpExponentLengthTooLarge
+		}
+		if modLen > 1024 {
+			return nil, errModExpModulusLengthTooLarge
+		}
+	}
+
+	if len(input) > 96 {
+		input = input[96:]
+	} else {
+		input = input[:0]
+	}
+	// Handle a special case when both the base and mod length is zero
+	if baseLen == 0 && modLen == 0 {
+		return []byte{}, nil
+	}
+	// Retrieve the operands and execute the exponentiation
+	var (
+		base = new(big.Int).SetBytes(getData(input, 0, baseLen))
+		exp  = new(big.Int).SetBytes(getData(input, baseLen, expLen))
+		mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
+		v    []byte
+	)
+	switch {
+	case mod.BitLen() == 0:
+		// Modulo 0 is undefined, return zero
+		return common.LeftPadBytes([]byte{}, int(modLen)), nil
+	case base.Cmp(common.Big1) == 0:
+		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
+		v = base.Mod(base, mod).Bytes()
+	case mod.Bit(0) == 0:
+		// Modulo is even
+		v = math.FastExp(base, exp, mod).Bytes()
+	default:
+		// Modulo is odd
+		v = base.Exp(base, exp, mod).Bytes()
+	}
+	return common.LeftPadBytes(v, int(modLen)), nil
+}
+
 // newCurvePoint unmarshals a binary blob into a bn256 elliptic curve point,
 // returning it, or an error if the point is invalid.
 func newCurvePoint(blob []byte) (*bn256.G1, error) {
@@ -662,12 +716,12 @@ func runBn256Pairing(input []byte) ([]byte, error) {
 			return nil, err
 		}
 
-		// t, err := newTwistPoint(input[i+64 : i+192])
 		t := bn254.G2Affine{}
+		_, err = t.SetBytes(input[i+64 : i+192])
 		if err != nil {
 			return nil, err
 		}
-		_, err = t.SetBytes(input[i+64 : i+192])
+
 		cs = append(cs, c)
 		ts = append(ts, t)
 	}
