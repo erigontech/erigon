@@ -581,11 +581,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
-			burnAmount = *(&uint256.Int{}).Mul((&uint256.Int{}).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+			burnAmount = *(&uint256.Int{}).Mul((&uint256.Int{}).SetUint64(st.gasUsed()), &st.evm.Context.BaseFee)
 
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				burnAmount = *(&uint256.Int{}).Add(&burnAmount, st.evm.BlobFee)
+				burnAmount = *(&uint256.Int{}).Add(&burnAmount, &st.evm.BlobFee)
 			}
 
 			if !st.noFeeBurnAndTip {
