@@ -38,6 +38,9 @@ func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
 func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
 	gid := &cltypes.Ping{}
+	if s.Conn().IsClosed() {
+		return nil
+	}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); err != nil {
 		return err
 	}
