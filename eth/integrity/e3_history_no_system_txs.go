@@ -45,7 +45,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
 
-	skipForPerf := 19
+	skipForPerf := 21
 	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
 
 	for j := 0; j < 256; j++ {
