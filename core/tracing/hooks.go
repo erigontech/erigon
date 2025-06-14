@@ -36,7 +36,7 @@ type OpContext interface {
 	StackData() []uint256.Int
 	Caller() common.Address
 	Address() common.Address
-	CallValue() *uint256.Int
+	CallValue() uint256.Int
 	CallInput() []byte
 	Code() []byte
 	CodeHash() common.Hash
@@ -59,7 +59,7 @@ type VMContext struct {
 	Time        uint64
 	Random      *common.Hash
 	// Effective txn gas price
-	GasPrice        *uint256.Int
+	GasPrice        uint256.Int
 	ChainConfig     *chain.Config
 	IntraBlockState IntraBlockState
 
@@ -89,7 +89,7 @@ type (
 	TxEndHook = func(receipt *types.Receipt, err error)
 
 	// EnterHook is invoked when the processing of a message starts.
-	EnterHook = func(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte)
+	EnterHook = func(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte)
 
 	// ExitHook is invoked when the processing of a message ends.
 	// `revert` is true when there was an error during the execution.

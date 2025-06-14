@@ -142,6 +142,6 @@ func initStateSyncTxContext(blockNum uint64, blockHash common.Hash) evmtypes.TxC
 	return evmtypes.TxContext{
 		TxHash:   bortypes.ComputeBorTxHash(blockNum, blockHash),
 		Origin:   common.Address{},
-		GasPrice: uint256.NewInt(0),
+		GasPrice: *uint256.NewInt(0),
 	}
 }

@@ -1764,7 +1764,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) error {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount uint256.Int, bailout bool) error {
 	// get inputs before
 	input1, err := db.GetBalance(sender)
 	if err != nil {
@@ -1777,12 +1777,12 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 	}
 	input2 = *input2.Clone()
 	if !bailout {
-		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
+		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
 		if err != nil {
 			return err
 		}
 	}
-	err = db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
+	err = db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
 	if err != nil {
 		return err
 	}
@@ -1798,7 +1798,7 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 	}
 	output2 = *output2.Clone()
 	// add transfer log into state
-	addTransferLog(db, transferLogSig, sender, recipient, amount, &input1, &input2, &output1, &output2)
+	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
 	return nil
 }
 
@@ -1816,11 +1816,11 @@ func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender common.Address, coin
 		transferFeeLogSig,
 		sender,
 		coinbase,
-		&result.FeeTipped,
-		&result.SenderInitBalance,
-		&result.CoinbaseInitBalance,
-		output1.Sub(output1, &result.FeeTipped),
-		output2.Add(output2, &result.FeeTipped),
+		result.FeeTipped,
+		result.SenderInitBalance,
+		result.CoinbaseInitBalance,
+		*output1.Sub(output1, &result.FeeTipped),
+		*output2.Add(output2, &result.FeeTipped),
 	)
 
 }

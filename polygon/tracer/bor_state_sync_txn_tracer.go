@@ -96,10 +96,10 @@ func (bsstt *borStateSyncTxnTracer) OnExit(depth int, output []byte, gasUsed uin
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (bsstt *borStateSyncTxnTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if bsstt.Tracer.OnEnter != nil {
 		if !bsstt.createdTopLevel {
-			bsstt.Tracer.OnEnter(0, byte(vm.CALL), state.SystemAddress, bsstt.stateReceiverContractAddress, false, nil, 0, u256.N0, nil)
+			bsstt.Tracer.OnEnter(0, byte(vm.CALL), state.SystemAddress, bsstt.stateReceiverContractAddress, false, nil, 0, *u256.N0, nil)
 			bsstt.createdTopLevel = true
 		}
 
