@@ -670,7 +670,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 					prev.Add(prev, &bi.increase)
 				}
 
-				//			sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, &amount)), reason)
+				sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, &amount)), reason)
 			}
 
 			bi.increase.Add(&bi.increase, &amount)
