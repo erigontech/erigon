@@ -57,6 +57,14 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		signer.setCode = true
 		signer.chainID.Set(&chainId)
 		signer.chainIDMul.Mul(&chainId, u256.Num2)
+	case config.IsBhilai(blockNumber):
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.blob = false
+		signer.setCode = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
 	case config.IsCancun(blockTime):
 		// All transaction types are still supported
 		signer.protected = true
@@ -125,6 +133,9 @@ func LatestSigner(config *chain.Config) *Signer {
 			signer.protected = true
 		}
 		if config.PragueTime != nil {
+			signer.setCode = true
+		}
+		if config.Bor != nil && config.Bor.GetBhilaiBlock() != nil {
 			signer.setCode = true
 		}
 	}
