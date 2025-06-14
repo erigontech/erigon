@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 )
@@ -83,8 +82,6 @@ func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, bea
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		forkDigestToVersion:   make(map[common.Bytes4]clparams.StateVersion),
 	}
-
-	log.Warn("[test] NewEthereumClock", "validatorsRoot", genesisValidatorsRoot.String())
 
 	for _, fork := range forkList(beaconCfg.ForkVersionSchedule) {
 		digest, err := impl.computeForkDigestForVersion(fork.version)
