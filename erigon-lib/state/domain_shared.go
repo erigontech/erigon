@@ -410,14 +410,12 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, roTx kv.Tx, it func
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
 	sd.muMaps.RLock()
 	defer sd.muMaps.RUnlock()
-	var haveRamUpdates bool
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
-		haveRamUpdates = sd.storage.Len() > 0
 		ramIter = sd.storage.Iter()
 	}
 
-	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, haveRamUpdates, ramIter, it, sd.stepSize, roTx)
+	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, sd.stepSize, roTx)
 }
 
 func (sd *SharedDomains) Close() {
