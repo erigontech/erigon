@@ -36,7 +36,7 @@ var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context dead
 //go:generate mockgen -typed=true -source=./interface.go -destination=./execution_engine_mock.go -package=execution_client . ExecutionEngine
 type ExecutionEngine interface {
 	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, versionedHashes []common.Hash, executionRequestsList []hexutil.Bytes) (PayloadStatus, error)
-	ForkChoiceUpdate(ctx context.Context, finalized common.Hash, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error)
+	ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error)
 	SupportInsertion() bool
 	InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error
 	InsertBlock(ctx context.Context, block *types.Block) error
