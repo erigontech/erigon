@@ -93,7 +93,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 	}
 	defer keys.Close()
 
-	samplingKeys := 9
+	samplingKeys := 11
 	samplingNums := 11
 	keysI := 0
 	numsI := 0
