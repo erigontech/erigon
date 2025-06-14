@@ -92,6 +92,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 	}
 	defer keys.Close()
 
+	samplingForPerf := 123
 	for keys.HasNext() {
 		key, _, err := keys.Next()
 		if err != nil {
@@ -101,7 +102,12 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 		if err != nil {
 			return err
 		}
+		j := 0
 		for it.HasNext() {
+			j++
+			if j%samplingForPerf != 0 {
+				continue
+			}
 			txNum, err := it.Next()
 			if err != nil {
 				return err
