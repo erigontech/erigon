@@ -126,11 +126,10 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 		return false, nil
 	}
 	forkDigest, err := h.ethClock.CurrentForkDigest()
-	//return responseStatus.ForkDigest == forkDigest, err
 	if responseStatus.ForkDigest != forkDigest {
 		respDigest := common.Bytes4{}
 		copy(respDigest[:], responseStatus.ForkDigest[:])
-		log.Debug("Fork digest mismatch", "responseStatus.ForkDigest", respDigest, "forkDigest", forkDigest, "responseStatus.HeadSlot", responseStatus.HeadSlot)
+		log.Trace("Fork digest mismatch", "responseStatus.ForkDigest", respDigest, "forkDigest", forkDigest, "responseStatus.HeadSlot", responseStatus.HeadSlot)
 		return false, nil
 	}
 	return true, nil
