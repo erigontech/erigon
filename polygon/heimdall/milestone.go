@@ -149,7 +149,7 @@ type MilestoneCountResponseV1 struct {
 }
 
 type MilestoneCountResponseV2 struct {
-	Count int64 `json:"count"`
+	Count string `json:"count"`
 }
 
 type MilestoneLastNoAck struct {

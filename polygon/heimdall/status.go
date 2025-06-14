@@ -17,14 +17,10 @@
 package heimdall
 
 type Status struct {
-	LatestBlockHash   string `json:"latest_block_hash"`
-	LatestAppHash     string `json:"latest_app_hash"`
-	LatestBlockHeight string `json:"latest_block_height"`
-	LatestBlockTime   string `json:"latest_block_time"`
-	CatchingUp        bool   `json:"catching_up"`
-	NodeInfo          struct {
-		Version string `json:"version"`
-	} `json:"node_info"`
+	LatestBlockHash string `json:"latest_block_hash"`
+	LatestAppHash   string `json:"latest_app_hash"`
+	LatestBlockTime string `json:"latest_block_time"`
+	CatchingUp      bool   `json:"catching_up"`
 }
 
 type StatusResponse struct {
