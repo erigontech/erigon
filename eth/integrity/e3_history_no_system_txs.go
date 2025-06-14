@@ -114,14 +114,15 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 		}
 
 		for it.HasNext() {
-			numsI++
-			if numsI%samplingNums != 0 {
-				continue
-			}
 			txNum, err := it.Next()
 			if err != nil {
 				return err
 			}
+			numsI++
+			if numsI%samplingNums != 0 {
+				continue
+			}
+
 			blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
 			if err != nil {
 				return err
