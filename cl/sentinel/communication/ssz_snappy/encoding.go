@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -95,7 +96,9 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	sr := snappy.NewReader(r)
 	raw := make([]byte, encodedLn)
 	if _, err := io.ReadFull(sr, raw); err != nil {
-		return fmt.Errorf("unable to readPacket: %w", err)
+		// fetch struct name of val
+		name := reflect.TypeOf(val).Name()
+		return fmt.Errorf("unable to readPacket: %w, struct name: %s", err, name)
 	}
 
 	err = val.DecodeSSZ(raw, int(version))
