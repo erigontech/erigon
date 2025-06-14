@@ -80,7 +80,8 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	return nil
 }
 
-func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []byte, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader,
+func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []byte, tx kv.TemporalTx,
+	txNumsReader rawdbv3.TxNumsReader,
 	logEvery *time.Ticker,
 	keysCnt, prefixesDone, prefixesTotal *atomic.Uint64) error {
 	agg := state.AggTx(tx)
@@ -93,6 +94,8 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 	defer keys.Close()
 
 	samplingForPerf := 1235
+	j := 0
+
 	for keys.HasNext() {
 		key, _, err := keys.Next()
 		if err != nil {
@@ -102,7 +105,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 		if err != nil {
 			return err
 		}
-		j := 0
+
 		for it.HasNext() {
 			j++
 			if j%samplingForPerf != 0 {
