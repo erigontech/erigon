@@ -45,7 +45,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
 
-	skipForPerf := 11
+	skipForPerf := 19
 	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
 
 	for j := 0; j < 256; j++ {
@@ -110,7 +110,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 
 					select {
 					case <-logEvery.C:
-						log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: prefixesDone=%d/%d, keys=%.2fm", prefixesDone.Load(), prefixesTotal.Load(), float64(count.Load())/1_000_000))
+						log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: progress=%d/%d, keys=%.2fm", prefixesDone.Load(), prefixesTotal.Load(), float64(count.Load())/1_000_000))
 					default:
 					}
 				}
