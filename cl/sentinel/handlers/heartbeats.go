@@ -96,6 +96,9 @@ func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
+	if c.ethClock.GetCurrentEpoch() < c.beaconConfig.FuluForkEpoch {
+		return nil
+	}
 	subnetField := [8]byte{}
 	syncnetField := [1]byte{}
 	attSubEnr := enr.WithEntry(c.netCfg.AttSubnetKey, &subnetField)
