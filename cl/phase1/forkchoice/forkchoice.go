@@ -271,6 +271,7 @@ func NewForkChoiceStore(
 }
 
 func (f *ForkChoiceStore) InitPeerDas(peerDas das.PeerDas) {
+	// this is a hack to inject the peer das
 	f.peerDas = peerDas
 }
 

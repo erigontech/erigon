@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -202,6 +203,8 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	_, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
 	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp", kv.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	columnStorage := blob_storage.NewDataColumnStore(memdb.New("/tmp", kv.ChainDB), afero.NewMemMapFs(), 1000, &clparams.MainnetBeaconConfig, ethClock)
+	peerDas := das.NewPeerDas(nil, &clparams.MainnetBeaconConfig, columnStorage)
 
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
@@ -209,6 +212,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
+	forkStore.InitPeerDas(peerDas)
 
 	var steps []ForkChoiceStep
 	err = spectest.ReadYml(root, "steps.yaml", &steps)
