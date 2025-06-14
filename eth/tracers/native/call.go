@@ -211,7 +211,10 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 		Input: common.CopyBytes(input),
 		Gas:   gas,
 	}
-	call.Value = value.ToBig()
+
+	if call.Type != vm.STATICCALL {
+		call.Value = value.ToBig()
+	}
 
 	if depth == 0 {
 		call.Gas = t.gasLimit

@@ -885,7 +885,7 @@ func TestOpCLZ(t *testing.T) {
 				val.SetFromHex(tc.inputHex)
 			}
 
-			stack.push(val)
+			stack.push(*val)
 			opCLZ(&pc, evmInterpreter, &ScopeContext{Stack: stack})
 
 			if gotLen := stack.len(); gotLen != 1 {
