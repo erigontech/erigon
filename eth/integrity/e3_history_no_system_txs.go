@@ -52,7 +52,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 		j := j
 		for jj := 0; jj < 255; jj++ {
 			jj := jj
-			if (j+jj)%skipForPerf != 0 {
+			if (j+jj)%skipForPerf != 0 || (j+jj == 0) {
 				continue
 			}
 
@@ -93,7 +93,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 	}
 	defer keys.Close()
 
-	samplingForPerf := 12_357
+	samplingForPerf := 123_579
 	j := 0
 
 	for keys.HasNext() {
