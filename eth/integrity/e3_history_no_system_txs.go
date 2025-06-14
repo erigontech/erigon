@@ -93,22 +93,29 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 	}
 	defer keys.Close()
 
-	samplingForPerf := 123_579
-	j := 0
+	samplingKeys := 11
+	samplingNums := 123
+	keysI := 0
+	numsI := 0
 
 	for keys.HasNext() {
 		key, _, err := keys.Next()
 		if err != nil {
 			return err
 		}
+		keysI++
+		if keysI%samplingKeys != 0 {
+			continue
+		}
+
 		it, err := tx.IndexRange(kv.AccountsHistoryIdx, key, -1, 1_100_000_000, order.Desc, -1)
 		if err != nil {
 			return err
 		}
 
 		for it.HasNext() {
-			j++
-			if j%samplingForPerf != 0 {
+			numsI++
+			if numsI%samplingNums != 0 {
 				continue
 			}
 			txNum, err := it.Next()
