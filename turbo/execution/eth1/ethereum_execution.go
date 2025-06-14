@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -231,7 +232,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 }
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
-	fmt.Println("XValidateChain called with request")
+	fmt.Println(time.Now(), "XValidateChain called with request")
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return &execution.ValidationReceipt{
@@ -251,7 +252,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		currentBlockNumber *uint64
 		err                error
 	)
-	fmt.Println("some metric")
+	fmt.Println(time.Now(), "some metric")
 	if err := e.db.View(ctx, func(tx kv.Tx) error {
 		header, err = e.blockReader.Header(ctx, tx, blockHash, req.Number)
 		if err != nil {
@@ -281,7 +282,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}, nil
 	}
 
-	fmt.Println("view done metric")
+	fmt.Println(time.Now(), "view done metric")
 
 	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
 		return e.unwindToCommonCanonical(tx, header)
@@ -289,7 +290,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 
-	fmt.Println("update done metric")
+	fmt.Println(time.Now(), "update done metric")
 
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
@@ -297,13 +298,13 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	defer tx.Rollback()
 
-	fmt.Println("open-rw metric")
+	fmt.Println(time.Now(), "open-rw metric")
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
 
-	fmt.Println("v-payload metric")
+	fmt.Println(time.Now(), "v-payload metric")
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
 	tx.Rollback()
 	tx, err = e.db.BeginRw(ctx)
@@ -334,7 +335,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if validationError != nil {
 		validationReceipt.ValidationError = validationError.Error()
 	}
-	fmt.Println("purge metric")
+	fmt.Println(time.Now(), "purge metric")
 	return validationReceipt, tx.Commit()
 }
 
