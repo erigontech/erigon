@@ -105,7 +105,8 @@ type domainCfg struct {
 	// for commitment domain only
 	replaceKeysInValues bool
 
-	version DomainVersionTypes
+	version        DomainVersionTypes
+	dirtyFilesLock *sync.Mutex
 }
 
 func (d domainCfg) GetVersions() VersionTypes {
@@ -806,7 +807,8 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnF
 	if err != nil {
 		return err
 	}
-
+	d.dirtyFilesLock.Lock()
+	defer d.dirtyFilesLock.Unlock()
 	d.integrateDirtyFiles(static, txnFrom, txnTo)
 	// d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	return nil

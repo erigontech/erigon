@@ -101,6 +101,8 @@ type histCfg struct {
 	historyIdx    kv.InvertedIdx
 
 	version HistVersionTypes
+
+	dirtyFilesLock *sync.Mutex
 }
 
 func (h histCfg) GetVersions() VersionTypes {
