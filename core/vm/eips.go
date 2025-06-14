@@ -98,7 +98,7 @@ func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeCo
 	if err != nil {
 		return nil, err
 	}
-	callContext.Stack.push(&balance)
+	callContext.Stack.push(balance)
 	return nil, nil
 }
 
@@ -117,7 +117,7 @@ func enable1344(jt *JumpTable) {
 // opChainID implements CHAINID opcode
 func opChainID(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	chainId, _ := uint256.FromBig(interpreter.evm.ChainRules().ChainID)
-	callContext.Stack.push(chainId)
+	callContext.Stack.push(*chainId)
 	return nil, nil
 }
 
@@ -241,7 +241,7 @@ func enable3855(jt *JumpTable) {
 
 // opPush0 implements the PUSH0 opcode
 func opPush0(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.push(new(uint256.Int))
+	scope.Stack.push(uint256.Int{})
 	return nil, nil
 }
 
@@ -278,7 +278,7 @@ func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 func opCLZ(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x := scope.Stack.pop()
 	// count leading zero bits in x
-	scope.Stack.push(new(uint256.Int).SetUint64(256 - uint64(x.BitLen())))
+	scope.Stack.push(*new(uint256.Int).SetUint64(256 - uint64(x.BitLen())))
 	return nil, nil
 }
 

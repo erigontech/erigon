@@ -263,7 +263,7 @@ func (t *jsTracer) OnTxEnd(receipt *types.Receipt, err error) {
 }
 
 // onStart implements the Tracer interface to initialize the tracing operation.
-func (t *jsTracer) onStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *uint256.Int) {
+func (t *jsTracer) onStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value uint256.Int) {
 	if t.err != nil {
 		return
 	}
@@ -329,7 +329,7 @@ func (t *jsTracer) onEnd(output []byte, gasUsed uint64, err error, reverted bool
 }
 
 // OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *jsTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *jsTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if t.err != nil {
 		return
 	}
@@ -349,9 +349,7 @@ func (t *jsTracer) OnEnter(depth int, typ byte, from common.Address, to common.A
 	t.frame.input = common.CopyBytes(input)
 	t.frame.gas = uint(gas)
 	t.frame.value = nil
-	if value != nil {
-		t.frame.value = value.ToBig()
-	}
+	t.frame.value = value.ToBig()
 
 	if _, err := t.enter(t.obj, t.frameValue); err != nil {
 		t.onError("enter", err)

@@ -72,7 +72,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	origin, _ := signer.Sender(txn)
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: uint256.NewInt(1),
+		GasPrice: *uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
@@ -82,8 +82,8 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
-		BaseFee:     uint256.NewInt(0),
-		BlobBaseFee: uint256.NewInt(50000),
+		BaseFee:     *uint256.NewInt(0),
+		BlobBaseFee: *uint256.NewInt(50000),
 	}
 	alloc := types.GenesisAlloc{}
 

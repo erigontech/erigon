@@ -67,7 +67,7 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 		res, err := evm.env.interpreter.Run(NewContract(
 			&dummyContractRef{},
 			common.Address{},
-			new(uint256.Int),
+			uint256.Int{},
 			0,
 			false,
 			evm.env.config.JumpDestCache,

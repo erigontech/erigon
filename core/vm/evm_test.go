@@ -59,7 +59,7 @@ func TestInterpreterReadonly(t *testing.T) {
 		dummyContract := NewContract(
 			&dummyContractRef{},
 			common.Address{},
-			new(uint256.Int),
+			uint256.Int{},
 			0,
 			false,
 			c,
@@ -317,7 +317,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 				dummyContract := NewContract(
 					&dummyContractRef{},
 					common.Address{},
-					new(uint256.Int),
+					uint256.Int{},
 					0,
 					false,
 					c,
@@ -410,7 +410,7 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	nextContract := NewContract(
 		&dummyContractRef{},
 		common.Address{},
-		new(uint256.Int),
+		uint256.Int{},
 		0,
 		false,
 		c,
