@@ -18,6 +18,7 @@ package sentry_multi_client
 
 import (
 	"context"
+	"encoding/hex"
 	"math/rand"
 
 	"google.golang.org/grpc"
@@ -70,23 +71,73 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			cs.logger.Error("Could not encode block bodies request", "err", err)
 			return [64]byte{}, false
 		}
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
-			MinBlock: req.BlockNums[len(req.BlockNums)-1],
-			Data: &proto_sentry.OutboundMessageData{
+
+		var sentPeers *proto_sentry.SentPeers
+		if cs.shadowFork {
+			// ######################
+			// # TWEAK FOR PERFNET2 #
+			// ######################
+			outreq := proto_sentry.OutboundMessageData{
 				Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
 				Data: bytes,
-			},
-			MaxPeers: 1,
-		}
+			}
 
-		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-		if err1 != nil {
-			cs.logger.Error("Could not send block bodies request", "err", err1)
+			sentPeers, err = cs.sentries[i].SendMessageToAll(ctx, &outreq, &grpc.EmptyCallOption{})
+		} else {
+			outreq := proto_sentry.SendMessageByMinBlockRequest{
+				MinBlock: req.BlockNums[len(req.BlockNums)-1],
+				Data: &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+					Data: bytes,
+				},
+				MaxPeers: 1,
+			}
+
+			sentPeers, err = cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		}
+		if err != nil {
+			cs.logger.Error("Could not send block bodies request", "err", err)
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			var fromNum, toNum uint64
+			if len(req.BlockNums) > 0 {
+				fromNum, toNum = req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]
+			}
+			var fromHash, toHash common.Hash
+			if len(req.Hashes) > 0 {
+				fromHash, toHash = req.Hashes[0], req.Hashes[len(req.Hashes)-1]
+			}
+			cs.logger.Trace(
+				"body request not sent to any peers",
+				"fromNum", fromNum,
+				"fromHash", fromHash,
+				"toNum", toNum,
+				"toHash", toHash,
+			)
 			continue
 		}
+		go func() {
+			var fromNum, toNum uint64
+			if len(req.BlockNums) > 0 {
+				fromNum, toNum = req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]
+			}
+			var fromHash, toHash common.Hash
+			if len(req.Hashes) > 0 {
+				fromHash, toHash = req.Hashes[0], req.Hashes[len(req.Hashes)-1]
+			}
+			for _, p := range sentPeers.Peers {
+				pid := sentry.ConvertH512ToPeerID(p)
+				cs.logger.Trace(
+					"body request sent to peer",
+					"fromNum", fromNum,
+					"fromHash", fromHash,
+					"toNum", toNum,
+					"toHash", toHash,
+					"peer", hex.EncodeToString(pid[:]),
+				)
+			}
+		}()
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
@@ -116,24 +167,58 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			cs.logger.Error("Could not encode header request", "err", err)
 			return [64]byte{}, false
 		}
-		minBlock := req.Number
 
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
-			MinBlock: minBlock,
-			Data: &proto_sentry.OutboundMessageData{
+		var sentPeers *proto_sentry.SentPeers
+		if cs.shadowFork {
+			// ######################
+			// # TWEAK FOR PERFNET2 #
+			// ######################
+			outreq := proto_sentry.OutboundMessageData{
 				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 				Data: bytes,
-			},
-			MaxPeers: 5,
+			}
+
+			sentPeers, err = cs.sentries[i].SendMessageToAll(ctx, &outreq, &grpc.EmptyCallOption{})
+		} else {
+			minBlock := req.Number
+			outreq := proto_sentry.SendMessageByMinBlockRequest{
+				MinBlock: minBlock,
+				Data: &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+					Data: bytes,
+				},
+				MaxPeers: 5,
+			}
+
+			sentPeers, err = cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
 		}
-		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-		if err1 != nil {
-			cs.logger.Error("Could not send header request", "err", err1)
+		if err != nil {
+			cs.logger.Error("Could not send header request", "err", err)
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			cs.logger.Trace(
+				"header request not sent to any peers",
+				"height", req.Number,
+				"hash", req.Hash,
+				"length", req.Length,
+				"reverse", req.Reverse,
+			)
 			continue
 		}
+		go func() {
+			for _, p := range sentPeers.Peers {
+				pid := sentry.ConvertH512ToPeerID(p)
+				cs.logger.Trace(
+					"header request sent to peer",
+					"height", req.Number,
+					"hash", req.Hash,
+					"length", req.Length,
+					"reverse", req.Reverse,
+					"peer", hex.EncodeToString(pid[:]),
+				)
+			}
+		}()
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false

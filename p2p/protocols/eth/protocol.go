@@ -43,7 +43,20 @@ const ProtocolName = "eth"
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
-const ProtocolMaxMsgSize = maxMessageSize
+
+// ######################
+// # TWEAK FOR PERFNET2 #
+// ######################
+// we've doubled the max
+// message size since
+// Reth and Geth
+// bootnodes were
+// sending us larger
+// messages and getting
+// penalized
+// ######################
+
+const ProtocolMaxMsgSize = 2 * maxMessageSize
 
 const (
 	// Protocol messages in eth/64

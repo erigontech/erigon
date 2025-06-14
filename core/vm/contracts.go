@@ -32,6 +32,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -572,9 +573,9 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	case base.Cmp(common.Big1) == 0:
 		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
 		v = base.Mod(base, mod).Bytes()
-	//case mod.Bit(0) == 0:
-	//	// Modulo is even
-	//	v = math.FastExp(base, exp, mod).Bytes()
+	case mod.Bit(0) == 0:
+		// Modulo is even
+		v = math.FastExp(base, exp, mod).Bytes()
 	default:
 		// Modulo is odd
 		v = base.Exp(base, exp, mod).Bytes()
@@ -704,25 +705,37 @@ func runBn256Pairing(input []byte) ([]byte, error) {
 	}
 	// Convert the input into a set of coordinates
 	var (
-		cs []*bn256.G1
-		ts []*bn256.G2
+		cs []bn254.G1Affine
+		ts []bn254.G2Affine
 	)
 	for i := 0; i < len(input); i += 192 {
-		c, err := newCurvePoint(input[i : i+64])
+		// c, err := newCurvePoint(input[i : i+64])
+		c := bn254.G1Affine{}
+		_, err := c.SetBytes(input[i : i+64])
 		if err != nil {
 			return nil, err
 		}
-		t, err := newTwistPoint(input[i+64 : i+192])
+
+		t := bn254.G2Affine{}
+		_, err = t.SetBytes(input[i+64 : i+192])
 		if err != nil {
 			return nil, err
 		}
+
 		cs = append(cs, c)
 		ts = append(ts, t)
 	}
-	// Execute the pairing checks and return the results
-	if bn256.PairingCheck(cs, ts) {
+	if len(cs) == 0 {
 		return true32Byte, nil
 	}
+	success, err := bn254.PairingCheck(cs, ts)
+	if err != nil {
+		return nil, err
+	}
+	if success {
+		return true32Byte, nil
+	}
+
 	return false32Byte, nil
 }
 
