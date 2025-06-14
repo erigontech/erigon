@@ -117,6 +117,7 @@ Loop:
 						log.Trace("No peers available for beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
 					} else {
 						log.Debug("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
+						f.rpc.BanPeer(peerId)
 					}
 					return
 				}

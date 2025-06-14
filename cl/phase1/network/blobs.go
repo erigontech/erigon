@@ -30,6 +30,8 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 )
 
+var ErrTimeout = errors.New("timeout")
+
 var requestBlobBatchExpiration = 15 * time.Second
 
 // This is just a bunch of functions to handle blobs
@@ -108,11 +110,11 @@ Loop:
 				// this is so we do not get stuck on a side-fork
 				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
 				if err != nil {
-					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
+					log.Debug("RequestBlobsFrantically: error", "err", err, "peer", pid)
 					return
 				}
 				if responses == nil {
-					log.Trace("RequestBlobsFrantically: response is nil", "peer", pid)
+					log.Debug("RequestBlobsFrantically: response is nil", "peer", pid)
 					return
 				}
 				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
@@ -127,7 +129,7 @@ Loop:
 			return nil, ctx.Err()
 		case <-timer.C:
 			log.Trace("RequestBlobsFrantically: timeout")
-			return nil, errors.New("timeout")
+			return nil, ErrTimeout
 		default:
 			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
 				break Loop
