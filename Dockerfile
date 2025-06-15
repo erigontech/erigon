@@ -19,12 +19,12 @@ ADD . .
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm rpcdaemon
+    make rpcdaemon
 
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon
+    make erigon
 
 
 FROM docker.io/library/alpine:3.22
@@ -33,7 +33,7 @@ FROM docker.io/library/alpine:3.22
 RUN apk add --no-cache ca-certificates libstdc++ tzdata
 RUN apk add --no-cache curl jq bind-tools
 
-# Setup user and group 
+# Setup user and group
 #
 # from the perspective of the container, uid=1000, gid=1000 is a sensible choice
 # (mimicking Ubuntu Server), but if caller creates a .env (example in repo root),
