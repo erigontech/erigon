@@ -260,10 +260,10 @@ Loop:
 				if err != nil {
 					return err
 				}
-				fmt.Println("block is had")
 				if !has {
 					break
 				}
+				fmt.Println("block is had")
 			}
 		}
 		if *slot <= clFrozenBlocks {
