@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -18,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 )
 
+//go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
 	InitLocalNodeId(nodeId enode.ID)
 	DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
@@ -31,7 +33,7 @@ type peerdas struct {
 	rpc           *rpc.BeaconRpcP2P
 	beaconConfig  *clparams.BeaconChainConfig
 	columnStorage blob_storage.DataCloumnStorage
-
+	sentinel      sentinelproto.SentinelClient
 	// cgc is expected to be dynamic value, which varies with the number of validators connecting to the beacon node
 	custodyGroupCount atomic.Uint64
 }
@@ -39,16 +41,33 @@ type peerdas struct {
 func NewPeerDas(
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
-	columnStorage blob_storage.DataCloumnStorage) PeerDas {
+	columnStorage blob_storage.DataCloumnStorage,
+	sentinel sentinelproto.SentinelClient,
+) PeerDas {
 	kzg.InitKZG()
 	p := &peerdas{
 		rpc:               rpc,
 		beaconConfig:      beaconConfig,
 		columnStorage:     columnStorage,
 		custodyGroupCount: atomic.Uint64{},
+		sentinel:          sentinel,
 	}
 	p.custodyGroupCount.Store(p.beaconConfig.CustodyRequirement)
 	return p
+}
+
+func (d *peerdas) p2pTopicsControl(ctx context.Context) {
+	// TODO: check if it's upgraded to fulu by notification
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// check if it's upgraded to fulu
+		}
+	}
 }
 
 func (d *peerdas) InitLocalNodeId(nodeId enode.ID) {
