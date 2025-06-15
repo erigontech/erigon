@@ -154,10 +154,9 @@ func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request
 		"p2p_addresses":       id.P2PAddresses,
 		"discovery_addresses": id.DiscoveryAddresses,
 		"metadata": map[string]interface{}{
-			"seq":                 strconv.FormatUint(id.Metadata.Seq, 10),
-			"attnets":             id.Metadata.Attnets,
-			"syncnets":            id.Metadata.Syncnets,
-			"custody_group_count": a.peerdas.CustodyGroupCount(),
+			"seq":      strconv.FormatUint(id.Metadata.Seq, 10),
+			"attnets":  id.Metadata.Attnets,
+			"syncnets": id.Metadata.Syncnets,
 		},
 	}), nil
 }
