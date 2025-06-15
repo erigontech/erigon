@@ -54,7 +54,7 @@ func NewUnboundedTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, er
 		return &TemporaryMdbx{}, err
 	}
 
-	db, err := New(kv.ChainDB, log.Root()).InMem(path).MapSize(32 * datasize.TB).PageSize(8 * datasize.KB).Open(ctx)
+	db, err := New(kv.ChainDB, log.Root()).InMem(path).MapSize(32 * datasize.TB).PageSize(16 * datasize.KB).Open(ctx)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
