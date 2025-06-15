@@ -710,6 +710,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		stack.Config().SentryLogPeerInfo,
 		maxBlockBroadcastPeers,
 		sentryMcDisableBlockDownload,
+		config.ShadowFork,
 		logger,
 	)
 	if err != nil {

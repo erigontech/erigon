@@ -47,7 +47,7 @@ type BlockOverrides struct {
 	GasLimit    *hexutil.Uint
 	Difficulty  *hexutil.Uint
 	BaseFee     *uint256.Int
-	BlockHash   *map[uint64]common.Hash
+	BlockHash   map[uint64]common.Hash
 }
 
 type Bundle struct {
@@ -65,7 +65,7 @@ func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOve
 		blockCtx.BlockNumber = uint64(*blockOverride.BlockNumber)
 	}
 	if blockOverride.BaseFee != nil {
-		blockCtx.BaseFee = blockOverride.BaseFee
+		blockCtx.BaseFee = *blockOverride.BaseFee
 	}
 	if blockOverride.Coinbase != nil {
 		blockCtx.Coinbase = *blockOverride.Coinbase
@@ -80,7 +80,7 @@ func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOve
 		blockCtx.GasLimit = uint64(*blockOverride.GasLimit)
 	}
 	if blockOverride.BlockHash != nil {
-		for blockNum, hash := range *blockOverride.BlockHash {
+		for blockNum, hash := range blockOverride.BlockHash {
 			overrideBlockHash[blockNum] = hash
 		}
 	}
@@ -246,7 +246,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.BlockNumber = uint64(*bundle.BlockOverride.BlockNumber)
 		}
 		if bundle.BlockOverride.BaseFee != nil {
-			blockCtx.BaseFee = bundle.BlockOverride.BaseFee
+			blockCtx.BaseFee = *bundle.BlockOverride.BaseFee
 		}
 		if bundle.BlockOverride.Coinbase != nil {
 			blockCtx.Coinbase = *bundle.BlockOverride.Coinbase
@@ -261,7 +261,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.GasLimit = uint64(*bundle.BlockOverride.GasLimit)
 		}
 		if bundle.BlockOverride.BlockHash != nil {
-			for blockNum, hash := range *bundle.BlockOverride.BlockHash {
+			for blockNum, hash := range bundle.BlockOverride.BlockHash {
 				overrideBlockHash[blockNum] = hash
 			}
 		}
@@ -270,7 +270,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
-			msg, err := txn.ToMessage(api.GasCap, blockCtx.BaseFee)
+			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)
 			if err != nil {
 				return nil, err
 			}

@@ -87,7 +87,7 @@ func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to common.A
 
 }
 
-func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	t.depth = depth
 	typ := vm.OpCode(typRaw)
 	// t.captureStartOrEnter(vm.OpCode(typ), from, to, precompile, input, value)
@@ -95,9 +95,7 @@ func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from common.Address,
 	inputCopy := make([]byte, len(input))
 	copy(inputCopy, input)
 	_value := new(big.Int)
-	if value != nil {
-		_value.Set(value.ToBig())
-	}
+	_value.Set(value.ToBig())
 
 	var entry *TraceEntry
 	if typ == vm.CALL {

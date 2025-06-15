@@ -40,7 +40,7 @@ func addTransferLog(
 	input1,
 	input2,
 	output1,
-	output2 *uint256.Int,
+	output2 uint256.Int,
 ) {
 	// ignore if amount is 0
 	if amount.IsZero() {

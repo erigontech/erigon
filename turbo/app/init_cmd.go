@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
@@ -87,6 +88,12 @@ func initGenesis(cliCtx *cli.Context) error {
 	chaindb, err := node.OpenDatabase(cliCtx.Context, stack.Config(), kv.ChainDB, "", false, logger)
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
+	}
+
+	// need to call this to initialise the state-salt if not present in the DB
+	_, err = state.GetStateIndicesSalt(stack.Config().Dirs, true, logger)
+	if err != nil {
+		utils.Fatalf("Failed to get state indices salt: %v", err)
 	}
 
 	if tracer != nil {
