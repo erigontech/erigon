@@ -23,6 +23,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
@@ -66,6 +67,22 @@ type ForkChoiceStorageMock struct {
 	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
+}
+
+type MockPeerDas struct{}
+
+func (m *MockPeerDas) InitLocalNodeId(nodeId enode.ID) {}
+func (m *MockPeerDas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+	return nil
+}
+func (m *MockPeerDas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
+	return true, nil
+}
+func (m *MockPeerDas) CustodyGroupCount() uint64 {
+	return 0
+}
+func (m *MockPeerDas) DataRecoverAndPrune(ctx context.Context) error {
+	return nil
 }
 
 func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {
@@ -142,6 +159,10 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		GetBeaconCommitteeMock:    nil,
 		SyncContributionPool:      makeSyncContributionPoolMock(t),
 	}
+}
+
+func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
+	return &MockPeerDas{}
 }
 
 func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) common.Hash {
@@ -366,8 +387,4 @@ func (f *ForkChoiceStorageMock) IsRootOptimistic(root common.Hash) bool {
 
 func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
 	return false
-}
-
-func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
-	return nil
 }
