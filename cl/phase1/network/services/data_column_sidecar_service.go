@@ -24,7 +24,7 @@ type dataColumnSidecarService struct {
 	forkChoice           forkchoice.ForkChoiceStorage
 	syncDataManager      synced_data.SyncedData
 	seenSidecar          *lru.Cache[seenSidecarKey, struct{}]
-	columnSidecarStorage blob_storage.DataCloumnStorage
+	columnSidecarStorage blob_storage.DataColumnStorage
 }
 
 func NewDataColumnSidecarService(
@@ -32,7 +32,7 @@ func NewDataColumnSidecarService(
 	ethClock eth_clock.EthereumClock,
 	forkChoice forkchoice.ForkChoiceStorage,
 	syncDataManager synced_data.SyncedData,
-	columnSidecarStorage blob_storage.DataCloumnStorage,
+	columnSidecarStorage blob_storage.DataColumnStorage,
 ) DataColumnSidecarService {
 	size := cfg.NumberOfColumns * cfg.SlotsPerEpoch * 4
 	seenSidecar, err := lru.New[seenSidecarKey, struct{}]("seenDataColumnSidecar", int(size))

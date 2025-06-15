@@ -32,7 +32,7 @@ type peerdas struct {
 	nodeId        enode.ID
 	rpc           *rpc.BeaconRpcP2P
 	beaconConfig  *clparams.BeaconChainConfig
-	columnStorage blob_storage.DataCloumnStorage
+	columnStorage blob_storage.DataColumnStorage
 	sentinel      sentinelproto.SentinelClient
 	// cgc is expected to be dynamic value, which varies with the number of validators connecting to the beacon node
 	custodyGroupCount atomic.Uint64
@@ -41,7 +41,7 @@ type peerdas struct {
 func NewPeerDas(
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
-	columnStorage blob_storage.DataCloumnStorage,
+	columnStorage blob_storage.DataColumnStorage,
 	sentinel sentinelproto.SentinelClient,
 ) PeerDas {
 	kzg.InitKZG()

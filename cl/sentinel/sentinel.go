@@ -91,7 +91,7 @@ type Sentinel struct {
 
 	blockReader       freezeblocks.BeaconSnapshotReader
 	blobStorage       blob_storage.BlobStorage
-	dataColumnStorage blob_storage.DataCloumnStorage
+	dataColumnStorage blob_storage.DataColumnStorage
 	bwc               *metrics.BandwidthCounter
 
 	indiciesDB kv.RoDB
@@ -203,7 +203,7 @@ func New(
 	indiciesDB kv.RoDB,
 	logger log.Logger,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
-	dataColumnStorage blob_storage.DataCloumnStorage,
+	dataColumnStorage blob_storage.DataColumnStorage,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx:               ctx,

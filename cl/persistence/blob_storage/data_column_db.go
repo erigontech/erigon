@@ -25,7 +25,7 @@ const (
 	mutexSize = 64
 )
 
-type DataCloumnStorage interface {
+type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
 	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
 	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
@@ -35,7 +35,7 @@ type DataCloumnStorage interface {
 	//Prune() error
 }
 
-type dataCloumnStorageImpl struct {
+type dataColumnStorageImpl struct {
 	db                kv.RwDB
 	fs                afero.Fs
 	beaconChainConfig *clparams.BeaconChainConfig
@@ -45,8 +45,8 @@ type dataCloumnStorageImpl struct {
 	dbMutexes map[uint64]*sync.RWMutex
 }
 
-func NewDataColumnStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) DataCloumnStorage {
-	impl := &dataCloumnStorageImpl{
+func NewDataColumnStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) DataColumnStorage {
+	impl := &dataColumnStorageImpl{
 		db:                db,
 		fs:                fs,
 		beaconChainConfig: beaconChainConfig,
@@ -67,7 +67,7 @@ func dataColumnFilePath(slot uint64, blockRoot common.Hash, columnIndex uint64) 
 	return
 }
 
-func (s *dataCloumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
+func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
 	dir, filepath := dataColumnFilePath(columnData.SignedBlockHeader.Header.Slot, blockRoot, uint64(columnIndex))
 	if err := s.fs.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -140,7 +140,7 @@ func (s *dataCloumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	return nil
 }
 
-func (s *dataCloumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
 	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
 	fh, err := s.fs.Open(filepath)
 	if err != nil {
@@ -155,7 +155,7 @@ func (s *dataCloumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 	return data, nil
 }
 
-func (s *dataCloumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
+func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
 	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
 	if _, err := s.fs.Stat(filepath); os.IsNotExist(err) {
 		return false, nil
@@ -165,7 +165,7 @@ func (s *dataCloumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot ui
 	return true, nil
 }
 
-func (s *dataCloumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
+func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
 	mutex := s.acquireMutexBySlot(slot)
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -197,7 +197,7 @@ func (s *dataCloumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 	return tx.Commit()
 }
 
-func (s *dataCloumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
+func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
 	_, filepath := dataColumnFilePath(slot, blockRoot, idx)
 	fh, err := s.fs.Open(filepath)
 	if err != nil {
@@ -208,7 +208,7 @@ func (s *dataCloumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot 
 	return err
 }
 
-func (s *dataCloumnStorageImpl) SavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error) {
+func (s *dataColumnStorageImpl) SavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error) {
 	// No need to lock the mutex here, as we are only reading from the database
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
@@ -231,12 +231,12 @@ func (s *dataCloumnStorageImpl) SavedColumnIndex(ctx context.Context, blockRoot 
 	return columns, nil
 }
 
-func (s *dataCloumnStorageImpl) acquireMutexBySlot(slot uint64) *sync.RWMutex {
+func (s *dataColumnStorageImpl) acquireMutexBySlot(slot uint64) *sync.RWMutex {
 	index := slot % mutexSize
 	return s.dbMutexes[index]
 }
 
-func (s *dataCloumnStorageImpl) Prune() error {
+func (s *dataColumnStorageImpl) Prune() error {
 	if s.slotsKept == math.MaxUint64 {
 		return nil
 	}
