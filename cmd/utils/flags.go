@@ -1464,11 +1464,11 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 	if ctx.String(ChainFlag.Name) == networkname.Dev {
 		// --dev mode can't use p2p networking.
 		//cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
-		/*if !ctx.IsSet(ListenPortFlag.Name) {
+		if !ctx.IsSet(ListenPortFlag.Name) {
 			cfg.ListenAddr = ":0"
 		}
 		cfg.NoDiscovery = true
-		cfg.DiscoveryV5 = false*/
+		cfg.DiscoveryV5 = false
 		logger.Info("Development chain flags set", "--nodiscover", cfg.NoDiscovery, "--v5disc", cfg.DiscoveryV5, "--port", cfg.ListenAddr)
 	}
 }
