@@ -261,6 +261,7 @@ Loop:
 					return err
 				}
 				if !has {
+					fmt.Println("block is not had")
 					break
 				}
 				fmt.Println("block is had")
