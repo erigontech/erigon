@@ -778,7 +778,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if err != nil {
 			return fmt.Errorf("could not start separate Websocket RPC api at port %d: %w", cfg.WebsocketPort, err)
 		}
-                info = append(info, "websocket.url", wsAddr, "ws.compression", cfg.WebsocketCompression)
+		info = append(info, "websocket.url", wsAddr, "ws.compression", cfg.WebsocketCompression)
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
