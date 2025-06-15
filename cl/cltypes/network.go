@@ -74,6 +74,7 @@ func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
 	copy(m.Syncnets[:], buf[16:17])
 
 	if len(buf) < 25 {
+		// less than fulu
 		return nil
 	}
 	m.CustodyGroupCount = new(uint64)
