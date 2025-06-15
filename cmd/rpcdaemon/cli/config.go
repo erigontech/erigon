@@ -731,7 +731,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		"grpc", cfg.GRPCServerEnabled,
 		"http", cfg.HttpServerEnabled,
 		"ws", cfg.WebsocketEnabled,
-        }
+	}
 
 	if cfg.SocketServerEnabled {
 		socketUrl, err := url.Parse(cfg.SocketListenUrl)
