@@ -3,6 +3,7 @@ package checkpoint_sync
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -10,6 +11,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/spf13/afero"
 )
+
+const fetchLatestBeaconStateTimeout = time.Minute
 
 // ReadOrFetchLatestBeaconState reads the latest beacon state from disk or fetches it from the network.
 func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, genesisDB genesisdb.GenesisDB) (*state.CachingBeaconState, error) {
@@ -27,5 +30,8 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 		}
 		syncer = NewLocalCheckpointSyncer(genesisState, afero.NewBasePathFs(aferoFs, dirs.CaplinLatest))
 	}
+	ctx, cancel := context.WithTimeout(ctx, fetchLatestBeaconStateTimeout)
+	defer cancel()
+
 	return syncer.GetLatestBeaconState(ctx)
 }
