@@ -578,6 +578,10 @@ func (c *PagedWriter) DisableFsync() {
 	}
 }
 
+type disableFsycn interface {
+	DisableFsync()
+}
+
 // growslice ensures b has the wanted length by either expanding it to its capacity
 // or allocating a new slice if b has insufficient capacity.
 func growslice(b []byte, wantLength int) []byte {
@@ -585,8 +589,4 @@ func growslice(b []byte, wantLength int) []byte {
 		return b[:wantLength]
 	}
 	return make([]byte, wantLength)
-}
-
-type disableFsycn interface {
-	DisableFsync()
 }

@@ -233,7 +233,7 @@ var Schema = SchemaGen{
 		CompressCfg: seg.Cfg{
 			WordLvl:    seg.CompressNone, //seg.CompressKeys,
 			WordLvlCfg: DomainCompressCfg,
-			PageLvl:    seg.PageLvlCfg{PageSize: 16, Compress: true},
+			//PageLvl:    seg.PageLvlCfg{PageSize: 16, Compress: true},
 		},
 
 		Accessors:           AccessorHashMap,
