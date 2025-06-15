@@ -17,6 +17,7 @@
 package network
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -259,6 +260,7 @@ Loop:
 				if err != nil {
 					return err
 				}
+				fmt.Println("block is had")
 				if !has {
 					break
 				}
