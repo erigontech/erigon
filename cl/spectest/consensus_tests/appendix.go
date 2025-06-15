@@ -188,6 +188,7 @@ func addSszTests() {
 			func(v clparams.StateVersion) *solid.Attestation {
 				return &solid.Attestation{}
 			}, withTestJson())).
+		With("SyncCommitteeMessage", sszStaticTestByEmptyObject(&cltypes.SyncCommitteeMessage{}, withTestJson())).
 		With("VoluntaryExit", sszStaticTestByEmptyObject(&cltypes.VoluntaryExit{}, withTestJson())).
 		With("SingleAttestation", sszStaticTestByEmptyObject(&solid.SingleAttestation{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
 		With("WithdrawalRequest", sszStaticTestByEmptyObject(&solid.WithdrawalRequest{}, runAfterVersion(clparams.ElectraVersion))).
