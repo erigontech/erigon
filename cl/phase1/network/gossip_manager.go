@@ -296,11 +296,13 @@ func (g *GossipManager) Start(ctx context.Context) {
 	blobsCh := make(chan *sentinel.GossipData, 1<<16)
 	blocksCh := make(chan *sentinel.GossipData, 1<<10)
 	syncCommitteesCh := make(chan *sentinel.GossipData, 1<<16)
+	dataColumnSidecarCh := make(chan *sentinel.GossipData, 1<<16)
 	defer close(operationsCh)
 	defer close(blobsCh)
 	defer close(blocksCh)
 	defer close(syncCommitteesCh)
 	defer close(attestationCh)
+	defer close(dataColumnSidecarCh)
 
 	// Start couple of goroutines that listen for new gossip messages and sends them to the operations processor.
 	goWorker := func(ch <-chan *sentinel.GossipData, workerCount int) {
@@ -326,6 +328,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 	goWorker(operationsCh, 1)
 	goWorker(blocksCh, 1)
 	goWorker(blobsCh, 6)
+	goWorker(dataColumnSidecarCh, 6)
 
 	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
 		// Skip processing the received data if the node is not ready to process operations.
@@ -371,6 +374,8 @@ Reconnect:
 				sendOrDrop(blocksCh, data)
 			case gossip.IsTopicBlobSidecar(data.Name):
 				sendOrDrop(blobsCh, data)
+			case gossip.IsTopicDataColumnSidecar(data.Name):
+				sendOrDrop(dataColumnSidecarCh, data)
 			case gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof:
 				sendOrDrop(syncCommitteesCh, data)
 			case gossip.IsTopicBeaconAttestation(data.Name):

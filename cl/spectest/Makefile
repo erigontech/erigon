@@ -10,6 +10,7 @@ tests:
 	rm -rf tests/mainnet/whisk
 	rm -rf tests/mainnet/eip7441
 	rm -rf tests/mainnet/eip7732
+	rm -rf tests/mainnet/eip7805
 
 clean:
 	rm -rf tests
