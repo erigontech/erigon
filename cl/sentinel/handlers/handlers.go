@@ -73,7 +73,7 @@ type ConsensusHandlers struct {
 	me                 *enode.LocalNode
 	netCfg             *clparams.NetworkConfig
 	blobsStorage       blob_storage.BlobStorage
-	dataColumnStorage  blob_storage.DataCloumnStorage
+	dataColumnStorage  blob_storage.DataColumnStorage
 	enableBlocks       bool
 }
 
@@ -96,7 +96,7 @@ func NewConsensusHandlers(
 	hs *handshake.HandShaker,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	blobsStorage blob_storage.BlobStorage,
-	dataColumnStorage blob_storage.DataCloumnStorage,
+	dataColumnStorage blob_storage.DataColumnStorage,
 	enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
