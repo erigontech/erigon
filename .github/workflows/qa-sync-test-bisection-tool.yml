@@ -15,7 +15,7 @@ on:
         default: 'mainnet'
 
 jobs:
-  bisect:
+  sync-test-bisect:
     runs-on: [self-hosted, qa, long-running]
     timeout-minutes: 7200  # 5 days
     env:
