@@ -69,7 +69,7 @@ func (e *EngineBlockDownloader) download(
 	}
 	defer tx.Rollback()
 
-	tmpDb, err := mdbx.NewTemporaryMdbx(ctx, e.tmpdir)
+	tmpDb, err := mdbx.NewUnboundedTemporaryMdbx(ctx, e.tmpdir)
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could create temporary mdbx", "err", err)
 		e.status.Store(headerdownload.Idle)
