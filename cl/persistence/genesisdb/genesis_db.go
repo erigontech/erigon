@@ -61,6 +61,10 @@ func (g *genesisDB) ReadGenesisState() (*state.CachingBeaconState, error) {
 		return nil, err
 	}
 
+	// Ensure decompressedEnc has enough bytes to safely slice
+	if len(decompressedEnc) < raw.SlotOffsetSSZ+8 {
+		return nil, fmt.Errorf("decompressedEnc is too short: expected at least %d bytes, got %d", raw.SlotOffsetSSZ+8, len(decompressedEnc))
+	}
 	// get slot from the state
 	slot := ssz.Uint64SSZDecode(decompressedEnc[raw.SlotOffsetSSZ : raw.SlotOffsetSSZ+8])
 	version := g.beaconConfig.GetCurrentStateVersion(slot / g.beaconConfig.SlotsPerEpoch)
