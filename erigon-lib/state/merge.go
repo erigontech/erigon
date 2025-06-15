@@ -779,7 +779,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			_comp.DisableFsync()
 		}
-		comp := ht.h.dataWriter(_comp)
+		histWriter := ht.h.dataWriter(_comp)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
@@ -833,7 +833,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 					var k, v []byte
 					k, v, valBuf, _ = ci1.hist.Next2ForHistory(valBuf[:0])
-					if err = comp.AddForHistory(k, v); err != nil {
+					if err = histWriter.AddForHistory(k, v); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -847,7 +847,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}
-		if err = comp.Compress(); err != nil {
+		if err = histWriter.Compress(); err != nil {
 			return nil, nil, err
 		}
 		_comp.Close()

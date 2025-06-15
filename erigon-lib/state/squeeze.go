@@ -96,7 +96,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	if err := w.ReadFrom(r); err != nil {
 		return err
 	}
-	if err := c.Compress(); err != nil {
+	if err := w.Compress(); err != nil {
 		return err
 	}
 
