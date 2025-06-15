@@ -45,9 +45,9 @@ type BlockContext struct {
 	BlockNumber uint64         // Provides information for NUMBER
 	Time        uint64         // Provides information for TIME
 	Difficulty  *big.Int       // Provides information for DIFFICULTY
-	BaseFee     *uint256.Int   // Provides information for BASEFEE
+	BaseFee     uint256.Int    // Provides information for BASEFEE
 	PrevRanDao  *common.Hash   // Provides information for PREVRANDAO
-	BlobBaseFee *uint256.Int   // Provides information for BLOBBASEFEE
+	BlobBaseFee uint256.Int    // Provides information for BLOBBASEFEE
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -56,8 +56,8 @@ type TxContext struct {
 	// Message information
 	TxHash     common.Hash
 	Origin     common.Address // Provides information for ORIGIN
-	GasPrice   *uint256.Int   // Provides information for GASPRICE
-	BlobFee    *uint256.Int   // The fee for blobs(blobGas * blobGasPrice) incurred in the txn
+	GasPrice   uint256.Int    // Provides information for GASPRICE
+	BlobFee    uint256.Int    // The fee for blobs(blobGas * blobGasPrice) incurred in the txn
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
 }
 
@@ -105,10 +105,10 @@ func (result *ExecutionResult) Revert() []byte {
 
 type (
 	// CanTransferFunc is the signature of a transfer guard function
-	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) (bool, error)
+	CanTransferFunc func(IntraBlockState, common.Address, uint256.Int) (bool, error)
 
 	// TransferFunc is the signature of a transfer function
-	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error
+	TransferFunc func(IntraBlockState, common.Address, common.Address, uint256.Int, bool) error
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.

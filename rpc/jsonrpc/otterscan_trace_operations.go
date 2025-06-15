@@ -68,7 +68,7 @@ func (t *OperationsTracer) Tracer() *tracers.Tracer {
 	}
 }
 
-func (t *OperationsTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *OperationsTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if depth == 0 {
 		return
 	}
