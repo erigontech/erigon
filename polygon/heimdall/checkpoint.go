@@ -158,7 +158,7 @@ type CheckpointCountResponseV1 struct {
 }
 
 type CheckpointCountResponseV2 struct {
-	AckCount int64 `json:"ack_count"`
+	AckCount string `json:"ack_count"`
 }
 
 type CheckpointListResponse struct {
