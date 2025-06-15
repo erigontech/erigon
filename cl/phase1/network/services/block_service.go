@@ -153,7 +153,14 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 
 	// [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer -- i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
 	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
-	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock) {
+	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
+	var maxBlobsPerBlock uint64
+	if blockVersion >= clparams.FuluVersion {
+		maxBlobsPerBlock = b.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock
+	} else {
+		maxBlobsPerBlock = b.beaconCfg.MaxBlobsPerBlockByVersion(blockVersion)
+	}
+	if msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
 		return ErrInvalidCommitmentsCount
 	}
 	b.publishBlockGossipEvent(msg)

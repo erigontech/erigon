@@ -66,9 +66,9 @@ const (
 )
 
 const (
-	StateLeafSizeDeneb = 32
-	StateLeafSize      = 37
-	StateLeafSizeFulu  = 38
+	StateLeafSizeDeneb   = 32
+	StateLeafSizeElectra = 37
+	StateLeafSizeFulu    = 38
 
 	StateLeafSizeLatest = StateLeafSizeFulu
 

@@ -5,7 +5,7 @@ var (
 	globalCaplinConfig *CaplinConfig
 )
 
-func InitGlobalBeaconConfig(bcfg *BeaconChainConfig, ccfg *CaplinConfig) {
+func InitGlobalStaticConfig(bcfg *BeaconChainConfig, ccfg *CaplinConfig) {
 	if bcfg == nil {
 		panic("cannot initialize globalBeaconConfig with nil")
 	}

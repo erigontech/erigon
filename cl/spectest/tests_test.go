@@ -30,6 +30,6 @@ import (
 
 func Test(t *testing.T) {
 	caplinConfig := clparams.CaplinConfig{}
-	clparams.InitGlobalBeaconConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
+	clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
 	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS("./tests"))
 }
