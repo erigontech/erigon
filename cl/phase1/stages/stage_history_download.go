@@ -149,7 +149,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				if err != nil {
 					return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 				}
-				fmt.Println("block is not had in main loop")
+				fmt.Println("block is not had in main loop", hasELBlock)
 			}
 
 			if !hasELBlock {
@@ -160,10 +160,17 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					return false, tx.Commit()
 				}
 			}
-			if hasELBlock && !cfg.caplinConfig.ArchiveBlocks {
-				return hasDownloadEnoughForImmediateBlobsBackfilling, tx.Commit()
+			if hasELBlock {
+				if !cfg.caplinConfig.ArchiveBlocks {
+					return hasDownloadEnoughForImmediateBlobsBackfilling, tx.Commit()
+				}
+				if isInCLSnapshots {
+					return true, tx.Commit()
+				}
 			}
-			hasFinishedDownloadingElBlocks.Store(hasELBlock)
+			if hasELBlock {
+				hasFinishedDownloadingElBlocks.Store(hasELBlock)
+			}
 		} else {
 			hasFinishedDownloadingElBlocks.Store(true)
 		}
