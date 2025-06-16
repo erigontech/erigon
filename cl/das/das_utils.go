@@ -13,11 +13,14 @@ import (
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
-type (
-	CustodyIndex = cltypes.CustodyIndex
-	ColumnIndex  = cltypes.ColumnIndex
-	RowIndex     = cltypes.RowIndex
-)
+// CustodyIndex represents the index of a custody group
+type CustodyIndex = cltypes.CustodyIndex
+
+// ColumnIndex represents the index of a column in the matrix
+type ColumnIndex = cltypes.ColumnIndex
+
+// RowIndex represents the index of a row in the matrix
+type RowIndex = cltypes.RowIndex
 
 var (
 	maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
@@ -25,39 +28,39 @@ var (
 
 // GetCustodyGroups generates custody groups for a given node ID.
 // This function is re-entrant and thread-safe.
-func GetCustodyGroups(nodeId enode.ID, custodyGroupCount uint64) ([]CustodyIndex, error) {
+func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex, error) {
 	cfg := clparams.GetBeaconConfig()
 	if custodyGroupCount > cfg.NumberOfCustodyGroups {
 		return nil, fmt.Errorf("custody group count %d exceeds maximum allowed %d", custodyGroupCount, cfg.NumberOfCustodyGroups)
 	}
-	currentId, ok := new(big.Int).SetString(nodeId.String(), 16)
+	currentID, ok := new(big.Int).SetString(nodeID.String(), 16)
 	if !ok {
-		return nil, fmt.Errorf("failed to convert nodeId %s to big int", nodeId.String())
+		return nil, fmt.Errorf("failed to convert nodeID %s to big int", nodeID.String())
 	}
 	custodyGroups := make([]CustodyIndex, 0)
 	for uint64(len(custodyGroups)) < custodyGroupCount {
 		// Hash current ID and take first 8 bytes
-		hash := crypto.Keccak256(currentId.Bytes())
+		hash := crypto.Keccak256(currentID.Bytes())
 		custodyGroup := binary.LittleEndian.Uint64(hash[:8]) % cfg.NumberOfCustodyGroups
 
 		// Check if custody group already exists
 		exists := false
 		for _, g := range custodyGroups {
-			if g == CustodyIndex(custodyGroup) {
+			if g == custodyGroup {
 				exists = true
 				break
 			}
 		}
 
 		if !exists {
-			custodyGroups = append(custodyGroups, CustodyIndex(custodyGroup))
+			custodyGroups = append(custodyGroups, custodyGroup)
 		}
 
-		// Increment currentId with overflow protection
-		if currentId.Cmp(maxUint256) == 0 {
-			currentId.SetInt64(0)
+		// Increment currentID with overflow protection
+		if currentID.Cmp(maxUint256) == 0 {
+			currentID.SetInt64(0)
 		} else {
-			currentId.Add(currentId, big.NewInt(1))
+			currentID.Add(currentID, big.NewInt(1))
 		}
 	}
 
@@ -75,7 +78,7 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	numberOfCustodyGroups := clparams.GetBeaconConfig().NumberOfCustodyGroups
 	numberOfColumns := clparams.GetBeaconConfig().NumberOfColumns
 
-	if custodyGroup >= CustodyIndex(numberOfCustodyGroups) {
+	if custodyGroup >= numberOfCustodyGroups {
 		return nil, fmt.Errorf("custody group %d is greater than or equal to the number of custody groups (%d)", custodyGroup, numberOfCustodyGroups)
 	}
 
