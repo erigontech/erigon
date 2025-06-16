@@ -30,8 +30,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	gojson "github.com/goccy/go-json"
 )
 
 const (
@@ -290,7 +288,7 @@ func isBatch(raw json.RawMessage) bool {
 // given types. It returns the parsed values or an error when the args could not be
 // parsed. Missing optional arguments are returned as reflect.Zero values.
 func parsePositionalArguments(rawArgs json.RawMessage, types []reflect.Type) ([]reflect.Value, error) {
-	dec := gojson.NewDecoder(bytes.NewReader(rawArgs))
+	dec := json.NewDecoder(bytes.NewReader(rawArgs))
 	var args []reflect.Value
 	tok, err := dec.Token()
 	switch {
@@ -317,7 +315,7 @@ func parsePositionalArguments(rawArgs json.RawMessage, types []reflect.Type) ([]
 	return args, nil
 }
 
-func parseArgumentArray(dec *gojson.Decoder, types []reflect.Type) ([]reflect.Value, error) {
+func parseArgumentArray(dec *json.Decoder, types []reflect.Type) ([]reflect.Value, error) {
 	args := make([]reflect.Value, 0, len(types))
 	for i := 0; dec.More(); i++ {
 		if i >= len(types) {
