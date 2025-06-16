@@ -83,7 +83,7 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	columns := make([]ColumnIndex, columnsPerGroup)
 
 	for i := ColumnIndex(0); i < ColumnIndex(columnsPerGroup); i++ {
-		columns[i] = ColumnIndex(numberOfCustodyGroups*uint64(i) + uint64(custodyGroup))
+		columns[i] = ColumnIndex(numberOfCustodyGroups*i + custodyGroup)
 	}
 
 	return columns, nil

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -77,12 +78,12 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
 	if !das.VerifyDataColumnSidecar(msg) {
-		return fmt.Errorf("invalid data column sidecar")
+		return errors.New("invalid data column sidecar")
 	}
 
 	// [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
 	if *subnet != das.ComputeSubnetForDataColumnSidecar(msg.Index) {
-		return fmt.Errorf("incorrect subnet for data column sidecar")
+		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
 
 	// [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
