@@ -138,8 +138,8 @@ github.com/anacrolix/sync v0.5.4/go.mod h1:21cUWerw9eiu/3T3kyoChu37AVO+YFue1/H15
 github.com/anacrolix/tagflag v0.0.0-20180109131632-2146c8d41bf0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.0.0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.1.0/go.mod h1:Scxs9CV10NQatSmbyjqmqmeQNwGzlNe0CMUMIxqHIG8=
-github.com/anacrolix/torrent v1.58.2-0.20250610025943-9b88d091c5df h1:UfPUik67Gosm9cSOELRcaXKBE/YwDNWz+l6c+41NWs0=
-github.com/anacrolix/torrent v1.58.2-0.20250610025943-9b88d091c5df/go.mod h1:e7JDNeT++mz4TwYSeDQBE0g7ilx0Wm+qygQAMGacT4c=
+github.com/anacrolix/torrent v1.58.2-0.20250616110532-9452c282b795 h1:DIJr5DPec72A5UWK5Xl/y5bAdGgb8CHJx/MaKKhGA0c=
+github.com/anacrolix/torrent v1.58.2-0.20250616110532-9452c282b795/go.mod h1:e7JDNeT++mz4TwYSeDQBE0g7ilx0Wm+qygQAMGacT4c=
 github.com/anacrolix/upnp v0.1.4 h1:+2t2KA6QOhm/49zeNyeVwDu1ZYS9dB9wfxyVvh/wk7U=
 github.com/anacrolix/upnp v0.1.4/go.mod h1:Qyhbqo69gwNWvEk1xNTXsS5j7hMHef9hdr984+9fIic=
 github.com/anacrolix/utp v0.1.0 h1:FOpQOmIwYsnENnz7tAGohA+r6iXpRjrq8ssKSre2Cp4=

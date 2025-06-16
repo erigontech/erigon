@@ -33,7 +33,7 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.4.5
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/sync v0.5.4
-	github.com/anacrolix/torrent v1.58.2-0.20250610025943-9b88d091c5df
+	github.com/anacrolix/torrent v1.58.2-0.20250616110532-9452c282b795
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.17.0
