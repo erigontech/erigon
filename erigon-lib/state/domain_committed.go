@@ -245,7 +245,7 @@ func encodeShorterKey(buf []byte, offset uint64) []byte {
 
 // Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.
 // If item is nil, or shorter key was not found, or anything else goes wrong, nil key and false returned.
-func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, item *filesItem) (shortened []byte, found bool) {
+func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, item *FilesItem) (shortened []byte, found bool) {
 	if item == nil {
 		return nil, false
 	}
@@ -310,7 +310,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 // Given range should exactly match the range of some file, so expected to be multiple of aggregationStep.
 // At first it checks range among visible files, then among dirty files.
 // If file is not found anywhere, returns nil
-func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*filesItem, error) {
+func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesItem, error) {
 	for _, f := range dt.files {
 		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil {
 			return f.src, nil // found in visible files
@@ -322,10 +322,10 @@ func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*filesIt
 	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.version.DataKV.String(), dt.d.filenameBase, txFrom/dt.d.aggregationStep, txTo/dt.d.aggregationStep)
 }
 
-func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
-	var item *filesItem
+func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {
+	var item *FilesItem
 	if item == nil {
-		dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
+		dt.d.dirtyFiles.Walk(func(files []*FilesItem) bool {
 			for _, f := range files {
 				if f.startTxNum == txFrom && f.endTxNum == txTo {
 					item = f
@@ -385,7 +385,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
-func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) (valueTransformer, error) {
+func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *FilesItem) (valueTransformer, error) {
 	var keyBuf [60]byte // 52b key and 8b for inverted step
 	var err error
 
