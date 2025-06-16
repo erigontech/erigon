@@ -246,7 +246,7 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 	//}
 
 	// For Fulu and later, XOR base digest with hash of blob parameters
-	blobParams := t.beaconCfg.GetBlobParameters(epoch)
+	/*blobParams := t.beaconCfg.GetBlobParameters(epoch)
 
 	// Hash blob parameters (epoch and max_blobs_per_block)
 	blobParamsBytes := make([]byte, 16)
@@ -260,7 +260,7 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 		digest[i] = baseDigest[i] ^ blobParamsHash[i]
 	}
 
-	return digest, nil
+	return digest, nil*/
 }
 
 func (t *ethereumClockImpl) GenesisValidatorsRoot() common.Hash {

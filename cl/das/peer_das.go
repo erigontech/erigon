@@ -3,7 +3,6 @@ package das
 import (
 	"context"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -106,7 +105,7 @@ func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*
 	return nil
 
 	// try to request columns in batches of 8 blocks in parallel
-	wg := sync.WaitGroup{}
+	/*wg := sync.WaitGroup{}
 	for i := 0; i < len(blocks); i += 8 {
 		request, err := d.composeIdentifierRequest(ctx, blocks[i:min(i+8, len(blocks))])
 		if err != nil {
@@ -122,7 +121,7 @@ func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*
 		}(i)
 	}
 	wg.Wait()
-	return nil
+	return nil*/
 }
 
 func (d *peerdas) downloadFromPeers(ctx context.Context, request *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]) error {
@@ -332,8 +331,8 @@ func (d *peerdas) getExpectedColumnIndex(
 	// expected_colums = custody_columns - existing_columns
 	want := make([]uint64, 0)
 	for c := range custodyColumns {
-		if !existingColumnsMap[uint64(c)] {
-			want = append(want, uint64(c))
+		if !existingColumnsMap[c] {
+			want = append(want, c)
 		}
 	}
 	sort.Slice(want, func(i, j int) bool {

@@ -51,7 +51,7 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 	// The column index represents the cell index for each proof
 	cellIndices := make([]uint64, sidecar.Column.Len())
 	for i := range cellIndices {
-		cellIndices[i] = uint64(sidecar.Index)
+		cellIndices[i] = sidecar.Index
 	}
 
 	ckzgCommitments := make([]ckzg.Bytes48, sidecar.KzgCommitments.Len())

@@ -117,6 +117,9 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 		return false, nil
 	}
 	forkDigest, err := h.ethClock.CurrentForkDigest()
+	if err != nil {
+		return false, err
+	}
 	if responseStatus.ForkDigest != forkDigest {
 		respDigest := common.Bytes4{}
 		copy(respDigest[:], responseStatus.ForkDigest[:])

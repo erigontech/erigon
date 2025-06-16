@@ -19,18 +19,21 @@ type (
 	RowIndex     = cltypes.RowIndex
 )
 
+var (
+	maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+)
+
 // GetCustodyGroups generates custody groups for a given node ID.
 // This function is re-entrant and thread-safe.
 func GetCustodyGroups(nodeId enode.ID, custodyGroupCount uint64) ([]CustodyIndex, error) {
 	cfg := clparams.GetBeaconConfig()
 	if custodyGroupCount > cfg.NumberOfCustodyGroups {
-		return nil, fmt.Errorf("custodyGroupCount is greater than the number of custody groups")
+		return nil, fmt.Errorf("custody group count %d exceeds maximum allowed %d", custodyGroupCount, cfg.NumberOfCustodyGroups)
 	}
 	currentId, ok := new(big.Int).SetString(nodeId.String(), 16)
 	if !ok {
-		return nil, fmt.Errorf("failed to convert nodeId to big int")
+		return nil, fmt.Errorf("failed to convert nodeId %s to big int", nodeId.String())
 	}
-	maxUint256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 	custodyGroups := make([]CustodyIndex, 0)
 	for uint64(len(custodyGroups)) < custodyGroupCount {
 		// Hash current ID and take first 8 bytes
@@ -161,23 +164,23 @@ func RecoverCellsAndKZGProofs(cellIndices []ColumnIndex, cells []cltypes.Cell) (
 		return nil, nil, fmt.Errorf("failed to recover cells and proofs: %w", err)
 	}
 
-	returnedCells := make([]cltypes.Cell, len(recoveredCells))
-	for i, cell := range recoveredCells {
-		copy(returnedCells[i][:], cell[:])
+	convertCells := make([]cltypes.Cell, len(recoveredCells))
+	for i, cell := range &recoveredCells {
+		convertCells[i] = cltypes.Cell(cell)
 	}
 
-	returnedProofs := make([]cltypes.KZGProof, len(recoveredProofs))
-	for i := range recoveredProofs {
-		copy(returnedProofs[i][:], recoveredProofs[i][:])
+	convertProofs := make([]cltypes.KZGProof, len(recoveredProofs))
+	for i, proof := range &recoveredProofs {
+		convertProofs[i] = cltypes.KZGProof(proof)
 	}
-	return returnedCells, returnedProofs, nil
+	return convertCells, convertProofs, nil
 }
 
 // ComputeCellsAndKZGProofs uses the c-kzg-4844 library to compute the cells and proofs.
 func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, error) {
 	ckzgBlob := ckzg.Blob{}
 	if len(blob) != len(ckzgBlob) {
-		return nil, nil, fmt.Errorf("blob length mismatch")
+		return nil, nil, fmt.Errorf("blob length mismatch: %d != %d", len(blob), len(ckzgBlob))
 	}
 	copy(ckzgBlob[:], blob)
 	cells, proofs, err := ckzg.ComputeCellsAndKZGProofs(&ckzgBlob)
@@ -186,13 +189,13 @@ func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, 
 	}
 
 	returnedCells := make([]cltypes.Cell, len(cells))
-	for i, cell := range cells {
-		copy(returnedCells[i][:], cell[:])
+	for i, cell := range &cells {
+		returnedCells[i] = cltypes.Cell(cell)
 	}
 
 	returnedProofs := make([]cltypes.KZGProof, len(proofs))
-	for i, proof := range proofs {
-		copy(returnedProofs[i][:], proof[:])
+	for i, proof := range &proofs {
+		returnedProofs[i] = cltypes.KZGProof(proof)
 	}
 
 	return returnedCells, returnedProofs, nil
