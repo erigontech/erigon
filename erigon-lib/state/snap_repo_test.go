@@ -166,6 +166,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
+	comp.DisableFsync()
 	if err = comp.AddWord([]byte("word")); err != nil {
 		t.Fatal(err)
 	}
@@ -625,6 +626,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
 			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
+			seg.DisableFsync()
 			if err = seg.AddWord([]byte("word")); err != nil {
 				t.Fatal(err)
 			}
@@ -641,6 +643,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".bt") {
 			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
+			seg2.DisableFsync()
 			if err = seg2.AddWord([]byte("key")); err != nil {
 				t.Fatal(err)
 			}
@@ -653,7 +656,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			require.NoError(t, err)
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
-			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), false, AccessorBTree|AccessorExistence)
+			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, AccessorBTree|AccessorExistence)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -670,6 +673,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".kvei") {
 			filter, err := existence.NewFilter(0, filename)
 			require.NoError(t, err)
+			filter.DisableFsync()
 			require.NoError(t, filter.Build())
 			filter.Close()
 
@@ -694,7 +698,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 				t.Fatal(err)
 			}
 			defer rs.Close()
-
+			rs.DisableFsync()
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)
 			}

@@ -299,6 +299,9 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	if !AggregatorSqueezeCommitmentValues {
+		t.Skip()
+	}
 
 	t.Parallel()
 	_db, agg := testDbAndAggregatorv3(t, 5)
@@ -1441,7 +1444,6 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
 	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
