@@ -77,8 +77,15 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusInvalidated, err
 	}
 
+	block := types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)
+	chainConfig := cc.chainRW.Config()
+	if block.ExceedsMaxRlpSize(chainConfig) {
+		err := fmt.Errorf("block exceeds max rlp size: %d vs %s", chainConfig.GetMaxRlpBlockSize(header.Time), block.Size())
+		return PayloadStatusInvalidated, err
+	}
+
 	startInsertBlockAndWait := time.Now()
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(ctx, block); err != nil {
 		return PayloadStatusNone, err
 	}
 	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlockAndWait)
