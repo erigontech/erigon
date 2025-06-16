@@ -128,14 +128,13 @@ func (e *EventRecordWithTime) UnmarshallBytes(v []byte) error {
 	return nil
 }
 
-type StateSyncEventsResponse struct {
+type StateSyncEventsResponseV1 struct {
 	Height string                 `json:"height"`
 	Result []*EventRecordWithTime `json:"result"`
 }
 
-type StateSyncEventResponse struct {
-	Height string              `json:"height"`
-	Result EventRecordWithTime `json:"result"`
+type StateSyncEventsResponseV2 struct {
+	EventRecords []*EventRecordWithTime `json:"event_records"`
 }
 
 var methodId []byte = borabi.StateReceiverContractABI().Methods["commitState"].ID
