@@ -1384,13 +1384,23 @@ func (b *Block) Size() common.StorageSize {
 	return common.StorageSize(c)
 }
 
-func (b *Block) ExceedsMaxRlpSize(config *chain.Config) bool {
-	maxSize := config.GetMaxRlpBlockSize(b.Time())
+func (b *Block) ValidateMaxRlpSize(chainConfig *chain.Config) error {
+	maxSize := common.StorageSize(chainConfig.GetMaxRlpBlockSize(b.Time()))
 	if maxSize == 0 {
-		return false
+		return nil
 	}
 
-	return b.Size() > common.StorageSize(maxSize)
+	if blockSize := b.Size(); blockSize > maxSize {
+		return fmt.Errorf(
+			"block exceeds max rlp size: blockNum=%d, blockHash=%s, rlpSize=%s, maxSize=%s",
+			b.NumberU64(),
+			b.Hash(),
+			blockSize,
+			maxSize,
+		)
+	}
+
+	return nil
 }
 
 // SanityCheck can be used to prevent that unbounded fields are
