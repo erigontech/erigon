@@ -96,6 +96,8 @@ type iiCfg struct {
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
 	Accessors Accessors
+
+	dirtyFilesLock *sync.Mutex
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
