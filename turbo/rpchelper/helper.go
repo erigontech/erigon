@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -186,8 +185,8 @@ func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
 	return state.NewReaderV3(sd)
 }
 
-func NewLatestDomainStateWriter(domains *state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
-	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
+func NewLatestStateWriter(tx kv.Tx, domains *state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+	minTxNum, err := blockReader.TxnumReader(context.Background()).Min(tx, blockNum)
 	if err != nil {
 		panic(err)
 	}
@@ -198,15 +197,6 @@ func NewLatestDomainStateWriter(domains *state2.SharedDomains, blockReader servi
 
 func NewLatestStateReader(tx kv.Tx) state.StateReader {
 	return state.NewReaderV3(tx.(kv.TemporalGetter))
-}
-func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
-	domains := txc.Doms
-	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
-	if err != nil {
-		panic(err)
-	}
-	domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
-	return state.NewWriterV4(domains)
 }
 
 func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.Tx) state.StateReader {

@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
@@ -44,6 +43,14 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
+<<<<<<< HEAD
+=======
+
+	skipForPerf := 11
+	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
+	txNumsReader := blockReader.TxnumReader(ctx)
+
+>>>>>>> 47f89b1ca9 (share and use txnumreader cache via blockreader (#15597))
 	for j := 0; j < 256; j++ {
 		j := j
 		for jj := 0; jj < 255; jj++ {

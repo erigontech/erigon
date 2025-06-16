@@ -335,13 +335,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
-	cfg.blockReader.Snapshots().LogStat("download")
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.blockReader))
-	if temporal, ok := tx.(*temporal.Tx); ok {
-		stats.LogStats(temporal, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
-			return histBlockNumProgress, err
-		})
+	{
+		cfg.blockReader.Snapshots().LogStat("download")
+		txNumsReader := cfg.blockReader.TxnumReader(ctx)
+		if temporalTx, ok := tx.(*temporal.Tx); ok {
+			stats.LogStats(temporalTx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+				histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+				return histBlockNumProgress, err
+			})
+		}
 	}
 
 	return nil

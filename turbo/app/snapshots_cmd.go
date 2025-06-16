@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -1327,7 +1326,19 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		defer agg.Close()
 		defer db.Close()
 	}
+<<<<<<< HEAD
 	tx, err := db.BeginTemporalRo(ctx)
+=======
+	err = chainDB.View(ctx, func(tx kv.Tx) error {
+		ac := agg.BeginFilesRo()
+		defer ac.Close()
+		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+			histBlockNumProgress, _, err := blockReader.TxnumReader(ctx).FindBlockNum(tx, endTxNumMinimax)
+			return histBlockNumProgress, err
+		})
+		return nil
+	})
+>>>>>>> 47f89b1ca9 (share and use txnumreader cache via blockreader (#15597))
 	if err != nil {
 		panic(err)
 	}
@@ -1758,7 +1769,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
+	txNumsReader := blockReader.TxnumReader(ctx)
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
