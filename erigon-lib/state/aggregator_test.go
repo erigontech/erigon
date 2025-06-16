@@ -252,7 +252,7 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int, disabled bool, name string) {
+	checkDirtyFiles := func(dirtyFiles []*FilesItem, expectedLen, expectedRefCnt int, disabled bool, name string) {
 		if disabled {
 			expectedLen = 0
 		}
@@ -297,6 +297,9 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	if testing.Short() {
+		t.Skip()
+	}
+	if !AggregatorSqueezeCommitmentValues {
 		t.Skip()
 	}
 
@@ -1441,7 +1444,6 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
 	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         10,
 		disableCommitmentBranchTransform: false,

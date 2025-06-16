@@ -21,12 +21,12 @@ func TestDependency(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions[*filesItem](filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfs := btree.NewBTreeGOptions[*FilesItem](filesItemLess, btree.Options{Degree: 128, NoLocks: false})
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	dfs.Set(df1)
 	dfs.Set(df2)
-	fg := func() *btree.BTreeG[*filesItem] {
+	fg := func() *btree.BTreeG[*FilesItem] {
 		// only commitment files
 		return dfs.Copy()
 	}
@@ -61,14 +61,14 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions[*filesItem](filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfs := btree.NewBTreeGOptions[*FilesItem](filesItemLess, btree.Options{Degree: 128, NoLocks: false})
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	df3 := getPopulatedCommitmentFilesItem(t, dirs, 0, 2, true, logger)
 	dfs.Set(df1)
 	dfs.Set(df2)
 	dfs.Set(df3)
-	fg := func() *btree.BTreeG[*filesItem] {
+	fg := func() *btree.BTreeG[*FilesItem] {
 		// only commitment files
 		return dfs.Copy()
 	}
@@ -95,7 +95,7 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 	assertFn(0, 2, true, false, true)
 }
 
-func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum, endTxNum uint64, noIndex bool, logger log.Logger) *filesItem {
+func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum, endTxNum uint64, noIndex bool, logger log.Logger) *FilesItem {
 	t.Helper()
 
 	base := fmt.Sprintf(dirs.Snap+"/commitment.%d-%d", startTxNum, endTxNum)
@@ -137,5 +137,5 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 		}
 	})
 
-	return &filesItem{decompressor: decomp, index: idx0, startTxNum: startTxNum, endTxNum: endTxNum}
+	return &FilesItem{decompressor: decomp, index: idx0, startTxNum: startTxNum, endTxNum: endTxNum}
 }
