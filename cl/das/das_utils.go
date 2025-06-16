@@ -165,13 +165,13 @@ func RecoverCellsAndKZGProofs(cellIndices []ColumnIndex, cells []cltypes.Cell) (
 	}
 
 	convertCells := make([]cltypes.Cell, len(recoveredCells))
-	for i, cell := range &recoveredCells {
-		convertCells[i] = cltypes.Cell(cell)
+	for i := range recoveredCells {
+		convertCells[i] = cltypes.Cell(recoveredCells[i])
 	}
 
 	convertProofs := make([]cltypes.KZGProof, len(recoveredProofs))
-	for i, proof := range &recoveredProofs {
-		convertProofs[i] = cltypes.KZGProof(proof)
+	for i := range recoveredProofs {
+		convertProofs[i] = cltypes.KZGProof(recoveredProofs[i])
 	}
 	return convertCells, convertProofs, nil
 }
@@ -188,15 +188,15 @@ func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, 
 		return nil, nil, fmt.Errorf("failed to compute cells and proofs: %w", err)
 	}
 
-	returnedCells := make([]cltypes.Cell, len(cells))
-	for i, cell := range &cells {
-		returnedCells[i] = cltypes.Cell(cell)
+	convertCells := make([]cltypes.Cell, len(cells))
+	for i := range cells {
+		convertCells[i] = cltypes.Cell(cells[i])
 	}
 
-	returnedProofs := make([]cltypes.KZGProof, len(proofs))
-	for i, proof := range &proofs {
-		returnedProofs[i] = cltypes.KZGProof(proof)
+	convertProofs := make([]cltypes.KZGProof, len(proofs))
+	for i := range proofs {
+		convertProofs[i] = cltypes.KZGProof(proofs[i])
 	}
 
-	return returnedCells, returnedProofs, nil
+	return convertCells, convertProofs, nil
 }
