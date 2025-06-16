@@ -101,7 +101,7 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if pass, err := s.verifyProposerSignature(blockHeader.ProposerIndex, msg.SignedBlockHeader); err != nil {
 		return fmt.Errorf("invalid proposer signature for data column sidecar: %v", err)
 	} else if !pass {
-		return fmt.Errorf("invalid proposer signature for data column sidecar")
+		return errors.New("invalid proposer signature for data column sidecar")
 	}
 
 	// [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via gossip or non-gossip sources)
@@ -122,17 +122,17 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
 	finalizedSlot := finalizedCheckpoint.Epoch * s.cfg.SlotsPerEpoch
 	if s.forkChoice.Ancestor(blockHeader.ParentRoot, finalizedSlot) != finalizedCheckpoint.Root {
-		return fmt.Errorf("finalized checkpoint is not an ancestor of the sidecar's block")
+		return errors.New("finalized checkpoint is not an ancestor of the sidecar's block")
 	}
 
 	// [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
 	if !das.VerifyDataColumnSidecarInclusionProof(msg) {
-		return fmt.Errorf("invalid inclusion proof for data column sidecar")
+		return errors.New("invalid inclusion proof for data column sidecar")
 	}
 
 	// [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
 	if !das.VerifyDataColumnSidecarKZGProofs(msg) {
-		return fmt.Errorf("invalid kzg proofs for data column sidecar")
+		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
 	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()
