@@ -45,7 +45,8 @@ import (
 )
 
 type RemoteBlockReader struct {
-	client remote.ETHBACKENDClient
+	client       remote.ETHBACKENDClient
+	txBlockIndex *txBlockIndexWithBlockReader
 }
 
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
@@ -160,7 +161,12 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 var _ services.FullBlockReader = &RemoteBlockReader{}
 
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
-	return &RemoteBlockReader{client}
+	br := &RemoteBlockReader{
+		client: client,
+	}
+	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
+	br.txBlockIndex = txnumReader
+	return br
 }
 
 func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
@@ -378,7 +384,10 @@ func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Tx, spanId uin
 	return nil, false, nil
 }
 func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
-	panic("not implemented")
+	if r == nil {
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(nil)
+	}
+	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
 }
 
 // BlockReader can read blocks from db and snapshots
@@ -1549,6 +1558,9 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 }
 
 func (r *BlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+	if r == nil {
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(nil)
+	}
 	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
 }
 
