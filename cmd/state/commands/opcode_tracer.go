@@ -38,6 +38,7 @@ import (
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -524,7 +525,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 		go func() {
 			var f *os.File
 			var fWriter *bufio.Writer
-			var fwEnc *json.Encoder
+			var fwEnc *fastjson.Encoder
 			var e error
 
 			for sp := range chanSegPrefix {
@@ -545,7 +546,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 						panic(e)
 					}
 					fWriter = bufio.NewWriter(f)
-					fwEnc = json.NewEncoder(fWriter)
+					fwEnc = fastjson.NewEncoder(fWriter)
 				}
 
 				if _, e = fWriter.WriteString(",\n\"" + bnStr + "\":[\n"); e != nil {

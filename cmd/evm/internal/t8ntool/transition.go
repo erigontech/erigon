@@ -162,7 +162,7 @@ func Main(ctx *cli.Context) error {
 	)
 	// Figure out the prestate alloc
 	if allocStr == stdinSelector || envStr == stdinSelector || txStr == stdinSelector {
-		decoder := json.NewDecoder(os.Stdin)
+		decoder := fastjson.NewDecoder(os.Stdin)
 		decoder.Decode(inputData) //nolint:errcheck
 	}
 	if allocStr != stdinSelector {
@@ -171,7 +171,7 @@ func Main(ctx *cli.Context) error {
 			return NewError(ErrorIO, fmt.Errorf("failed reading alloc file: %v", err1))
 		}
 		defer inFile.Close()
-		decoder := json.NewDecoder(inFile)
+		decoder := fastjson.NewDecoder(inFile)
 		if err = decoder.Decode(&inputData.Alloc); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %v", err))
 		}
@@ -186,7 +186,7 @@ func Main(ctx *cli.Context) error {
 			return NewError(ErrorIO, fmt.Errorf("failed reading env file: %v", err1))
 		}
 		defer inFile.Close()
-		decoder := json.NewDecoder(inFile)
+		decoder := fastjson.NewDecoder(inFile)
 		var env stEnv
 		if err = decoder.Decode(&env); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %v", err))
@@ -217,7 +217,7 @@ func Main(ctx *cli.Context) error {
 			return NewError(ErrorIO, fmt.Errorf("failed reading txs file: %v", err1))
 		}
 		defer inFile.Close()
-		decoder := json.NewDecoder(inFile)
+		decoder := fastjson.NewDecoder(inFile)
 		if err = decoder.Decode(&txsWithKeys); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
 		}

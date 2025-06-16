@@ -18,9 +18,9 @@ package diagnostics
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -114,7 +114,7 @@ func (d *DiagnosticClient) runBodiesProcessingListener(rootCtx context.Context) 
 func (d *DiagnosticClient) BodiesInfoJson(w io.Writer) {
 	d.bodiesMutex.Lock()
 	defer d.bodiesMutex.Unlock()
-	if err := json.NewEncoder(w).Encode(d.bodies); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(d.bodies); err != nil {
 		log.Debug("[diagnostics] BodiesInfoJson", "err", err)
 	}
 }

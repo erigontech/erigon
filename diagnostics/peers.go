@@ -67,7 +67,7 @@ func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode, 
 	allPeers := peers(diag)
 	filteredPeers := filterPeersWithoutBytesIn(allPeers)
 
-	json.NewEncoder(w).Encode(filteredPeers)
+	fastjson.NewEncoder(w).Encode(filteredPeers)
 }
 
 func peers(diag *diaglib.DiagnosticClient) []*PeerResponse {

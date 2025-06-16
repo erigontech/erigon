@@ -22,7 +22,6 @@ package abi
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -50,7 +49,7 @@ type ABI struct {
 
 // JSON returns a parsed ABI interface and error if it failed.
 func JSON(reader io.Reader) (ABI, error) {
-	dec := json.NewDecoder(reader)
+	dec := fastjson.NewDecoder(reader)
 
 	var abi ABI
 	if err := dec.Decode(&abi); err != nil {

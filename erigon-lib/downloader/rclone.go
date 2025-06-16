@@ -345,7 +345,7 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 			Error string `json:"error"`
 		}{}
 
-		if err := json.NewDecoder(response.Body).Decode(&responseBody); err == nil && len(responseBody.Error) > 0 {
+		if err := fastjson.NewDecoder(response.Body).Decode(&responseBody); err == nil && len(responseBody.Error) > 0 {
 			var argsJson string
 
 			if bytes, err := fastjson.Marshal(args); err == nil {
@@ -756,7 +756,7 @@ func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.D
 			List []remoteInfo `json:"list"`
 		}{}
 
-		if err := json.NewDecoder(response.Body).Decode(&responseBody); err != nil {
+		if err := fastjson.NewDecoder(response.Body).Decode(&responseBody); err != nil {
 			return nil, fmt.Errorf("can't decode remote list: %w", err)
 		}
 

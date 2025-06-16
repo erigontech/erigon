@@ -23,7 +23,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -43,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/temporal"
@@ -561,7 +561,7 @@ func readPrealloc(filename string) types.GenesisAlloc {
 		panic(fmt.Sprintf("Could not open genesis preallocation for %s: %v", filename, err))
 	}
 	defer f.Close()
-	decoder := json.NewDecoder(f)
+	decoder := fastjson.NewDecoder(f)
 	ga := make(types.GenesisAlloc)
 	err = decoder.Decode(&ga)
 	if err != nil {

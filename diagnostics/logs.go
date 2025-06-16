@@ -91,7 +91,7 @@ func writeLogsList(w http.ResponseWriter, dirPath string) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(files)
+	fastjson.NewEncoder(w).Encode(files)
 }
 
 func writeLogsRead(w http.ResponseWriter, r *http.Request, dirPath string) {

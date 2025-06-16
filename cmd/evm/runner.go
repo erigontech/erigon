@@ -87,7 +87,7 @@ func readGenesis(genesisPath string) *types.Genesis {
 	}(file)
 
 	genesis := new(types.Genesis)
-	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+	if err := fastjson.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
 	return genesis

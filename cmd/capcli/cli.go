@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,6 +35,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -721,7 +721,7 @@ func getHead(beaconApiURL string) (uint64, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	if err := json.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
+	if err := fastjson.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
 		return 0, err
 	}
 	data := headResponse["data"].([]interface{})
@@ -755,7 +755,7 @@ func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
 		return common.Hash{}, nil
 	}
 	defer resp.Body.Close()
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	if err := fastjson.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return common.Hash{}, err
 	}
 	data := response["data"].(map[string]interface{})

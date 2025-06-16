@@ -110,7 +110,7 @@ func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *ht
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
 	req := []*solid.Attestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -162,7 +162,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			Failures: failures,
 		}
 		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(errResp); err != nil {
+		if err := fastjson.NewEncoder(w).Encode(errResp); err != nil {
 			log.Warn("failed to encode response", "err", err)
 		}
 		return
@@ -188,7 +188,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 	}
 
 	req := []*solid.SingleAttestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -239,7 +239,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			Failures: failures,
 		}
 		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(errResp); err != nil {
+		if err := fastjson.NewEncoder(w).Encode(errResp); err != nil {
 			log.Warn("failed to encode response", "err", err)
 		}
 		return
@@ -249,7 +249,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 
 func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) {
 	req := cltypes.SignedVoluntaryExit{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -284,7 +284,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 	clVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch())
 
 	req := cltypes.NewAttesterSlashing(clVersion)
-	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -312,7 +312,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 
 func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter, r *http.Request) {
 	req := cltypes.ProposerSlashing{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -351,7 +351,7 @@ type poolingError struct {
 
 func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWriter, r *http.Request) {
 	req := []*cltypes.SignedBLSToExecutionChange{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -381,7 +381,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 
 	if len(failures) > 0 {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		fastjson.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
 		return
 	}
 	// Only write 200
@@ -391,7 +391,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter, r *http.Request) {
 	req := []*cltypes.SignedAggregateAndProof{}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -427,7 +427,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 
 	if len(failures) > 0 {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		fastjson.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
 		return
 	}
 	// Only write 200
@@ -438,7 +438,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 // it receives a list of sync committee messages and adds them to the sync committee pool.
 func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r *http.Request) {
 	msgs := []*cltypes.SyncCommitteeMessage{}
-	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&msgs); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -490,7 +490,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 	}
 	if len(failures) > 0 {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		fastjson.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
 		return
 	}
 	// Only write 200
@@ -501,7 +501,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 // it receives a list of signed contributions and proofs and adds them to the sync committee pool.
 func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWriter, r *http.Request) {
 	msgs := []*cltypes.SignedContributionAndProof{}
-	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&msgs); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -539,7 +539,7 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 
 	if len(failures) > 0 {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		fastjson.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
 		return
 	}
 	// Only write 200

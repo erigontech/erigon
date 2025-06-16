@@ -17,11 +17,11 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -101,7 +101,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 
 func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	registerReq := []*cltypes.ValidatorRegistration{}
-	if err := json.NewDecoder(r.Body).Decode(&registerReq); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&registerReq); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	if len(registerReq) == 0 {

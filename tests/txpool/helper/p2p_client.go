@@ -86,7 +86,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		} `json:"result"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&resp); err != nil {
 		return nil, nil, err
 	}
 
@@ -157,7 +157,7 @@ func (p *p2pClient) notifyWhenReady() (<-chan struct{}, error) {
 		} `json:"result"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&resp); err != nil {
 		return nil, err
 	}
 
@@ -175,7 +175,7 @@ func (p *p2pClient) notifyWhenReady() (<-chan struct{}, error) {
 			}
 			defer r.Body.Close()
 
-			if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+			if err := fastjson.NewDecoder(r.Body).Decode(&resp); err != nil {
 				continue
 			}
 

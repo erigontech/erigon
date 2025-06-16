@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -674,7 +674,7 @@ func chainConfig(name string) error {
 		return err
 	}
 	w := bufio.NewWriter(f)
-	encoder := json.NewEncoder(w)
+	encoder := fastjson.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	if err = encoder.Encode(chainConfig); err != nil {
 		return err

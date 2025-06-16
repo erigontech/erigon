@@ -19,16 +19,17 @@ package diagnostics
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon-lib/common/paths"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/urfave/cli/v2"
 )
 
 func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
@@ -141,7 +142,7 @@ func writeDbList(w http.ResponseWriter, dataDir string) {
 		dbs = append(dbs, strings.ReplaceAll(strings.TrimPrefix(path, dataDir)[1:], "\\", "/"))
 	}
 
-	json.NewEncoder(w).Encode(dbs)
+	fastjson.NewEncoder(w).Encode(dbs)
 }
 
 func writeDbTables(w http.ResponseWriter, r *http.Request, dataDir string, dbname string) {
@@ -194,7 +195,7 @@ func writeDbTables(w http.ResponseWriter, r *http.Request, dataDir string, dbnam
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tables)
+	fastjson.NewEncoder(w).Encode(tables)
 }
 
 func writeDbRead(w http.ResponseWriter, r *http.Request, dataDir string, dbname string, table string, key []byte, offset int64, limit int64) {

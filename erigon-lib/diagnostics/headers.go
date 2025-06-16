@@ -34,7 +34,7 @@ func (d *DiagnosticClient) setupHeadersDiagnostics(rootCtx context.Context) {
 func (d *DiagnosticClient) HeadersJson(w io.Writer) {
 	d.headerMutex.Lock()
 	defer d.headerMutex.Unlock()
-	if err := json.NewEncoder(w).Encode(d.headers); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(d.headers); err != nil {
 		log.Debug("[diagnostics] HeadersJson", "err", err)
 	}
 }

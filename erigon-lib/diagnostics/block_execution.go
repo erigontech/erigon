@@ -18,10 +18,10 @@ package diagnostics
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -82,7 +82,7 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) BlockExecutionInfoJson(w io.Writer) {
-	if err := json.NewEncoder(w).Encode(d.BlockExecution.Data()); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(d.BlockExecution.Data()); err != nil {
 		log.Debug("[diagnostics] BlockExecutionInfoJson", "err", err)
 	}
 }

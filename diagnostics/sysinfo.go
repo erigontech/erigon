@@ -56,15 +56,15 @@ func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 
 func writeCPUUsage(w http.ResponseWriter) {
 	cpuusage := sysutils.CPUUsage()
-	json.NewEncoder(w).Encode(cpuusage)
+	fastjson.NewEncoder(w).Encode(cpuusage)
 }
 
 func writeProcessesInfo(w http.ResponseWriter) {
 	processes := sysutils.GetProcessesInfo()
-	json.NewEncoder(w).Encode(processes)
+	fastjson.NewEncoder(w).Encode(processes)
 }
 
 func writeMemoryInfo(w http.ResponseWriter) {
 	totalMemory := sysutils.TotalMemoryUsage()
-	json.NewEncoder(w).Encode(totalMemory)
+	fastjson.NewEncoder(w).Encode(totalMemory)
 }

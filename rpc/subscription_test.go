@@ -62,8 +62,8 @@ func TestSubscriptions(t *testing.T) {
 
 		server                 = NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 		clientConn, serverConn = net.Pipe()
-		out                    = json.NewEncoder(clientConn)
-		in                     = json.NewDecoder(clientConn)
+		out                    = fastjson.NewEncoder(clientConn)
+		in                     = fastjson.NewDecoder(clientConn)
 		successes              = make(chan subConfirmation)
 		notifications          = make(chan subscriptionResult)
 		errors                 = make(chan error, subCount*notificationCount+1)
@@ -152,7 +152,7 @@ func TestServerUnsubscribe(t *testing.T) {
 		notifications = make(chan subscriptionResult)
 		errors        = make(chan error, 1)
 	)
-	go waitForMessages(json.NewDecoder(p2), resps, notifications, errors)
+	go waitForMessages(fastjson.NewDecoder(p2), resps, notifications, errors)
 
 	// Receive the subscription ID.
 	var sub subConfirmation
@@ -186,7 +186,7 @@ type subConfirmation struct {
 
 // waitForMessages reads RPC messages from 'in' and dispatches them into the given channels.
 // It stops if there is an error.
-func waitForMessages(in *json.Decoder, successes chan subConfirmation, notifications chan subscriptionResult, errors chan error) {
+func waitForMessages(in *fastjson.Decoder, successes chan subConfirmation, notifications chan subscriptionResult, errors chan error) {
 	for {
 		resp, notification, err := readAndValidateMessage(in)
 		if err != nil {
@@ -200,7 +200,7 @@ func waitForMessages(in *json.Decoder, successes chan subConfirmation, notificat
 	}
 }
 
-func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionResult, error) {
+func readAndValidateMessage(in *fastjson.Decoder) (*subConfirmation, *subscriptionResult, error) {
 	var msg jsonrpcMessage
 	if err := in.Decode(&msg); err != nil {
 		return nil, nil, fmt.Errorf("decode error: %w", err)

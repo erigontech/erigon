@@ -124,7 +124,7 @@ func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *
 		resp = append(resp, respUpdate)
 	}
 
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(resp); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

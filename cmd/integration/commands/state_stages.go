@@ -217,7 +217,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 		if err3 != nil {
 			panic(err3)
 		}
-		encoder := json.NewEncoder(w)
+		encoder := fastjson.NewEncoder(w)
 		encoder.SetIndent(" ", " ")
 		for _, l := range logger.FormatLogs(structLogger.StructLogs()) {
 			if err2 := encoder.Encode(l); err2 != nil {

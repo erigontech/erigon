@@ -74,7 +74,7 @@ func initGenesis(cliCtx *cli.Context) error {
 	defer file.Close()
 
 	genesis := new(types.Genesis)
-	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+	if err := fastjson.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
 

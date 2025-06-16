@@ -31,7 +31,7 @@ type ValidatorPreparationPayload struct {
 func (a *ApiHandler) PostEthV1ValidatorPrepareBeaconProposal(w http.ResponseWriter, r *http.Request) {
 	req := []ValidatorPreparationPayload{}
 	// decode request with json
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

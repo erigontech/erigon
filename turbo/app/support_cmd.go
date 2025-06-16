@@ -367,7 +367,7 @@ func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoRe
 
 	var reply remote.NodesInfoReply
 
-	err = json.NewDecoder(debugResponse.Body).Decode(&reply)
+	err = fastjson.NewDecoder(debugResponse.Body).Decode(&reply)
 
 	debugResponse.Body.Close()
 
@@ -523,7 +523,7 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 
 			bytes := &bytes.Buffer{}
 
-			if err := json.NewEncoder(bytes).Encode(response); err != nil {
+			if err := fastjson.NewEncoder(bytes).Encode(response); err != nil {
 				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Failed to encode response: "+err.Error())
 				continue
 			}
@@ -549,7 +549,7 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 
 			bytes := &bytes.Buffer{}
 
-			if err := json.NewEncoder(bytes).Encode(response); err != nil {
+			if err := fastjson.NewEncoder(bytes).Encode(response); err != nil {
 				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Failed to encode response: "+err.Error())
 				continue
 			}

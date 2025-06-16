@@ -99,7 +99,7 @@ func TestJson(t *testing.T) {
 	l.Error("some message", "x", 1, "y", 3.2)
 
 	var v map[string]interface{}
-	decoder := json.NewDecoder(buf)
+	decoder := fastjson.NewDecoder(buf)
 	if err := decoder.Decode(&v); err != nil {
 		t.Fatalf("Error decoding JSON: %v", v)
 	}
@@ -127,7 +127,7 @@ func TestJSONMap(t *testing.T) {
 	l.Error("logging structs", "struct", m)
 
 	var v map[string]interface{}
-	decoder := json.NewDecoder(buf)
+	decoder := fastjson.NewDecoder(buf)
 	if err := decoder.Decode(&v); err != nil {
 		t.Fatalf("Error decoding JSON: %v", v)
 	}

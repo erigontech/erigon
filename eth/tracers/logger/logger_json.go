@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -33,7 +34,7 @@ import (
 )
 
 type JSONLogger struct {
-	encoder *json.Encoder
+	encoder *fastjson.Encoder
 	cfg     *LogConfig
 	env     *tracing.VMContext
 }
@@ -41,7 +42,7 @@ type JSONLogger struct {
 // NewJSONLogger creates a new EVM tracer that prints execution steps as JSON objects
 // into the provided stream.
 func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
-	l := &JSONLogger{json.NewEncoder(writer), cfg, nil}
+	l := &JSONLogger{fastjson.NewEncoder(writer), cfg, nil}
 	if l.cfg == nil {
 		l.cfg = &LogConfig{}
 	}

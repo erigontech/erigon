@@ -64,7 +64,7 @@ func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 func (d *DiagnosticClient) HardwareInfoJson(w io.Writer) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if err := json.NewEncoder(w).Encode(d.hardwareInfo); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(d.hardwareInfo); err != nil {
 		log.Debug("[diagnostics] HardwareInfoJson", "err", err)
 	}
 }

@@ -82,7 +82,7 @@ func TestPoolAttesterSlashings(t *testing.T) {
 		},
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&out)
+	err = fastjson.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
 	require.Len(t, out.Data, 1)
@@ -136,7 +136,7 @@ func TestPoolProposerSlashings(t *testing.T) {
 		Data: []*cltypes.ProposerSlashing{},
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&out)
+	err = fastjson.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
 	require.Len(t, out.Data, 1)
@@ -181,7 +181,7 @@ func TestPoolVoluntaryExits(t *testing.T) {
 		Data: []*cltypes.SignedVoluntaryExit{},
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&out)
+	err = fastjson.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
 	require.Len(t, out.Data, 1)
@@ -234,7 +234,7 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 		Data: []*cltypes.SignedBLSToExecutionChange{},
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&out)
+	err = fastjson.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
 	require.Len(t, out.Data, 2)
@@ -298,7 +298,7 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 		Data: []*solid.Attestation{},
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&out)
+	err = fastjson.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
 	require.Len(t, out.Data, 2)
@@ -338,7 +338,7 @@ func TestPoolSyncCommittees(t *testing.T) {
 		Data *cltypes.Contribution `json:"data"`
 	}{}
 
-	err = json.NewDecoder(resp.Body).Decode(&out)
+	err = fastjson.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
 	require.Equal(t, &cltypes.Contribution{
@@ -387,7 +387,7 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 		Data *cltypes.Contribution `json:"data"`
 	}{}
 
-	err = json.NewDecoder(resp.Body).Decode(&out)
+	err = fastjson.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
 	require.Equal(t, &cltypes.Contribution{

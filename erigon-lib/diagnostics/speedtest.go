@@ -77,7 +77,7 @@ func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTes
 func (d *DiagnosticClient) NetworkSpeedJson(w io.Writer) {
 	d.networkSpeedMutex.Lock()
 	defer d.networkSpeedMutex.Unlock()
-	if err := json.NewEncoder(w).Encode(d.networkSpeed); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(d.networkSpeed); err != nil {
 		log.Debug("[diagnostics] ResourcesUsageJson", "err", err)
 	}
 }

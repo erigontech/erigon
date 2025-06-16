@@ -17,9 +17,9 @@
 package diagnostics
 
 import (
-	"encoding/json"
 	"net/http"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/turbo/node"
 )
 
@@ -39,6 +39,6 @@ func SetupBootnodesAccess(metricsMux *http.ServeMux, node *node.ErigonNode) {
 			btNodes = append(btNodes, bootnode.String())
 		}
 
-		json.NewEncoder(w).Encode(btNodes)
+		fastjson.NewEncoder(w).Encode(btNodes)
 	})
 }

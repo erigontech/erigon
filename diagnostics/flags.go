@@ -17,10 +17,11 @@
 package diagnostics
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/fastjson"
 )
 
 func SetupFlagsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
@@ -69,6 +70,6 @@ func SetupFlagsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 				Default: !inCtx,
 			}
 		}
-		json.NewEncoder(w).Encode(flags)
+		fastjson.NewEncoder(w).Encode(flags)
 	})
 }

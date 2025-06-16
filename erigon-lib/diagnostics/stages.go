@@ -332,7 +332,7 @@ func (d *DiagnosticClient) GetSyncStages() []SyncStage {
 func (d *DiagnosticClient) SyncStagesJson(w io.Writer) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if err := json.NewEncoder(w).Encode(d.syncStages); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(d.syncStages); err != nil {
 		log.Debug("[diagnostics] HardwareInfoJson", "err", err)
 	}
 }

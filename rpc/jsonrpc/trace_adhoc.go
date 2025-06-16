@@ -1193,7 +1193,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer dbtx.Rollback()
 
 	var callParams []TraceCallParam
-	dec := json.NewDecoder(bytes.NewReader(calls))
+	dec := fastjson.NewDecoder(bytes.NewReader(calls))
 	tok, err := dec.Token()
 	if err != nil {
 		return nil, err

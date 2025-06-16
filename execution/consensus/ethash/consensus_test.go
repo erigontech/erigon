@@ -27,8 +27,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goccy/go-json"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -75,7 +73,7 @@ func TestCalcDifficulty(t *testing.T) {
 	defer file.Close()
 
 	tests := make(map[string]diffTest)
-	err = json.NewDecoder(file).Decode(&tests)
+	err = fastjson.NewDecoder(file).Decode(&tests)
 	if err != nil {
 		t.Fatal(err)
 	}

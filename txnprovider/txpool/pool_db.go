@@ -93,7 +93,7 @@ func ChainConfig(tx kv.Getter) (*chain.Config, error) {
 
 func PutChainConfig(tx kv.Putter, cc *chain.Config, buf []byte) error {
 	wr := bytes.NewBuffer(buf)
-	if err := json.NewEncoder(wr).Encode(cc); err != nil {
+	if err := fastjson.NewEncoder(wr).Encode(cc); err != nil {
 		return fmt.Errorf("invalid chain config JSON in pool db: %w", err)
 	}
 	if err := tx.Put(kv.PoolInfo, PoolChainConfigKey, wr.Bytes()); err != nil {

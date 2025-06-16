@@ -273,7 +273,7 @@ func (a *ApiHandler) PostEthV1BeaconStatesValidators(w http.ResponseWriter, r *h
 	}
 
 	var req validatorsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -516,7 +516,7 @@ func (a *ApiHandler) PostEthV1BeaconValidatorsBalances(w http.ResponseWriter, r 
 
 	validatorIds := []string{}
 	// read from request body
-	if err := json.NewDecoder(r.Body).Decode(&validatorIds); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&validatorIds); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1092,7 +1091,7 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	// check content type
 	switch r.Header.Get("Content-Type") {
 	case "application/json":
-		if err := json.NewDecoder(r.Body).Decode(block); err != nil {
+		if err := fastjson.NewDecoder(r.Body).Decode(block); err != nil {
 			return nil, err
 		}
 		return block, nil

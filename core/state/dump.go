@@ -20,7 +20,6 @@
 package state
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -62,7 +61,7 @@ type Dump struct {
 
 // iterativeDump is a 'collector'-implementation which dump output line-by-line iteratively.
 type iterativeDump struct {
-	*json.Encoder
+	*fastjson.Encoder
 }
 
 // IteratorDump is an implementation for iterating over data.
@@ -263,7 +262,7 @@ func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
 }
 
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
-func (d *Dumper) IterativeDump(excludeCode, excludeStorage bool, output *json.Encoder) {
+func (d *Dumper) IterativeDump(excludeCode, excludeStorage bool, output *fastjson.Encoder) {
 	//nolint:errcheck
 	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, common.Address{}, 0)
 }

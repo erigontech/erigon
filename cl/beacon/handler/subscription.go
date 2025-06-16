@@ -45,7 +45,7 @@ type ValidatorSyncCommitteeSubscriptionsRequest struct {
 
 func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.ResponseWriter, r *http.Request) {
 	var req []ValidatorSyncCommitteeSubscriptionsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -103,7 +103,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 
 func (a *ApiHandler) PostEthV1ValidatorBeaconCommitteeSubscription(w http.ResponseWriter, r *http.Request) {
 	req := []*cltypes.BeaconCommitteeSubscription{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Error("failed to decode request", "err", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

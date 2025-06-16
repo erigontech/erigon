@@ -32,7 +32,7 @@ func SetupVersionAccess(metricsMux *http.ServeMux) {
 
 	metricsMux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(struct {
+		fastjson.NewEncoder(w).Encode(struct {
 			Node int    `json:"nodeVersion"`
 			Code string `json:"codeVersion"`
 			Git  string `json:"gitCommit"`

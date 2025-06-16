@@ -282,7 +282,7 @@ func (l *StructLogger) Flush(tx types.Transaction) {
 	if err1 != nil {
 		panic(err1)
 	}
-	encoder := json.NewEncoder(w)
+	encoder := fastjson.NewEncoder(w)
 	logs := FormatLogs(l.StructLogs())
 	if err2 := encoder.Encode(logs); err2 != nil {
 		panic(err2)

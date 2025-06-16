@@ -147,7 +147,7 @@ func writeDiagAdderss(w http.ResponseWriter, addr DiagAddress) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "application/json")
 
-	if err := json.NewEncoder(w).Encode(addr); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(addr); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 

@@ -17,11 +17,11 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 
@@ -47,7 +47,7 @@ func (a *ApiHandler) GetEthV1DebugBeaconForkChoice(w http.ResponseWriter, r *htt
 	justifiedCheckpoint := a.forkchoiceStore.JustifiedCheckpoint()
 	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 	forkNodes := a.forkchoiceStore.ForkNodes()
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := fastjson.NewEncoder(w).Encode(map[string]interface{}{
 		"justified_checkpoint": justifiedCheckpoint,
 		"finalized_checkpoint": finalizedCheckpoint,
 		"fork_choice_nodes":    forkNodes,

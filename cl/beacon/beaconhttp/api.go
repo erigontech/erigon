@@ -17,7 +17,6 @@
 package beaconhttp
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,6 +24,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -78,7 +78,7 @@ func (e EndpointError) Unwrap() error {
 
 func (e *EndpointError) WriteTo(w http.ResponseWriter) {
 	w.WriteHeader(e.Code)
-	encErr := json.NewEncoder(w).Encode(e)
+	encErr := fastjson.NewEncoder(w).Encode(e)
 	if encErr != nil {
 		log.Error("beaconapi failed to write json error", "err", encErr)
 	}
@@ -131,7 +131,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):
 			if !isNil(ans) {
 				w.Header().Set("Content-Type", "application/json")
-				err := json.NewEncoder(w).Encode(ans)
+				err := fastjson.NewEncoder(w).Encode(ans)
 				if err != nil {
 					// this error is fatal, log to console
 					log.Error("beaconapi failed to encode json", "type", reflect.TypeOf(ans), "err", err)

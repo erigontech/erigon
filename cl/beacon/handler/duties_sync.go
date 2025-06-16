@@ -17,13 +17,13 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/fastjson"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -45,7 +45,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	period := epoch / a.beaconChainCfg.EpochsPerSyncCommitteePeriod
 
 	var idxsStr []string
-	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
+	if err := fastjson.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err))
 	}
 	if len(idxsStr) == 0 {

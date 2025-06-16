@@ -108,7 +108,7 @@ func WithTestFromBytes(name string, xs []byte) func(*Harness) error {
 		s.Write(xs)
 		hsh := hex.EncodeToString(s.Sum(nil))
 		// unmarshal just the extra data
-		err := yaml.Unmarshal(xs, &x, yaml.JSONOpt(func(d *json.Decoder) *json.Decoder {
+		err := yaml.Unmarshal(xs, &x, yaml.JSONOpt(func(d *fastjson.Decoder) *fastjson.Decoder {
 			return d
 		}))
 		if err != nil {

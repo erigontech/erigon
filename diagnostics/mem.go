@@ -41,7 +41,7 @@ func writeMem(w http.ResponseWriter) {
 		return
 	}
 
-	if err := json.NewEncoder(w).Encode(memStats); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(memStats); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

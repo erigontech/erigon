@@ -133,7 +133,7 @@ func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
 func (d *DiagnosticClient) SyncStatsJson(w io.Writer) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if err := json.NewEncoder(w).Encode(d.syncStats); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(d.syncStats); err != nil {
 		log.Debug("[diagnostics] SyncStatsJson", "err", err)
 	}
 }
@@ -141,7 +141,7 @@ func (d *DiagnosticClient) SyncStatsJson(w io.Writer) {
 func (d *DiagnosticClient) SnapshotFilesListJson(w io.Writer) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if err := json.NewEncoder(w).Encode(d.snapshotFileList); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(d.snapshotFileList); err != nil {
 		log.Debug("[diagnostics] SnapshotFilesListJson", "err", err)
 	}
 }

@@ -21,7 +21,6 @@ package params
 
 import (
 	"embed"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"path"
@@ -44,7 +43,7 @@ func readChainSpec(filename string) *chain.Config {
 	}
 	defer f.Close()
 
-	decoder := json.NewDecoder(f)
+	decoder := fastjson.NewDecoder(f)
 	spec := &chain.Config{}
 	err = decoder.Decode(&spec)
 	if err != nil {

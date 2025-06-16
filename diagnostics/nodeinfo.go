@@ -41,5 +41,5 @@ func writeNodeInfo(w http.ResponseWriter, node *node.ErigonNode) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(reply)
+	fastjson.NewEncoder(w).Encode(reply)
 }

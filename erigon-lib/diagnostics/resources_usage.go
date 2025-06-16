@@ -35,7 +35,7 @@ func (d *DiagnosticClient) ResourcesUsageJson(w io.Writer) {
 	returnObj := d.resourcesUsage
 	d.resourcesUsage = ResourcesUsage{}
 
-	if err := json.NewEncoder(w).Encode(returnObj); err != nil {
+	if err := fastjson.NewEncoder(w).Encode(returnObj); err != nil {
 		log.Debug("[diagnostics] ResourcesUsageJson", "err", err)
 	}
 }

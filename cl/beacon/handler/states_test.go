@@ -83,7 +83,7 @@ func TestGetStateFork(t *testing.T) {
 			}
 			jsonVal := make(map[string]interface{})
 			// unmarshal the json
-			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
+			require.NoError(t, fastjson.NewDecoder(resp.Body).Decode(&jsonVal))
 			data := jsonVal["data"].(map[string]interface{})
 			require.Equal(t, "0x00000000", data["current_version"])
 			require.Equal(t, "0x00000000", data["previous_version"])
@@ -148,7 +148,7 @@ func TestGetStateRoot(t *testing.T) {
 			}
 			jsonVal := make(map[string]interface{})
 			// unmarshal the json
-			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
+			require.NoError(t, fastjson.NewDecoder(resp.Body).Decode(&jsonVal))
 			data := jsonVal["data"].(map[string]interface{})
 			require.Equal(t, data["root"], "0x"+common.Bytes2Hex(postRoot[:]))
 		})
