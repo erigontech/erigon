@@ -2,15 +2,23 @@ package entity_extras
 
 import (
 	"bytes"
+	"context"
+	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // toPrefix exclusive
-func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, rwTx kv.RwTx) (delCount uint64, err error) {
+func DeleteRangeFromTbl(ctx context.Context, tbl string, fromPrefix, toPrefix []byte, limit uint64, logEvery *time.Ticker, logger log.Logger, rwTx kv.RwTx) (delCount uint64, err error) {
 	c, err := rwTx.RwCursor(tbl) // TODO: no dupsort tbl assumed
 	if err != nil {
 		return
+	}
+
+	if logEvery == nil {
+		logEvery = time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
 	}
 
 	defer c.Close()
@@ -26,6 +34,14 @@ func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, r
 		}
 		limit--
 		delCount++
+		select {
+		case <-logEvery.C:
+			logger.Info("DeleteRange", "tbl", tbl, "from", fromPrefix, "to", toPrefix, "limit", limit, "del", delCount)
+		case <-ctx.Done():
+			logger.Info("DeleteRange cancelled", "tbl", tbl, "del", delCount)
+			return delCount, ctx.Err()
+		default:
+		}
 	}
 
 	return

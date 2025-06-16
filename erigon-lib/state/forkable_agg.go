@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -628,21 +628,62 @@ func (r *ForkableAggTemporalTx) HasRootNumUpto(ctx context.Context, forId Forkab
 
 func (r *ForkableAggTemporalTx) Unwind(ctx context.Context, to RootNum, tx kv.RwTx) error {
 	return loopOverDebugDbsExec(r, kv.AllForkableId, func(db ForkableDbCommonTxI) error {
-		return db.Unwind(ctx, to, tx)
+		_, err := db.Unwind(ctx, to, tx)
+		return err
 	})
 }
 
-func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, tx kv.RwTx) (err error) {
+func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, timeout time.Duration, tx kv.RwTx) (err error) {
 	if dbg.NoPrune() {
 		return
 	}
 
-	// 1. unlike in agg, less number of prune elements expected => so can do all of the pruning in one shot..
-	// 2. `toRootNum` is the max value. Each forkable checks if it can prune upto that point (e.g. files are be built).
-	return loopOverDebugDbsExec(r, kv.AllForkableId, func(db ForkableDbCommonTxI) error {
-		_, err = db.Prune(ctx, toRootNum, math.MaxUint64, tx)
-		return err
+	limit := uint64(1000)
+	if timeout > 5*time.Hour {
+		limit = 1_000_000
+	} else if timeout >= time.Minute {
+		limit = 10_000
+	}
+
+	localTimeout := time.NewTicker(timeout)
+	defer localTimeout.Stop()
+	timeoutErr := fmt.Errorf("prune timeout")
+
+	aggLogEvery := time.NewTicker(600 * time.Second)
+	defer aggLogEvery.Stop()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	aggStat := ForkablePruneStat{}
+
+	err = loopOverDebugDbsExec(r, kv.AllForkableId, func(db ForkableDbCommonTxI) error {
+		stat, err := db.Prune(ctx, toRootNum, limit, aggLogEvery, tx)
+		if err != nil {
+			return err
+		}
+
+		aggStat.Accumulate(&stat)
+
+		select {
+		case <-localTimeout.C:
+			return timeoutErr
+		case <-logEvery.C:
+			r.f.logger.Info("forkable prune progress", "toRootNum", toRootNum, "stat", aggStat)
+		case <-ctx.Done():
+			r.f.logger.Info("forkable prune cancelled", "toRootNum", toRootNum, "stat", aggStat)
+			return ctx.Err()
+		default:
+			return nil
+		}
+
+		return nil
 	})
+	if err != nil && err != timeoutErr {
+		r.f.logger.Error("forkable prune", "err", err)
+		return err
+	}
+	r.f.logger.Info("forkable prune finished", "toRootNum", toRootNum, "stat", aggStat)
+	return nil
 }
 
 func (r *ForkableAggTemporalTx) Close() {
