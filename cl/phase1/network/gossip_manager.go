@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -231,6 +232,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
 	default:
+		if strings.Contains(data.Name, "column") {
+			log.Debug("Received data column sidecar via gossip", "slot", data.Name)
+		}
 		switch {
 		case gossip.IsTopicBlobSidecar(data.Name):
 			// decode sidecar
