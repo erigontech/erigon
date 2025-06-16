@@ -385,7 +385,9 @@ func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Tx, spanId uin
 }
 func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
 	if r == nil {
-		return rawdbv3.TxNums.WithCustomReadTxNumFunc(nil)
+		// tests
+		txnumReader := TxBlockIndexFromBlockReader(ctx, nil).(*txBlockIndexWithBlockReader)
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(txnumReader)
 	}
 	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
 }
@@ -1559,7 +1561,9 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 
 func (r *BlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
 	if r == nil {
-		return rawdbv3.TxNums.WithCustomReadTxNumFunc(nil)
+		// tests
+		txnumReader := TxBlockIndexFromBlockReader(ctx, nil).(*txBlockIndexWithBlockReader)
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(txnumReader)
 	}
 	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
 }
