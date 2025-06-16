@@ -43,13 +43,12 @@ ARG TARGETARCH \
 
 WORKDIR /erigon
 
-#COPY . /erigon
+COPY . /erigon
 
 SHELL ["/bin/bash", "-c"]
 
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache \
-    --mount=type=bind,target=/erigon \
+    --mount=type=cache,target=/root/.cache \s
     echo "DEBUG: building on ${TARGETARCH}${TARGETVARIANT}" && \
     if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then \
         echo "DEBUG: detected architecture AMD64v1"; \
