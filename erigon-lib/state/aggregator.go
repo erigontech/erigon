@@ -263,7 +263,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	// ii has checker on history dirtyFiles (same domain)
 	dd := a.d[domain]
 	if dd.histCfg.snapshotsDisabled || dd.histCfg.historyDisabled || dd.disable {
-		a.logger.Info("history or ii disabled, can't register dependency", "domain", domain.String())
+		a.logger.Debug("history or ii disabled, can't register dependency", "domain", domain.String())
 		return
 	}
 
@@ -354,7 +354,17 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	return a.OpenFolder()
 }
 
+func (a *Aggregator) WaitForFiles() {
+	for {
+		select {
+		case <-a.WaitForBuildAndMerge(a.ctx):
+			return
+		}
+	}
+}
+
 func (a *Aggregator) Close() {
+	a.WaitForFiles()
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
@@ -470,7 +480,10 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 			select {
 			case <-ctx.Done():
 				return
-			case <-chkEvery.C: //TODO: more reliable notification
+			case <-chkEvery.C:
+				a.logger.Trace("[agg] waiting for files",
+					"building files", a.buildingFiles.Load(),
+					"merging files", a.mergingFiles.Load())
 			}
 		}
 	}()
@@ -664,7 +677,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
 		if ii.disable {
-			log.Warn("[dbg] here1?", "n", ii.name)
 			continue
 		}
 
@@ -673,7 +685,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
 		dc.Close()
 		if step < firstStepNotInFiles {
-			log.Warn("[dbg] here2?", "n", ii.name, "step", step, "firstStepNotInFiles", firstStepNotInFiles)
 			continue
 		}
 
@@ -1550,7 +1561,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 
 		if a.snapshotBuildSema != nil {
 			//we are inside own goroutine - it's fine to block here
-			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
+			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil { //TODO: not sure if this ctx is correct
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				close(fin)
 				return //nolint
@@ -1702,10 +1713,21 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-func (at *AggregatorRoTx) HistoryProgress(name kv.Domain, tx kv.Tx) uint64 {
+// func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
+// 	return at.d[name].d.maxTxNumInDB(tx)
+// }
+
+func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
+	d := at.d[name]
+	if d.d.historyDisabled {
+		// this is not accurate, okay for reporting...
+		// if historyDisabled, there's no way to get progress in
+		// terms of exact txNum
+		return at.d[name].d.maxStepInDBNoHistory(tx) * at.a.aggregationStep
+	}
 	return at.d[name].HistoryProgress(tx)
 }
-func (at *AggregatorRoTx) ProgressII(name kv.InvertedIdx, tx kv.Tx) uint64 {
+func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)
 }
 

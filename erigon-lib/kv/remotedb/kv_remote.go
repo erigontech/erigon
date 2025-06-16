@@ -385,11 +385,11 @@ func (tx *tx) ListTables() ([]string, error) {
 	return nil, errors.New("function ListTables is not implemented for remoteTx")
 }
 
-func (tx *tx) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
+func (tx *tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	panic("not implemented")
 }
 
-func (tx *tx) RoForkables(id kv.ForkableId) any {
+func (tx *tx) AggForkablesTx(id kv.ForkableId) any {
 	panic("not implemented")
 }
 

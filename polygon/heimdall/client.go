@@ -24,12 +24,12 @@ import (
 //go:generate mockgen -typed=true -destination=./client_mock.go -package=heimdall . Client
 type Client interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
-	FetchStateSyncEvent(ctx context.Context, id uint64) (*EventRecordWithTime, error)
 
 	FetchLatestSpan(ctx context.Context) (*Span, error)
 	FetchSpan(ctx context.Context, spanID uint64) (*Span, error)
 	FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error)
 
+	FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error)
 	FetchStatus(ctx context.Context) (*Status, error)
 
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)

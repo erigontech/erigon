@@ -57,11 +57,11 @@ func (m *unmarkedTx) Get(num Num) ([]byte, error) {
 	return m.s.Get(num, m.dbtx)
 }
 
-func (m *unmarkedTx) Debug() kv.ForkableRoTxCommons {
+func (m *unmarkedTx) Debug() kv.ForkableTxCommons {
 	return m
 }
 
-func (m *unmarkedTx) RoDbDebug() kv.UnmarkedDbRoTx {
+func (m *unmarkedTx) RoDbDebug() kv.UnmarkedDbTx {
 	return m
 }
 

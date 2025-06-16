@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/backup"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -599,11 +598,8 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	br, bw := blocksIO(db, logger)
 
 	if integritySlow {
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			log.Info("[integrity] no gaps in canonical headers")
-			integrity.NoGapsInCanonicalHeaders(tx, ctx, br)
-			return nil
-		}); err != nil {
+		log.Info("[integrity] no gaps in canonical headers")
+		if err := integrity.NoGapsInCanonicalHeaders(ctx, db, br, true); err != nil {
 			return err
 		}
 		return nil
@@ -829,7 +825,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	genesis := core.GenesisBlockByChainName(chain)
+	genesis := readGenesis(chain)
 	br, _ := blocksIO(db, logger)
 
 	notifications := shards.NewNotifications(nil)
@@ -839,8 +835,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		dirs, br, nil, genesis, syncCfg, nil)
 
 	if unwind > 0 {
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			minUnwindableBlockNum, _, err := libstate.AggTx(tx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			minUnwindableBlockNum, _, err := tx.Debug().CanUnwindBeforeBlockNum(s.BlockNumber - unwind)
 			if err != nil {
 				return err
 			}
@@ -955,45 +951,17 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	must(sync.SetCurrentStage(stages.Execution))
 
 	chainConfig := fromdb.ChainConfig(db)
-	genesis := core.GenesisBlockByChainName(chain)
+	genesis := readGenesis(chain)
 	blockReader, _ := blocksIO(db, logger)
 
-	cfg := stagedsync.StageCustomTraceCfg(strings.Split(domain, ","), db, dirs, blockReader, chainConfig, engine, genesis, &syncCfg)
+	cfg := stagedsync.StageCustomTraceCfg(strings.Split(domain, ","), db, dirs, blockReader, chainConfig, engine, genesis, syncCfg)
 	if reset {
-		tx, err := db.BeginTemporalRw(ctx)
-		if err != nil {
+		if err := stagedsync.StageCustomTraceReset(ctx, db, cfg.Produce); err != nil {
 			return err
 		}
-		defer tx.Rollback()
-		var tables []string
-		if cfg.Produce.ReceiptDomain {
-			tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
-		}
-		if cfg.Produce.RCacheDomain {
-			tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
-		}
-		if cfg.Produce.LogAddr {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)
-		}
-		if cfg.Produce.LogTopic {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogTopicIdx)...)
-		}
-		if cfg.Produce.TraceFrom {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx)...)
-		}
-		if cfg.Produce.TraceTo {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
-		}
-		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-
-		if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
-			return err
-		}
+		//if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
+		//	return err
+		//}
 		return nil
 	}
 
@@ -1085,11 +1053,11 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	return tx.Commit()
 }
 
-func printAllStages(db kv.RoDB, ctx context.Context, logger log.Logger) error {
+func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	sn, borSn, _, _, _, _, _ := allSnapshots(ctx, db, logger) // ignore error here to get some stat.
 	defer sn.Close()
 	defer borSn.Close()
-	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn) })
+	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {
@@ -1249,7 +1217,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 
 	events := shards.NewEvents()
 
-	genesis := core.GenesisBlockByChainName(chain)
+	genesis := readGenesis(chain)
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, dirs, logger)
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
@@ -1409,11 +1377,20 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 		consensusConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
-			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger)
+			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, heimdall.WithApiVersioner(ctx))
 		}
 	} else {
 		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
 		heimdallClient, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, nil, nil), heimdallClient
+}
+
+func readGenesis(chain string) *types.Genesis {
+	genesis := core.GenesisBlockByChainName(chain)
+	if genesis == nil {
+		panic("genesis is nil. probably you passed wrong --chain")
+	}
+	_ = genesis.Alloc // nil check
+	return genesis
 }

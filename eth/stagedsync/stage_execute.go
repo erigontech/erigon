@@ -463,16 +463,17 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	}
 	useExternalTx := txc.Tx != nil
 	if !useExternalTx {
-		txc.Tx, err = cfg.db.BeginRw(ctx)
+		tx, err := cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
-		defer txc.Tx.Rollback()
+		defer tx.Rollback()
+		txc.SetTx(tx)
 	}
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	unwindToLimit, ok, err := libstate.AggTx(txc.Tx).CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Tx)
+	unwindToLimit, ok, err := txc.Ttx.Debug().CanUnwindBeforeBlockNum(u.UnwindPoint)
 	if err != nil {
 		return err
 	}

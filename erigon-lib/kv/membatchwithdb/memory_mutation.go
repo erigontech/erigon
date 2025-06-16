@@ -760,17 +760,17 @@ func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc orde
 }
 
 func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
-	return m.db.(kv.TemporalTx).HistoryStartFrom(name)
+	return m.db.(kv.TemporalTx).Debug().HistoryStartFrom(name)
 }
 func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
 	panic("not supported")
 }
 func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.(kv.TemporalTx).Debug() }
 
-func (m *MemoryMutation) RoForkables(id kv.ForkableId) any {
-	return m.db.(kv.TemporalTx).RoForkables(id)
+func (m *MemoryMutation) AggForkablesTx(id kv.ForkableId) any {
+	return m.db.(kv.TemporalTx).AggForkablesTx(id)
 }
 
-func (m *MemoryMutation) UnmarkedRo(id kv.ForkableId) kv.UnmarkedRoTx {
-	return m.db.(kv.TemporalTx).UnmarkedRo(id)
+func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	return m.db.(kv.TemporalTx).Unmarked(id)
 }
