@@ -200,6 +200,11 @@ const (
 	SetCodeMagicPrefix  = byte(0x05)
 	PerEmptyAccountCost = 25000
 	PerAuthBaseCost     = 12500
+
+	// EIP-7934: RLP Execution Block Size Limit
+	MaxBlockSize             uint64 = 10_485_760                              // 10 MiB
+	MaxBlockSizeSafetyMargin uint64 = 2_097_152                               // 2 MiB
+	MaxRlpBlockSize                 = MaxBlockSize - MaxBlockSizeSafetyMargin // 8 MiB
 )
 
 // EIP-7702: Set EOA account code

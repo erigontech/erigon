@@ -331,6 +331,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	if block.ExceedsMaxRlpSize(s.config) {
+		err := fmt.Errorf("block exceeds max rlp size: %d vs %s", s.config.GetMaxRlpBlockSize(header.Time), block.Size())
+		return &engine_types.PayloadStatus{
+			Status:          engine_types.InvalidStatus,
+			ValidationError: engine_types.NewStringifiedError(err),
+		}, nil
+	}
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {

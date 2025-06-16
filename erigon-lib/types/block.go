@@ -32,6 +32,7 @@ import (
 
 	"github.com/gballet/go-verkle"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -1381,6 +1382,15 @@ func (b *Block) Size() common.StorageSize {
 	rlp.Encode(&c, b)
 	b.size.Store(uint64(c))
 	return common.StorageSize(c)
+}
+
+func (b *Block) ExceedsMaxRlpSize(config *chain.Config) bool {
+	maxSize := config.GetMaxRlpBlockSize(b.Time())
+	if maxSize == 0 {
+		return false
+	}
+
+	return b.Size() > common.StorageSize(maxSize)
 }
 
 // SanityCheck can be used to prevent that unbounded fields are

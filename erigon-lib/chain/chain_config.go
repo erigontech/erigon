@@ -422,6 +422,13 @@ func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
 	return c.getBlobConfig(time).BaseFeeUpdateFraction
 }
 
+func (c *Config) GetMaxRlpBlockSize(time uint64) uint64 {
+	if c.IsOsaka(time) {
+		return params.MaxRlpBlockSize
+	}
+	return 0 // means unlimited
+}
+
 func (c *Config) SecondsPerSlot() uint64 {
 	if c.Bor != nil {
 		return 2 // Polygon
