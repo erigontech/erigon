@@ -83,6 +83,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	blockBatchSize := 500
 	// We divide them in batches
 	blocksBatch := []*types.Block{}
+	chainConfig := e.chainRW.Config()
 
 	loopBody := func() (bool, error) {
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
@@ -160,6 +161,15 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 			block, err := rawBlock.AsBlock()
 			if err != nil {
 				return false, fmt.Errorf("Could not construct block: %w", err)
+			}
+			if block.ExceedsMaxRlpSize(chainConfig) {
+				return false, fmt.Errorf(
+					"block exceeds max rlp size: blockNum=%d, blockHash=%s, %d vs %s",
+					block.NumberU64(),
+					block.Hash(),
+					chainConfig.GetMaxRlpBlockSize(header.Time),
+					block.Size(),
+				)
 			}
 			blocksBatch = append(blocksBatch, block)
 			dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)
