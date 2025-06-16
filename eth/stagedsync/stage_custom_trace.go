@@ -108,7 +108,7 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
+	txNumsReader := cfg.ExecArgs.BlockReader.TxnumReader(ctx)
 
 	// 1. Require stage_exec > 0: means don't need handle "half-block execution case here"
 	// 2. Require stage_exec > 0: means has enough state-history
@@ -310,7 +310,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 	var cumulativeBlobGasUsedInBlock uint64
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.BlockReader))
+	txNumsReader := cfg.BlockReader.TxnumReader(ctx)
 	fromTxNum, _ := txNumsReader.Min(tx, fromBlock)
 	prevTxNumLog := fromTxNum
 

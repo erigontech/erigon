@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
@@ -46,7 +45,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 
 	skipForPerf := 11
 	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
+	txNumsReader := blockReader.TxnumReader(ctx)
 
 	for j := 0; j < 256; j++ {
 		j := j
