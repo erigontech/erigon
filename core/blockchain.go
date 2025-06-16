@@ -305,7 +305,7 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 		*msg.To(),
 		msg.Data(),
 		msg.Gas(),
-		*msg.Value(),
+		msg.Value(),
 		false,
 	)
 	if isBor && err != nil {
@@ -339,7 +339,7 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 		vm.AccountRef(msg.From()),
 		msg.Data(),
 		msg.Gas(),
-		*msg.Value(),
+		msg.Value(),
 		contract,
 	)
 	return ret, err

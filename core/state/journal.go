@@ -102,40 +102,40 @@ type (
 		prev    *stateObject
 	}
 	selfdestructChange struct {
-		account     common.Address
+		account     *common.Address
 		prev        bool // whether account had already selfdestructed
 		prevbalance uint256.Int
 	}
 
 	// Changes to individual accounts.
 	balanceChange struct {
-		account common.Address
+		account *common.Address
 		prev    uint256.Int
 	}
 	balanceIncrease struct {
-		account  common.Address
+		account  *common.Address
 		increase uint256.Int
 	}
 	balanceIncreaseTransfer struct {
 		bi *BalanceIncrease
 	}
 	nonceChange struct {
-		account common.Address
+		account *common.Address
 		prev    uint64
 	}
 	storageChange struct {
-		account     common.Address
+		account     *common.Address
 		key         common.Hash
 		prevalue    uint256.Int
 		wasCommited bool
 	}
 	fakeStorageChange struct {
-		account  common.Address
+		account  *common.Address
 		key      common.Hash
 		prevalue uint256.Int
 	}
 	codeChange struct {
-		account  common.Address
+		account  *common.Address
 		prevcode []byte
 		prevhash common.Hash
 	}
@@ -193,7 +193,7 @@ func (ch resetObjectChange) dirtied() *common.Address {
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
@@ -203,20 +203,20 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 	}
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prevbalance {
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: BalancePath})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
 			}
 		}
-		s.versionedWrites.Delete(ch.account, AccountKey{Path: SelfDestructPath})
+		s.versionedWrites.Delete(*ch.account, AccountKey{Path: SelfDestructPath})
 	}
 
 	return nil
 }
 
 func (ch selfdestructChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 var ripemd = common.HexToAddress("0000000000000000000000000000000000000003")
@@ -228,20 +228,20 @@ func (ch touchChange) revert(s *IntraBlockState) error {
 func (ch touchChange) dirtied() *common.Address { return &ch.account }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
-	if traceAccount(ch.account) {
-		fmt.Printf("Revert Balance %x: %d, prev: %d, orig: %d\n", ch.account, obj.data.Balance, ch.prev, obj.original.Balance)
+	if traceAccount(*ch.account) {
+		fmt.Printf("Revert Balance %x: %d, prev: %d, orig: %d\n", *ch.account, obj.data.Balance, ch.prev, obj.original.Balance)
 	}
 	obj.setBalance(ch.prev)
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prev {
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: BalancePath})
-			s.versionMap.Delete(ch.account, BalancePath, common.Hash{}, s.txIndex, false)
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})
+			s.versionMap.Delete(*ch.account, BalancePath, common.Hash{}, s.txIndex, false)
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
 			}
 		}
@@ -251,22 +251,22 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 }
 
 func (ch balanceChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch balanceIncrease) revert(s *IntraBlockState) error {
-	if bi, ok := s.balanceInc[ch.account]; ok {
+	if bi, ok := s.balanceInc[*ch.account]; ok {
 		bi.increase.Sub(&bi.increase, &ch.increase)
 		bi.count--
 		if bi.count == 0 {
-			delete(s.balanceInc, ch.account)
+			delete(s.balanceInc, *ch.account)
 		}
 	}
 	return nil
 }
 
 func (ch balanceIncrease) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch balanceIncreaseTransfer) dirtied() *common.Address {
@@ -278,16 +278,16 @@ func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
 	return nil
 }
 func (ch nonceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
 	obj.setNonce(ch.prev)
 	if s.versionMap != nil {
 		if obj.original.Nonce == ch.prev {
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: NoncePath})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: NoncePath})
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: NoncePath}]; ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: NoncePath}]; ok {
 				v.Val = ch.prev
 			}
 		}
@@ -297,24 +297,24 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 }
 
 func (ch nonceChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch codeChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
 	obj.setCode(ch.prevhash, ch.prevcode)
 	if s.versionMap != nil {
 		if obj.original.CodeHash == ch.prevhash {
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodePath})
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeHashPath})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: CodePath})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: CodeHashPath})
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: CodePath}]; ok {
 				v.Val = ch.prevcode
 			}
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: CodeHashPath}]; ok {
 				v.Val = ch.prevhash
 			}
 		}
@@ -323,21 +323,21 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 }
 
 func (ch codeChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch storageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
 
 	if s.versionMap != nil {
 		if ch.wasCommited {
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: StatePath, Key: ch.key})
-			s.versionMap.Delete(ch.account, StatePath, ch.key, s.txIndex, false)
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: StatePath, Key: ch.key})
+			s.versionMap.Delete(*ch.account, StatePath, ch.key, s.txIndex, false)
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
 				v.Val = ch.prevalue
 			}
 		}
@@ -347,11 +347,11 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 }
 
 func (ch storageChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch fakeStorageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
@@ -360,7 +360,7 @@ func (ch fakeStorageChange) revert(s *IntraBlockState) error {
 }
 
 func (ch fakeStorageChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch transientStorageChange) revert(s *IntraBlockState) error {

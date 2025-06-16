@@ -18,7 +18,7 @@ type EntryPointTracer struct {
 	Error error
 }
 
-func (epc *EntryPointTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (epc *EntryPointTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if epc.OnEnterSuper != nil {
 		epc.OnEnterSuper(depth, typ, from, to, precompile, input, gas, value, code)
 	}

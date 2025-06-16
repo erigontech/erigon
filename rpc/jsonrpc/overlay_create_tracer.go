@@ -51,7 +51,7 @@ func (ct *OverlayCreateTracer) CaptureStart(env *vm.EVM, from common.Address, to
 func (ct *OverlayCreateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {}
 
 // Rest of the frames
-func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if ct.isCapturing {
 		return
 	}

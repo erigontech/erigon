@@ -89,7 +89,7 @@ type StateTransition struct {
 	feeCap       *uint256.Int
 	tipCap       *uint256.Int
 	initialGas   uint64
-	value        uint256.Int
+	value        *uint256.Int
 	data         []byte
 	state        *state.IntraBlockState
 	evm          *vm.EVM
@@ -133,7 +133,7 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 		gasPrice: msg.GasPrice(),
 		feeCap:   msg.FeeCap(),
 		tipCap:   msg.TipCap(),
-		value:    *msg.Value(),
+		value:    msg.Value(),
 		data:     msg.Data(),
 		state:    evm.IntraBlockState(),
 	}
@@ -198,10 +198,10 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	blobGasVal := &uint256.Int{}
 	if st.evm.ChainRules().IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
-		if blobGasPrice.IsZero() {
-			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is 0", ErrInternalFailure)
+		if blobGasPrice == nil {
+			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
 		}
-		blobGasVal, overflow = blobGasVal.MulOverflow(&blobGasPrice, new(uint256.Int).SetUint64(st.msg.BlobGas()))
+		blobGasVal, overflow = blobGasVal.MulOverflow(blobGasPrice, new(uint256.Int).SetUint64(st.msg.BlobGas()))
 		if overflow {
 			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, blobGasVal)
 		}
@@ -219,7 +219,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			if overflow {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 			}
-			balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, &st.value)
+			balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, st.value)
 			if overflow {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 			}
@@ -255,7 +255,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
-	st.evm.BlobFee = *blobGasVal
+	st.evm.BlobFee = blobGasVal
 	return nil
 }
 
@@ -317,15 +317,15 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 		if !skipCheck {
-			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
+			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.feeCap, st.tipCap, st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
 				return err
 			}
 		}
 	}
 	if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
-		if blobGasPrice.IsZero() {
-			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is 0", ErrInternalFailure)
+		if blobGasPrice == nil {
+			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
 		}
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
 		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
@@ -505,7 +505,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
 	if gasBailout {
-		canTransfer, err := st.evm.Context.CanTransfer(st.state, msg.From(), *msg.Value())
+		canTransfer, err := st.evm.Context.CanTransfer(st.state, msg.From(), msg.Value())
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
@@ -559,8 +559,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
-		if st.feeCap.Gt(&st.evm.Context.BaseFee) {
-			effectiveTip = math.U256Min(st.tipCap, (&uint256.Int{}).Sub(st.feeCap, &st.evm.Context.BaseFee))
+		if st.feeCap.Gt(st.evm.Context.BaseFee) {
+			effectiveTip = math.U256Min(st.tipCap, (&uint256.Int{}).Sub(st.feeCap, st.evm.Context.BaseFee))
 		} else {
 			effectiveTip = u256.Num0
 		}
@@ -581,11 +581,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
-			burnAmount = *(&uint256.Int{}).Mul((&uint256.Int{}).SetUint64(st.gasUsed()), &st.evm.Context.BaseFee)
+			burnAmount = *(&uint256.Int{}).Mul((&uint256.Int{}).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
 
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				burnAmount = *(&uint256.Int{}).Add(&burnAmount, &st.evm.BlobFee)
+				burnAmount = *(&uint256.Int{}).Add(&burnAmount, st.evm.BlobFee)
 			}
 
 			if !st.noFeeBurnAndTip {

@@ -54,12 +54,14 @@ type Config struct {
 	BlockNumber *big.Int
 	Time        *big.Int
 	GasLimit    uint64
-	GasPrice    uint256.Int
-	Value       uint256.Int
+	GasPrice    *uint256.Int
+	Value       *uint256.Int
 	EVMConfig   vm.Config
-	BaseFee     uint256.Int
+	BaseFee     *uint256.Int
 
-	State     *state.IntraBlockState
+	State *state.IntraBlockState
+
+	evm       *vm.EVM
 	GetHashFn func(n uint64) (common.Hash, error)
 }
 
@@ -95,6 +97,12 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.GasLimit == 0 {
 		cfg.GasLimit = math.MaxUint64
+	}
+	if cfg.GasPrice == nil {
+		cfg.GasPrice = new(uint256.Int)
+	}
+	if cfg.Value == nil {
+		cfg.Value = new(uint256.Int)
 	}
 	if cfg.BlockNumber == nil {
 		cfg.BlockNumber = new(big.Int)

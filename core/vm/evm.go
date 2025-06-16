@@ -105,7 +105,7 @@ type EVM struct {
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
-			blockCtx.BaseFee = uint256.Int{}
+			blockCtx.BaseFee = new(uint256.Int)
 		}
 	}
 	evm := &EVM{
@@ -138,7 +138,7 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
-			blockCtx.BaseFee = uint256.Int{}
+			blockCtx.BaseFee = new(uint256.Int)
 		}
 	}
 	evm.Context = blockCtx
@@ -178,7 +178,7 @@ func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
 }
 
-func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
 
 	p, isPrecompile := evm.precompile(addr)
@@ -194,7 +194,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 	if evm.Config().Tracer != nil {
 		v := value
 		if typ == STATICCALL {
-			v = *u256.Num0
+			v = nil
 		} else if typ == DELEGATECALL {
 			// NOTE: caller must, at all times be a contract. It should never happen
 			// that caller is something other than a Contract.
@@ -307,7 +307,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 // parameters. It also handles any necessary value transfer required and takes
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
-func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	return evm.call(CALL, caller, addr, input, gas, value, bailout)
 }
 
@@ -318,7 +318,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 //
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
-func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, gas uint64, value uint256.Int) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
 	return evm.call(CALLCODE, caller, addr, input, gas, value, false)
 }
 
@@ -328,7 +328,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
 func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(DELEGATECALL, caller, addr, input, gas, uint256.Int{}, false)
+	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false)
 }
 
 // StaticCall executes the contract associated with the addr with the given input
@@ -336,7 +336,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(STATICCALL, caller, addr, input, gas, uint256.Int{}, false)
+	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false)
 }
 
 type codeAndHash struct {
@@ -355,12 +355,12 @@ func (c *codeAndHash) Hash() common.Hash {
 	return c.hash
 }
 
-func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value uint256.Int, address common.Address, typ OpCode, incrementNonce bool) ([]byte, common.Address, uint64, error) {
+func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce bool) ([]byte, common.Address, uint64, error) {
 	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false)
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value uint256.Int, address common.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress common.Address, leftOverGas uint64, err error) {
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress common.Address, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
 
 	if evm.Config().Tracer != nil {
@@ -489,7 +489,7 @@ func (evm *EVM) maxCodeSize() int {
 
 // Create creates a new contract using code as deployment code.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, endowment uint256.Int, bailout bool) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, bailout bool) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	nonce, err := evm.intraBlockState.GetNonce(caller.Address())
 	if err != nil {
 		return nil, common.Address{}, 0, err
@@ -503,7 +503,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, end
 // The different between Create2 with Create is Create2 uses keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]
 // instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
 	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout)
@@ -511,7 +511,7 @@ func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, en
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 // Unlike the normal Create & Create2, it doesn't increment caller's nonce.
-func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment uint256.Int, contractAddr common.Address) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, contractAddr common.Address) (ret []byte, leftOverGas uint64, err error) {
 	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, false)
 	return
 }
@@ -551,7 +551,7 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 	}
 }
 
-func (evm *EVM) captureBegin(depth int, typ OpCode, from common.Address, to common.Address, precompile bool, input []byte, startGas uint64, value uint256.Int, code []byte) {
+func (evm *EVM) captureBegin(depth int, typ OpCode, from common.Address, to common.Address, precompile bool, input []byte, startGas uint64, value *uint256.Int, code []byte) {
 	tracer := evm.Config().Tracer
 
 	if tracer.OnEnter != nil {

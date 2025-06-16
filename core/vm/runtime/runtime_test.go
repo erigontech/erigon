@@ -97,6 +97,12 @@ func TestDefaults(t *testing.T) {
 	if cfg.GasLimit == 0 {
 		t.Error("didn't expect gaslimit to be zero")
 	}
+	if cfg.GasPrice == nil {
+		t.Error("expected time to be non nil")
+	}
+	if cfg.Value == nil {
+		t.Error("expected time to be non nil")
+	}
 	if cfg.GetHashFn == nil {
 		t.Error("expected time to be non nil")
 	}
@@ -222,7 +228,7 @@ func BenchmarkCall(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: *uint256.MustFromBig(big.NewInt(13377))}
+	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: uint256.MustFromBig(big.NewInt(13377))}
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()

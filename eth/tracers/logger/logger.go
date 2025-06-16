@@ -425,12 +425,12 @@ func (t *mdLogger) captureStartOrEnter(from, to common.Address, create bool, inp
 `)
 }
 
-func (t *mdLogger) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *mdLogger) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if depth != 0 {
 		return
 	}
 	create := vm.OpCode(typ) == vm.CREATE
-	t.captureStartOrEnter(from, to, create, input, gas, &value)
+	t.captureStartOrEnter(from, to, create, input, gas, value)
 }
 
 func (t *mdLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {

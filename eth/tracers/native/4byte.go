@@ -95,7 +95,7 @@ func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
-func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) { // Skip if tracing was interrupted
+func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) { // Skip if tracing was interrupted
 	// Skip if tracing was interrupted
 	if atomic.LoadUint32(&t.interrupt) > 0 {
 		return

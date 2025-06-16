@@ -154,12 +154,12 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 	}
 }
 
-func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if t.err != nil {
 		return
 	}
 
-	if !value.IsZero() {
+	if value != nil && !value.IsZero() {
 		t.err = errors.New("CALL with value is forbidden")
 		return
 	}
