@@ -83,7 +83,7 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	columns := make([]ColumnIndex, columnsPerGroup)
 
 	for i := ColumnIndex(0); i < ColumnIndex(columnsPerGroup); i++ {
-		columns[i] = ColumnIndex(numberOfCustodyGroups*i + custodyGroup)
+		columns[i] = numberOfCustodyGroups*i + custodyGroup
 	}
 
 	return columns, nil
@@ -125,7 +125,7 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([]clt
 		var cellIndices []ColumnIndex
 		var cells []cltypes.Cell
 		for _, entry := range partialMatrix {
-			if entry.RowIndex == RowIndex(blobIndex) {
+			if entry.RowIndex == blobIndex {
 				cellIndices = append(cellIndices, entry.ColumnIndex)
 				cells = append(cells, entry.Cell)
 			}
@@ -142,7 +142,7 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([]clt
 			matrix = append(matrix, cltypes.MatrixEntry{
 				Cell:        recoveredCells[cellIndex],
 				KzgProof:    recoveredProofs[cellIndex],
-				RowIndex:    RowIndex(blobIndex),
+				RowIndex:    blobIndex,
 				ColumnIndex: ColumnIndex(cellIndex),
 			})
 		}
