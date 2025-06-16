@@ -96,7 +96,7 @@ func (v *validator) toValidator() (valset.Validator, error) {
 		return valset.Validator{}, err
 	}
 
-	proposerPriority, err := strconv.Atoi(v.VotingPower)
+	proposerPriority, err := strconv.Atoi(v.ProposerPriority)
 	if err != nil {
 		return valset.Validator{}, err
 	}
