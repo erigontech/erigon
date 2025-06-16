@@ -22,12 +22,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
@@ -61,7 +59,7 @@ func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB, badBlockHalt
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (common.Hash, error) {
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.blockReader))
+	txNumsReader := cfg.blockReader.TxnumReader(ctx)
 	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New())
 	if err != nil {
 		return trie.EmptyRoot, err
