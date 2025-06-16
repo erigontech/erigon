@@ -155,7 +155,7 @@ jobs:
           echo Content of ${GITHUB_WORKSPACE}/docker-build-cache-new
           find ${GITHUB_WORKSPACE}/docker-build-cache-new -ls
           du -sh ${GITHUB_WORKSPACE}/docker-build-cache*
-          mv ${GITHUB_WORKSPACE}/docker-build-cache ${GITHUB_WORKSPACE}/docker-build-cache.ORIG
+          mv ${GITHUB_WORKSPACE}/docker-build-cache ${GITHUB_WORKSPACE}/docker-build-cache.ORIG || echo "Warning: cache dir not found."
           mv ${GITHUB_WORKSPACE}/docker-build-cache-new ${GITHUB_WORKSPACE}/docker-build-cache
 
       - name: export and print docker build tag, cleanup old docker images
