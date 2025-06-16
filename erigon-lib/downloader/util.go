@@ -28,6 +28,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/anacrolix/torrent"
@@ -321,6 +323,7 @@ func IsSnapNameAllowed(name string) bool {
 // Don't need call torrent.VerifyData manually
 func (d *Downloader) addTorrentSpec(
 	ts *torrent.TorrentSpec,
+	name string,
 ) (t *torrent.Torrent, first bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.Trackers = Trackers
@@ -336,12 +339,10 @@ func (d *Downloader) addTorrentSpec(
 	if err != nil {
 		return
 	}
-	t.AddWebSeeds(
-		d.cfg.WebSeedUrls,
-		// TODO: We add a truly massive number of torrents, this is a workaround until goroutine
-		// counts are managed more effectively for them.
-		//torrent.WebSeedTorrentMaxRequests(1),
-	)
+	g.MakeMapIfNil(&d.torrentsByName)
+	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
+	panicif.Eq(first, hadOld)
+	t.AddWebSeeds(d.cfg.WebSeedUrls)
 	return
 }
 

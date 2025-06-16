@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -118,29 +116,19 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 }
 
 // Delete - stop seeding, remove file, remove .torrent
-func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (*emptypb.Empty, error) {
-	torrents := s.d.torrentClient.Torrents()
+func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (_ *emptypb.Empty, err error) {
 	for _, name := range request.Paths {
 		if name == "" {
-			return nil, errors.New("field 'path' is required")
+			err = errors.Join(err, errors.New("field 'path' is required"))
+			// Retain existing behaviour.
+			break
 		}
-		for _, t := range torrents {
-			select {
-			case <-t.GotInfo():
-				continue
-			default:
-			}
-			if t.Name() == name {
-				t.Drop()
-				break
-			}
-		}
-
-		fPath := filepath.Join(s.d.SnapDir(), name)
-		_ = os.Remove(fPath)
-		s.d.torrentFS.Delete(name)
+		err = errors.Join(err, s.d.Delete(name))
 	}
-	return &emptypb.Empty{}, nil
+	if err == nil {
+		return &emptypb.Empty{}, nil
+	}
+	return
 }
 
 func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {

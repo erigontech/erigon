@@ -96,7 +96,11 @@ type Downloader struct {
 	// that aren't subsequently requested are not required to satisfy the sync stage.
 	// https://github.com/erigontech/erigon/issues/15514
 	requiredTorrents map[*torrent.Torrent]struct{}
-	stats            AggStats
+	// The "name" or file path of a torrent is used throughout as a unique identifier for the
+	// torrent. Make it explicit rather than fold it into DisplayName or guess at the name at
+	// various points. This might change if multifile torrents are used.
+	torrentsByName map[string]*torrent.Torrent
+	stats          AggStats
 }
 
 // Sets the log interval low again after making new requests.
@@ -498,7 +502,8 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 	passed = true
 	// This has to be available if it's complete.
 	for _, f := range t.Files() {
-		fp := filepath.Join(d.SnapDir(), filepath.FromSlash(f.Path()))
+		// Technically this works, we're preemptively handling multifile torrents here.
+		fp := d.filePathForName(f.Path())
 		fi, err := os.Stat(fp)
 		if err == nil {
 			if fi.Size() == f.Length() {
@@ -875,7 +880,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	_, _, err = d.addTorrentSpec(ts)
+	_, _, err = d.addTorrentSpec(ts, name)
 	if err != nil {
 		return fmt.Errorf("addTorrentSpec: %w", err)
 	}
@@ -883,20 +888,13 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 }
 
 func (d *Downloader) alreadyHaveThisName(name string) bool {
-	for _, t := range d.torrentClient.Torrents() {
-		if t.Info() != nil {
-			if t.Name() == name {
-				return true
-			}
-		}
-	}
-	return false
+	return g.MapContains(d.torrentsByName, name)
 }
 
 // Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
 // errors.
 func (d *Downloader) loadSpecFromDisk(name string) (spec g.Option[*torrent.TorrentSpec]) {
-	miPath := filepath.Join(d.SnapDir(), filepath.FromSlash(name)+".torrent")
+	miPath := d.filePathForName(name) + ".torrent"
 	mi, err := metainfo.LoadFromFile(miPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return
@@ -985,7 +983,7 @@ func (d *Downloader) addPreverifiedTorrent(
 		u := s + name + ".torrent"
 		spec.Sources = append(spec.Sources, u)
 	}
-	t, ok, err = d.addTorrentSpec(spec)
+	t, ok, err = d.addTorrentSpec(spec, name)
 	if err != nil {
 		return
 	}
@@ -1354,4 +1352,35 @@ func (d *Downloader) spawn(f func()) {
 
 func (d *Downloader) updateVerificationOccurring() {
 	d.verificationOccurring.SetBool(len(d.piecesBeingVerified) != 0)
+}
+
+// Delete - stop seeding, remove file, remove .torrent
+func (s *Downloader) Delete(name string) (err error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	t, ok := s.torrentsByName[name]
+	if !ok {
+		return
+	}
+	t.Drop()
+	err = os.Remove(s.filePathForName(name))
+	if err != nil {
+		level := log.LvlError
+		if errors.Is(err, fs.ErrNotExist) {
+			level = log.LvlInfo
+		}
+		s.logger.Log(level, "error removing snapshot file data", "name", name, "err", err)
+	}
+	err = s.torrentFS.Delete(name)
+	if err != nil {
+		s.logger.Log(log.LvlError, "error removing snapshot file torrent", "name", name, "err", err)
+	}
+	g.MustDelete(s.torrentsByName, name)
+	// I wonder if it's an issue if this occurs before initial sync has completed.
+	delete(s.requiredTorrents, t)
+	return nil
+}
+
+func (d *Downloader) filePathForName(name string) string {
+	return filepath.Join(d.SnapDir(), filepath.FromSlash(name))
 }
