@@ -203,7 +203,7 @@ mainloop:
 					d.rpc.BanPeer(result.pid)
 					continue
 				}
-				if _, ok := requestMap[blockRoot][uint64(sidecar.Index)]; !ok {
+				if _, ok := requestMap[blockRoot][sidecar.Index]; !ok {
 					log.Debug("received unexpected column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
 					continue
 				}
@@ -230,7 +230,7 @@ mainloop:
 					log.Debug("failed to write column sidecar", "err", err)
 					continue
 				}
-				delete(requestMap[blockRoot], uint64(sidecar.Index))
+				delete(requestMap[blockRoot], sidecar.Index)
 			}
 			// check if there are any remaining requests and send again if there are
 			r := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
