@@ -1202,8 +1202,8 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	}
 	defer release()
 
-	var b *types.BodyForStorage
-	b, _, err = r.bodyForStorageFromSnapshot(blockNum, seg, nil)
+	var b *types.BodyOnlyTxn
+	b, _, err = BodyForTxnFromSnapshot(blockNum, seg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1295,7 +1295,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 		}
 		firstBlockNum := snb.Src().Index().BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
-		b, _, err := r.bodyForStorageFromSnapshot(firstBlockNum, snb, nil)
+		b, _, err := BodyForTxnFromSnapshot(firstBlockNum, snb, nil)
 		if err != nil {
 			return err
 		}
