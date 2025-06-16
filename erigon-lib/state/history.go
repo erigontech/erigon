@@ -64,7 +64,7 @@ type History struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visibleFiles in zero-copy way
-	dirtyFiles *btree2.BTreeG[*filesItem]
+	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -118,7 +118,7 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 
 	h := History{
 		histCfg:       cfg,
-		dirtyFiles:    btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:    btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visibleFiles: []visibleFile{},
 	}
 
@@ -200,8 +200,8 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 
 func (h *History) openDirtyFiles() error {
 	invalidFilesMu := sync.Mutex{}
-	invalidFileItems := make([]*filesItem, 0)
-	h.dirtyFiles.Walk(func(items []*filesItem) bool {
+	invalidFileItems := make([]*FilesItem, 0)
+	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
@@ -299,8 +299,8 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
 	}
-	var toClose []*filesItem
-	h.dirtyFiles.Walk(func(items []*filesItem) bool {
+	var toClose []*FilesItem
+	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
 				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
@@ -336,11 +336,11 @@ func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) MissedMapAccessors() (l []*filesItem) {
+func (h *History) MissedMapAccessors() (l []*FilesItem) {
 	return h.missedMapAccessors(h.dirtyFiles.Items())
 }
 
-func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
+func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !h.Accessors.Has(AccessorHashMap) {
 		return nil
 	}
@@ -351,12 +351,12 @@ func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	})
 }
 
-func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
+func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
 	if item.decompressor == nil {
 		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
 	}
 
-	search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
+	search := &FilesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
 	iiItem, ok := h.InvertedIndex.dirtyFiles.Get(search)
 	if !ok {
 		return nil

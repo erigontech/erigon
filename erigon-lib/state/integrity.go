@@ -86,7 +86,7 @@ func (dt *DomainRoTx) IntegrityDomainFilesWithKey(k []byte) (res []string, err e
 	return res, nil
 }
 func (dt *DomainRoTx) IntegrityKey(k []byte) error {
-	dt.ht.iit.ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	dt.ht.iit.ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
 				continue
