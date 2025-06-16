@@ -219,8 +219,8 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 		if err := bs.fs.Remove(filePath); err != nil {
 			return err
 		}
-		tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:])
 	}
+	tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:])
 	return tx.Commit()
 }
 

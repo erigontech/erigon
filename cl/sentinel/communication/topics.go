@@ -24,6 +24,7 @@ const EncodingProtocol = "/ssz_snappy"
 // request and response versions
 const Schema1 = "/1"
 const Schema2 = "/2"
+const Schema3 = "/3"
 
 // Request and Response topics
 const MetadataTopic = "/metadata"
@@ -39,6 +40,9 @@ const LightClientFinalityUpdateTopic = "/light_client_finality_update"
 const LightClientBootstrapTopic = "/light_client_bootstrap"
 const LightClientUpdatesByRangeTopic = "/light_client_updates_by_range"
 
+const DataColumnSidecarsByRangeTopic = "/data_column_sidecars_by_range"
+const DataColumnSidecarsByRootTopic = "/data_column_sidecars_by_root"
+
 // Request and Response protocol ids
 var (
 	PingProtocolV1    = ProtocolPrefix + PingTopic + Schema1 + EncodingProtocol
@@ -46,6 +50,7 @@ var (
 
 	MetadataProtocolV1 = ProtocolPrefix + MetadataTopic + Schema1 + EncodingProtocol
 	MetadataProtocolV2 = ProtocolPrefix + MetadataTopic + Schema2 + EncodingProtocol
+	MetadataProtocolV3 = ProtocolPrefix + MetadataTopic + Schema3 + EncodingProtocol
 
 	StatusProtocolV1 = ProtocolPrefix + StatusTopic + Schema1 + EncodingProtocol
 
@@ -55,9 +60,11 @@ var (
 	BeaconBlocksByRootProtocolV1 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema1 + EncodingProtocol
 	BeaconBlocksByRootProtocolV2 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema2 + EncodingProtocol
 
-	BlobSidecarByRootProtocolV1 = ProtocolPrefix + BlobSidecarByRootTopic + Schema1 + EncodingProtocol
-
+	BlobSidecarByRootProtocolV1  = ProtocolPrefix + BlobSidecarByRootTopic + Schema1 + EncodingProtocol
 	BlobSidecarByRangeProtocolV1 = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
+
+	DataColumnSidecarsByRootProtocolV1  = ProtocolPrefix + DataColumnSidecarsByRootTopic + Schema1 + EncodingProtocol
+	DataColumnSidecarsByRangeProtocolV1 = ProtocolPrefix + DataColumnSidecarsByRangeTopic + Schema1 + EncodingProtocol
 
 	LightClientOptimisticUpdateProtocolV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
 	LightClientFinalityUpdateProtocolV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol
