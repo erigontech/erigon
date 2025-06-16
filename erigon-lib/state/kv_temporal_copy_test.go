@@ -249,6 +249,26 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
+func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
+	panic("not implemented")
+}
+
+func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
+	panic("not implemented")
+}
+
 func (tx *RwTx) WarmupDB(force bool) error {
 	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
 		return mdbxTx.WarmupDB(force)
@@ -574,4 +594,16 @@ func (tx *Tx) StepSize() uint64 {
 }
 func (tx *RwTx) StepSize() uint64 {
 	return tx.aggtx.StepSize()
+}
+func (tx *Tx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.Tx)
+}
+func (tx *RwTx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.RwTx)
+}
+func (tx *Tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.Tx)
+}
+func (tx *RwTx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.RwTx)
 }

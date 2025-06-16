@@ -31,8 +31,7 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/holiman/uint256"
 
-	evmone "github.com/erigontech/evmone_precompiles"
-
+	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -173,23 +172,24 @@ var PrecompiledContractsPrague = map[common.Address]PrecompiledContract{
 }
 
 var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{0x01}): &ecrecover{},
-	common.BytesToAddress([]byte{0x02}): &sha256hash{},
-	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
-	common.BytesToAddress([]byte{0x04}): &dataCopy{},
-	common.BytesToAddress([]byte{0x05}): &bigModExp{osaka: true},
-	common.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{0x09}): &blake2F{},
-	common.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
-	common.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
-	common.BytesToAddress([]byte{0x0c}): &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{0x0d}): &bls12381G2Add{},
-	common.BytesToAddress([]byte{0x0e}): &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{0x0f}): &bls12381Pairing{},
-	common.BytesToAddress([]byte{0x10}): &bls12381MapFpToG1{},
-	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
+	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
+	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
+	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
+	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
+	common.BytesToAddress([]byte{0x05}):       &bigModExp{osaka: true},
+	common.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x09}):       &blake2F{},
+	common.BytesToAddress([]byte{0x0a}):       &pointEvaluation{},
+	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
+	common.BytesToAddress([]byte{0x0c}):       &bls12381G1MultiExp{},
+	common.BytesToAddress([]byte{0x0d}):       &bls12381G2Add{},
+	common.BytesToAddress([]byte{0x0e}):       &bls12381G2MultiExp{},
+	common.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
+	common.BytesToAddress([]byte{0x10}):       &bls12381MapFpToG1{},
+	common.BytesToAddress([]byte{0x11}):       &bls12381MapFp2ToG2{},
+	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
 var (
@@ -605,14 +605,19 @@ func newTwistPoint(blob []byte) (*bn256.G2, error) {
 // runBn256Add implements the Bn256Add precompile, referenced by both
 // Byzantium and Istanbul operations.
 func runBn256Add(input []byte) ([]byte, error) {
-	x := getData(input, 0, 64)
-	y := getData(input, 64, 64)
-	var out [64]byte
-	if evmone.EcAdd(&out, (*[64]byte)(x), (*[64]byte)(y)) {
-		return out[:], nil
-	} else {
-		return nil, errors.New("bn256: invalid point")
+	x := &bn254.G1Affine{}
+	_, err := x.SetBytes(getData(input, 0, 64))
+	if err != nil {
+		return nil, err
 	}
+
+	y := &bn254.G1Affine{}
+	_, err = y.SetBytes(getData(input, 64, 64))
+	if err != nil {
+		return nil, err
+	}
+	x = x.Add(x, y)
+	return x.Marshal(), nil
 }
 
 // bn256Add implements a native elliptic curve point addition conforming to
@@ -644,13 +649,13 @@ func (c *bn256AddByzantium) Run(input []byte) ([]byte, error) {
 // runBn256ScalarMul implements the Bn256ScalarMul precompile, referenced by
 // both Byzantium and Istanbul operations.
 func runBn256ScalarMul(input []byte) ([]byte, error) {
-	p, err := newCurvePoint(getData(input, 0, 64))
+	x := &bn254.G1Affine{}
+	_, err := x.SetBytes(getData(input, 0, 64))
 	if err != nil {
 		return nil, err
 	}
-	res := new(bn256.G1)
-	res.ScalarMult(p, new(big.Int).SetBytes(getData(input, 64, 32)))
-	return res.Marshal(), nil
+	x = x.ScalarMultiplication(x, new(big.Int).SetBytes(getData(input, 64, 32)))
+	return x.Marshal(), nil
 }
 
 // bn256ScalarMulIstanbul implements a native elliptic curve scalar

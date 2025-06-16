@@ -252,7 +252,7 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int, disabled bool, name string) {
+	checkDirtyFiles := func(dirtyFiles []*FilesItem, expectedLen, expectedRefCnt int, disabled bool, name string) {
 		if disabled {
 			expectedLen = 0
 		}
@@ -1087,7 +1087,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, step, _, err := AggTx(tx).d[kv.StorageDomain].GetLatest(keys[txNum-1-half], tx)
+		prev, step, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
 		require.NoError(t, err)
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev, step)
 		require.NoError(t, err)
@@ -1100,8 +1100,9 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	defer tx.Rollback()
 
 	for i, key := range keys {
-		storedV, _, found, err := AggTx(tx).d[kv.StorageDomain].GetLatest(key, tx)
-		require.Truef(t, found, "key %x not found %d", key, i)
+
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		require.NotNil(t, storedV, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.Equal(t, key[0], storedV[0])
 		require.Equal(t, key[length.Addr], storedV[1])

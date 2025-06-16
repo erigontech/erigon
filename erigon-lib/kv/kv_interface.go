@@ -574,6 +574,9 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+
+	AggForkablesTx(ForkableId) any // any forkableId, returns that group
+	Unmarked(ForkableId) UnmarkedTx
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -591,6 +594,9 @@ type TemporalDebugTx interface {
 	DomainProgress(domain Domain) (txNum uint64)
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
+
+	CanUnwindToBlockNum() (uint64, error)
+	CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error)
 }
 
 type TemporalDebugDB interface {
@@ -614,6 +620,8 @@ type TemporalRwTx interface {
 	RwTx
 	TemporalTx
 	TemporalPutDel
+
+	UnmarkedRw(ForkableId) UnmarkedRwTx
 
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)

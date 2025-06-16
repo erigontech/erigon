@@ -61,12 +61,14 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	// Perform fork choice update if the engine is available
 	if cfg.forkChoice.Engine() != nil {
 		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
+		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
 		logger.Debug("Caplin is sending forkchoice")
 
 		// Run fork choice update with finalized checkpoint and head
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
 			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
+			cfg.forkChoice.GetEth1Hash(justifiedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil,
 		); err != nil {
 			err = fmt.Errorf("failed to run forkchoice: %w", err)
