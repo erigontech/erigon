@@ -85,7 +85,7 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	columnsPerGroup := numberOfColumns / numberOfCustodyGroups
 	columns := make([]ColumnIndex, columnsPerGroup)
 
-	for i := ColumnIndex(0); i < ColumnIndex(columnsPerGroup); i++ {
+	for i := ColumnIndex(0); i < columnsPerGroup; i++ {
 		columns[i] = numberOfCustodyGroups*i + custodyGroup
 	}
 
