@@ -350,8 +350,8 @@ jobs:
           echo Publishing latest tag:
           skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest-test
         fi
-        echo Deleting temporary image:
-        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} && echo -n " ...done"
+        echo -n Deleting temporary image:
+        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} && echo " ...done"
 
   publish-release:
     needs: [ build-debian-pkg, publish-docker-image, build-release ]
