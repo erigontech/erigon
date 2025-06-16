@@ -63,7 +63,7 @@ var ValidTxnTypes = map[byte]struct{}{
 	DynamicFeeTxnType:             {},
 	BlobTxnType:                   {},
 	SetCodeTxnType:                {},
-	AATxnType: {},
+	AATxnType:                     {},
 	ArbitrumDepositTxType:         {},
 	ArbitrumUnsignedTxType:        {},
 	ArbitrumContractTxType:        {},
@@ -176,13 +176,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
-	p = dataPos
-	if payload[p] >= ArbitrumDepositTxType && payload[p] <= ArbitrumLegacyTxType && legacy { // TODO Arbitrum remove later, need to understand if there a legacy txns as well
-		fmt.Printf("arbTxType %x isLegacyList %t\n", payload[p], legacy)
-	}
-
 	var wrapperDataPos, wrapperDataLen int
-
+	p = dataPos
 	// If it is non-legacy transaction, the transaction type follows, and then the list
 	if !legacy {
 		slot.Type = payload[p]
