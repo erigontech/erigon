@@ -32,7 +32,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -173,24 +172,23 @@ var PrecompiledContractsPrague = map[common.Address]PrecompiledContract{
 }
 
 var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
-	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
-	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
-	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
-	common.BytesToAddress([]byte{0x05}):       &bigModExp{osaka: true},
-	common.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{0x09}):       &blake2F{},
-	common.BytesToAddress([]byte{0x0a}):       &pointEvaluation{},
-	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
-	common.BytesToAddress([]byte{0x0c}):       &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{0x0d}):       &bls12381G2Add{},
-	common.BytesToAddress([]byte{0x0e}):       &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
-	common.BytesToAddress([]byte{0x10}):       &bls12381MapFpToG1{},
-	common.BytesToAddress([]byte{0x11}):       &bls12381MapFp2ToG2{},
-	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+	common.BytesToAddress([]byte{0x01}): &ecrecover{},
+	common.BytesToAddress([]byte{0x02}): &sha256hash{},
+	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
+	common.BytesToAddress([]byte{0x04}): &dataCopy{},
+	common.BytesToAddress([]byte{0x05}): &bigModExp{osaka: true},
+	common.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x09}): &blake2F{},
+	common.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
+	common.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
+	common.BytesToAddress([]byte{0x0c}): &bls12381G1MultiExp{},
+	common.BytesToAddress([]byte{0x0d}): &bls12381G2Add{},
+	common.BytesToAddress([]byte{0x0e}): &bls12381G2MultiExp{},
+	common.BytesToAddress([]byte{0x0f}): &bls12381Pairing{},
+	common.BytesToAddress([]byte{0x10}): &bls12381MapFpToG1{},
+	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
 }
 
 var (
@@ -705,37 +703,25 @@ func runBn256Pairing(input []byte) ([]byte, error) {
 	}
 	// Convert the input into a set of coordinates
 	var (
-		cs []bn254.G1Affine
-		ts []bn254.G2Affine
+		cs []*bn256.G1
+		ts []*bn256.G2
 	)
 	for i := 0; i < len(input); i += 192 {
-		// c, err := newCurvePoint(input[i : i+64])
-		c := bn254.G1Affine{}
-		_, err := c.SetBytes(input[i : i+64])
+		c, err := newCurvePoint(input[i : i+64])
 		if err != nil {
 			return nil, err
 		}
-
-		t := bn254.G2Affine{}
-		_, err = t.SetBytes(input[i+64 : i+192])
+		t, err := newTwistPoint(input[i+64 : i+192])
 		if err != nil {
 			return nil, err
 		}
-
 		cs = append(cs, c)
 		ts = append(ts, t)
 	}
-	if len(cs) == 0 {
+	// Execute the pairing checks and return the results
+	if bn256.PairingCheck(cs, ts) {
 		return true32Byte, nil
 	}
-	success, err := bn254.PairingCheck(cs, ts)
-	if err != nil {
-		return nil, err
-	}
-	if success {
-		return true32Byte, nil
-	}
-
 	return false32Byte, nil
 }
 
