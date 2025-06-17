@@ -23,9 +23,9 @@ import (
 )
 
 // UnmarshalCurvePoint unmarshals a given input [32-byte X | 32-byte Y] slice to a G1Affine point
-func UnmarshalCurvePoint(input []byte) (*bn254.G1Affine, error) {
+func UnmarshalCurvePoint(input []byte, point *bn254.G1Affine) error {
 	if len(input) != 64 {
-		return nil, errors.New("invalid input size")
+		return errors.New("invalid input size")
 	}
 
 	isAllZeroes := true
@@ -35,24 +35,23 @@ func UnmarshalCurvePoint(input []byte) (*bn254.G1Affine, error) {
 			break
 		}
 	}
-	point := &bn254.G1Affine{}
 	if isAllZeroes {
-		return point, nil
+		return nil
 	}
 
 	// read X and Y coordinates
 	if err := point.X.SetBytesCanonical(input[:32]); err != nil {
-		return nil, err
+		return err
 	}
 	if err := point.Y.SetBytesCanonical(input[32:64]); err != nil {
-		return nil, err
+		return err
 	}
 
 	// subgroup check
 	if !point.IsInSubGroup() {
-		return nil, errors.New("invalid point: subgroup check failed")
+		return errors.New("invalid point: subgroup check failed")
 	}
-	return point, nil
+	return nil
 }
 
 // UnmarshalCurvePoint unmarshals a given input [32-byte X | 32-byte Y] slice to a G1Affine point
