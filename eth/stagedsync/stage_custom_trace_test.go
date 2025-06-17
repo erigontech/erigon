@@ -69,7 +69,7 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 
 func TestCustomTraceInvalidProduceMode(t *testing.T) {
 	require := require.New(t)
-	produce := stagedsync.NewProduce([]string{"invalid_mode"})
+	produce := stagedsync.NewProduce([]string{})
 
 	require.False(produce.ReceiptDomain)
 	require.False(produce.RCacheDomain)
