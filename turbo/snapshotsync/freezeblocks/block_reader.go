@@ -159,7 +159,7 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 }
 
 func (r *RemoteBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txnNum uint64) (blockNum uint64, ok bool, err error) {
-	reply, err := r.client.GetBlockNumberForTxNum(ctx, &remote.BlockForTxNumRequest{Txnum: txnNum})
+	reply, err := r.client.BlockForTxNum(ctx, &remote.BlockForTxNumRequest{Txnum: txnNum})
 	if err != nil {
 		return 0, false, err
 	}
