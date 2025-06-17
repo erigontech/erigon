@@ -123,6 +123,7 @@ require (
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc // indirect
 	github.com/elastic/go-freelru v0.16.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
+	github.com/erigontech/interfaces v0.0.0-20250617100756-be3dfa6b66bb // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
