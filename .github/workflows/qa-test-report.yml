@@ -1,0 +1,34 @@
+
+jobs:
+  test-report:
+    runs-on: ubuntu-latest
+
+    permissions:  # we only need read permissions for the repository
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install npm deps
+        working-directory: .github/workflows/scripts/test_report
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Generate test report
+        working-directory: .github/workflows/scripts/test_report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          START_DATE:   ${{ inputs.start_date }}
+          END_DATE:     ${{ inputs.end_date }}
+        run: node --loader ts-node/esm generate-test-report.ts
