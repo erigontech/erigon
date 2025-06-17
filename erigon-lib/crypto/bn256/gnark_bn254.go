@@ -17,7 +17,6 @@
 package bn256
 
 import (
-	"encoding/binary"
 	"errors"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
@@ -25,13 +24,13 @@ import (
 
 // UnmarshalCurvePoint unmarshals a given input [32-byte X | 32-byte Y] slice to a G1Affine point
 func UnmarshalCurvePoint(input []byte) (*bn254.G1Affine, error) {
-	if len(input) < 64 {
-		return nil, errors.New("input too short")
+	if len(input) != 64 {
+		return nil, errors.New("invalid input size")
 	}
 
 	isAllZeroes := true
-	for i := 0; i < 64; i += 8 {
-		if binary.LittleEndian.Uint64(input[i:i+8]) != 0 {
+	for b := range input {
+		if b != 0 {
 			isAllZeroes = false
 			break
 		}
@@ -58,11 +57,10 @@ func UnmarshalCurvePoint(input []byte) (*bn254.G1Affine, error) {
 
 // UnmarshalCurvePoint unmarshals a given input [32-byte X | 32-byte Y] slice to a G1Affine point
 func MarshalCurvePoint(point *bn254.G1Affine) []byte {
-	ret := make([]byte, 0, 64)
 	xBytes := point.X.Bytes()
 	yBytes := point.Y.Bytes()
-	ret = make([]byte, 64)
-	copy(ret[0:32], xBytes[:])
-	copy(ret[32:64], yBytes[:])
+	ret := make([]byte, 0, 64)
+	ret = append(ret, xBytes[:]...)
+	ret = append(ret, yBytes[:]...)
 	return ret
 }
