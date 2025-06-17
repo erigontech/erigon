@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -151,6 +152,10 @@ func (eat *EngineApiTest) Run(ctx context.Context, t *testing.T) error {
 	require.NoError(t, err)
 
 	// perform requests
+	sendRequestWithRetry := func(req func() error) error {
+		// needed as there may be a race between when engine api has been initialised and this test hitting it
+		return backoff.Retry(req, backoff.WithMaxRetries(backoff.NewConstantBackOff(100*time.Millisecond), 100))
+	}
 	timeout := time.After(time.Minute)
 	queue := eat.Requests
 	requestCounter := 1
@@ -160,13 +165,17 @@ func (eat *EngineApiTest) Run(ctx context.Context, t *testing.T) error {
 		var requestType string
 		if strings.HasPrefix(request.Method, "engine_forkchoiceUpdatedV") {
 			var result enginetypes.ForkChoiceUpdatedResponse
-			err = rpcClient.CallContext(ctx, &result, request.Method, request.Params...)
+			err = sendRequestWithRetry(func() error {
+				return rpcClient.CallContext(ctx, &result, request.Method, request.Params...)
+			})
 			require.NoError(t, err)
 			status = result.PayloadStatus.Status
 			requestType = "forkchoiceUpdated"
 		} else if strings.HasPrefix(request.Method, "engine_newPayloadV") {
 			var result enginetypes.PayloadStatus
-			err = rpcClient.CallContext(ctx, &result, request.Method, request.Params...)
+			err = sendRequestWithRetry(func() error {
+				return rpcClient.CallContext(ctx, &result, request.Method, request.Params...)
+			})
 			require.NoError(t, err)
 			status = result.Status
 			requestType = "newPayload"
