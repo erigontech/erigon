@@ -21,24 +21,23 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Execution_InsertBlocks_FullMethodName           = "/execution.Execution/InsertBlocks"
-	Execution_ValidateChain_FullMethodName          = "/execution.Execution/ValidateChain"
-	Execution_UpdateForkChoice_FullMethodName       = "/execution.Execution/UpdateForkChoice"
-	Execution_AssembleBlock_FullMethodName          = "/execution.Execution/AssembleBlock"
-	Execution_GetAssembledBlock_FullMethodName      = "/execution.Execution/GetAssembledBlock"
-	Execution_CurrentHeader_FullMethodName          = "/execution.Execution/CurrentHeader"
-	Execution_GetTD_FullMethodName                  = "/execution.Execution/GetTD"
-	Execution_GetHeader_FullMethodName              = "/execution.Execution/GetHeader"
-	Execution_GetBody_FullMethodName                = "/execution.Execution/GetBody"
-	Execution_HasBlock_FullMethodName               = "/execution.Execution/HasBlock"
-	Execution_GetBodiesByRange_FullMethodName       = "/execution.Execution/GetBodiesByRange"
-	Execution_GetBodiesByHashes_FullMethodName      = "/execution.Execution/GetBodiesByHashes"
-	Execution_IsCanonicalHash_FullMethodName        = "/execution.Execution/IsCanonicalHash"
-	Execution_GetHeaderHashNumber_FullMethodName    = "/execution.Execution/GetHeaderHashNumber"
-	Execution_GetForkChoice_FullMethodName          = "/execution.Execution/GetForkChoice"
-	Execution_Ready_FullMethodName                  = "/execution.Execution/Ready"
-	Execution_FrozenBlocks_FullMethodName           = "/execution.Execution/FrozenBlocks"
-	Execution_GetBlockNumberForTxNum_FullMethodName = "/execution.Execution/GetBlockNumberForTxNum"
+	Execution_InsertBlocks_FullMethodName        = "/execution.Execution/InsertBlocks"
+	Execution_ValidateChain_FullMethodName       = "/execution.Execution/ValidateChain"
+	Execution_UpdateForkChoice_FullMethodName    = "/execution.Execution/UpdateForkChoice"
+	Execution_AssembleBlock_FullMethodName       = "/execution.Execution/AssembleBlock"
+	Execution_GetAssembledBlock_FullMethodName   = "/execution.Execution/GetAssembledBlock"
+	Execution_CurrentHeader_FullMethodName       = "/execution.Execution/CurrentHeader"
+	Execution_GetTD_FullMethodName               = "/execution.Execution/GetTD"
+	Execution_GetHeader_FullMethodName           = "/execution.Execution/GetHeader"
+	Execution_GetBody_FullMethodName             = "/execution.Execution/GetBody"
+	Execution_HasBlock_FullMethodName            = "/execution.Execution/HasBlock"
+	Execution_GetBodiesByRange_FullMethodName    = "/execution.Execution/GetBodiesByRange"
+	Execution_GetBodiesByHashes_FullMethodName   = "/execution.Execution/GetBodiesByHashes"
+	Execution_IsCanonicalHash_FullMethodName     = "/execution.Execution/IsCanonicalHash"
+	Execution_GetHeaderHashNumber_FullMethodName = "/execution.Execution/GetHeaderHashNumber"
+	Execution_GetForkChoice_FullMethodName       = "/execution.Execution/GetForkChoice"
+	Execution_Ready_FullMethodName               = "/execution.Execution/Ready"
+	Execution_FrozenBlocks_FullMethodName        = "/execution.Execution/FrozenBlocks"
 )
 
 // ExecutionClient is the client API for Execution service.
@@ -72,7 +71,6 @@ type ExecutionClient interface {
 	Ready(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ReadyResponse, error)
 	// Frozen blocks are how many blocks are in snapshots .seg files.
 	FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*FrozenBlocksResponse, error)
-	GetBlockNumberForTxNum(ctx context.Context, in *Txnum2BlknumRequest, opts ...grpc.CallOption) (*Txnum2BlknumResponse, error)
 }
 
 type executionClient struct {
@@ -253,16 +251,6 @@ func (c *executionClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, o
 	return out, nil
 }
 
-func (c *executionClient) GetBlockNumberForTxNum(ctx context.Context, in *Txnum2BlknumRequest, opts ...grpc.CallOption) (*Txnum2BlknumResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Txnum2BlknumResponse)
-	err := c.cc.Invoke(ctx, Execution_GetBlockNumberForTxNum_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ExecutionServer is the server API for Execution service.
 // All implementations must embed UnimplementedExecutionServer
 // for forward compatibility.
@@ -294,7 +282,6 @@ type ExecutionServer interface {
 	Ready(context.Context, *emptypb.Empty) (*ReadyResponse, error)
 	// Frozen blocks are how many blocks are in snapshots .seg files.
 	FrozenBlocks(context.Context, *emptypb.Empty) (*FrozenBlocksResponse, error)
-	GetBlockNumberForTxNum(context.Context, *Txnum2BlknumRequest) (*Txnum2BlknumResponse, error)
 	mustEmbedUnimplementedExecutionServer()
 }
 
@@ -355,9 +342,6 @@ func (UnimplementedExecutionServer) Ready(context.Context, *emptypb.Empty) (*Rea
 }
 func (UnimplementedExecutionServer) FrozenBlocks(context.Context, *emptypb.Empty) (*FrozenBlocksResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FrozenBlocks not implemented")
-}
-func (UnimplementedExecutionServer) GetBlockNumberForTxNum(context.Context, *Txnum2BlknumRequest) (*Txnum2BlknumResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetBlockNumberForTxNum not implemented")
 }
 func (UnimplementedExecutionServer) mustEmbedUnimplementedExecutionServer() {}
 func (UnimplementedExecutionServer) testEmbeddedByValue()                   {}
@@ -686,24 +670,6 @@ func _Execution_FrozenBlocks_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Execution_GetBlockNumberForTxNum_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Txnum2BlknumRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ExecutionServer).GetBlockNumberForTxNum(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Execution_GetBlockNumberForTxNum_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExecutionServer).GetBlockNumberForTxNum(ctx, req.(*Txnum2BlknumRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // Execution_ServiceDesc is the grpc.ServiceDesc for Execution service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -778,10 +744,6 @@ var Execution_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FrozenBlocks",
 			Handler:    _Execution_FrozenBlocks_Handler,
-		},
-		{
-			MethodName: "GetBlockNumberForTxNum",
-			Handler:    _Execution_GetBlockNumberForTxNum_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

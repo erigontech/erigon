@@ -484,3 +484,17 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 
 	return &remote.AAValidationReply{Valid: validationTracer.Err() == nil}, nil
 }
+
+func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remote.BlockForTxNumRequest) (*remote.BlockForTxNumResponse, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, ok, err := s.blockReader.BlockForTxNum(ctx, tx, req.Txnum)
+	return &remote.BlockForTxNumResponse{
+		BlockNumber: blockNum,
+		Present:     ok,
+	}, err
+}

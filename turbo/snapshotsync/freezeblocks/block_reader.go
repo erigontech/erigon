@@ -158,6 +158,17 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 	return h, h != emptyHash, nil
 }
 
+func (r *RemoteBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txnNum uint64) (blockNum uint64, ok bool, err error) {
+	reply, err := r.client.GetBlockNumberForTxNum(ctx, &remote.BlockForTxNumRequest{Txnum: txnNum})
+	if err != nil {
+		return 0, false, err
+	}
+	if reply == nil {
+		return 0, false, nil
+	}
+	return reply.BlockNumber, reply.Present, nil
+}
+
 var _ services.FullBlockReader = &RemoteBlockReader{}
 
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
@@ -1592,6 +1603,10 @@ func (r *BlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
 		return rawdbv3.TxNums.WithCustomReadTxNumFunc(txnumReader)
 	}
 	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
+}
+
+func (r *BlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txnNum uint64) (blockNum uint64, ok bool, err error) {
+	return r.TxnumReader(ctx).FindBlockNum(tx, txnNum)
 }
 
 func TxBlockIndexFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.TxBlockIndex {
