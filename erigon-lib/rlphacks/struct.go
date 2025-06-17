@@ -16,7 +16,7 @@
 
 package rlphacks
 
-func GenerateStructLen(buffer []byte, l uint64) int {
+func GenerateStructLen(buffer []byte, l int) int {
 	if l < 56 {
 		buffer[0] = byte(192 + l)
 		return 1
@@ -33,59 +33,9 @@ func GenerateStructLen(buffer []byte, l uint64) int {
 		buffer[0] = byte(247 + 2)
 		return 3
 	}
-	if l < (1 << 24) {
-		buffer[3] = byte(l & 255)
-		buffer[2] = byte((l >> 8) & 255)
-		buffer[1] = byte(l >> 16)
-		buffer[0] = byte(247 + 3)
-		return 4
-	}
-	if l < (1 << 32) {
-		buffer[4] = byte(l & 255)
-		buffer[3] = byte((l >> 8) & 255)
-		buffer[2] = byte((l >> 16) & 255)
-		buffer[1] = byte(l >> 24)
-		buffer[0] = byte(247 + 4)
-		return 5
-	}
-	if l < (1 << 40) {
-		buffer[5] = byte(l & 255)
-		buffer[4] = byte((l >> 8) & 255)
-		buffer[3] = byte((l >> 16) & 255)
-		buffer[2] = byte((l >> 24) & 255)
-		buffer[1] = byte(l >> 32)
-		buffer[0] = byte(247 + 5)
-		return 6
-	}
-	if l < (1 << 48) {
-		buffer[6] = byte(l & 255)
-		buffer[5] = byte((l >> 8) & 255)
-		buffer[4] = byte((l >> 16) & 255)
-		buffer[3] = byte((l >> 24) & 255)
-		buffer[2] = byte((l >> 32) & 255)
-		buffer[1] = byte(l >> 40)
-		buffer[0] = byte(247 + 6)
-		return 7
-	}
-	if l < (1 << 56) {
-		buffer[7] = byte(l & 255)
-		buffer[6] = byte((l >> 8) & 255)
-		buffer[5] = byte((l >> 16) & 255)
-		buffer[4] = byte((l >> 24) & 255)
-		buffer[3] = byte((l >> 32) & 255)
-		buffer[2] = byte((l >> 40) & 255)
-		buffer[1] = byte(l >> 48)
-		buffer[0] = byte(247 + 7)
-		return 8
-	}
-	buffer[8] = byte(l & 255)
-	buffer[7] = byte((l >> 8) & 255)
-	buffer[6] = byte((l >> 16) & 255)
-	buffer[5] = byte((l >> 24) & 255)
-	buffer[4] = byte((l >> 32) & 255)
-	buffer[3] = byte((l >> 40) & 255)
-	buffer[2] = byte((l >> 48) & 255)
-	buffer[1] = byte(l >> 56)
-	buffer[0] = byte(247 + 8)
-	return 9
+	buffer[3] = byte(l & 255)
+	buffer[2] = byte((l >> 8) & 255)
+	buffer[1] = byte(l >> 16)
+	buffer[0] = byte(247 + 3)
+	return 4
 }
