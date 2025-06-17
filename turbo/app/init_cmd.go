@@ -19,6 +19,7 @@ package app
 import (
 	"bufio"
 	"os"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -126,7 +127,9 @@ func initGenesis(cliCtx *cli.Context) error {
 						account.Storage = make(map[common.Hash]common.Hash)
 						for storageKey = iter.ReadObject(); storageKey != ""; storageKey = iter.ReadObject() {
 							storageValue = iter.ReadStringAsSlice()
-							account.Storage[common.HexToHash(storageKey)] = common.CastToHash(storageValue)
+							// unsafe []byte to string to avoid extra memory allocation
+							ss := unsafe.String((*byte)(unsafe.Pointer(&storageValue[0])), len(storageValue))
+							account.Storage[common.HexToHash(storageKey)] = common.HexToHash(ss)
 						}
 					default:
 						iter.Skip()
