@@ -133,7 +133,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 		}
 	}
 	if err1 != nil {
-		return nil, err
+		return nil, err1
 	}
 
 	// Ensure we have an actually valid block and return its snapshot
