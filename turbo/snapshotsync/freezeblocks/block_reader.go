@@ -1652,6 +1652,9 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum u
 }
 
 func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
+	if _, ok := t.r.(*BlockReader); !ok {
+		return t.r.BlockForTxNum(t.ctx, tx, txNum)
+	}
 	var buf []byte
 	var b *types.BodyOnlyTxn
 	view := t.r.Snapshots().(*RoSnapshots).View()
