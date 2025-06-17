@@ -384,7 +384,6 @@ func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (
 		}
 		return &execution.ReadyResponse{Ready: false}, err
 	}
-	// Give up after 50ms if the semaphore is the channel is not ready.
 
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
