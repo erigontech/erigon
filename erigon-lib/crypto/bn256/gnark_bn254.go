@@ -54,11 +54,10 @@ func UnmarshalCurvePoint(input []byte, point *bn254.G1Affine) error {
 	return nil
 }
 
-// UnmarshalCurvePoint unmarshals a given input [32-byte X | 32-byte Y] slice to a G1Affine point
-func MarshalCurvePoint(point *bn254.G1Affine) []byte {
+// MarshalCurvePoint marshals a given G1Affine point to byte slice with [32-byte X | 32-byte Y] form
+func MarshalCurvePoint(point *bn254.G1Affine, ret []byte) []byte {
 	xBytes := point.X.Bytes()
 	yBytes := point.Y.Bytes()
-	ret := make([]byte, 0, 64)
 	ret = append(ret, xBytes[:]...)
 	ret = append(ret, yBytes[:]...)
 	return ret

@@ -616,7 +616,7 @@ func runBn256Add(input []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return bn256.MarshalCurvePoint(x.Add(&x, &y)), nil
+	return bn256.MarshalCurvePoint(x.Add(&x, &y), make([]byte, 0, 64)), nil
 }
 
 // bn256Add implements a native elliptic curve point addition conforming to
@@ -653,7 +653,7 @@ func runBn256ScalarMul(input []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return bn256.MarshalCurvePoint(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
+	return bn256.MarshalCurvePoint(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32))), make([]byte, 0, 64)), nil
 }
 
 // bn256ScalarMulIstanbul implements a native elliptic curve scalar
