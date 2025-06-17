@@ -117,9 +117,9 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 
 	//nolint:nestif
 	if blockNrOrHash == nil {
-		latestBlockNum, err := rpchelper.GetLatestBlockNumber(tx)
-		if err != nil {
-			return nil, err
+		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(tx)
+		if err2 != nil {
+			return nil, err2
 		}
 		header, err = api._blockReader.HeaderByNumber(ctx, tx, latestBlockNum)
 	} else {
