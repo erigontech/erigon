@@ -524,11 +524,20 @@ LOOP:
 		}
 
 		remainingRlpSpace := current.RemainingRlpSpaceSize(chainConfig)
-		minRemainingSpace := 100 // TODO think of a good value for this - maybe the size of 1 eip-1559 simple eth transfer txn from A to B
+		// TODO think of a good value for this
+		//    - maybe the size of 1 eip-1559 simple eth transfer txn from A to B
+		//    - plus a few extra bytes buffer to account for change in rlp prefix len bytes needed
+		minRemainingSpace := 100
 		if remainingRlpSpace < minRemainingSpace {
 			logger.Debug(fmt.Sprintf("[%s] Not enough rlp space for further transactions", logPrefix), "have", remainingRlpSpace, "want", minRemainingSpace)
 			done = true
 			break
+		}
+
+		txnEncodingSize := txn.EncodingSize()
+		if remainingRlpSpace < txnEncodingSize {
+			logger.Debug(fmt.Sprintf("[%s] Skipping transaction since it does not fit in remaining rlp space", logPrefix), "hash", txn.Hash(), "size", txnEncodingSize, "remaining", remainingRlpSpace)
+			continue
 		}
 
 		// We use the eip155 signer regardless of the env hf.
