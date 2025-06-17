@@ -554,8 +554,6 @@ LOOP:
 			continue
 		}
 
-		txn.EncodingSize()
-
 		// Start executing the transaction
 		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
 		if errors.Is(err, core.ErrGasLimitReached) {
