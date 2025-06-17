@@ -490,27 +490,6 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 	return res
 }
 
-func (a *Aggregator) WaitForBuild(ctx context.Context) chan struct{} {
-	res := make(chan struct{})
-	go func() {
-		defer close(res)
-
-		chkEvery := time.NewTicker(3 * time.Second)
-		defer chkEvery.Stop()
-		for a.buildingFiles.Load() {
-			select {
-			case <-ctx.Done():
-				return
-			case <-chkEvery.C:
-				a.logger.Trace("[agg] waiting for files",
-					"building files", a.buildingFiles.Load(),
-					"merging files", a.mergingFiles.Load())
-			}
-		}
-	}()
-	return res
-}
-
 func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) error {
 	startIndexingTime := time.Now()
 	ps := background.NewProgressSet()

@@ -357,8 +357,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	g, ctx := errgroup.WithContext(ctx)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
-	resultChannelLimit := workerCount * 128 * 4
-	heapLimit := workerCount * 128 * 4
+	resultChannelLimit := workerCount * 128
+	heapLimit := workerCount * 128
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
 
 	g.Go(func() (err error) {
