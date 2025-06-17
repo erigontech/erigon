@@ -292,8 +292,9 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 // bindType is a set of type binders that convert Solidity types to some supported
 // programming language types.
 var bindType = map[Lang]func(kind abi.Type, structs map[string]*tmplStruct) string{
-	LangGo:   bindTypeGo,
-	LangJava: bindTypeJava,
+	LangGo:    bindTypeGo,
+	LangGoArb: bindTypeGo,
+	LangJava:  bindTypeJava,
 }
 
 var intTypeRegexp = regexp.MustCompile(`(u)?int([0-9]*)`)
@@ -416,8 +417,9 @@ func bindTypeJava(kind abi.Type, structs map[string]*tmplStruct) string {
 // bindTopicType is a set of type binders that convert Solidity types to some
 // supported programming language topic types.
 var bindTopicType = map[Lang]func(kind abi.Type, structs map[string]*tmplStruct) string{
-	LangGo:   bindTopicTypeGo,
-	LangJava: bindTopicTypeJava,
+	LangGo:    bindTopicTypeGo,
+	LangGoArb: bindTopicTypeGo,
+	LangJava:  bindTopicTypeJava,
 }
 
 // bindTopicTypeGo converts a Solidity topic type to a Go one. It is almost the same
@@ -457,8 +459,9 @@ func bindTopicTypeJava(kind abi.Type, structs map[string]*tmplStruct) string {
 // bindStructType is a set of type binders that convert Solidity tuple types to some supported
 // programming language struct definition.
 var bindStructType = map[Lang]func(kind abi.Type, structs map[string]*tmplStruct) string{
-	LangGo:   bindStructTypeGo,
-	LangJava: bindStructTypeJava,
+	LangGo:    bindStructTypeGo,
+	LangGoArb: bindStructTypeGo,
+	LangJava:  bindStructTypeJava,
 }
 
 // bindStructTypeGo converts a Solidity tuple type to a Go one and records the mapping
@@ -540,8 +543,9 @@ func bindStructTypeJava(kind abi.Type, structs map[string]*tmplStruct) string {
 // namedType is a set of functions that transform language specific types to
 // named versions that may be used inside method names.
 var namedType = map[Lang]func(string, abi.Type) string{
-	LangGo:   func(string, abi.Type) string { panic("this shouldn't be needed") },
-	LangJava: namedTypeJava,
+	LangGo:    func(string, abi.Type) string { panic("this shouldn't be needed") },
+	LangGoArb: func(string, abi.Type) string { panic("this shouldn't be needed") },
+	LangJava:  namedTypeJava,
 }
 
 // namedTypeJava converts some primitive data types to named variants that can
@@ -582,8 +586,9 @@ func alias(aliases map[string]string, n string) string {
 // methodNormalizer is a name transformer that modifies Solidity method names to
 // conform to target language naming conventions.
 var methodNormalizer = map[Lang]func(string) string{
-	LangGo:   abi.ToCamelCase,
-	LangJava: decapitalise,
+	LangGo:    abi.ToCamelCase,
+	LangGoArb: abi.ToCamelCase,
+	LangJava:  decapitalise,
 }
 
 // capitalise makes a camel-case string which starts with an upper case character.
