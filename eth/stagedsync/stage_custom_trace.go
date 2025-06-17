@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -105,8 +106,19 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 }
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
+	if cfg.Produce.RCacheDomain {
+		if err := cfg.db.View(context.Background(), func(tx kv.Tx) error {
+			return kvcfg.PersistReceipts.MustBeEnabled(tx, "you must enable `--persist.receipts` flag in db. remove chaindata and start erigon with this flag")
+		}); err != nil {
+			panic(err)
+		}
+	}
+
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
+
+	//agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
+	//stepSize := agg.StepSize()
 
 	// 1. Require stage_exec > 0: means don't need handle "half-block execution case here"
 	// 2. Require stage_exec > 0: means has enough state-history
@@ -142,6 +154,24 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 	batchSize := uint64(50_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
+		//var _nextBlock uint64
+		//if err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) (err error) {
+		//	startBlockTxNum, _ := txNumsReader.Min(tx, startBlock)
+		//	nextStep := (startBlockTxNum / stepSize) + 1
+		//	bn, ok, _ := txNumsReader.FindBlockNum(tx, nextStep*stepSize)
+		//	if ok {
+		//		_nextBlock = bn + 1
+		//	}
+		//	return nil
+		//}); err != nil {
+		//	return err
+		//}
+		//
+		//to := endBlock + 1
+		//if _nextBlock > 0 {
+		//	to = min(endBlock+1, _nextBlock)
+		//}
+
 		_nextBlock := startBlock + batchSize
 		fromStep, toStep, err := exec3.BlkRangeToStepsOnDB(cfg.db, startBlock, _nextBlock, txNumsReader)
 		if err != nil {
@@ -247,11 +277,11 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	var fromStep, toStep uint64
-	if lastTxNum/agg.StepSize() > 0 {
-		toStep = lastTxNum / agg.StepSize()
-	}
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		fromStep = firstStepNotInFiles(tx, produce)
+		if lastTxNum/agg.StepSize() > 0 {
+			toStep = lastTxNum / agg.StepSize()
+		}
 		return nil
 	}); err != nil {
 		return err
@@ -419,7 +449,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				if prevTxNumLog > 0 {
 					dbg.ReadMemStats(&m)
 					txsPerSec := (txTask.TxNum - prevTxNumLog) / uint64(logPeriod.Seconds())
-					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", fmt.Sprintf("%dK", txTask.BlockNum/1_000), "tx/s", fmt.Sprintf("%dK", txsPerSec/1_000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", fmt.Sprintf("%.1fm", float64(txTask.BlockNum)/1_000_000), "tx/s", fmt.Sprintf("%dK", txsPerSec/1_000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				}
 				prevTxNumLog = txTask.TxNum
 			default:
