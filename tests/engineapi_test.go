@@ -151,20 +151,44 @@ func (eat *EngineApiTest) Run(ctx context.Context, t *testing.T) error {
 	require.NoError(t, err)
 
 	// perform requests
-	for _, request := range eat.Requests {
+	timeout := time.After(time.Minute)
+	queue := eat.Requests
+	requestCounter := 1
+	for len(queue) > 0 {
+		request := queue[0]
+		var status enginetypes.EngineStatus
+		var requestType string
 		if strings.HasPrefix(request.Method, "engine_forkchoiceUpdatedV") {
 			var result enginetypes.ForkChoiceUpdatedResponse
 			err = rpcClient.CallContext(ctx, &result, request.Method, request.Params...)
 			require.NoError(t, err)
-			require.Equal(t, enginetypes.ValidStatus, result.PayloadStatus.Status)
+			status = result.PayloadStatus.Status
+			requestType = "forkchoiceUpdated"
 		} else if strings.HasPrefix(request.Method, "engine_newPayloadV") {
 			var result enginetypes.PayloadStatus
 			err = rpcClient.CallContext(ctx, &result, request.Method, request.Params...)
 			require.NoError(t, err)
-			require.Equal(t, enginetypes.ValidStatus, result.Status)
+			status = result.Status
+			requestType = "newPayload"
 		} else {
 			panic("unexpected method: " + request.Method)
 		}
+
+		if status == enginetypes.SyncingStatus {
+			select {
+			case <-timeout:
+				t.Fatalf("timeout waiting for syncing to finish: request=%d, type=%s", requestCounter, requestType)
+			default: // continue
+			}
+
+			logger.Debug("waiting for syncing to finish", "request", requestCounter, "type", requestType)
+			time.Sleep(200 * time.Millisecond)
+			continue // retry the request
+		}
+
+		require.Equal(t, enginetypes.ValidStatus, status, "unexpected status for request=%d, type=%s", requestCounter, requestType)
+		queue = queue[1:]
+		requestCounter++
 	}
 
 	return nil
