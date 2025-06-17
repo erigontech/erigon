@@ -66,3 +66,55 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 	})
 	require.NoError(err)
 }
+
+func TestCustomTraceInvalidProduceMode(t *testing.T) {
+	require := require.New(t)
+	produce := stagedsync.NewProduce([]string{"invalid_mode"})
+
+	require.False(produce.ReceiptDomain)
+	require.False(produce.RCacheDomain)
+	require.False(produce.LogAddr)
+	require.False(produce.LogTopic)
+	require.False(produce.TraceFrom)
+	require.False(produce.TraceTo)
+
+	require.Panics(func() {
+		stagedsync.NewProduce([]string{"invalid_mode"})
+	}, "Should panic on invalid produce mode")
+}
+
+func TestCustomTraceDomainProgressConsistency(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+	ctx := context.Background()
+
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+
+	allDomains := []string{
+		kv.ReceiptDomain.String(),
+		kv.RCacheDomain.String(),
+		kv.LogAddrIdx.String(),
+		kv.LogTopicIdx.String(),
+		kv.TracesFromIdx.String(),
+		kv.TracesToIdx.String(),
+	}
+	stageCfg := stagedsync.StageCustomTraceCfg(allDomains, m.DB, m.Dirs, m.BlockReader, m.ChainConfig, m.Engine, m.Cfg().Genesis, m.Cfg().Sync)
+	err := stagedsync.StageCustomTraceReset(ctx, m.DB, stageCfg.Produce)
+	require.NoError(err)
+
+	err = stagedsync.SpawnCustomTrace(stageCfg, ctx, m.Log)
+	require.NoError(err)
+
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		d := tx.Debug()
+		assert.Greater(int(d.DomainProgress(kv.ReceiptDomain)), 0)
+		assert.Greater(int(d.DomainProgress(kv.RCacheDomain)), 0)
+		assert.Greater(int(d.IIProgress(kv.LogAddrIdx)), 0)
+		assert.Greater(int(d.IIProgress(kv.LogTopicIdx)), 0)
+		assert.Greater(int(d.IIProgress(kv.TracesFromIdx)), 0)
+		assert.Greater(int(d.IIProgress(kv.TracesToIdx)), 0)
+
+		return nil
+	})
+	require.NoError(err)
+}
