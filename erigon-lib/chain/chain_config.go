@@ -422,7 +422,7 @@ func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
 	return c.getBlobConfig(time).BaseFeeUpdateFraction
 }
 
-func (c *Config) GetMaxRlpBlockSize(time uint64) uint64 {
+func (c *Config) GetMaxRlpBlockSize(time uint64) int {
 	if c.IsOsaka(time) {
 		return params.MaxRlpBlockSize
 	}

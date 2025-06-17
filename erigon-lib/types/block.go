@@ -1385,18 +1385,18 @@ func (b *Block) Size() common.StorageSize {
 }
 
 func (b *Block) ValidateMaxRlpSize(chainConfig *chain.Config) error {
-	maxSize := common.StorageSize(chainConfig.GetMaxRlpBlockSize(b.Time()))
-	if maxSize == 0 {
+	maxRlpSize := chainConfig.GetMaxRlpBlockSize(b.Time())
+	if maxRlpSize == 0 {
 		return nil
 	}
 
-	if blockSize := b.Size(); blockSize > maxSize {
+	if blockRlpSize := b.EncodingSize(); blockRlpSize > maxRlpSize {
 		return fmt.Errorf(
-			"block exceeds max rlp size: blockNum=%d, blockHash=%s, rlpSize=%s, maxSize=%s",
+			"block exceeds max rlp size: blockNum=%d, blockHash=%s, blockRlpSize=%d, maxRlpSize=%s",
 			b.NumberU64(),
 			b.Hash(),
-			blockSize,
-			maxSize,
+			blockRlpSize,
+			maxRlpSize,
 		)
 	}
 

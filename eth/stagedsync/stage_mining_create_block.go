@@ -53,6 +53,13 @@ type MiningBlock struct {
 	Requests         types.FlatRequests
 }
 
+func (mb MiningBlock) RemainingRlpSpaceSize(chainConfig *chain.Config) int {
+	maxRlpSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Time)
+	block := types.NewBlockForAsembling(mb.Header, mb.Txns, mb.Uncles, mb.Receipts, mb.Withdrawals)
+	blockRlpSize := block.EncodingSize()
+	return maxRlpSize - blockRlpSize
+}
+
 type MiningState struct {
 	MiningConfig    *params.MiningConfig
 	PendingResultCh chan *types.Block

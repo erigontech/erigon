@@ -523,6 +523,14 @@ LOOP:
 			break
 		}
 
+		remainingRlpSpace := current.RemainingRlpSpaceSize(chainConfig)
+		minRemainingSpace := 100 // TODO think of a good value for this - maybe the size of 1 eip-1559 simple eth transfer txn from A to B
+		if remainingRlpSpace < minRemainingSpace {
+			logger.Debug(fmt.Sprintf("[%s] Not enough rlp space for further transactions", logPrefix), "have", remainingRlpSpace, "want", minRemainingSpace)
+			done = true
+			break
+		}
+
 		// We use the eip155 signer regardless of the env hf.
 		from, err := txn.Sender(*signer)
 		if err != nil {
@@ -536,6 +544,8 @@ LOOP:
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
 			continue
 		}
+
+		txn.EncodingSize()
 
 		// Start executing the transaction
 		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)

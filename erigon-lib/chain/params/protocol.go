@@ -202,9 +202,9 @@ const (
 	PerAuthBaseCost     = 12500
 
 	// EIP-7934: RLP Execution Block Size Limit
-	MaxBlockSize             uint64 = 10_485_760                              // 10 MiB
-	MaxBlockSizeSafetyMargin uint64 = 2_097_152                               // 2 MiB
-	MaxRlpBlockSize                 = MaxBlockSize - MaxBlockSizeSafetyMargin // 8 MiB
+	MaxBlockSize             = 10_485_760 // 10 MiB
+	MaxBlockSizeSafetyMargin = 2_097_152  // 2 MiB
+	MaxRlpBlockSize          = MaxBlockSize - MaxBlockSizeSafetyMargin
 )
 
 // EIP-7702: Set EOA account code
