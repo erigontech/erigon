@@ -1,3 +1,16 @@
+name: QA - Test Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Starting date (YYYY-MM-DD)'
+        required: true
+        type: string
+      end_date:
+        description: 'Ending date (YYYY-MM-DD)'
+        required: true
+        type: string
 
 jobs:
   test-report:
