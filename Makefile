@@ -354,10 +354,10 @@ lint:
 
 ## tidy:                              `go mod tidy`
 tidy:
-	@cd erigon-lib && go mod tidy
-	@cd erigon-db && go mod tidy
-	@cd p2p && go mod tidy
-	@go mod tidy
+	cd erigon-lib && go mod tidy
+	cd erigon-db && go mod tidy
+	cd p2p && go mod tidy
+	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
