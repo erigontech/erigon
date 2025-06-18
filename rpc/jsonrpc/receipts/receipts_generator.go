@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -72,7 +71,7 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		panic(err)
 	}
 
-	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), blockReader))
+	txNumReader := blockReader.TxnumReader(context.Background())
 
 	return &Generator{
 		receiptsCache:      receiptsCache,
@@ -105,7 +104,7 @@ func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*ty
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, g.blockReader))
+	txNumsReader := g.blockReader.TxnumReader(ctx)
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)

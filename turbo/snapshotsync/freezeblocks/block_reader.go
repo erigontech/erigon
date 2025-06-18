@@ -45,7 +45,8 @@ import (
 )
 
 type RemoteBlockReader struct {
-	client remote.ETHBACKENDClient
+	client       remote.ETHBACKENDClient
+	txBlockIndex *txBlockIndexWithBlockReader
 }
 
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
@@ -160,7 +161,12 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 var _ services.FullBlockReader = &RemoteBlockReader{}
 
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
-	return &RemoteBlockReader{client}
+	br := &RemoteBlockReader{
+		client: client,
+	}
+	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
+	br.txBlockIndex = txnumReader
+	return br
 }
 
 func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
@@ -377,6 +383,14 @@ func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.G
 func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Checkpoint, bool, error) {
 	return nil, false, nil
 }
+func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+	if r == nil {
+		// tests
+		txnumReader := TxBlockIndexFromBlockReader(ctx, nil).(*txBlockIndexWithBlockReader)
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(txnumReader)
+	}
+	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
+}
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
@@ -384,12 +398,16 @@ type BlockReader struct {
 	borSn          *heimdall.RoSnapshots
 	borBridgeStore bridge.Store
 	heimdallStore  heimdall.Store
+	txBlockIndex   *txBlockIndexWithBlockReader
 }
 
 func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store, borBridge bridge.Store) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
-	return &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore, borBridgeStore: borBridge}
+	br := &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore, borBridgeStore: borBridge}
+	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
+	br.txBlockIndex = txnumReader
+	return br
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
@@ -994,6 +1012,32 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *snapsho
 	return BodyForStorageFromSnapshot(blockHeight, sn, buf)
 }
 
+func BodyForTxnFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.BodyOnlyTxn, []byte, error) {
+	index := sn.Src().Index()
+
+	if index == nil {
+		return nil, buf, nil
+	}
+
+	bodyOffset := index.OrdinalLookup(blockHeight - index.BaseDataID())
+
+	gg := sn.Src().MakeGetter()
+	gg.Reset(bodyOffset)
+	if !gg.HasNext() {
+		return nil, buf, nil
+	}
+	buf, _ = gg.Next(buf[:0])
+	if len(buf) == 0 {
+		return nil, buf, nil
+	}
+	b := &types.BodyOnlyTxn{}
+	if err := rlp.DecodeBytesPartial(buf, b); err != nil {
+		return nil, buf, err
+	}
+
+	return b, buf, nil
+}
+
 func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.BodyForStorage, []byte, error) {
 	index := sn.Src().Index()
 
@@ -1157,8 +1201,8 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	}
 	defer release()
 
-	var b *types.BodyForStorage
-	b, _, err = r.bodyForStorageFromSnapshot(blockNum, seg, nil)
+	var b *types.BodyOnlyTxn
+	b, _, err = BodyForTxnFromSnapshot(blockNum, seg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1250,7 +1294,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 		}
 		firstBlockNum := snb.Src().Index().BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
-		b, _, err := r.bodyForStorageFromSnapshot(firstBlockNum, snb, nil)
+		b, _, err := BodyForTxnFromSnapshot(firstBlockNum, snb, nil)
 		if err != nil {
 			return err
 		}
@@ -1541,6 +1585,15 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 	return nil
 }
 
+func (r *BlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+	if r == nil {
+		// tests
+		txnumReader := TxBlockIndexFromBlockReader(ctx, nil).(*txBlockIndexWithBlockReader)
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(txnumReader)
+	}
+	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
+}
+
 func TxBlockIndexFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.TxBlockIndex {
 	return &txBlockIndexWithBlockReader{
 		r:     r,
@@ -1553,6 +1606,14 @@ type txBlockIndexWithBlockReader struct {
 	r     services.FullBlockReader
 	ctx   context.Context
 	cache *BlockTxNumLookupCache
+}
+
+func (t *txBlockIndexWithBlockReader) CopyWithContext(ctx context.Context) *txBlockIndexWithBlockReader {
+	return &txBlockIndexWithBlockReader{
+		r:     t.r,
+		ctx:   ctx,
+		cache: t.cache,
+	}
 }
 
 func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
@@ -1577,13 +1638,13 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum u
 
 func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
 	var buf []byte
-	var b *types.BodyForStorage
+	var b *types.BodyOnlyTxn
 	view := t.r.Snapshots().(*RoSnapshots).View()
 	defer view.Close()
 
 	getMaxTxNum := func(seg *snapshotsync.VisibleSegment) GetMaxTxNum {
 		return func(i uint64) (uint64, error) {
-			b, buf, err = BodyForStorageFromSnapshot(i, seg, buf)
+			b, buf, err = BodyForTxnFromSnapshot(i, seg, buf)
 			if err != nil {
 				return 0, err
 			}
