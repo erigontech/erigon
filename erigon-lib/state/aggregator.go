@@ -58,7 +58,6 @@ type Aggregator struct {
 	d               [kv.DomainLen]*Domain
 	iis             []*InvertedIndex
 	dirs            datadir.Dirs
-	tmpdir          string
 	aggregationStep uint64
 
 	dirtyFilesLock           sync.Mutex
@@ -105,7 +104,6 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 		ctxCancel:              ctxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
