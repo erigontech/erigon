@@ -342,7 +342,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 
 	start := time.Now()
-	defer func() { logger.Info("Commitment DONE", "duration", time.Since(start)) }()
+	defer func() { logger.Info("[commitment_rebuild] done", "duration", time.Since(start)) }()
 
 	originalCommitmentValuesTransform := a.commitmentValuesTransform
 	a.commitmentValuesTransform = false
