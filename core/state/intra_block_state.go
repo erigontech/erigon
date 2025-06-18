@@ -645,7 +645,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		// If this account has not been read, add to the balance increment map
 		if _, needAccount := sdb.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
 			sdb.journal.append(balanceIncrease{
-				account:  addr,
+				account:  &addr,
 				increase: amount,
 			})
 
@@ -915,7 +915,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr common.Address) (bool, error) {
 	}
 	prevBalance := stateObject.Balance()
 	sdb.journal.append(selfdestructChange{
-		account:     addr,
+		account:     &addr,
 		prev:        stateObject.selfdestructed,
 		prevbalance: prevBalance,
 	})

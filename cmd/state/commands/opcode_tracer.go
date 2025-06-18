@@ -228,7 +228,7 @@ func (ot *opcodeTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, 
 	ot.depth = 0
 }
 
-func (ot *opcodeTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (ot *opcodeTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.depth = depth
 	ot.captureStartOrEnter(from, to, to == common.Address{}, input)
 }

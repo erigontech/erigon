@@ -146,14 +146,14 @@ func TestEIP2200(t *testing.T) {
 
 			_ = s.CommitBlock(chain.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, common.Address, uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, uint256.Int, bool) error {
+				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
+				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 					return nil
 				},
 			}
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
-			_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, tt.gaspool, uint256.Int{}, false /* bailout */)
+			_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
@@ -205,8 +205,8 @@ func TestCreateGas(t *testing.T) {
 		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
-			CanTransfer: func(evmtypes.IntraBlockState, common.Address, uint256.Int) (bool, error) { return true, nil },
-			Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, uint256.Int, bool) error {
+			CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
+			Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 				return nil
 			},
 		}
@@ -218,7 +218,7 @@ func TestCreateGas(t *testing.T) {
 		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
 
 		var startGas uint64 = math.MaxUint64
-		_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, startGas, uint256.Int{}, false /* bailout */)
+		_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}

@@ -67,7 +67,7 @@ type Contract struct {
 	Input    []byte
 
 	Gas   uint64
-	value uint256.Int
+	value *uint256.Int
 }
 
 type JumpDestCache struct {
@@ -97,7 +97,7 @@ func (c *JumpDestCache) LogStats() {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, addr common.Address, value uint256.Int, gas uint64, skipAnalysis bool, jumpDest *JumpDestCache) *Contract {
+func NewContract(caller ContractRef, addr common.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
 		CallerAddress: caller.Address(), caller: caller, self: addr,
 		value:        value,
@@ -228,7 +228,7 @@ func (c *Contract) Address() common.Address {
 
 // Value returns the contract's value (sent to it from it's caller)
 func (c *Contract) Value() *uint256.Int {
-	return &c.value
+	return c.value
 }
 
 // SetCallCode sets the code of the contract and address of the backing data

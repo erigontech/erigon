@@ -217,7 +217,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
-			account:  so.address,
+			account:  &so.address,
 			key:      key,
 			prevalue: so.fakeStorage[key],
 		})
@@ -247,7 +247,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
-		account:     so.address,
+		account:     &so.address,
 		key:         key,
 		prevalue:    prev,
 		wasCommited: commited,
@@ -301,7 +301,7 @@ func (so *stateObject) printTrie() {
 
 func (so *stateObject) SetBalance(amount uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
-		account: so.address,
+		account: &so.address,
 		prev:    so.data.Balance,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
@@ -358,7 +358,7 @@ func (so *stateObject) SetCode(codeHash common.Hash, code []byte) error {
 		return err
 	}
 	so.db.journal.append(codeChange{
-		account:  so.address,
+		account:  &so.address,
 		prevhash: so.data.CodeHash,
 		prevcode: prevcode,
 	})
@@ -377,7 +377,7 @@ func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
 
 func (so *stateObject) SetNonce(nonce uint64) {
 	so.db.journal.append(nonceChange{
-		account: so.address,
+		account: &so.address,
 		prev:    so.data.Nonce,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {

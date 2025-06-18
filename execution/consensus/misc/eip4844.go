@@ -69,30 +69,30 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
 // as described in the EIP-4844 spec.
-func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (uint256.Int, error) {
+func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (*uint256.Int, error) {
 	numerator := uint256.NewInt(excessBlobGas)
 	output := uint256.NewInt(0)
 	numeratorAccum := new(uint256.Int)
 	_, overflow := numeratorAccum.MulOverflow(factor, denom)
 	if overflow {
-		return uint256.Int{}, fmt.Errorf("FakeExponential: overflow in MulOverflow(factor=%v, denom=%v)", factor, denom)
+		return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(factor=%v, denom=%v)", factor, denom)
 	}
 	divisor := new(uint256.Int)
 	for i := 1; numeratorAccum.Sign() > 0; i++ {
 		_, overflow = output.AddOverflow(output, numeratorAccum)
 		if overflow {
-			return uint256.Int{}, fmt.Errorf("FakeExponential: overflow in AddOverflow(output=%v, numeratorAccum=%v)", output, numeratorAccum)
+			return nil, fmt.Errorf("FakeExponential: overflow in AddOverflow(output=%v, numeratorAccum=%v)", output, numeratorAccum)
 		}
 		_, overflow = divisor.MulOverflow(denom, uint256.NewInt(uint64(i)))
 		if overflow {
-			return uint256.Int{}, fmt.Errorf("FakeExponential: overflow in MulOverflow(denom=%v, i=%v)", denom, i)
+			return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(denom=%v, i=%v)", denom, i)
 		}
 		_, overflow = numeratorAccum.MulDivOverflow(numeratorAccum, numerator, divisor)
 		if overflow {
-			return uint256.Int{}, fmt.Errorf("FakeExponential: overflow in MulDivOverflow(numeratorAccum=%v, numerator=%v, divisor=%v)", numeratorAccum, numerator, divisor)
+			return nil, fmt.Errorf("FakeExponential: overflow in MulDivOverflow(numeratorAccum=%v, numerator=%v, divisor=%v)", numeratorAccum, numerator, divisor)
 		}
 	}
-	return *output.Div(output, denom), nil
+	return output.Div(output, denom), nil
 }
 
 // VerifyPresenceOfCancunHeaderFields checks that the fields introduced in Cancun (EIP-4844, EIP-4788) are present.
@@ -123,7 +123,7 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 	return nil
 }
 
-func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (uint256.Int, error) {
+func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (*uint256.Int, error) {
 	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime)), excessBlobGas)
 }
 

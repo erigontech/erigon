@@ -69,7 +69,7 @@ func (t *noopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpC
 
 func (t *noopTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {}
 
-func (t *noopTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *noopTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 func (t *noopTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {

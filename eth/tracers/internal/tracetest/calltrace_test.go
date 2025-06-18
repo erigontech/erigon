@@ -146,8 +146,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
 			if test.Context.BaseFee != nil {
-				baseFee, _ := uint256.FromBig((*big.Int)(test.Context.BaseFee))
-				context.BaseFee = *baseFee
+				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
 			}
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 
@@ -252,7 +251,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	baseFee := uint256.MustFromBig((*big.Int)(test.Context.BaseFee))
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: *tx.GetEffectiveGasTip(baseFee),
+		GasPrice: tx.GetEffectiveGasTip(baseFee),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
@@ -312,7 +311,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	origin, _ := signer.Sender(tx)
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: *uint256.NewInt(1),
+		GasPrice: uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,

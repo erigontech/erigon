@@ -401,8 +401,7 @@ func TestOeTracer(t *testing.T) {
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
 			if test.Context.BaseFee != nil {
-				baseFee, _ := uint256.FromBig((*big.Int)(test.Context.BaseFee))
-				context.BaseFee = *baseFee
+				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
 			}
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 

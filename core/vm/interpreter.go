@@ -106,8 +106,8 @@ func (ctx *ScopeContext) Address() common.Address {
 }
 
 // CallValue returns the value supplied with this call.
-func (ctx *ScopeContext) CallValue() uint256.Int {
-	return *ctx.Contract.Value()
+func (ctx *ScopeContext) CallValue() *uint256.Int {
+	return ctx.Contract.Value()
 }
 
 // CallInput returns the input/calldata with this call. Callers must not modify

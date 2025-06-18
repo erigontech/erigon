@@ -132,7 +132,7 @@ func (t *Tracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.mustFlushToFile(path.Join(t.outputDir, txnTraceFile))
 }
 
-func (t *Tracer) OnEnter(depth int, typ byte, from, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *Tracer) OnEnter(depth int, typ byte, from, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if t.recordOptions.DisableOnEnterRecording {
 		return
 	}
@@ -152,7 +152,7 @@ func (t *Tracer) OnEnter(depth int, typ byte, from, to common.Address, precompil
 			Precompile: precompile,
 			Input:      inputCopy,
 			Gas:        gas,
-			Value:      &value,
+			Value:      value,
 			Code:       code,
 		},
 	})
