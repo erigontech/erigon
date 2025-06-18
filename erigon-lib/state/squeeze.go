@@ -394,7 +394,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		shardTo = shardFrom + shardSize
 		toTxNumRange = shardTo * a.StepSize()
 
-		logger.Info("beginning commitment", "range", r.String("", a.StepSize()), "shardSize", shardSize, "batch", batchSize)
+		logger.Info("[rebuild_commitment] starting", "range", r.String("", a.StepSize()), "shardSize", shardSize, "batch", batchSize)
 
 		var rebuiltCommit *rebuiltCommitment
 		var processed uint64
