@@ -62,7 +62,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		*prevRandDao = header.MixDigest
 	}
 
-	var blobBaseFee *uint256.Int
+	var blobBaseFee uint256.Int
 	if header.ExcessBlobGas != nil {
 		var err error
 		blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
@@ -89,7 +89,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		BlockNumber:      header.Number.Uint64(),
 		Time:             header.Time,
 		Difficulty:       new(big.Int).Set(header.Difficulty),
-		BaseFee:          &baseFee,
+		BaseFee:          baseFee,
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
@@ -100,7 +100,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	return evmtypes.TxContext{
 		Origin:     msg.From(),
-		GasPrice:   msg.GasPrice(),
+		GasPrice:   *msg.GasPrice(),
 		BlobHashes: msg.BlobHashes(),
 	}
 }
@@ -189,10 +189,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint256.Int) (bool, error) {
+func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount uint256.Int) (bool, error) {
 	balance, err := db.GetBalance(addr)
 	if err != nil {
 		return false, err
 	}
-	return !balance.Lt(amount), nil
+	return !balance.Lt(&amount), nil
 }

@@ -117,8 +117,8 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	)
 
 	for i, test := range tests {
-		x := new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
-		y := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
+		x := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
+		y := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
 		stack.push(x)
 		stack.push(y)
@@ -235,9 +235,9 @@ func TestAddMod(t *testing.T) {
 	// in 256 bit repr, fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd
 
 	for i, test := range tests {
-		x := new(uint256.Int).SetBytes(common.Hex2Bytes(test.x))
-		y := new(uint256.Int).SetBytes(common.Hex2Bytes(test.y))
-		z := new(uint256.Int).SetBytes(common.Hex2Bytes(test.z))
+		x := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.x))
+		y := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.y))
+		z := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.z))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.expected))
 		stack.push(z)
 		stack.push(y)
@@ -317,8 +317,7 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, arg := range byteArgs {
-			a := new(uint256.Int)
-			a.SetBytes(arg)
+			a := *new(uint256.Int).SetBytes(arg)
 			stack.push(a)
 		}
 		op(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
@@ -547,14 +546,14 @@ func TestOpMstore(t *testing.T) {
 	mem.Resize(64)
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
-	stack.push(new(uint256.Int).SetBytes(common.Hex2Bytes(v)))
-	stack.push(new(uint256.Int))
+	stack.push(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)))
+	stack.push(*new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
 	if got := common.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
-	stack.push(new(uint256.Int).SetOne())
-	stack.push(new(uint256.Int))
+	stack.push(*new(uint256.Int).SetOne())
+	stack.push(*new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
 	if common.Bytes2Hex(mem.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
@@ -572,8 +571,8 @@ func BenchmarkOpMstore(bench *testing.B) {
 	env.interpreter = evmInterpreter
 	mem.Resize(64)
 	pc := uint64(0)
-	memStart := new(uint256.Int)
-	value := new(uint256.Int).SetUint64(0x1337)
+	memStart := *new(uint256.Int)
+	value := *new(uint256.Int).SetUint64(0x1337)
 
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
@@ -594,7 +593,7 @@ func TestOpTstore(t *testing.T) {
 		caller         = common.Address{}
 		to             = common.Address{1}
 		contractRef    = contractRef{caller}
-		contract       = NewContract(contractRef, to, u256.Num0, 0, false, NewJumpDestCache(16))
+		contract       = NewContract(contractRef, to, *u256.Num0, 0, false, NewJumpDestCache(16))
 		scopeContext   = ScopeContext{mem, stack, contract}
 		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
@@ -602,16 +601,16 @@ func TestOpTstore(t *testing.T) {
 	env.interpreter = evmInterpreter
 	pc := uint64(0)
 	// push the value to the stack
-	stack.push(new(uint256.Int).SetBytes(value))
+	stack.push(*new(uint256.Int).SetBytes(value))
 	// push the location to the stack
-	stack.push(new(uint256.Int))
+	stack.push(*new(uint256.Int))
 	opTstore(&pc, evmInterpreter, &scopeContext)
 	// there should be no elements on the stack after TSTORE
 	if stack.len() != 0 {
 		t.Fatal("stack wrong size")
 	}
 	// push the location to the stack
-	stack.push(new(uint256.Int))
+	stack.push(*new(uint256.Int))
 	opTload(&pc, evmInterpreter, &scopeContext)
 	// there should be one element on the stack after TLOAD
 	if stack.len() != 1 {
@@ -633,11 +632,11 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 	env.interpreter = evmInterpreter
 	mem.Resize(32)
 	pc := uint64(0)
-	start := uint256.NewInt(0)
+	start := *uint256.NewInt(0)
 
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
-		stack.push(uint256.NewInt(32))
+		stack.push(*uint256.NewInt(32))
 		stack.push(start)
 		opKeccak256(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
 	}
@@ -816,9 +815,9 @@ func TestOpMCopy(t *testing.T) {
 		src, _ := uint256.FromHex(tc.src)
 		dst, _ := uint256.FromHex(tc.dst)
 
-		stack.push(len)
-		stack.push(src)
-		stack.push(dst)
+		stack.push(*len)
+		stack.push(*src)
+		stack.push(*dst)
 		wantErr := (tc.wantGas == 0)
 		// Calc mem expansion
 		var memorySize uint64
@@ -886,7 +885,7 @@ func TestOpCLZ(t *testing.T) {
 				val.SetFromHex(tc.inputHex)
 			}
 
-			stack.push(val)
+			stack.push(*val)
 			opCLZ(&pc, evmInterpreter, &ScopeContext{Stack: stack})
 
 			if gotLen := stack.len(); gotLen != 1 {
