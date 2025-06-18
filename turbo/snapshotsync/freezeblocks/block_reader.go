@@ -1012,6 +1012,32 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *snapsho
 	return BodyForStorageFromSnapshot(blockHeight, sn, buf)
 }
 
+func BodyForTxnFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.BodyOnlyTxn, []byte, error) {
+	index := sn.Src().Index()
+
+	if index == nil {
+		return nil, buf, nil
+	}
+
+	bodyOffset := index.OrdinalLookup(blockHeight - index.BaseDataID())
+
+	gg := sn.Src().MakeGetter()
+	gg.Reset(bodyOffset)
+	if !gg.HasNext() {
+		return nil, buf, nil
+	}
+	buf, _ = gg.Next(buf[:0])
+	if len(buf) == 0 {
+		return nil, buf, nil
+	}
+	b := &types.BodyOnlyTxn{}
+	if err := rlp.DecodeBytesPartial(buf, b); err != nil {
+		return nil, buf, err
+	}
+
+	return b, buf, nil
+}
+
 func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.BodyForStorage, []byte, error) {
 	index := sn.Src().Index()
 
@@ -1175,8 +1201,8 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	}
 	defer release()
 
-	var b *types.BodyForStorage
-	b, _, err = r.bodyForStorageFromSnapshot(blockNum, seg, nil)
+	var b *types.BodyOnlyTxn
+	b, _, err = BodyForTxnFromSnapshot(blockNum, seg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1268,7 +1294,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 		}
 		firstBlockNum := snb.Src().Index().BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
-		b, _, err := r.bodyForStorageFromSnapshot(firstBlockNum, snb, nil)
+		b, _, err := BodyForTxnFromSnapshot(firstBlockNum, snb, nil)
 		if err != nil {
 			return err
 		}
@@ -1612,13 +1638,13 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum u
 
 func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
 	var buf []byte
-	var b *types.BodyForStorage
+	var b *types.BodyOnlyTxn
 	view := t.r.Snapshots().(*RoSnapshots).View()
 	defer view.Close()
 
 	getMaxTxNum := func(seg *snapshotsync.VisibleSegment) GetMaxTxNum {
 		return func(i uint64) (uint64, error) {
-			b, buf, err = BodyForStorageFromSnapshot(i, seg, buf)
+			b, buf, err = BodyForTxnFromSnapshot(i, seg, buf)
 			if err != nil {
 				return 0, err
 			}
