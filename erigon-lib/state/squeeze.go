@@ -355,7 +355,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		fromTxNumRange, toTxNumRange := r.FromTo()
 		lastTxnumInShard := toTxNumRange
 		if acRo.TxNumsInFiles(kv.StateDomains...) >= toTxNumRange {
-			logger.Info("skipping existing range", "range", r.String("", a.StepSize()))
+			logger.Info("[commitment_rebuild] skipping existing range", "range", r.String("", a.StepSize()))
 			continue
 		}
 
