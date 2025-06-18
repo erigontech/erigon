@@ -121,6 +121,8 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 		}
 		if !bytes.Equal(raw, ourRaw) {
 			log.Error("encoding is not correct", "raw", common.Bytes2Hex(raw), "ourRaw", common.Bytes2Hex(ourRaw))
+		} else {
+			log.Debug("encoding is correct", "raw", common.Bytes2Hex(raw), "ourRaw", common.Bytes2Hex(ourRaw))
 		}
 	}
 	bytes, err := req.MarshalJSON()
