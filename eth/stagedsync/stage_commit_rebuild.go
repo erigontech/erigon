@@ -26,33 +26,25 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 type TrieCfg struct {
 	db                kv.TemporalRwDB
 	checkRoot         bool
-	badBlockHalt      bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
 	blockReader       services.FullBlockReader
-	hd                *headerdownload.HeaderDownload
 
-	historyV3 bool
-	agg       *state.Aggregator
+	agg *state.Aggregator
 }
 
-func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool) TrieCfg {
+func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader services.FullBlockReader) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
 		tmpDir:            tmpDir,
 		saveNewHashesToDB: saveNewHashesToDB,
-		badBlockHalt:      badBlockHalt,
 		blockReader:       blockReader,
-		hd:                hd,
-
-		historyV3: historyV3,
 	}
 }
 

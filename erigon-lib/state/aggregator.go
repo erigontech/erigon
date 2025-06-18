@@ -58,7 +58,6 @@ type Aggregator struct {
 	d               [kv.DomainLen]*Domain
 	iis             []*InvertedIndex
 	dirs            datadir.Dirs
-	tmpdir          string
 	aggregationStep uint64
 
 	dirtyFilesLock           sync.Mutex
@@ -105,7 +104,6 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 		ctxCancel:              ctxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -1669,7 +1667,7 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 		}
 	}
 	if fi < 0 {
-		return nil, fmt.Errorf("file not found")
+		return nil, fmt.Errorf("FileStream: file not found: %s, %d-%d", name, fromTxNum/at.StepSize(), toTxNum/at.StepSize())
 	}
 	r := dt.dataReader(dt.files[fi].src.decompressor)
 	return NewSegStreamReader(r, -1), nil
