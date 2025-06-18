@@ -201,48 +201,60 @@ mainloop:
 			}
 			// stop sending request
 			stopChan <- struct{}{}
+			// drain the result channel
+			results := []resultData{result}
+		drainLoop:
+			for {
+				select {
+				case result := <-resultChan:
+					results = append(results, result)
+				default:
+					break drainLoop
+				}
+			}
 			// process the result
-			for _, sidecar := range result.sidecars {
-				blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
-				if err != nil {
-					log.Debug("failed to get block root", "err", err)
-					d.rpc.BanPeer(result.pid)
-					continue
-				}
-				// check if the sidecar is expected
-				if _, ok := requestMap[blockRoot]; !ok {
-					log.Debug("received unexpected block root", "blockRoot", blockRoot)
-					d.rpc.BanPeer(result.pid)
-					continue
-				}
-				if _, ok := requestMap[blockRoot][sidecar.Index]; !ok {
-					//log.Debug("received unexpected column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-					continue
-				}
-				columnIndex := sidecar.Index
-				columnData := sidecar
+			for _, result := range results {
+				for _, sidecar := range result.sidecars {
+					blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+					if err != nil {
+						log.Debug("failed to get block root", "err", err)
+						d.rpc.BanPeer(result.pid)
+						continue
+					}
+					// check if the sidecar is expected
+					if _, ok := requestMap[blockRoot]; !ok {
+						log.Debug("received unexpected block root", "blockRoot", blockRoot)
+						d.rpc.BanPeer(result.pid)
+						continue
+					}
+					if _, ok := requestMap[blockRoot][sidecar.Index]; !ok {
+						continue
+					}
+					columnIndex := sidecar.Index
+					columnData := sidecar
 
-				if !VerifyDataColumnSidecar(sidecar) {
-					log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-					d.rpc.BanPeer(result.pid)
-					continue
+					if !VerifyDataColumnSidecar(sidecar) {
+						log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+						d.rpc.BanPeer(result.pid)
+						continue
+					}
+					if !VerifyDataColumnSidecarInclusionProof(sidecar) {
+						log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+						d.rpc.BanPeer(result.pid)
+						continue
+					}
+					if !VerifyDataColumnSidecarKZGProofs(sidecar) {
+						log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+						d.rpc.BanPeer(result.pid)
+						continue
+					}
+					// save the sidecar to the column storage
+					if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnData); err != nil {
+						log.Debug("failed to write column sidecar", "err", err)
+						continue
+					}
+					delete(requestMap[blockRoot], sidecar.Index)
 				}
-				if !VerifyDataColumnSidecarInclusionProof(sidecar) {
-					log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-					d.rpc.BanPeer(result.pid)
-					continue
-				}
-				if !VerifyDataColumnSidecarKZGProofs(sidecar) {
-					log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-					d.rpc.BanPeer(result.pid)
-					continue
-				}
-				// save the sidecar to the column storage
-				if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnData); err != nil {
-					log.Debug("failed to write column sidecar", "err", err)
-					continue
-				}
-				delete(requestMap[blockRoot], sidecar.Index)
 			}
 			// check if there are any remaining requests and send again if there are
 			r := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
