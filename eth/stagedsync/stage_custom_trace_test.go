@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -89,6 +90,10 @@ func TestCustomTraceDomainProgressConsistency(t *testing.T) {
 	ctx := context.Background()
 
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+
+	require.NoError(m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		return kvcfg.PersistReceipts.ForceWrite(tx, true)
+	}))
 
 	allDomains := []string{
 		kv.ReceiptDomain.String(),
