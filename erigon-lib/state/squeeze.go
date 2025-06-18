@@ -496,17 +496,17 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
-	//logger.Info("[squeeze] starting")
-	//logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
+	logger.Info("[squeeze] starting")
+	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
 
-	//actx := a.BeginFilesRo()
-	//defer actx.Close()
+	actx := a.BeginFilesRo()
+	defer actx.Close()
 
-	//if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
-	//	logger.Warn("[squeeze] failed", "err", err)
-	//	logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
-	//	return nil, err
-	//}
+	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
+		logger.Warn("[squeeze] failed", "err", err)
+		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
+		return nil, err
+	}
 
 	return latestRoot, nil
 }
