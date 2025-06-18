@@ -105,29 +105,24 @@ func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*
 	return nil
 
 	// try to request columns in batches of 8 blocks in parallel
-<<<<<<< HEAD
-	/*wg := sync.WaitGroup{}
-	for i := 0; i < len(blocks); i += 8 {
-		request, err := d.composeIdentifierRequest(ctx, blocks[i:min(i+8, len(blocks))])
-=======
-	wg := sync.WaitGroup{}
-	for i := 0; i < len(blocks); i += 16 {
-		request, err := d.composeIdentifierRequest(ctx, blocks[i:min(i+16, len(blocks))])
->>>>>>> b95667cdf3 (update)
-		if err != nil {
-			return err
+	/*
+		wg := sync.WaitGroup{}
+		for i := 0; i < len(blocks); i += 16 {
+			request, err := d.composeIdentifierRequest(ctx, blocks[i:min(i+16, len(blocks))])
+			if err != nil {
+				return err
+			}
+			if request.Len() == 0 {
+				continue
+			}
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				d.downloadFromPeers(ctx, request)
+			}(i)
 		}
-		if request.Len() == 0 {
-			continue
-		}
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			d.downloadFromPeers(ctx, request)
-		}(i)
-	}
-	wg.Wait()
-	return nil*/
+		wg.Wait()
+		return nil*/
 }
 
 func (d *peerdas) downloadFromPeers(ctx context.Context, request *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]) error {
