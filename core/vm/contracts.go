@@ -29,9 +29,9 @@ import (
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/holiman/uint256"
 
-	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -605,19 +605,18 @@ func newTwistPoint(blob []byte) (*bn256.G2, error) {
 // runBn256Add implements the Bn256Add precompile, referenced by both
 // Byzantium and Istanbul operations.
 func runBn256Add(input []byte) ([]byte, error) {
-	x := &bn254.G1Affine{}
-	_, err := x.SetBytes(getData(input, 0, 64))
+	x := bn254.G1Affine{}
+	err := bn256.UnmarshalCurvePoint(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
 
-	y := &bn254.G1Affine{}
-	_, err = y.SetBytes(getData(input, 64, 64))
+	y := bn254.G1Affine{}
+	err = bn256.UnmarshalCurvePoint(getData(input, 64, 64), &y)
 	if err != nil {
 		return nil, err
 	}
-	x = x.Add(x, y)
-	return x.Marshal(), nil
+	return bn256.MarshalCurvePoint(x.Add(&x, &y), make([]byte, 0, 64)), nil
 }
 
 // bn256Add implements a native elliptic curve point addition conforming to
@@ -649,13 +648,12 @@ func (c *bn256AddByzantium) Run(input []byte) ([]byte, error) {
 // runBn256ScalarMul implements the Bn256ScalarMul precompile, referenced by
 // both Byzantium and Istanbul operations.
 func runBn256ScalarMul(input []byte) ([]byte, error) {
-	x := &bn254.G1Affine{}
-	_, err := x.SetBytes(getData(input, 0, 64))
+	x := bn254.G1Affine{}
+	err := bn256.UnmarshalCurvePoint(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
-	x = x.ScalarMultiplication(x, new(big.Int).SetBytes(getData(input, 64, 32)))
-	return x.Marshal(), nil
+	return bn256.MarshalCurvePoint(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32))), make([]byte, 0, 64)), nil
 }
 
 // bn256ScalarMulIstanbul implements a native elliptic curve scalar
