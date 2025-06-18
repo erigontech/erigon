@@ -344,6 +344,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	start := time.Now()
 	defer func() { logger.Info("Commitment DONE", "duration", time.Since(start)) }()
 
+	originalCommitmentValuesTransform := a.commitmentValuesTransform
 	a.commitmentValuesTransform = false
 
 	var totalKeysCommitted uint64
@@ -499,6 +500,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
+	a.commitmentValuesTransform = originalCommitmentValuesTransform
+
 	if err = SqueezeCommitmentFiles(actx, logger); err != nil {
 		logger.Warn("squeezeCommitmentFiles failed", "err", err)
 		logger.Info("rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")

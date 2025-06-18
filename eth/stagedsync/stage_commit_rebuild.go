@@ -60,9 +60,18 @@ var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (common.Hash, error) {
 	txNumsReader := cfg.blockReader.TxnumReader(ctx)
-	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New())
+	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, true, &txNumsReader, log.New())
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
+	actx := a.BeginFilesRo()
+	defer actx.Close()
+	if err = SqueezeCommitmentFiles(actx, logger); err != nil {
+		logger.Warn("squeezeCommitmentFiles failed", "err", err)
+		logger.Info("rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
+		return nil, err
+	}
+
+	return latestRoot, nil
 	return common.BytesToHash(rh), err
 }
