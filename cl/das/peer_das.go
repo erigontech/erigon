@@ -133,6 +133,7 @@ func (d *peerdas) downloadFromPeers(ctx context.Context, request *solid.ListSSZ[
 		err      error
 	}
 
+	requestMapLock := sync.Mutex{}
 	requestMap := map[common.Hash]map[uint64]bool{} // blockRoot -> columnIndex set
 	for i := 0; i < request.Len(); i++ {
 		req := request.Get(i)
@@ -210,49 +211,62 @@ mainloop:
 				}
 			}
 			// process the result
+			wg := sync.WaitGroup{}
 			for _, result := range results {
 				for _, sidecar := range result.sidecars {
-					blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
-					if err != nil {
-						log.Debug("failed to get block root", "err", err)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-					// check if the sidecar is expected
-					if _, ok := requestMap[blockRoot]; !ok {
-						log.Debug("received unexpected block root", "blockRoot", blockRoot)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-					if _, ok := requestMap[blockRoot][sidecar.Index]; !ok {
-						continue
-					}
-					columnIndex := sidecar.Index
-					columnData := sidecar
+					wg.Add(1)
+					go func(sidecar *cltypes.DataColumnSidecar) {
+						defer wg.Done()
+						blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+						if err != nil {
+							log.Debug("failed to get block root", "err", err)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
+						// check if the sidecar is expected
+						requestMapLock.Lock()
+						if _, ok := requestMap[blockRoot]; !ok {
+							requestMapLock.Unlock()
+							return
+						}
+						if _, ok := requestMap[blockRoot][sidecar.Index]; !ok {
+							requestMapLock.Unlock()
+							return
+						}
+						requestMapLock.Unlock()
+						columnIndex := sidecar.Index
+						columnData := sidecar
 
-					if !VerifyDataColumnSidecar(sidecar) {
-						log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-					if !VerifyDataColumnSidecarInclusionProof(sidecar) {
-						log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-					if !VerifyDataColumnSidecarKZGProofs(sidecar) {
-						log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						d.rpc.BanPeer(result.pid)
-						continue
-					}
-					// save the sidecar to the column storage
-					if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnData); err != nil {
-						log.Debug("failed to write column sidecar", "err", err)
-						continue
-					}
-					delete(requestMap[blockRoot], sidecar.Index)
+						if !VerifyDataColumnSidecar(sidecar) {
+							log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
+						if !VerifyDataColumnSidecarInclusionProof(sidecar) {
+							log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
+						if !VerifyDataColumnSidecarKZGProofs(sidecar) {
+							log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
+						// save the sidecar to the column storage
+						if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnData); err != nil {
+							log.Debug("failed to write column sidecar", "err", err)
+							return
+						}
+						requestMapLock.Lock()
+						delete(requestMap[blockRoot], sidecar.Index)
+						if len(requestMap[blockRoot]) == 0 {
+							delete(requestMap, blockRoot)
+						}
+						requestMapLock.Unlock()
+					}(sidecar)
 				}
 			}
+			wg.Wait()
 			// check if there are any remaining requests and send again if there are
 			r := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
 			for blockRoot, columns := range requestMap {
