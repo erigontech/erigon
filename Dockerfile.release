@@ -95,7 +95,7 @@ ARG USER=erigon \
     EXPOSED_PORTS
 
 RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${TARGETARCH},target=/tmp/erigon \
-    apk add --no-cache curl ca-certificates tzdata libstdc++ && \
+    apk add --no-cache curl ca-certificates tzdata libstdc++ gmp && \
     addgroup ${GROUP} && \
     adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \

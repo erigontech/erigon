@@ -115,7 +115,7 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates gmp-dev; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
 
       - name: Build amd64
         env:
@@ -128,7 +128,7 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates gmp-dev; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
         id: built_tag_export
