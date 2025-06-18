@@ -236,7 +236,8 @@ func (d *DataColumnsByRootIdentifier) DecodeSSZ(buf []byte, _ int) error {
 
 func (d *DataColumnsByRootIdentifier) EncodingSizeSSZ() int {
 	d.tryInit()
-	return 32 + d.Columns.EncodingSizeSSZ()
+	// TODO: check the additional 4 bytes for the length of the columns
+	return 32 + 4 + d.Columns.EncodingSizeSSZ()
 }
 
 func (*DataColumnsByRootIdentifier) Clone() clonable.Clonable {
