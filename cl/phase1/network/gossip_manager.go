@@ -247,7 +247,6 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			if err := dataColumnSidecar.DecodeSSZ(data.Data, int(version)); err != nil {
 				return err
 			}
-			log.Debug("Received data column sidecar via gossip", "slot", dataColumnSidecar.SignedBlockHeader.Header.Slot, "column_index", dataColumnSidecar.Index)
 			return g.dataColumnSidecarService.ProcessMessage(ctx, data.SubnetId, dataColumnSidecar)
 		case gossip.IsTopicSyncCommittee(data.Name):
 			obj := &services.SyncCommitteeMessageForGossip{
