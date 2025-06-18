@@ -506,6 +506,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
 		return nil, err
 	}
+	actx.Close()
+	if err := a.BuildMissedAccessors(ctx); err != nil {
+		return nil, err
+	}
 
 	return latestRoot, nil
 }
