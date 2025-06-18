@@ -218,7 +218,7 @@ var Schema = SchemaGen{
 	},
 	CommitmentDomain: domainCfg{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys,
 
 		Accessors:           AccessorHashMap,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
