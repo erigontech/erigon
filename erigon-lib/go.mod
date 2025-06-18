@@ -43,7 +43,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/go-retryablehttp v0.7.7
-	github.com/holiman/bloomfilter/v2 v2.0.3
+	github.com/holiman/bloomfilter/v2 v2.0.0-00010101000000-000000000000
 	github.com/holiman/uint256 v1.3.2
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.18.0

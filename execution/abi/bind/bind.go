@@ -44,6 +44,7 @@ const (
 	LangGo Lang = iota
 	LangJava
 	LangObjC
+	LangGoArb // arbitrum variations of go bindings
 )
 
 const (
