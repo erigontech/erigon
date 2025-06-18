@@ -78,7 +78,7 @@ type peerAndBlocks struct {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
-	count := uint64(16)
+	count := uint64(512)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
