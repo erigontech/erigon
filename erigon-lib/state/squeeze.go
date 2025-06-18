@@ -331,7 +331,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 	ranges := make([]MergeRange, 0)
 	for fi, f := range sf.d[kv.AccountsDomain] {
-		logger.Info("shard %d - %d-%d %s", fi, f.startTxNum, f.endTxNum, f.decompressor.FileName())
+		logger.Info(fmt.Sprintf("[commitment_rebuild] shard %d - %d-%d %s", fi, f.startTxNum/a.StepSize(), f.endTxNum/a.StepSize(), f.decompressor.FileName()))
 		ranges = append(ranges, MergeRange{
 			from: f.startTxNum,
 			to:   f.endTxNum,
@@ -350,7 +350,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	var totalKeysCommitted uint64
 
 	for i, r := range ranges {
-		logger.Info("scanning keys", "range", r.String("", a.StepSize()), "shards", fmt.Sprintf("%d/%d", i+1, len(ranges))) //
+		logger.Info("[commitment_rebuild] scanning keys", "range", r.String("", a.StepSize()), "shards", fmt.Sprintf("%d/%d", i+1, len(ranges))) //
 
 		fromTxNumRange, toTxNumRange := r.FromTo()
 		lastTxnumInShard := toTxNumRange
