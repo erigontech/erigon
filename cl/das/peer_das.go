@@ -132,6 +132,10 @@ func (d *peerdas) downloadFromPeers(ctx context.Context, request *solid.ListSSZ[
 		err      error
 	}
 
+	// print the request
+	bytes, _ := request.MarshalJSON()
+	log.Debug("downloadFromPeers", "request", string(bytes))
+
 	requestMap := map[common.Hash]map[uint64]bool{} // blockRoot -> columnIndex set
 	for i := 0; i < request.Len(); i++ {
 		req := request.Get(i)
