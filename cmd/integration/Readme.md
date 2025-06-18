@@ -127,13 +127,22 @@ integration stage_exec
 # Option 2 is good 
 ```
 
-## How to re-generate some Domain/Index
+## How to re-gen CommitmentDomain
+
+```sh
+rm -rf datadir/heimdall
+rm -rf datadir/snapshots/*borch*
+# Start erigon, it will gen. Then:
+erigon seg integrity --datadir /erigon-data/ --check=BorCheckpoints
+```
+
+## How to re-generate optional Domain/Index
 
 ```sh
 # By parallel executing blocks on existing historical state. Can be 1 or many domains:
-erigon seg rm-state-snapshots --domain=rcache,logtopics,logaddrs,tracesfrom,tracesto
-integration stage_custom_trace --domain=rcache,logindex,traceindex --reset
-integration stage_custom_trace --domain=rcache,logindex,traceindex
+erigon seg rm-state-snapshots --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
+integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto --reset
+integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
 ```
 
 ## How to re-gen bor checkpoints
