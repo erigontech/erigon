@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -253,116 +252,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	if err = ExecBlockV3(s, u, txc, toBlock, ctx, cfg, s.CurrentSyncCycle.IsInitialCycle, logger, false); err != nil {
 		return err
 	}
-	return nil
-}
-
-func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (chan uint64, context.CancelFunc) {
-	const readAheadBlocks = 100
-	readAhead := make(chan uint64, readAheadBlocks)
-	g, gCtx := errgroup.WithContext(ctx)
-	for workerNum := 0; workerNum < workers; workerNum++ {
-		g.Go(func() (err error) {
-			var bn uint64
-			var ok bool
-			var tx kv.Tx
-			defer func() {
-				if tx != nil {
-					tx.Rollback()
-				}
-				if rec := recover(); rec != nil {
-					err = fmt.Errorf("%s, %s", rec, dbg.Stack())
-				}
-			}()
-
-			for i := 0; ; i++ {
-				select {
-				case bn, ok = <-readAhead:
-					if !ok {
-						return
-					}
-				case <-gCtx.Done():
-					return gCtx.Err()
-				}
-
-				if i%100 == 0 {
-					if tx != nil {
-						tx.Rollback()
-					}
-					tx, err = cfg.db.BeginRo(ctx)
-					if err != nil {
-						return err
-					}
-				}
-
-				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks); err != nil {
-					return err
-				}
-			}
-		})
-	}
-	return readAhead, func() {
-		close(readAhead)
-		_ = g.Wait()
-	}
-}
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64) error {
-	block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return err
-	}
-	if block == nil {
-		return nil
-	}
-	_, _ = cfg.engine.Author(block.HeaderNoCopy()) // Bor consensus: this calc is heavy and has cache
-
-	ttx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return nil
-	}
-
-	stateReader := state.NewReaderV3(ttx)
-	senders := block.Body().SendersFromTxs()
-
-	for _, sender := range senders {
-		a, _ := stateReader.ReadAccountData(sender)
-		if a == nil {
-			continue
-		}
-
-		//Code domain using .bt index - means no false-positives
-		if code, _ := stateReader.ReadAccountCode(sender, 0); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
-	}
-
-	for _, txn := range block.Transactions() {
-		to := txn.GetTo()
-		if to != nil {
-			a, _ := stateReader.ReadAccountData(*to)
-			if a == nil {
-				continue
-			}
-			//if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
-			//	reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
-			//}
-			if code, _ := stateReader.ReadAccountCode(*to, 0); len(code) > 0 {
-				_, _ = code[0], code[len(code)-1]
-			}
-
-			for _, list := range txn.GetAccessList() {
-				stateReader.ReadAccountData(list.Address)
-				if len(list.StorageKeys) > 0 {
-					for _, slot := range list.StorageKeys {
-						stateReader.ReadAccountStorage(list.Address, 0, &slot)
-					}
-				}
-			}
-			//TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
-		}
-
-	}
-	_, _ = stateReader.ReadAccountData(block.Coinbase())
-
 	return nil
 }
 

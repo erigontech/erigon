@@ -294,7 +294,16 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 	defer applyWorker.LogStats()
 	applyWorker.ResetTx(tx)
 
+	//logEvery := time.NewTicker(1 * time.Second)
+	//defer logEvery.Stop()
+
 	for outputTxNum.Load() <= toTxNum {
+		//select {
+		//case <-logEvery.C:
+		//	log.Info("[dbg] out", "chanLen", rws.ChanLen(), "chanCapacity", rws.ChanCapacity(), "heapLen", rws.Len(), "heapCapacity", rws.Capacity())
+		//default:
+		//}
+
 		err = rws.DrainNonBlocking(ctx)
 		if err != nil {
 			return err
@@ -307,6 +316,7 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 		if processedTxNum > 0 {
 			outputTxNum.Store(processedTxNum)
 		}
+
 	}
 	//if outputTxNum.Load() != toTxNum {
 	//	return fmt.Errorf("not all txnums proceeded: toTxNum=%d, outputTxNum=%d", toTxNum, outputTxNum.Load())
@@ -403,7 +413,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		if err != nil {
 			return err
 		}
-		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%dk-%dk", fromBlock/1_000, toBlock/1_000), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
+		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%.1fm-%.1fm", float64(fromBlock)/1_000_000, float64(toBlock)/1_000_000), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -433,6 +443,12 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		workersExited.Store(true)
 	}()
 
+	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
+	// can't use OS-level ReadAhead - because Data >> RAM
+	// it also warmsup state a bit - by touching senders/coninbase accounts and code
+	readAhead, clean := BlocksReadAhead(ctx, 4, cfg.ChainDB, cfg.Engine, cfg.BlockReader)
+	defer clean()
+
 	inputTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return err
@@ -440,6 +456,11 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 	for blockNum := fromBlock; blockNum <= toBlock && !workersExited.Load(); blockNum++ {
+		select {
+		case readAhead <- blockNum:
+		default:
+		}
+
 		var b *types.Block
 		b, err = blockWithSenders(ctx, nil, tx, br, blockNum)
 		if err != nil {
@@ -500,7 +521,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 			//select {
 			//case <-logEvery.C:
-			//	log.Info("[dbg] in", "in", in.Len())
+			//	log.Info("[dbg] in", "len", in.Len(), "cap", in.Capacity())
 			//default:
 			//}
 		}

@@ -349,8 +349,8 @@ func (q *QueueWithRetry) Close() {
 
 // ResultsQueue thread-safe priority-queue of execution results
 type ResultsQueue struct {
-	limit  int
-	closed bool
+	heapLimit int
+	closed    bool
 
 	resultCh chan *TxTask
 	iter     *ResultsQueueIter
@@ -363,10 +363,10 @@ type ResultsQueue struct {
 
 func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
 	r := &ResultsQueue{
-		results:  &TxTaskQueue{},
-		limit:    heapLimit,
-		resultCh: make(chan *TxTask, resultChannelLimit),
-		ticker:   time.NewTicker(2 * time.Second),
+		results:   &TxTaskQueue{},
+		heapLimit: heapLimit,
+		resultCh:  make(chan *TxTask, resultChannelLimit),
+		ticker:    time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
 	r.iter = &ResultsQueueIter{q: r, results: r.results}
@@ -402,7 +402,7 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (err erro
 				continue
 			}
 			heap.Push(q.results, txTask)
-			if q.results.Len() > q.limit {
+			if q.results.Len() > q.heapLimit {
 				return nil
 			}
 		default: // we are inside mutex section, can't block here
@@ -496,13 +496,16 @@ func (q *ResultsQueue) Close() {
 }
 func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
 func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }
-func (q *ResultsQueue) Limit() int       { return q.limit }
+func (q *ResultsQueue) Limit() int       { return q.heapLimit }
 func (q *ResultsQueue) Len() (l int) {
 	q.m.Lock()
 	l = q.results.Len()
 	q.m.Unlock()
 	return l
 }
+func (q *ResultsQueue) Capacity() int            { return q.heapLimit }
+func (q *ResultsQueue) ChanLen() int             { return len(q.resultCh) }
+func (q *ResultsQueue) ChanCapacity() int        { return cap(q.resultCh) }
 func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].TxNum }
 func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
 func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }
