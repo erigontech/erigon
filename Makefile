@@ -319,6 +319,9 @@ kurtosis-pectra-assertoor:	check-kurtosis
 kurtosis-regular-assertoor:	check-kurtosis 
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
 
+kurtosis-fusaka-assertoor: check-kurtosis
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/fusaka.io")
+
 kurtosis-cleanup:
 	@echo "Currently Running Enclaves: "
 	@kurtosis enclave ls
@@ -341,6 +344,13 @@ lint:
 	@./erigon-lib/tools/mod_tidy_check.sh
 	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
 	@cd p2p && ./../erigon-lib/tools/mod_tidy_check.sh
+
+## tidy:                              `go mod tidy`
+tidy:
+	@cd erigon-lib && go mod tidy
+	@cd erigon-db && go mod tidy
+	@cd p2p && go mod tidy
+	@go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:

@@ -231,7 +231,7 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false)
+		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true)
 		Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.Len(Ranges, 3)
 		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
@@ -388,7 +388,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
 	os.Remove(filepath.Join(s.Dir(), list[15].Name()))
 
-	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
 	require.NoError(s.RemoveOverlaps())
 
 	list, err = snaptype.Segments(s.Dir())
@@ -432,7 +432,7 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	require.NoError(err)
 	require.Equal(4, len(list))
 
-	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
 	require.NoError(s.RemoveOverlaps())
 
 	list, err = snaptype.Segments(s.Dir())
@@ -500,7 +500,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.OpenFolder()
 		require.NoError(err)
 		require.NotNil(s.visible[coresnaptype.Enums.Headers])
-		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false)
+		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true)
 		// require.Equal(1, len(getSegs(coresnaptype.Enums.Headers]))
 		s.Close()
 
@@ -564,6 +564,12 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v1.0-1-2-bodies.seg":    &fstest.MapFile{},
 		"v1-accounts.24-28.ef":   &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef": &fstest.MapFile{},
+		"salt-blocks.txt":        &fstest.MapFile{},
+		"v1.0-022695-022696-transactions-to-block.idx": &fstest.MapFile{},
+		"v1-022695-022696-transactions-to-block.idx":   &fstest.MapFile{},
+		"preverified.toml":                             &fstest.MapFile{},
+		"idx/v1-tracesto.40-44.ef":                     &fstest.MapFile{},
+		"v1.0-021700-021800-bodies.seg.torrent":        &fstest.MapFile{},
 	}
 	stat := func(name string) string {
 		s, err := fs.Stat(name)
@@ -589,26 +595,56 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(f.Type.Enum(), coresnaptype.Bodies.Enum())
 	require.Equal(1_000, int(f.From))
 	require.Equal(2_000, int(f.To))
+	require.Equal("bodies", f.TypeString)
 
 	var e3 bool
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(f.TypeString, coresnaptype.Indexes.TxnHash2BlockNum.Name)
+	require.Equal(22695000, int(f.From))
+	require.Equal(22696000, int(f.To))
+
+	f, e3, ok = snaptype.ParseFileName("", stat("v1-022695-022696-transactions-to-block.idx"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(f.TypeString, coresnaptype.Indexes.TxnHash2BlockNum.Name)
+	require.Equal(22695000, int(f.From))
+	require.Equal(22696000, int(f.To))
+
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-1-2-bodies.seg"))
 	require.True(ok)
 	require.False(e3)
 	require.Equal(f.Type.Enum(), coresnaptype.Bodies.Enum())
 	require.Equal(1_000, int(f.From))
 	require.Equal(2_000, int(f.To))
+	require.Equal("bodies", f.TypeString)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-accounts.24-28.ef"))
 	require.True(ok)
 	require.True(e3)
 	require.Equal(24, int(f.From))
 	require.Equal(28, int(f.To))
+	require.Equal("accounts", f.TypeString)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1-accounts.24-28.ef"))
 	require.True(ok)
 	require.True(e3)
 	require.Equal(24, int(f.From))
 	require.Equal(28, int(f.To))
+	require.Equal("accounts", f.TypeString)
+
+	f, e3, ok = snaptype.ParseFileName("", stat("salt-blocks.txt"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal("salt", f.TypeString)
+	require.Equal("domain", f.Type.Name())
+
+	f, e3, ok = snaptype.ParseFileName("", stat("idx/v1-tracesto.40-44.ef"))
+	require.True(ok)
+	require.True(e3)
+	require.Equal("tracesto", f.TypeString)
+	//require.Equal("tracesto", f.Type.Name())
 }
 
 func TestCalculateVisibleSegments(t *testing.T) {

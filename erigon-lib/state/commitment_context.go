@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
 )
 
 type SharedDomainsCommitmentContext struct {
@@ -181,10 +182,10 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if ok {
-		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
+		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, codeReads, expectedRoot, logPrefix)
 	}
 
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")

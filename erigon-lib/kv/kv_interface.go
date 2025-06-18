@@ -548,9 +548,6 @@ type TemporalTx interface {
 	TemporalGetter
 	WithFreezeInfo
 
-	// return the earliest known txnum in history of a given domain
-	HistoryStartFrom(domainName Domain) uint64
-
 	// DomainGetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
 	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
@@ -577,6 +574,9 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+
+	AggForkablesTx(ForkableId) any // any forkableId, returns that group
+	Unmarked(ForkableId) UnmarkedTx
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -586,8 +586,17 @@ type TemporalDebugTx interface {
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
 	DomainFiles(domain ...Domain) VisibleFiles
-
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
+
+	// return the earliest known txnum in history of a given domain
+	HistoryStartFrom(domainName Domain) uint64
+
+	DomainProgress(domain Domain) (txNum uint64)
+	IIProgress(name InvertedIdx) (txNum uint64)
+	StepSize() uint64
+
+	CanUnwindToBlockNum() (uint64, error)
+	CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error)
 }
 
 type TemporalDebugDB interface {
@@ -611,6 +620,8 @@ type TemporalRwTx interface {
 	RwTx
 	TemporalTx
 	TemporalPutDel
+
+	UnmarkedRw(ForkableId) UnmarkedRwTx
 
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)

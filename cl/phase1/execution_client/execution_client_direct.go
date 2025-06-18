@@ -113,8 +113,8 @@ func (cc *ExecutionClientDirect) NewPayload(
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
-func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized common.Hash, head common.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
-	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, head, finalized)
+func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
+	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}

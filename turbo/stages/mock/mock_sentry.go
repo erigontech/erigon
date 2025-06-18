@@ -50,7 +50,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -128,6 +127,7 @@ type MockSentry struct {
 	TxPoolGrpcServer txpoolproto.TxpoolServer
 
 	HistoryV3      bool
+	cfg            ethconfig.Config
 	BlockSnapshots *freezeblocks.RoSnapshots
 	BlockReader    services.FullBlockReader
 	ReceiptsReader *receipts.Generator
@@ -276,6 +276,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
+	cfg.Genesis = gspec
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -315,6 +316,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		BlockReader:    br,
 		ReceiptsReader: receipts.NewGenerator(br, engine),
 		HistoryV3:      true,
+		cfg:            cfg,
 	}
 
 	if tb != nil {
@@ -584,8 +586,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		logger, stages.ModeBlockProduction,
 	)
 
-	cfg.Genesis = gspec
-
 	mock.StreamWg.Add(1)
 	go mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
@@ -656,6 +656,23 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
 }
 
+func MockWithTxPoolOsaka(t *testing.T) *MockSentry {
+	funds := big.NewInt(1 * common.Ether)
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	chainConfig := chain.AllProtocolChanges
+	chainConfig.OsakaTime = big.NewInt(0)
+	gspec := &types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			address: {Balance: funds},
+		},
+	}
+
+	checkStateRoot := true
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
+}
+
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -700,6 +717,7 @@ func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
 	return chain.NumberOfPoWBlocks()
 }
 
+func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
 func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n == 0 {
@@ -869,7 +887,7 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 }
 
 func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
-	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ms.Ctx, ms.BlockReader)))
+	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, ms.BlockReader.TxnumReader(ms.Ctx))
 	if err != nil {
 		panic(err)
 	}

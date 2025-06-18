@@ -610,7 +610,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
-			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger)
+			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, heimdall.WithApiVersioner(ctx))
 		} else {
 			heimdallClient = heimdall.NewIdleClient(config.Miner)
 		}
@@ -1906,16 +1906,9 @@ func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Con
 }
 
 func setDefaultMinerGasLimit(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
-	if chainConfig.Bor != nil {
-		if config.Miner.GasLimit == nil {
-			gasLimit := ethconfig.BorDefaultMinerGasLimit
-			config.Miner.GasLimit = &gasLimit
-		}
-	} else {
-		if config.Miner.GasLimit == nil {
-			gasLimit := ethconfig.DefaultMinerGasLimit
-			config.Miner.GasLimit = &gasLimit
-		}
+	if config.Miner.GasLimit == nil {
+		gasLimit := ethconfig.DefaultMinerGasLimitByChain(config)
+		config.Miner.GasLimit = &gasLimit
 	}
 }
 

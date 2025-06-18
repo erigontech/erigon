@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tip-tracking-test:
+  mainnet-tip-tracking-test:
     runs-on: [self-hosted, qa, Erigon3]
     timeout-minutes: 600
     env:
@@ -78,6 +78,12 @@ jobs:
           echo "Error detected during tests"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Upload Downloader Torrent Client Status
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        path: torrent-client-status.txt
 
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'

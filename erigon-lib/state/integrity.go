@@ -86,14 +86,14 @@ func (dt *DomainRoTx) IntegrityDomainFilesWithKey(k []byte) (res []string, err e
 	return res, nil
 }
 func (dt *DomainRoTx) IntegrityKey(k []byte) error {
-	dt.ht.iit.ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	dt.ht.iit.ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
 				continue
 			}
 			accessor := item.index
 			if accessor == nil {
-				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
+				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.aggStep, item.endTxNum/dt.aggStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)

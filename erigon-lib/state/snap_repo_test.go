@@ -49,7 +49,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 	require.NoError(t, err)
 
 	// check dirty files
-	repo.dirtyFiles.Walk(func(items []*filesItem) bool {
+	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
@@ -103,7 +103,7 @@ func TestOpenFolder_CodeII(t *testing.T) {
 	require.NoError(t, err)
 
 	// check dirty files
-	repo.dirtyFiles.Walk(func(items []*filesItem) bool {
+	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
@@ -166,6 +166,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
+	comp.DisableFsync()
 	if err = comp.AddWord([]byte("word")); err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +378,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 
 	require.Equal(t, 2*stepSize, ccf[1].endTxNum)
 
-	mergeFile, found := accountsR.dirtyFiles.Get(&filesItem{startTxNum: 0, endTxNum: 2 * stepSize})
+	mergeFile, found := accountsR.dirtyFiles.Get(&FilesItem{startTxNum: 0, endTxNum: 2 * stepSize})
 	require.True(t, found)
 	require.Equal(t, uint64(0), mergeFile.startTxNum)
 	require.Equal(t, 2*stepSize, mergeFile.endTxNum)
@@ -398,7 +399,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	require.Equal(t, uint64(0), ccf[0].startTxNum)
 	require.Equal(t, 2*stepSize, ccf[0].endTxNum)
 
-	cMergeFile, found := commitmentR.dirtyFiles.Get(&filesItem{startTxNum: 0, endTxNum: 2 * stepSize})
+	cMergeFile, found := commitmentR.dirtyFiles.Get(&FilesItem{startTxNum: 0, endTxNum: 2 * stepSize})
 	require.True(t, found)
 	require.Equal(t, uint64(0), cMergeFile.startTxNum)
 	require.Equal(t, 2*stepSize, cMergeFile.endTxNum)
@@ -625,6 +626,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
 			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
+			seg.DisableFsync()
 			if err = seg.AddWord([]byte("word")); err != nil {
 				t.Fatal(err)
 			}
@@ -641,6 +643,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".bt") {
 			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
+			seg2.DisableFsync()
 			if err = seg2.AddWord([]byte("key")); err != nil {
 				t.Fatal(err)
 			}
@@ -652,7 +655,8 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			seg3, err := seg.NewDecompressor(filename + ".sample")
 			require.NoError(t, err)
 
-			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, seg3, seg.CompressNone, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), false, AccessorBTree|AccessorExistence)
+			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
+			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, AccessorBTree|AccessorExistence)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -669,6 +673,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".kvei") {
 			filter, err := existence.NewFilter(0, filename)
 			require.NoError(t, err)
+			filter.DisableFsync()
 			require.NoError(t, filter.Build())
 			filter.Close()
 
@@ -693,7 +698,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 				t.Fatal(err)
 			}
 			defer rs.Close()
-
+			rs.DisableFsync()
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)
 			}
@@ -745,7 +750,7 @@ func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64
 	t.Helper()
 	stepSize := repo.stepSize
 	startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
-	_, found := repo.dirtyFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
+	_, found := repo.dirtyFiles.Get(&FilesItem{startTxNum: startTxNum, endTxNum: endTxNum})
 	require.Equal(t, found, isFound)
 
 	_, err := os.Stat(repo.cfg.Schema.DataFile(version.V1_0, ee.RootNum(startTxNum), ee.RootNum(endTxNum)))

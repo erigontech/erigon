@@ -12,20 +12,22 @@ replace (
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250501041114-4a48ac232c83
-	github.com/erigontech/interfaces v0.0.0-20250602082224-daf6311709c1
+	github.com/erigontech/interfaces v0.0.0-20250617105115-44025d7ddebf
 	github.com/erigontech/mdbx-go v0.39.8
 	github.com/erigontech/secp256k1 v1.2.0
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.4.5
+	github.com/RoaringBitmap/roaring/v2 v2.5.0
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.15.2
 	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
+	github.com/consensys/gnark-crypto v0.18.0
 	github.com/containerd/cgroups/v3 v3.0.3
+	github.com/crate-crypto/go-eth-kzg v1.3.0
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
 	github.com/crate-crypto/go-kzg-4844 v1.1.0
 	github.com/davecgh/go-spew v1.1.1
@@ -50,8 +52,8 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
-	github.com/pelletier/go-toml/v2 v2.2.3
-	github.com/prometheus/client_golang v1.21.1
+	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.1
 	github.com/protolambda/ztyp v0.2.2
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
@@ -63,13 +65,13 @@ require (
 	github.com/ugorji/go/codec v1.2.12
 	github.com/valyala/fastjson v1.6.4
 	go.uber.org/mock v0.5.0
-	golang.org/x/crypto v0.38.0
-	golang.org/x/exp v0.0.0-20250506013437-ce4c2cf36ca6
-	golang.org/x/net v0.40.0
-	golang.org/x/sync v0.14.0
+	golang.org/x/crypto v0.39.0
+	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476
+	golang.org/x/net v0.41.0
+	golang.org/x/sync v0.15.0
 	golang.org/x/sys v0.33.0
-	golang.org/x/time v0.11.0
-	google.golang.org/grpc v1.71.1
+	golang.org/x/time v0.12.0
+	google.golang.org/grpc v1.72.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
 	google.golang.org/protobuf v1.36.6
 )
@@ -87,9 +89,9 @@ require (
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
-	golang.org/x/mod v0.24.0 // indirect
-	golang.org/x/tools v0.33.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
+	golang.org/x/mod v0.25.0 // indirect
+	golang.org/x/tools v0.34.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect
 	modernc.org/libc v1.55.3 // indirect
 	modernc.org/memory v1.8.0 // indirect
 	modernc.org/sqlite v1.33.1 // indirect
@@ -118,8 +120,6 @@ require (
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
-	github.com/consensys/bavard v0.1.29 // indirect
-	github.com/consensys/gnark-crypto v0.17.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -132,18 +132,17 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/huandu/xstrings v1.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
 	github.com/pion/dtls/v2 v2.2.4 // indirect
 	github.com/pion/ice/v2 v2.2.6 // indirect
-	github.com/pion/interceptor v0.1.11 // indirect
-	github.com/pion/logging v0.2.2 // indirect
+	github.com/pion/interceptor v0.1.40 // indirect
+	github.com/pion/logging v0.2.3 // indirect
 	github.com/pion/mdns v0.0.5 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.9 // indirect
-	github.com/pion/rtp v1.7.13 // indirect
+	github.com/pion/rtcp v1.2.15 // indirect
+	github.com/pion/rtp v1.8.18 // indirect
 	github.com/pion/sctp v1.8.2 // indirect
 	github.com/pion/sdp/v3 v3.0.5 // indirect
 	github.com/pion/srtp/v2 v2.0.9 // indirect
@@ -166,9 +165,8 @@ require (
 	go.opentelemetry.io/otel v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
 	go.uber.org/goleak v1.3.0 // indirect
-	golang.org/x/text v0.25.0 // indirect
+	golang.org/x/text v0.26.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
-	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )

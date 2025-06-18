@@ -139,6 +139,22 @@ func DecodeBytes(b []byte, val interface{}) error {
 	return nil
 }
 
+func DecodeBytesPartial(b []byte, val interface{}) error {
+	r := (*sliceReader)(&b)
+
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to type convert to Stream pointer")
+	}
+	defer streamPool.Put(stream)
+
+	stream.Reset(r, uint64(len(b)))
+	if err := stream.Decode(val); err != nil {
+		return err
+	}
+	return nil
+}
+
 type decodeError struct {
 	msg string
 	typ reflect.Type

@@ -22,24 +22,25 @@ import (
 	"fmt"
 	"math"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 const (
@@ -183,9 +183,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		domains = txc.Doms
 	}
 
-	rs := state.NewParallelExecutionState(domains, txc.Tx, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
+	txNumsReader := br.TxnumReader(ctx)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := txNumsReader.Min(tx, u.UnwindPoint+1)
@@ -219,7 +217,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			}
 		}
 	}
-	if err := rs.Unwind(ctx, tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
+	if err := unwindExec3State(ctx, tx, domains, u.UnwindPoint, txNum, accumulator, changeset, logger); err != nil {
 		return fmt.Errorf("ParallelExecutionState.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
@@ -227,6 +225,92 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	}
 	return nil
 }
+
+var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
+
+func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *libstate.SharedDomains,
+	blockUnwindTo, txUnwindTo uint64,
+	accumulator *shards.Accumulator,
+	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
+	st := time.Now()
+	defer mxState3Unwind.ObserveDuration(st)
+	var currentInc uint64
+
+	//TODO: why we don't call accumulator.ChangeCode???
+	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if len(k) == length.Addr {
+			if len(v) > 0 {
+				var acc accounts.Account
+				if err := accounts.DeserialiseV3(&acc, v); err != nil {
+					return fmt.Errorf("%w, %x", err, v)
+				}
+				var address common.Address
+				copy(address[:], k)
+
+				newV := accounts.SerialiseV3(&acc)
+				if accumulator != nil {
+					accumulator.ChangeAccount(address, acc.Incarnation, newV)
+				}
+			} else {
+				var address common.Address
+				copy(address[:], k)
+				if accumulator != nil {
+					accumulator.DeleteAccount(address)
+				}
+			}
+			return nil
+		}
+
+		var address common.Address
+		var location common.Hash
+		copy(address[:], k[:length.Addr])
+		copy(location[:], k[length.Addr:])
+		if accumulator != nil {
+			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
+		}
+		return nil
+	}
+
+	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	defer stateChanges.Close()
+	stateChanges.SortAndFlushInBackground(true)
+
+	accountDiffs := changeset[kv.AccountsDomain]
+	for _, kv := range accountDiffs {
+		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key)[:length.Addr], kv.Value); err != nil {
+			return err
+		}
+	}
+	storageDiffs := changeset[kv.StorageDomain]
+	for _, kv := range storageDiffs {
+		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
+			return err
+		}
+	}
+
+	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+
+	//_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment")
+	//if err != nil {
+	//	return err
+	//}
+	if err := sd.Flush(ctx, tx); err != nil {
+		return err
+	}
+
+	if err := tx.Unwind(ctx, txUnwindTo, changeset); err != nil {
+		return err
+	}
+
+	sd.ClearRam(true)
+	sd.SetTxNum(txUnwindTo)
+	sd.SetBlockNum(blockUnwindTo)
+	return nil
+}
+
+func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgress uint64, err error) {
 	if tx != nil {
@@ -260,113 +344,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	return nil
 }
 
-func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, histV3 bool) (chan uint64, context.CancelFunc) {
-	const readAheadBlocks = 100
-	readAhead := make(chan uint64, readAheadBlocks)
-	g, gCtx := errgroup.WithContext(ctx)
-	for workerNum := 0; workerNum < workers; workerNum++ {
-		g.Go(func() (err error) {
-			var bn uint64
-			var ok bool
-			var tx kv.Tx
-			defer func() {
-				if tx != nil {
-					tx.Rollback()
-				}
-			}()
-
-			for i := 0; ; i++ {
-				select {
-				case bn, ok = <-readAhead:
-					if !ok {
-						return
-					}
-				case <-gCtx.Done():
-					return gCtx.Err()
-				}
-
-				if i%100 == 0 {
-					if tx != nil {
-						tx.Rollback()
-					}
-					tx, err = cfg.db.BeginRo(ctx)
-					if err != nil {
-						return err
-					}
-				}
-
-				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks, histV3); err != nil {
-					return err
-				}
-			}
-		})
-	}
-	return readAhead, func() {
-		close(readAhead)
-		_ = g.Wait()
-	}
-}
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64, histV3 bool) error {
-	block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return err
-	}
-	if block == nil {
-		return nil
-	}
-	_, _ = cfg.engine.Author(block.HeaderNoCopy()) // Bor consensus: this calc is heavy and has cache
-
-	ttx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return nil
-	}
-
-	stateReader := state.NewReaderV3(ttx)
-	senders := block.Body().SendersFromTxs()
-
-	for _, sender := range senders {
-		a, _ := stateReader.ReadAccountData(sender)
-		if a == nil {
-			continue
-		}
-
-		//Code domain using .bt index - means no false-positives
-		if code, _ := stateReader.ReadAccountCode(sender); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
-	}
-
-	for _, txn := range block.Transactions() {
-		to := txn.GetTo()
-		if to != nil {
-			a, _ := stateReader.ReadAccountData(*to)
-			if a == nil {
-				continue
-			}
-			//if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
-			//	reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
-			//}
-			if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
-				_, _ = code[0], code[len(code)-1]
-			}
-
-			for _, list := range txn.GetAccessList() {
-				stateReader.ReadAccountData(list.Address)
-				if len(list.StorageKeys) > 0 {
-					for _, slot := range list.StorageKeys {
-						stateReader.ReadAccountStorage(list.Address, slot)
-					}
-				}
-			}
-			//TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
-		}
-
-	}
-	_, _ = stateReader.ReadAccountData(block.Coinbase())
-
-	return nil
-}
-
 func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
@@ -374,16 +351,17 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	}
 	useExternalTx := txc.Tx != nil
 	if !useExternalTx {
-		txc.Tx, err = cfg.db.BeginRw(ctx)
+		tx, err := cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
-		defer txc.Tx.Rollback()
+		defer tx.Rollback()
+		txc.SetTx(tx)
 	}
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	unwindToLimit, ok, err := libstate.AggTx(txc.Tx).CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Tx)
+	unwindToLimit, ok, err := txc.Ttx.Debug().CanUnwindBeforeBlockNum(u.UnwindPoint)
 	if err != nil {
 		return err
 	}

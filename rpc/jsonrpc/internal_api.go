@@ -39,7 +39,7 @@ func (api *InternalAPIImpl) GetTxNumInfo(ctx context.Context, txNum uint64) (*Tx
 	}
 	defer tx.Rollback()
 
-	ok, bn, err := api._txNumReader.FindBlockNum(tx, txNum)
+	bn, ok, err := api._txNumReader.FindBlockNum(tx, txNum)
 	if err != nil {
 		return nil, err
 	}

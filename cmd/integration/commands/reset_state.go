@@ -61,7 +61,7 @@ var cmdResetState = &cobra.Command{
 		defer sn.Close()
 		defer borSn.Close()
 
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn) }); err != nil {
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -77,7 +77,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn) }); err != nil {
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -115,7 +115,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) error {
+func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -183,6 +183,26 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.
 		fmt.Fprintf(w, "in db: first header %d, last header %d, first body %d, last body %d\n", fstHeader, lstHeader, fstBody, lstBody)
 	}
 
+	fmt.Fprintf(w, "--\n\n\n")
+	w.Flush()
+
+	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
+	fmt.Fprintf(w, "domain and ii progress\n\n")
+	fmt.Fprintf(w, "Note: progress for commitment domain (in terms of txNum) is not presented.\n")
+	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
+
+	dbg := tx.Debug()
+	stepSize := dbg.StepSize()
+	for i := 0; i < int(kv.DomainLen); i++ {
+		d := kv.Domain(i)
+		txNum := dbg.DomainProgress(d)
+		step := txNum / stepSize
+		if d == kv.CommitmentDomain {
+			fmt.Fprintf(w, "%s \t\t - \t\t - \t\t %d\n", d.String(), step)
+			continue
+		}
+		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), dbg.HistoryStartFrom(d), txNum, step)
+	}
 	fmt.Fprintf(w, "--\n")
 
 	//fmt.Printf("==== state =====\n")

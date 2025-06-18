@@ -139,18 +139,26 @@ func (cs checkpoints) Swap(i, j int) {
 	cs[i], cs[j] = cs[j], cs[i]
 }
 
-type CheckpointResponse struct {
+type CheckpointResponseV1 struct {
 	Height string     `json:"height"`
 	Result Checkpoint `json:"result"`
+}
+
+type CheckpointResponseV2 struct {
+	Checkpoint Checkpoint `json:"checkpoint"`
 }
 
 type CheckpointCount struct {
 	Result int64 `json:"result"`
 }
 
-type CheckpointCountResponse struct {
+type CheckpointCountResponseV1 struct {
 	Height string          `json:"height"`
 	Result CheckpointCount `json:"result"`
+}
+
+type CheckpointCountResponseV2 struct {
+	AckCount string `json:"ack_count"`
 }
 
 type CheckpointListResponse struct {
