@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -108,11 +110,21 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	if c.ethClock.GetCurrentEpoch() < c.beaconConfig.FuluForkEpoch {
 		return nil
 	}
-
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(c.beaconConfig.MaxRequestBlocksDeneb))
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.FuluVersion); err != nil {
+	if err, raw := ssz_snappy.DecodeAndReadNoForkDigestDebug(s, req, clparams.FuluVersion); err != nil {
 		return err
+	} else {
+		// check our encoding is correct
+		ourRaw, err := req.EncodeSSZ(nil)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(raw, ourRaw) {
+			log.Error("encoding is not correct", "raw", common.Bytes2Hex(raw), "ourRaw", common.Bytes2Hex(ourRaw))
+		}
 	}
+	bytes, err := req.MarshalJSON()
+	log.Debug("dataColumnSidecarsByRootHandler", "req", string(bytes))
 	curSlot := c.ethClock.GetCurrentSlot()
 	curEpoch := curSlot / c.beaconConfig.SlotsPerEpoch
 

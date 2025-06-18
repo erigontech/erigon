@@ -106,6 +106,30 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	return nil
 }
 
+func DecodeAndReadNoForkDigestDebug(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) (error, []byte) {
+	// Read varint for length of message.
+	encodedLn, _, err := ReadUvarint(r)
+	if err != nil {
+		return fmt.Errorf("unable to read varint from message prefix: %v", err), nil
+	}
+	if encodedLn > uint64(16*datasize.MB) {
+		return errors.New("payload too big"), nil
+	}
+
+	sr := snappy.NewReader(r)
+	raw := make([]byte, encodedLn)
+	if _, err := io.ReadFull(sr, raw); err != nil {
+		// fetch struct name of val
+		return fmt.Errorf("unable to readPacket: %w", err), nil
+	}
+
+	err = val.DecodeSSZ(raw, int(version))
+	if err != nil {
+		return fmt.Errorf("enable to unmarshall message: %v", err), nil
+	}
+	return nil, raw
+}
+
 func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	currByte := make([]byte, 1)
 	for shift := uint(0); shift < 64; shift += 7 {
