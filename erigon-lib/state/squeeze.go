@@ -473,7 +473,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			rhx = hex.EncodeToString(rebuiltCommit.RootHash)
 			latestRoot = rebuiltCommit.RootHash
 		}
-		logger.Info("finished commitment range", "stateRoot", rhx, "range", r.String("", a.StepSize()),
+		logger.Info("[rebuild_commitment] finished range", "stateRoot", rhx, "range", r.String("", a.StepSize()),
 			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
 
 		for {
@@ -488,23 +488,23 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 
 	}
-	logger.Info("Commitment rebuild", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
+	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
 
-	logger.Info("Squeezing commitment files")
+	logger.Info("[squeeze] starting")
 	a.commitmentValuesTransform = originalCommitmentValuesTransform
 
 	acRo.Close()
 
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
-	logger.Info(fmt.Sprintf("latest root %x", latestRoot))
+	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
 
 	if err = SqueezeCommitmentFiles(actx, logger); err != nil {
-		logger.Warn("squeezeCommitmentFiles failed", "err", err)
-		logger.Info("rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
+		logger.Warn("[squeeze] failed", "err", err)
+		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
 		return nil, err
 	}
 
