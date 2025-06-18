@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tip-tracking-test:
+  gnosis-tip-tracking-test:
     runs-on: [self-hosted, qa, Gnosis]
     timeout-minutes: 600
     env:

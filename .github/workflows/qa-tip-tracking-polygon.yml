@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tip-tracking-test:
+  bor-mainnet-tip-tracking-test:
     runs-on: [self-hosted, qa, Polygon]
     timeout-minutes: 800
     env:
