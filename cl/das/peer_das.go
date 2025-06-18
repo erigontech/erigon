@@ -247,7 +247,9 @@ mainloop:
 				for column := range columns {
 					id.Columns.Append(column)
 				}
-				r.Append(id)
+				if id.Columns.Length() > 0 {
+					r.Append(id)
+				}
 			}
 			if r.Len() == 0 {
 				break mainloop
