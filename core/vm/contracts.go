@@ -606,17 +606,17 @@ func newTwistPoint(blob []byte) (*bn256.G2, error) {
 // Byzantium and Istanbul operations.
 func runBn256Add(input []byte) ([]byte, error) {
 	x := bn254.G1Affine{}
-	err := bn256.UnmarshalCurvePoint(getData(input, 0, 64), &x)
+	err := bn256.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
 
 	y := bn254.G1Affine{}
-	err = bn256.UnmarshalCurvePoint(getData(input, 64, 64), &y)
+	err = bn256.UnmarshalCurvePointG1(getData(input, 64, 64), &y)
 	if err != nil {
 		return nil, err
 	}
-	return bn256.MarshalCurvePoint(x.Add(&x, &y), make([]byte, 0, 64)), nil
+	return bn256.MarshalCurvePointG1(x.Add(&x, &y), make([]byte, 0, 64)), nil
 }
 
 // bn256Add implements a native elliptic curve point addition conforming to
@@ -649,11 +649,11 @@ func (c *bn256AddByzantium) Run(input []byte) ([]byte, error) {
 // both Byzantium and Istanbul operations.
 func runBn256ScalarMul(input []byte) ([]byte, error) {
 	x := bn254.G1Affine{}
-	err := bn256.UnmarshalCurvePoint(getData(input, 0, 64), &x)
+	err := bn256.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
-	return bn256.MarshalCurvePoint(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32))), make([]byte, 0, 64)), nil
+	return bn256.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32))), make([]byte, 0, 64)), nil
 }
 
 // bn256ScalarMulIstanbul implements a native elliptic curve scalar
@@ -697,28 +697,37 @@ var (
 // Byzantium and Istanbul operations.
 func runBn256Pairing(input []byte) ([]byte, error) {
 	// Handle some corner cases cheaply
+	if len(input) == 0 {
+		return true32Byte, nil
+	}
 	if len(input)%192 > 0 {
 		return nil, errBadPairingInput
 	}
+
 	// Convert the input into a set of coordinates
-	var (
-		cs []*bn256.G1
-		ts []*bn256.G2
-	)
+	as := make([]bn254.G1Affine, 0, len(input)/192)
+	bs := make([]bn254.G2Affine, 0, len(input)/192)
 	for i := 0; i < len(input); i += 192 {
-		c, err := newCurvePoint(input[i : i+64])
+		ai := bn254.G1Affine{}
+		err := bn256.UnmarshalCurvePointG1(input[i:i+64], &ai)
 		if err != nil {
 			return nil, err
 		}
-		t, err := newTwistPoint(input[i+64 : i+192])
+
+		bi := bn254.G2Affine{}
+		err = bn256.UnmarshalCurvePointG2(input[i+64:i+192], &bi)
 		if err != nil {
 			return nil, err
 		}
-		cs = append(cs, c)
-		ts = append(ts, t)
+		as = append(as, ai)
+		bs = append(bs, bi)
 	}
-	// Execute the pairing checks and return the results
-	if bn256.PairingCheck(cs, ts) {
+
+	success, err := bn254.PairingCheck(as, bs)
+	if err != nil {
+		return nil, err
+	}
+	if success {
 		return true32Byte, nil
 	}
 	return false32Byte, nil
