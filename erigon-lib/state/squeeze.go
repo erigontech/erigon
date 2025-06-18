@@ -464,6 +464,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 
 		roTx.Rollback()
+		keyIter.Close()
+
 		totalKeysCommitted += processed
 
 		rhx := ""
@@ -485,7 +487,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			a.onFilesChange(nil)
 		}
 
-		keyIter.Close()
 	}
 	logger.Info("Commitment rebuild", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
 
