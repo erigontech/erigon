@@ -156,24 +156,31 @@ func (d *peerdas) downloadFromPeers(ctx context.Context, request *solid.ListSSZ[
 		// keep trying until the request is done
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
+		wg := sync.WaitGroup{}
+	loop:
 		for {
 			select {
 			case <-stopChan:
-				return
+				break loop
 			case <-ticker.C:
-				cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				s, pid, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, request)
-				cancel()
-				select {
-				case resultChan <- resultData{
-					sidecars: s,
-					pid:      pid,
-					err:      err,
-				}:
-				default:
-				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					s, pid, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, request)
+					cancel()
+					select {
+					case resultChan <- resultData{
+						sidecars: s,
+						pid:      pid,
+						err:      err,
+					}:
+					default:
+					}
+				}()
 			}
 		}
+		wg.Wait()
 	}
 
 	// send the request
