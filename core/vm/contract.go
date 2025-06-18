@@ -22,11 +22,14 @@ package vm
 import (
 	"fmt"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/tracing"
 )
@@ -245,4 +248,11 @@ func (c *Contract) SetCodeOptionalHash(addr *common.Address, codeAndHash *codeAn
 	c.Code = codeAndHash.code
 	c.CodeHash = codeAndHash.hash
 	c.CodeAddr = addr
+}
+
+func MaxInitCodeSize(rules *chain.Rules) int {
+	if rules.IsOsaka {
+		return params.MaxInitCodeSizeEip7907
+	}
+	return params.MaxInitCodeSize
 }

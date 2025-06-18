@@ -488,6 +488,9 @@ func (evm *EVM) maxCodeSize() int {
 	if evm.chainConfig.Bor != nil && evm.chainConfig.Bor.IsAhmedabad(evm.Context.BlockNumber) {
 		return params.MaxCodeSizePostAhmedabad
 	}
+	if evm.chainRules.IsOsaka {
+		return params.MaxCodeSizeEip7907
+	}
 	return params.MaxCodeSize
 }
 
