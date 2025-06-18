@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1032,16 +1031,10 @@ func BodyForTxnFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment,
 		return nil, buf, nil
 	}
 	b := &types.BodyOnlyTxn{}
-
-	rstream, ok := rlp.StreamPool.Get().(*rlp.Stream)
-	if !ok {
-		log.Warn("Failed to type convert to Stream pointer")
-	}
-	defer rlp.StreamPool.Put(rstream)
-	rstream.Reset(bytes.NewReader(buf), 0)
-	if err := b.DecodeRLP(rstream); err != nil {
+	if err := rlp.DecodeBytesPartial(buf, b); err != nil {
 		return nil, buf, err
 	}
+
 	return b, buf, nil
 }
 

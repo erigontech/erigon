@@ -60,7 +60,7 @@ var (
 	errNoPointer     = errors.New("rlp: interface given to Decode must be a pointer")
 	errDecodeIntoNil = errors.New("rlp: pointer given to Decode must not be nil")
 
-	StreamPool = sync.Pool{
+	streamPool = sync.Pool{
 		New: func() interface{} { return new(Stream) },
 	}
 )
@@ -108,11 +108,11 @@ type Decoder interface {
 //
 //	NewStream(r, limit).Decode(val)
 func Decode(r io.Reader, val interface{}) error {
-	stream, ok := StreamPool.Get().(*Stream)
+	stream, ok := streamPool.Get().(*Stream)
 	if !ok {
 		log.Warn("Failed to type convert to Stream pointer")
 	}
-	defer StreamPool.Put(stream)
+	defer streamPool.Put(stream)
 
 	stream.Reset(r, 0)
 	return stream.Decode(val)
@@ -123,11 +123,11 @@ func Decode(r io.Reader, val interface{}) error {
 func DecodeBytes(b []byte, val interface{}) error {
 	r := (*sliceReader)(&b)
 
-	stream, ok := StreamPool.Get().(*Stream)
+	stream, ok := streamPool.Get().(*Stream)
 	if !ok {
 		log.Warn("Failed to type convert to Stream pointer")
 	}
-	defer StreamPool.Put(stream)
+	defer streamPool.Put(stream)
 
 	stream.Reset(r, uint64(len(b)))
 	if err := stream.Decode(val); err != nil {
@@ -135,6 +135,22 @@ func DecodeBytes(b []byte, val interface{}) error {
 	}
 	if len(b) > 0 {
 		return ErrMoreThanOneValue
+	}
+	return nil
+}
+
+func DecodeBytesPartial(b []byte, val interface{}) error {
+	r := (*sliceReader)(&b)
+
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to type convert to Stream pointer")
+	}
+	defer streamPool.Put(stream)
+
+	stream.Reset(r, uint64(len(b)))
+	if err := stream.Decode(val); err != nil {
+		return err
 	}
 	return nil
 }
