@@ -130,10 +130,7 @@ integration stage_exec
 ## How to re-gen CommitmentDomain
 
 ```sh
-rm -rf datadir/heimdall
-rm -rf datadir/snapshots/*borch*
-# Start erigon, it will gen. Then:
-erigon seg integrity --datadir /erigon-data/ --check=BorCheckpoints
+integration commitment_rebuild
 ```
 
 ## How to re-generate optional Domain/Index
