@@ -59,9 +59,10 @@ func UnmarshalCurvePointG1(input []byte, point *bn254.G1Affine) error {
 func MarshalCurvePointG1(point *bn254.G1Affine, ret []byte) []byte {
 	xBytes := point.X.Bytes()
 	yBytes := point.Y.Bytes()
+	start := len(ret)
 	ret = append(ret, xBytes[:]...)
 	ret = append(ret, yBytes[:]...)
-	return ret
+	return ret[start:]
 }
 
 // UnmarshalCurvePointG2 unmarshals a given input [64-byte X | 64-byte Y] slice to a G2Affine point
@@ -109,9 +110,10 @@ func MarshalCurvePointG2(point *bn254.G2Affine, ret []byte) []byte {
 	x0Bytes := point.X.A0.Bytes()
 	y1Bytes := point.Y.A1.Bytes()
 	y0Bytes := point.Y.A0.Bytes()
+	start := len(ret)
 	ret = append(ret, x1Bytes[:]...)
 	ret = append(ret, x0Bytes[:]...)
 	ret = append(ret, y1Bytes[:]...)
 	ret = append(ret, y0Bytes[:]...)
-	return ret
+	return ret[start:]
 }
