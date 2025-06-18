@@ -152,7 +152,8 @@ func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s := rlpStream(data)
+	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
+	defer done()
 	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
@@ -165,7 +166,8 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s := rlpStream(data)
+	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
+	defer done()
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
 		return nil, err
@@ -181,7 +183,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
-	s := rlpStream(data[1:])
+	s, done := rlp.NewStreamFromPool(bytes.NewReader(data[1:]), uint64(len(data)-1))
+	defer done()
 	var t Transaction
 	switch data[0] {
 	case AccessListTxType:
@@ -462,14 +465,4 @@ func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 
 func EncodeSSZ(w io.Writer, obj codec.Serializable) error {
 	return obj.Serialize(codec.NewEncodingWriter(w))
-}
-
-func rlpStream(data []byte) *rlp.Stream {
-	rstream := rlp.StreamPool.Get().(*rlp.Stream)
-	if rstream == nil {
-		log.Warn("Failed to get RLP stream from pool")
-		return nil
-	}
-	rstream.Reset(bytes.NewReader(data), uint64(len(data)))
-	return rstream
 }
