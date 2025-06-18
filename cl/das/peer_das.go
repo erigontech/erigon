@@ -107,8 +107,8 @@ func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*
 
 	// try to request columns in batches of 8 blocks in parallel
 	wg := sync.WaitGroup{}
-	for i := 0; i < len(blocks); i += 1 {
-		request, err := d.composeIdentifierRequest(ctx, blocks[i:min(i+1, len(blocks))])
+	for i := 0; i < len(blocks); i += 8 {
+		request, err := d.composeIdentifierRequest(ctx, blocks[i:min(i+8, len(blocks))])
 		if err != nil {
 			return err
 		}

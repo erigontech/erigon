@@ -2,7 +2,7 @@
 
 
 tests:
-	wget https://github.com/ethereum/consensus-spec-tests/releases/download/v1.6.0-alpha.2/mainnet.tar.gz
+	wget https://github.com/ethereum/consensus-spec-tests/releases/download/v1.6.0-alpha.1/mainnet.tar.gz
 	tar xf mainnet.tar.gz
 	rm mainnet.tar.gz
 	# not needed for now
