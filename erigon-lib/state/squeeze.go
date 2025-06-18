@@ -404,8 +404,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				if !keyIter.HasNext() {
 					return false, nil
 				}
-				if processed%10_000 == 0 {
-					logger.Info(fmt.Sprintf("processed %12d/%d (%2.f%%) %x", processed, totalKeys, float64(processed)/float64(totalKeys)*100, k))
+				if processed%100_000 == 0 {
+					logger.Info(fmt.Sprintf("[commitment_rebuild] progress %12dk/%dk (%2.f%%) %x", processed/1_000, totalKeys/1_000, float64(processed)/float64(totalKeys)*100, k))
 				}
 				k, _, err := keyIter.Next()
 				if err != nil {
