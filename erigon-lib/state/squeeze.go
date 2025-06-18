@@ -490,13 +490,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
 
-	logger.Info("[squeeze] starting")
 	a.commitmentValuesTransform = originalCommitmentValuesTransform
 
 	acRo.Close()
 
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
+	//logger.Info("[squeeze] starting")
 	//logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
 
 	//actx := a.BeginFilesRo()
