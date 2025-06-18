@@ -107,8 +107,8 @@ func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*
 
 	// try to request columns in batches of 8 blocks in parallel
 	wg := sync.WaitGroup{}
-	for i := 0; i < len(blocks); i += 8 {
-		request, err := d.composeIdentifierRequest(ctx, blocks[i:min(i+8, len(blocks))])
+	for i := 0; i < len(blocks); i += 16 {
+		request, err := d.composeIdentifierRequest(ctx, blocks[i:min(i+16, len(blocks))])
 		if err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func (d *peerdas) downloadFromPeers(ctx context.Context, request *solid.ListSSZ[
 	}
 
 	stopChan := make(chan struct{})
-	resultChan := make(chan resultData, 32)
+	resultChan := make(chan resultData) // no need to buffer
 	requestColumnSidecars := func(request *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]) {
 		// print the request
 		bytes, _ := request.MarshalJSON()
@@ -209,7 +209,7 @@ mainloop:
 					continue
 				}
 				if _, ok := requestMap[blockRoot][sidecar.Index]; !ok {
-					log.Debug("received unexpected column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+					//log.Debug("received unexpected column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
 					continue
 				}
 				columnIndex := sidecar.Index
