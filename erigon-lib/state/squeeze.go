@@ -490,7 +490,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	logger.Info("Commitment rebuild", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
 
 	logger.Info("Squeezing commitment files")
-	a.commitmentValuesTransform = true
+	a.commitmentValuesTransform = originalCommitmentValuesTransform
 
 	acRo.Close()
 
@@ -500,7 +500,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
-	a.commitmentValuesTransform = originalCommitmentValuesTransform
 
 	if err = SqueezeCommitmentFiles(actx, logger); err != nil {
 		logger.Warn("squeezeCommitmentFiles failed", "err", err)
