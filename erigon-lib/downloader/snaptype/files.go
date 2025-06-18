@@ -110,12 +110,11 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	res.Path = filepath.Join(dir, fileName)
 	res.Ext = filepath.Ext(fileName)
 	res.name = fileName
-	dirParts := strings.SplitN(fileName, "/", 2)
+	dirPart, fileName := filepath.Split(fileName)
 	caplin := false
-	if dirParts[0] == "caplin" {
+	if dirPart == "caplin" {
 		caplin = true
 	}
-	fileName = dirParts[(len(dirParts) - 1)]
 	if isSaltFile(fileName) {
 		typeString := "salt"
 		// format for salt files is different: salt-<type>.txt
@@ -282,7 +281,7 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	}
 
 	var err error
-	verParts := strings.SplitN(parts[0], "/", 2)
+	verParts := strings.SplitN(parts[0], string(filepath.Separator), 2)
 	res.Version, err = version.ParseVersion(verParts[len(verParts)-1])
 	if err != nil {
 		return res, false
