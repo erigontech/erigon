@@ -367,8 +367,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 		blockNum, _, err := txNumsReader.FindBlockNum(roTx, toTxNumRange-1)
 		if err != nil {
-			logger.Warn("failed to find block number for txNum", "txNum", toTxNumRange, "err", err)
-			return nil, err
+			return nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", toTxNumRange, err)
 		}
 
 		streamAcc, err := acRo.FileStream(kv.AccountsDomain, fromTxNumRange, toTxNumRange)
