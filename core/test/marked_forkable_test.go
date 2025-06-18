@@ -185,10 +185,10 @@ func TestPrune(t *testing.T) {
 			defer rwtx.Rollback()
 			require.NoError(t, err)
 
-			del, err := ma_tx.Prune(ctx, pruneTo, 1000, rwtx)
+			stat, err := ma_tx.Prune(ctx, pruneTo, 1000, nil, rwtx)
 			require.NoError(t, err)
 			cfgPruneFrom := int64(ma.PruneFrom())
-			require.Equal(t, int64(del), max(0, min(int64(pruneTo), int64(entries_count))-cfgPruneFrom))
+			require.Equal(t, int64(stat.PruneCount), max(0, min(int64(pruneTo), int64(entries_count))-cfgPruneFrom))
 
 			require.NoError(t, rwtx.Commit())
 			ma_tx = ma.BeginTemporalTx()
@@ -276,9 +276,9 @@ func TestBuildFiles_Marked(t *testing.T) {
 	require.NoError(t, err)
 
 	firstRootNumNotInSnap := ma_tx.DebugFiles().VisibleFilesMaxRootNum()
-	del, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
+	stat, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, nil, rwtx)
 	require.NoError(t, err)
-	require.Equal(t, del, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
+	require.Equal(t, stat.PruneCount, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
 
 	require.NoError(t, rwtx.Commit())
 	ma_tx = ma.BeginTemporalTx()

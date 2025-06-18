@@ -122,11 +122,11 @@ func TestUnmarkedPrune(t *testing.T) {
 			defer rwtx.Rollback()
 			require.NoError(t, err)
 
-			ndels, err := uma_tx.Prune(ctx, pruneTo, 1000, rwtx)
+			stat, err := uma_tx.Prune(ctx, pruneTo, 1000, nil, rwtx)
 			require.NoError(t, err)
 
 			spanId := heimdall.SpanIdAt(uint64(pruneTo))
-			require.Equal(t, ndels, uint64(spanId))
+			require.Equal(t, stat.PruneCount, uint64(spanId))
 
 			require.NoError(t, rwtx.Commit())
 			uma_tx = uma.BeginTemporalTx()
@@ -205,9 +205,9 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 
 	firstRootNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	firstSpanIdNotInSnap := Num(heimdall.SpanIdAt(uint64(firstRootNumNotInSnap)))
-	del, err := uma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
+	stat, err := uma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, nil, rwtx)
 	require.NoError(t, err)
-	require.Equal(t, del, uint64(firstSpanIdNotInSnap))
+	require.Equal(t, stat.PruneCount, uint64(firstSpanIdNotInSnap))
 
 	require.NoError(t, rwtx.Commit())
 	uma_tx = uma.BeginTemporalTx()
