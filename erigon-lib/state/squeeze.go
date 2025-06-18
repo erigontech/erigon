@@ -410,7 +410,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				if err != nil {
 					err = fmt.Errorf("CommitmentRebuild: keyIter.Next() %w", err)
 					panic(err)
-					return false, nil
 				}
 				processed++
 				if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
