@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"time"
 
@@ -55,6 +56,10 @@ type MiningBlock struct {
 
 func (mb MiningBlock) RemainingRlpSpaceSize(chainConfig *chain.Config) int {
 	maxRlpSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Time)
+	if maxRlpSize == 0 {
+		return math.MaxInt
+	}
+
 	block := types.NewBlockForAsembling(mb.Header, mb.Txns, mb.Uncles, mb.Receipts, mb.Withdrawals)
 	blockRlpSize := block.EncodingSize()
 	return maxRlpSize - blockRlpSize
