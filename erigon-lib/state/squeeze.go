@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -507,9 +506,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		return nil, err
 	}
 	actx.Close()
-	if err := a.BuildMissedAccessors(ctx); err != nil {
-		return nil, err
-	}
 
 	return latestRoot, nil
 }
