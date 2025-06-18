@@ -3,6 +3,7 @@ package das
 import (
 	"context"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -102,10 +103,10 @@ func (d *peerdas) DataRecoverAndPrune(ctx context.Context) error {
 
 func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
 	// TODO: not all beacon nodes support this p2p request for now, so temporarily disable it
-	return nil
+	//return nil
 
 	// try to request columns in batches of 8 blocks in parallel
-	/*wg := sync.WaitGroup{}
+	wg := sync.WaitGroup{}
 	for i := 0; i < len(blocks); i += 8 {
 		request, err := d.composeIdentifierRequest(ctx, blocks[i:min(i+8, len(blocks))])
 		if err != nil {
@@ -121,7 +122,7 @@ func (d *peerdas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*
 		}(i)
 	}
 	wg.Wait()
-	return nil*/
+	return nil
 }
 
 func (d *peerdas) downloadFromPeers(ctx context.Context, request *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]) error {
