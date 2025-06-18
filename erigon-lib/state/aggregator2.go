@@ -212,7 +212,7 @@ var Schema = map[kv.Domain]domainCfg{
 			historyIdx:         kv.RCacheHistoryIdx,
 
 			snapshotsDisabled:             true,
-			historyValuesOnCompressedPage: 16,
+			historyValuesOnCompressedPage: 32,
 
 			filenameBase: kv.RCacheDomain.String(),
 
