@@ -67,24 +67,25 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 	return ctx
 }
 
-func (sdc *SharedDomainsCommitmentContext) Close() {
-	sdc.updates.Close()
+func (sdc *SharedDomainsCommitmentContext) CloseSubTxns() {
 	for i := range sdc.subTtx {
 		if sdc.subTtx[i] != nil {
 			sdc.subTtx[i].roTtx.Rollback()
+			sdc.subTtx[i] = nil
 		}
 	}
+}
+
+func (sdc *SharedDomainsCommitmentContext) Close() {
+	sdc.updates.Close()
+	sdc.CloseSubTxns()
 }
 
 func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
-	for i := range sdc.subTtx {
-		if sdc.subTtx[i] != nil {
-			sdc.subTtx[i].roTtx.Rollback()
-		}
-	}
+	sdc.CloseSubTxns()
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {

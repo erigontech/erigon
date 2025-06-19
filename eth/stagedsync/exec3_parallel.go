@@ -251,7 +251,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 					}
 					defer rotx.Rollback()
 
-					pe.doms.SetTxns(rotx.(kv.TemporalTx), uint(i))
+					pe.doms.SetTxn(rotx.(kv.TemporalTx), uint(i))
 				}
 				_, err := pe.doms.ComputeCommitment(ctx, true, pe.outputBlockNum.GetValueUint64(), pe.outputTxNum.Load(), pe.execStage.LogPrefix())
 				if err != nil {

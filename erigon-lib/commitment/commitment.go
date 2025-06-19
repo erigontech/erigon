@@ -749,7 +749,7 @@ func ParseTrieVariant(s string) TrieVariant {
 	switch s {
 	case "bin":
 		trieVariant = VariantBinPatriciaTrie
-	case "hex-parallel":
+	case "hex-concurrent":
 		trieVariant = VariantConcurrentHexPatricia
 	case "hex":
 		fallthrough

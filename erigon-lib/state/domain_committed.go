@@ -143,7 +143,7 @@ func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, st
 	return rv, endTx / sd.StepSize(), false, nil
 }
 
-func (sd *SharedDomains) SetTxns(tx kv.TemporalTx, i uint) {
+func (sd *SharedDomains) SetTxn(tx kv.TemporalTx, i uint) {
 	sd.sdCtx.SetTxn(tx, i)
 }
 

@@ -2192,7 +2192,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	defer func() { logEvery.Stop() }()
 	defer func() {
-		log.Debug("commitment finished", "keys", common.PrettyCounter(ki), "spent", time.Since(start), "warmup", COM_WARMUP)
+		log.Debug("commitment finished", "keys", common.PrettyCounter(ki), "spent", time.Since(start), "warmup", COM_WARMUP, "concurrent", len(hph.mountedTries) > 0)
 	}()
 
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {

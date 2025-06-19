@@ -459,6 +459,18 @@ func ExecV3(ctx context.Context,
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 
+	if state2.ExperimentalConcurrentCommitment {
+		for i := 0; i < 16; i++ {
+			//rotx := cfg.db.BeginRw(context.Background())
+			rotx, err := cfg.db.BeginRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer rotx.Rollback()
+
+			executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i))
+		}
+	}
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
@@ -467,18 +479,6 @@ Loop:
 			start := time.Now()
 			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 
-			for i := 0; i < 16; i++ {
-				// rotx := agg.BeginFilesRo()
-				// rotx := cfg.db.BeginRw(context.Background())
-
-				rotx, err := cfg.db.BeginRo(ctx)
-				if err != nil {
-					return err
-				}
-				defer rotx.Rollback()
-
-				executor.domains().SetTxns(rotx.(kv.TemporalTx), uint(i))
-			}
 			// First compute and commit the progress done so far
 			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix()); err != nil {
 				return err
@@ -774,7 +774,7 @@ Loop:
 					}
 					defer rotx.Rollback()
 
-					executor.domains().SetTxns(rotx.(kv.TemporalTx), uint(i)) // before commitment
+					executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
 				}
 
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
@@ -829,18 +829,18 @@ Loop:
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
 
-			for i := 0; i < 16; i++ {
-				// rotx := agg.BeginFilesRo()
-				// rotx := cfg.db.BeginRw(context.Background())
-
-				rotx, err := cfg.db.BeginRo(ctx)
-				if err != nil {
-					return err
-				}
-				defer rotx.Rollback()
-
-				executor.domains().SetTxns(rotx.(kv.TemporalTx), uint(i)) // before commitment
-			}
+			//for i := 0; i < 16; i++ {
+			//	// rotx := agg.BeginFilesRo()
+			//	// rotx := cfg.db.BeginRw(context.Background())
+			//
+			//	rotx, err := cfg.db.BeginRo(ctx)
+			//	if err != nil {
+			//		return err
+			//	}
+			//	defer rotx.Rollback()
+			//
+			//	executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
+			//}
 			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
@@ -853,6 +853,9 @@ Loop:
 	//dumpPlainStateDebug(executor.tx(), executor.domains())
 
 	if !useExternalTx && executor.tx() != nil {
+		if state2.ExperimentalConcurrentCommitment {
+			executor.domains().GetCommitmentContext().CloseSubTxns()
+		}
 		if err = executor.tx().Commit(); err != nil {
 			return err
 		}
