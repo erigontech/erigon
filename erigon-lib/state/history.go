@@ -928,6 +928,11 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorFilePath(step, step+1)); err != nil {
 			return HistoryFiles{}, err
 		}
+		if h.InvertedIndex.Accessors.Has(AccessorExistence) {
+			if efExistence, err = existence.OpenFilter(h.InvertedIndex.efAccessorExistenceFilterFilePath(step, step+1)); err != nil {
+				return HistoryFiles{}, err
+			}
+		}
 	}
 
 	historyDecomp, err = seg.NewDecompressor(collation.historyPath)

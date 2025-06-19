@@ -20,6 +20,7 @@ require (
 )
 
 require (
+	github.com/FastFilter/xorfilter v0.2.1 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.5.0 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.7.3 // indirect

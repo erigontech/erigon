@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -147,6 +148,9 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 
 func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.version.AccessorEFI.String(), ii.filenameBase, fromStep, toStep))
+}
+func (ii *InvertedIndex) efAccessorExistenceFilterFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efei", ii.version.AccessorEFEI.String(), ii.filenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.version.DataEF.String(), ii.filenameBase, fromStep, toStep))
@@ -255,13 +259,15 @@ func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
 }
 
 func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
-	if !ii.Accessors.Has(AccessorHashMap) {
-		return nil
-	}
 	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
-		return []string{
-			ii.efAccessorFilePath(fromStep, toStep),
+		var files []string
+		if ii.Accessors.Has(AccessorHashMap) {
+			files = append(files, ii.efAccessorFilePath(fromStep, toStep))
 		}
+		if ii.Accessors.Has(AccessorExistence) {
+			files = append(files, ii.efAccessorExistenceFilterFilePath(fromStep, toStep))
+		}
+		return files
 	})
 }
 
@@ -374,6 +380,22 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+			if item.existence == nil {
+				fPath := ii.efAccessorExistenceFilterFilePath(fromStep, toStep)
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+				if exists {
+					if item.existence, err = existence.OpenFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -684,9 +706,22 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		if iit.files[i].endTxNum <= txNum {
 			continue
 		}
-		offset, ok := iit.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
-		if !ok {
-			continue
+		var offset uint64
+		var ok bool
+		if iit.files[i].src.existence != nil {
+			ok = iit.files[i].src.existence.ContainsHash(hi)
+			if !ok {
+				continue
+			}
+			offset, ok = iit.statelessIdxReader(i).LookupHash(hi, lo)
+			if !ok {
+				continue
+			}
+		} else {
+			offset, ok = iit.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
+			if !ok {
+				continue
+			}
 		}
 
 		g := iit.statelessGetter(i)
@@ -793,6 +828,8 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		orderAscend: asc,
 		limit:       limit,
 		seq:         &multiencseq.SequenceReader{},
+		accessors:   iit.ii.Accessors,
+		ii:          iit,
 	}
 	if asc {
 		for i := len(iit.files) - 1; i >= 0; i-- {
@@ -1214,10 +1251,10 @@ func (ic InvertedIndexCollation) Close() {
 // buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll InvertedIndexCollation, ps *background.ProgressSet) (InvertedFiles, error) {
 	var (
-		decomp    *seg.Decompressor
-		index     *recsplit.Index
-		existence *existence.Filter
-		err       error
+		decomp          *seg.Decompressor
+		mapAccessor     *recsplit.Index
+		existenceFilter *existence.Filter
+		err             error
 	)
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
@@ -1228,11 +1265,11 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 			if decomp != nil {
 				decomp.Close()
 			}
-			if index != nil {
-				index.Close()
+			if mapAccessor != nil {
+				mapAccessor.Close()
 			}
-			if existence != nil {
-				existence.Close()
+			if existenceFilter != nil {
+				existenceFilter.Close()
 			}
 		}
 	}()
@@ -1260,46 +1297,24 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	if err := ii.buildMapAccessor(ctx, step, step+1, ii.dataReader(decomp), ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
-	if index, err = recsplit.OpenIndex(ii.efAccessorFilePath(step, step+1)); err != nil {
-		return InvertedFiles{}, err
+	if ii.Accessors.Has(AccessorHashMap) {
+		if mapAccessor, err = recsplit.OpenIndex(ii.efAccessorFilePath(step, step+1)); err != nil {
+			return InvertedFiles{}, err
+		}
+	}
+	if ii.Accessors.Has(AccessorExistence) {
+		if existenceFilter, err = existence.OpenFilter(ii.efAccessorExistenceFilterFilePath(step, step+1)); err != nil {
+			return InvertedFiles{}, err
+		}
 	}
 
 	closeComp = false
-	return InvertedFiles{decomp: decomp, index: index, existence: existence}, nil
+	return InvertedFiles{decomp: decomp, index: mapAccessor, existence: existenceFilter}, nil
 }
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
-	// Design decision: `why Enum=true and LessFalsePositives=true`?
-	//
-	// Test on: rpcdaemon (erigon shut-down), `--http.compression=false`, after `sync && sudo sysctl vm.drop_caches=3`, query:
-	//```sh
-	//curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method": "eth_getLogs","params": [{"fromBlock": "0x115B624", "toBlock": "0x115B664"}], "id":1}' -s -o /dev/null  localhost:8545
-	//```
-	//
-	// On compared it with `Enum=false and LessFalsePositives=false` on ethmainnet (on small machine with cloud drives and `sync && sudo sysctl vm.drop_caches=3`):
-	//  - `du -hsc *.efi` changed from `24Gb` to `17Gb` (better)
-	//  - `vmtouch of .ef` changed from `152M/426G` to `787M/426G` (worse)
-	//  - `vmtouch of .efi` changed from `1G/23G` to `633M/16G` (better)
-	//  - speed on hot data - not changed. speed on cold data changed from `7min` to `10min`  (worse)
-	//  - but most important i see `.ef` files became "randomly warm":
-	// From:
-	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
-	//[ ooooooooo ooooooo oooooooooooooooooo oooooooo  oo o o  ooo ] 93/81397
-	//```
-	// To:
-	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
-	//[oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo] 16279/81397
-	//```
-	// It happens because: EVM does read much non-existing keys, like "create storage key if it doesn't exists". And
-	// each such non-existing key read `MPH` transforms to random
-	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 	cfg := recsplit.RecSplitArgs{
-		Enums:              true,
-		LessFalsePositives: true,
-
 		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     ii.dirs.Tmp,
@@ -1307,7 +1322,46 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger)
+	if ii.iiCfg.Accessors.Has(AccessorExistence) {
+		cfg.Enums, cfg.LessFalsePositives = false, false
+	} else {
+		// Design decision: `why Enum=true and LessFalsePositives=true`?
+		//
+		// Test on: rpcdaemon (erigon shut-down), `--http.compression=false`, after `sync && sudo sysctl vm.drop_caches=3`, query:
+		//```sh
+		//curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method": "eth_getLogs","params": [{"fromBlock": "0x115B624", "toBlock": "0x115B664"}], "id":1}' -s -o /dev/null  localhost:8545
+		//```
+		//
+		// On compared it with `Enum=false and LessFalsePositives=false` on ethmainnet (on small machine with cloud drives and `sync && sudo sysctl vm.drop_caches=3`):
+		//  - `du -hsc *.efi` changed from `24Gb` to `17Gb` (better)
+		//  - `vmtouch of .ef` changed from `152M/426G` to `787M/426G` (worse)
+		//  - `vmtouch of .efi` changed from `1G/23G` to `633M/16G` (better)
+		//  - speed on hot data - not changed. speed on cold data changed from `7min` to `10min`  (worse)
+		//  - but most important i see `.ef` files became "randomly warm":
+		// From:
+		//```sh
+		//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
+		//[ ooooooooo ooooooo oooooooooooooooooo oooooooo  oo o o  ooo ] 93/81397
+		//```
+		// To:
+		//```sh
+		//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
+		//[oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo] 16279/81397
+		//```
+		// It happens because: EVM does read much non-existing keys, like "create storage key if it doesn't exists". And
+		// each such non-existing key read `MPH` transforms to random
+		// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
+		cfg.Enums, cfg.LessFalsePositives = true, true
+	}
+	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger); err != nil {
+		return err
+	}
+	if ii.iiCfg.Accessors.Has(AccessorExistence) {
+		if err := buildExistanceFilter(ctx, data, ii.Compression, ii.efAccessorExistenceFilterFilePath(fromStep, toStep), *cfg.Salt, ps); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {

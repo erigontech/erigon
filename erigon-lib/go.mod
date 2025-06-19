@@ -18,6 +18,7 @@ require (
 )
 
 require (
+	github.com/FastFilter/xorfilter v0.2.1
 	github.com/RoaringBitmap/roaring/v2 v2.5.0
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1

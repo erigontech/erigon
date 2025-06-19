@@ -29,8 +29,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/version"
-
+	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -47,6 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (
@@ -735,9 +735,23 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if reader.Empty() {
 			return nil, false, 0, nil
 		}
-		offset, ok := reader.TwoLayerLookup(filekey)
-		if !ok {
-			return nil, false, 0, nil
+		if dt.d.Accessors.Has(AccessorExistence) {
+			hi, lo := dt.ht.iit.hashKey(filekey)
+			if dt.files[i].src.existence != nil {
+				ok = dt.files[i].src.existence.ContainsHash(hi)
+				if !ok {
+					return nil, false, 0, nil
+				}
+			}
+			offset, ok = reader.LookupHash(hi, lo)
+			if !ok {
+				return nil, false, 0, nil
+			}
+		} else {
+			offset, ok = reader.TwoLayerLookup(filekey)
+			if !ok {
+				return nil, false, 0, nil
+			}
 		}
 		g := dt.reusableReader(i)
 		g.Reset(offset)
@@ -1258,9 +1272,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums:              true,
-		LessFalsePositives: true,
-
 		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     d.dirs.Tmp,
@@ -1268,7 +1279,23 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
+
+	if d.Accessors.Has(AccessorExistence) {
+		cfg.Enums, cfg.LessFalsePositives = false, false
+	} else {
+		cfg.Enums, cfg.LessFalsePositives = true, true
+	}
+
+	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger); err != nil {
+		return err
+	}
+
+	if d.Accessors.Has(AccessorExistence) {
+		if err := buildExistanceFilter(ctx, data, d.Compression, d.kvExistenceIdxFilePath(fromStep, toStep), *cfg.Salt, ps); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *Domain) MissedBtreeAccessors() (l []*FilesItem) {
@@ -1289,11 +1316,15 @@ func (d *Domain) MissedMapAccessors() (l []*FilesItem) {
 }
 
 func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
-	if !d.Accessors.Has(AccessorHashMap) {
-		return nil
-	}
-	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
-		return []string{d.kviAccessorFilePath(fromStep, toStep)}
+	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep, toStep uint64) []string {
+		var files []string
+		if d.Accessors.Has(AccessorHashMap) {
+			files = append(files, d.kviAccessorFilePath(fromStep, toStep))
+		}
+		if d.Accessors.Has(AccessorExistence) {
+			files = append(files, d.kvExistenceIdxFilePath(fromStep, toStep))
+		}
+		return files
 	})
 }
 
@@ -1397,6 +1428,41 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		} else {
 			break
 		}
+	}
+	return nil
+}
+
+func buildExistanceFilter(ctx context.Context, g *seg.Reader, compressed seg.FileCompression, idxPath string, salt uint32, ps *background.ProgressSet) error {
+	_, fileName := filepath.Split(idxPath)
+	count := g.Count() / 2
+	p := ps.AddNew(fileName, uint64(count))
+	defer ps.Delete(p)
+
+	defer g.MadvNormal().DisableReadAhead()
+
+	useFuse := true
+	existenceFilter, err := existence.NewFilter(uint64(count), idxPath, useFuse)
+	if err != nil {
+		return err
+	}
+	defer existenceFilter.Close()
+	//if noFsync {
+	//	existenceFilter.DisableFsync()
+	//}
+
+	key := make([]byte, 0, 64)
+	for g.HasNext() {
+		key, _ = g.Next(key[:0])
+		hi, _ := murmur3.Sum128WithSeed(key, salt)
+		if existenceFilter != nil {
+			existenceFilter.AddHash(hi)
+		}
+		_, _ = g.Skip()
+
+		p.Processed.Add(1)
+	}
+	if err = existenceFilter.Build(); err != nil {
+		return fmt.Errorf("build idx: %w", err)
 	}
 	return nil
 }
