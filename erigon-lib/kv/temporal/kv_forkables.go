@@ -90,9 +90,11 @@ func (m *unmarkedTx) RwDbDebug() kv.UnmarkedDbRwTx {
 }
 
 func (m *unmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64) (uint64, error) {
-	return m.s.DebugDb().Prune(ctx, to, limit, m.dbtx.(kv.RwTx))
+	stat, err := m.s.DebugDb().Prune(ctx, to, limit, nil, m.dbtx.(kv.RwTx))
+	return stat.PruneCount, err
 }
 
 func (m *unmarkedTx) Unwind(ctx context.Context, from RootNum) error {
-	return m.s.DebugDb().Unwind(ctx, from, m.dbtx.(kv.RwTx))
+	_, err := m.s.DebugDb().Unwind(ctx, from, m.dbtx.(kv.RwTx))
+	return err
 }
