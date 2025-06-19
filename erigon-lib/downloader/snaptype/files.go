@@ -112,7 +112,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	res.name = fileName
 	dirPart, fileName := filepath.Split(fileName)
 	caplin := false
-	if dirPart == "caplin" {
+	if dirPart == "caplin/" {
 		caplin = true
 	}
 	if isSaltFile(fileName) {
@@ -198,7 +198,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		res.Type, ok = ParseFileType(typeString)
 		if ok {
 			res.CaplinTypeString = res.Type.Name()
-		} else {
+		} else if !caplin {
 			return res, isStateFile, false
 		}
 	}
