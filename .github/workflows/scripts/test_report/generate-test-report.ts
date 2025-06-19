@@ -124,8 +124,8 @@ async function run() {
         const token = process.env.GITHUB_TOKEN as string;  // The GitHub token for authentication
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
-        //const branch= process.env.BRANCH_NAME ?? github.context.ref.replace(/^refs\/\w+\//, '');   // The branch name, defaults to the current branch
-        const branch= 'main';   // For testing purposes
+        const branch= process.env.BRANCH_NAME ?? github.context.ref.replace(/^refs\/\w+\//, '');   // The branch name, defaults to the current branch
+        //const branch= 'main';   // For testing purposes
         const { owner, repo } = github.context.repo;
         //const {owner, repo} = {owner: 'erigontech', repo: 'erigon'};  // For testing purposes
 
