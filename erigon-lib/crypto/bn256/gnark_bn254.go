@@ -56,13 +56,13 @@ func UnmarshalCurvePointG1(input []byte, point *bn254.G1Affine) error {
 }
 
 // MarshalCurvePointG1 marshals a given G1Affine point to byte slice with [32-byte X | 32-byte Y] form
-func MarshalCurvePointG1(point *bn254.G1Affine, ret []byte) []byte {
+func MarshalCurvePointG1(point *bn254.G1Affine) []byte {
 	xBytes := point.X.Bytes()
 	yBytes := point.Y.Bytes()
-	start := len(ret)
+	ret := make([]byte, 0, 64)
 	ret = append(ret, xBytes[:]...)
 	ret = append(ret, yBytes[:]...)
-	return ret[start:]
+	return ret
 }
 
 // UnmarshalCurvePointG2 unmarshals a given input [64-byte X | 64-byte Y] slice to a G2Affine point
@@ -105,15 +105,15 @@ func UnmarshalCurvePointG2(input []byte, point *bn254.G2Affine) error {
 }
 
 // MarshalCurvePointG2 marshals a given G2Affine point to byte slice with [64-byte X | 64-byte Y] form
-func MarshalCurvePointG2(point *bn254.G2Affine, ret []byte) []byte {
+func MarshalCurvePointG2(point *bn254.G2Affine) []byte {
 	x1Bytes := point.X.A1.Bytes()
 	x0Bytes := point.X.A0.Bytes()
 	y1Bytes := point.Y.A1.Bytes()
 	y0Bytes := point.Y.A0.Bytes()
-	start := len(ret)
+	ret := make([]byte, 0, 32*4)
 	ret = append(ret, x1Bytes[:]...)
 	ret = append(ret, x0Bytes[:]...)
 	ret = append(ret, y1Bytes[:]...)
 	ret = append(ret, y0Bytes[:]...)
-	return ret[start:]
+	return ret
 }
