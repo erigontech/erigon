@@ -20,6 +20,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"embed"
@@ -28,6 +29,7 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
+	"sort"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -495,9 +497,8 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			statedb.CreateAccount(common.Address{}, false)
 		}
 
-		keys := sortedAllocKeys(g.Alloc)
-		for _, key := range keys {
-			addr := common.BytesToAddress([]byte(key))
+		addrs := sortedAllocAddresses(g.Alloc)
+		for _, addr := range addrs {
 			account := g.Alloc[addr]
 
 			balance, overflow := uint256.FromBig(account.Balance)
@@ -507,10 +508,10 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			statedb.AddBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
+			var slotVal uint256.Int
 			for key, value := range account.Storage {
-				key := key
-				val := uint256.NewInt(0).SetBytes(value.Bytes())
-				statedb.SetState(addr, key, *val)
+				slotVal.SetBytes(value.Bytes())
+				statedb.SetState(addr, key, slotVal)
 			}
 
 			if len(account.Constructor) > 0 {
@@ -542,6 +543,18 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	head.Root = root
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+}
+
+func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
+	addrs := make([]common.Address, 0, len(m))
+	for addr := range m {
+		addrs = append(addrs, addr)
+	}
+
+	sort.Slice(addrs, func(i, j int) bool {
+		return bytes.Compare(addrs[i][:], addrs[j][:]) < 0
+	})
+	return addrs
 }
 
 func sortedAllocKeys(m types.GenesisAlloc) []string {
