@@ -173,7 +173,7 @@ func canSnapshotBePruned(name string) bool {
 	return isStateHistory(name) || strings.Contains(name, "transactions")
 }
 
-func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified, syncCfg ethconfig.Sync) (map[string]struct{}, error) {
+func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
 
 	blackList := make(map[string]struct{})
 	if !pruneMode {
@@ -331,7 +331,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			return err
 		}
 
-		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots, syncCfg)
+		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}
