@@ -367,7 +367,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		}
 
 		if _, ok := blackListForPruning[p.Name]; ok {
-			fmt.Printf("[dbg] %s blacklisted\n", p.Name)
 			continue
 		}
 
