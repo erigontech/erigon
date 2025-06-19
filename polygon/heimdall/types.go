@@ -84,6 +84,8 @@ var Indexes = struct {
 	BorMilestoneId:  snaptype.Index{Name: "bormilestones"},
 }
 
+var ErrHeimdallDataIsNotReady = errors.New("heimdall data is not ready to extract for the specified interval")
+
 type EventRangeExtractor struct {
 	EventsDb func() kv.RoDB
 }
@@ -291,9 +293,13 @@ var (
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpointEnds, tx)
 
-					checkpoints, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
+					checkpoints, ok, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
 					if err != nil {
 						return err
+					}
+
+					if !ok {
+						return ErrHeimdallDataIsNotReady
 					}
 
 					if len(checkpoints) > 0 {
@@ -353,9 +359,13 @@ var (
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					rangeIndex := NewTxRangeIndex(db, kv.BorMilestoneEnds, tx)
 
-					milestones, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
+					milestones, ok, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
+					}
+
+					if !ok {
+						return ErrHeimdallDataIsNotReady
 					}
 
 					if len(milestones) > 0 {
