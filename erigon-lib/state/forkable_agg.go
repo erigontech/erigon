@@ -678,12 +678,12 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 
 		return nil
 	})
-	if err != nil && err != timeoutErr {
-		r.f.logger.Error("forkable prune", "err", err)
-		return err
+	if errors.Is(err, timeoutErr) {
+		r.f.logger.Warn("forkable prune timeout")
+		return nil
 	}
 	r.f.logger.Info("forkable prune finished", "toRootNum", toRootNum, "stat", aggStat)
-	return nil
+	return err
 }
 
 func (r *ForkableAggTemporalTx) Close() {

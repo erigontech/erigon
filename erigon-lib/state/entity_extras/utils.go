@@ -15,13 +15,13 @@ func DeleteRangeFromTbl(ctx context.Context, tbl string, fromPrefix, toPrefix []
 	if err != nil {
 		return
 	}
+	defer c.Close()
 
 	if logEvery == nil {
 		logEvery = time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 	}
 
-	defer c.Close()
 	// bigendianess assumed (for key comparison)
 	// imo this can be generalized if needed, by using key comparison functions, which mdbx provides.
 	for k, _, err := c.Seek(fromPrefix); k != nil && (toPrefix == nil || bytes.Compare(k, toPrefix) < 0) && limit > 0; k, _, err = c.Next() {
