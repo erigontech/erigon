@@ -2636,9 +2636,9 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		//	}
 		//}
 
-		// this check is performed here becuase t.MergeSpec in addTorrentFile will do a file
+		// this check is performed here because t.MergeSpec in addTorrentFile will do a file
 		// update in place when it opens its MemMap.  This is non destructive for the data
-		// but casues an update to the file which changes its size to the torrent length which
+		// but causes an update to the file which changes its size to the torrent length which
 		// invalidated the file length check
 		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
 			if info.Completed != nil {
