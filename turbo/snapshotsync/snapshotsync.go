@@ -167,10 +167,13 @@ func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 func canSnapshotBePruned(name string) bool {
+	if strings.Contains(name, kv.RCacheDomain.String()) {
+		return false
+	}
 	return isStateHistory(name) || strings.Contains(name, "transactions")
 }
 
-func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
+func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified, syncCfg ethconfig.Sync) (map[string]struct{}, error) {
 
 	blackList := make(map[string]struct{})
 	if !pruneMode {
@@ -328,7 +331,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			return err
 		}
 
-		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
+		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots, syncCfg)
 		if err != nil {
 			return err
 		}
@@ -364,6 +367,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		}
 
 		if _, ok := blackListForPruning[p.Name]; ok {
+			fmt.Printf("[dbg] %s blacklisted\n", p.Name)
 			continue
 		}
 
