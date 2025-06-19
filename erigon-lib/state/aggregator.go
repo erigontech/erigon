@@ -58,7 +58,6 @@ type Aggregator struct {
 	d               [kv.DomainLen]*Domain
 	iis             []*InvertedIndex
 	dirs            datadir.Dirs
-	tmpdir          string
 	aggregationStep uint64
 
 	dirtyFilesLock           sync.Mutex
@@ -105,7 +104,6 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 		ctxCancel:              ctxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -770,30 +768,27 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
+	defer a.buildingFiles.Store(false)
+	if toStep > fromStep {
+		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+	}
+	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+		if err := a.buildFiles(ctx, step); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+				panic(err)
+			}
+			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+			panic(err)
+		}
+		a.onFilesChange(nil)
+	}
+
 	go func() {
-		defer a.buildingFiles.Store(false)
-		if toStep > fromStep {
-			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+		if err := a.MergeLoop(ctx); err != nil {
+			panic(err)
 		}
-		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, step); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-					panic(err)
-				}
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-				panic(err)
-			}
-			a.onFilesChange(nil)
-		}
-
-		go func() {
-			if err := a.MergeLoop(ctx); err != nil {
-				panic(err)
-			}
-			a.onFilesChange(nil)
-		}()
+		a.onFilesChange(nil)
 	}()
-
 	return nil
 }
 
@@ -1688,7 +1683,7 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 		}
 	}
 	if fi < 0 {
-		return nil, fmt.Errorf("file not found")
+		return nil, fmt.Errorf("FileStream: file not found: %s, %d-%d", name, fromTxNum/at.StepSize(), toTxNum/at.StepSize())
 	}
 	r := dt.dataReader(dt.files[fi].src.decompressor)
 	return NewSegStreamReader(r, -1), nil
@@ -1827,10 +1822,10 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 		}
 	}
 }
-func (at *Aggregator) MadvNormal() *Aggregator {
-	at.dirtyFilesLock.Lock()
-	defer at.dirtyFilesLock.Unlock()
-	for _, d := range at.d {
+func (a *Aggregator) MadvNormal() *Aggregator {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
 		for _, f := range d.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
@@ -1841,17 +1836,17 @@ func (at *Aggregator) MadvNormal() *Aggregator {
 			f.MadvNormal()
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range a.iis {
 		for _, f := range ii.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
 	}
-	return at
+	return a
 }
-func (at *Aggregator) DisableReadAhead() {
-	at.dirtyFilesLock.Lock()
-	defer at.dirtyFilesLock.Unlock()
-	for _, d := range at.d {
+func (a *Aggregator) DisableReadAhead() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
 		for _, f := range d.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}
@@ -1862,7 +1857,7 @@ func (at *Aggregator) DisableReadAhead() {
 			f.DisableReadAhead()
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range a.iis {
 		for _, f := range ii.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}

@@ -48,8 +48,8 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -139,7 +139,7 @@ func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *stat
 func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *state2.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.blockReader))
+	txNumsReader := cfg.blockReader.TxnumReader(ctx)
 
 	inputTxNum = doms.TxNum()
 
@@ -442,7 +442,7 @@ func ExecV3(ctx context.Context,
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
 
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+		readAhead, clean = exec3.BlocksReadAhead(ctx, 4, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
 	}
 

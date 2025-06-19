@@ -51,7 +51,6 @@ import (
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
@@ -379,7 +378,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
-		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.blockReader))
+		txNumsReader := cfg.blockReader.TxnumReader(ctx)
 		aggtx := state.AggTx(tx)
 		stats.LogStats(aggtx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)

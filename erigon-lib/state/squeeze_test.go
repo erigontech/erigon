@@ -112,7 +112,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	// now do the squeeze
 	agg.commitmentValuesTransform = true
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = true
-	err = SqueezeCommitmentFiles(AggTx(rwTx), log.New())
+	err = SqueezeCommitmentFiles(context.Background(), AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
 	agg.recalcVisibleFiles(math.MaxUint64)

@@ -29,9 +29,9 @@ import (
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/holiman/uint256"
 
-	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -429,21 +429,19 @@ func modExpMultComplexityEip2565(x *big.Int) *big.Int {
 //
 // def mult_complexity(x):
 //
-//	words = math.ceil(x / 8)
-//	multiplication_complexity = 0
-//	if x <= 32: multiplication_complexity = words**2
-//	elif x > 32: multiplication_complexity = 2 * words**2
-//	return multiplication_complexity
+// max_length = max(base_length, modulus_length)
+// words = math.ceil(max_length / 8)
+// multiplication_complexity = 16
+// if max_length > 32: multiplication_complexity = 2 * words**2
+// return multiplication_complexity
 //
 // where is x is max(length_of_MODULUS, length_of_BASE)
 func modExpMultComplexityEip7883(x *big.Int) *big.Int {
-	lessOrEq32 := x.Cmp(big32) <= 0
-	x = modExpMultComplexityEip2565(x)
-	if lessOrEq32 {
-		return x
-	} else {
+	if x.Cmp(big32) > 0 {
+		x = modExpMultComplexityEip2565(x)
 		return x.Lsh(x, 1) // ×2
 	}
+	return x.SetUint64(16)
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -487,10 +485,10 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	adjExpLen = math.BigMax(adjExpLen, big1)
 
 	// Calculate the gas cost of the operation
-	gas := new(big.Int).Set(math.BigMax(modLen, baseLen))
+	gas := new(big.Int).Set(math.BigMax(modLen, baseLen)) // max_length
 	if c.osaka {
 		// EIP-7883: ModExp Gas Cost Increase
-		gas = modExpMultComplexityEip7883(gas)
+		gas = modExpMultComplexityEip7883(gas /*max_length */)
 
 		gas.Mul(gas, adjExpLen)
 		gas.Div(gas, big3)
@@ -605,19 +603,18 @@ func newTwistPoint(blob []byte) (*bn256.G2, error) {
 // runBn256Add implements the Bn256Add precompile, referenced by both
 // Byzantium and Istanbul operations.
 func runBn256Add(input []byte) ([]byte, error) {
-	x := &bn254.G1Affine{}
-	_, err := x.SetBytes(getData(input, 0, 64))
+	x := bn254.G1Affine{}
+	err := bn256.UnmarshalCurvePoint(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
 
-	y := &bn254.G1Affine{}
-	_, err = y.SetBytes(getData(input, 64, 64))
+	y := bn254.G1Affine{}
+	err = bn256.UnmarshalCurvePoint(getData(input, 64, 64), &y)
 	if err != nil {
 		return nil, err
 	}
-	x = x.Add(x, y)
-	return x.Marshal(), nil
+	return bn256.MarshalCurvePoint(x.Add(&x, &y), make([]byte, 0, 64)), nil
 }
 
 // bn256Add implements a native elliptic curve point addition conforming to
@@ -649,13 +646,12 @@ func (c *bn256AddByzantium) Run(input []byte) ([]byte, error) {
 // runBn256ScalarMul implements the Bn256ScalarMul precompile, referenced by
 // both Byzantium and Istanbul operations.
 func runBn256ScalarMul(input []byte) ([]byte, error) {
-	x := &bn254.G1Affine{}
-	_, err := x.SetBytes(getData(input, 0, 64))
+	x := bn254.G1Affine{}
+	err := bn256.UnmarshalCurvePoint(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
-	x = x.ScalarMultiplication(x, new(big.Int).SetBytes(getData(input, 64, 32)))
-	return x.Marshal(), nil
+	return bn256.MarshalCurvePoint(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32))), make([]byte, 0, 64)), nil
 }
 
 // bn256ScalarMulIstanbul implements a native elliptic curve scalar

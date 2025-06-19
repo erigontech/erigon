@@ -22,46 +22,36 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 type TrieCfg struct {
 	db                kv.TemporalRwDB
 	checkRoot         bool
-	badBlockHalt      bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
 	blockReader       services.FullBlockReader
-	hd                *headerdownload.HeaderDownload
 
-	historyV3 bool
-	agg       *state.Aggregator
+	agg *state.Aggregator
 }
 
-func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool) TrieCfg {
+func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader services.FullBlockReader) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
 		tmpDir:            tmpDir,
 		saveNewHashesToDB: saveNewHashesToDB,
-		badBlockHalt:      badBlockHalt,
 		blockReader:       blockReader,
-		hd:                hd,
-
-		historyV3: historyV3,
 	}
 }
 
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (common.Hash, error) {
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.blockReader))
+	txNumsReader := cfg.blockReader.TxnumReader(ctx)
 	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New())
 	if err != nil {
 		return trie.EmptyRoot, err

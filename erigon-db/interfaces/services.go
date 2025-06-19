@@ -51,6 +51,7 @@ type BodyReader interface {
 	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
 	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error)
 	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
+	BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error)
 }
 
 type HeaderAndBodyReader interface {
