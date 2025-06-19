@@ -257,6 +257,13 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint6
 	return err
 }
 
+func (b *BeaconRpcP2P) SetEarliestAvailableSlot(earliestAvailableSlot uint64) error {
+	_, err := b.sentinel.SetStatus(b.ctx, &sentinel.Status{
+		EarliestAvailableSlot: &earliestAvailableSlot,
+	})
+	return err
+}
+
 func (b *BeaconRpcP2P) BanPeer(pid string) {
 	b.sentinel.BanPeer(b.ctx, &sentinel.Peer{Pid: pid})
 }
