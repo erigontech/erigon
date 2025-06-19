@@ -286,6 +286,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
+
+	if validators := f.localValidators.GetValidators(); len(validators) > 0 {
+		custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, validators)
+		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+	}
 	return nil
 }
 
