@@ -1149,7 +1149,7 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	return slices.Concat(files, l1, l2, l3, l4, l5), nil
 }
 
-func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
+func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.PreverifiedItems) error {
 	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
 	return err
 }
