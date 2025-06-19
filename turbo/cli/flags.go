@@ -81,7 +81,7 @@ var (
 		Name: "prune.mode",
 		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
 				Full: Keep only necessary blocks and latest state,
-				Blocks: Keep all blocks and latest state but not the state history,
+				Blocks: Keep all blocks but not the state history,
 				Archive: Keep the entire state history and all blocks,
 				Minimal: Keep only latest state`,
 		Value: "full",
@@ -97,7 +97,7 @@ var (
 	HistoryExpiryEnabledFlag = cli.BoolFlag{
 		Name:  "history-expiry",
 		Usage: "Enable history expiry",
-		Value: false,
+		Value: true,
 	}
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
@@ -276,17 +276,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 
-	if ctx.IsSet(PruneBlocksDistanceFlag.Name) {
-		mode.Blocks = prune.Distance(blockDistance)
-	}
-	if ctx.IsSet(PruneDistanceFlag.Name) {
-		mode.History = prune.Distance(distance)
-	}
-
-	if ctx.IsSet(HistoryExpiryEnabledFlag.Name) {
-		dbg.EnableHistoryExpiry = ctx.Bool(HistoryExpiryEnabledFlag.Name)
-	}
-
 	cfg.Prune = mode
 	if ctx.String(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
@@ -388,13 +377,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	mode, err := prune.FromCli(*pruneMode, distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
-
-	if pruneBlockDistance != nil {
-		mode.Blocks = prune.Distance(blockDistance)
-	}
-	if pruneDistance != nil {
-		mode.History = prune.Distance(distance)
 	}
 
 	cfg.Prune = mode

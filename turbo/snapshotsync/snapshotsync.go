@@ -30,7 +30,6 @@ import (
 
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -295,11 +294,7 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 // isTransactionsSegmentExpired - check if the transactions segment is expired according to whichever history expiry policy we use.
 func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snapcfg.PreverifiedItem) bool {
 	// History expiry is the default.
-	if pruneMode.Blocks != prune.DefaultBlocksPruneMode {
-		return false
-	}
-	// Make sepolia expired by default
-	if !dbg.EnableHistoryExpiry && cc.ChainName != networkname.Sepolia {
+	if pruneMode.Blocks != prune.DefaultBlocksPruneMode || !dbg.EnableHistoryExpiry {
 		return false
 	}
 
