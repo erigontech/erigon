@@ -466,6 +466,19 @@ Loop:
 		if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
 			start := time.Now()
 			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
+
+			for i := 0; i < 16; i++ {
+				// rotx := agg.BeginFilesRo()
+				// rotx := cfg.db.BeginRw(context.Background())
+
+				rotx, err := cfg.db.BeginRo(ctx)
+				if err != nil {
+					return err
+				}
+				defer rotx.Rollback()
+
+				executor.domains().SetTxns(rotx.(kv.TemporalTx), uint(i))
+			}
 			// First compute and commit the progress done so far
 			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix()); err != nil {
 				return err
@@ -751,6 +764,19 @@ Loop:
 					t1, t3 time.Duration
 				)
 
+				for i := 0; i < 16; i++ {
+					// rotx := agg.BeginFilesRo()
+					// rotx := cfg.db.BeginRw(context.Background())
+
+					rotx, err := cfg.db.BeginRo(ctx)
+					if err != nil {
+						return err
+					}
+					defer rotx.Rollback()
+
+					executor.domains().SetTxns(rotx.(kv.TemporalTx), uint(i)) // before commitment
+				}
+
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
@@ -802,6 +828,19 @@ Loop:
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
+
+			for i := 0; i < 16; i++ {
+				// rotx := agg.BeginFilesRo()
+				// rotx := cfg.db.BeginRw(context.Background())
+
+				rotx, err := cfg.db.BeginRo(ctx)
+				if err != nil {
+					return err
+				}
+				defer rotx.Rollback()
+
+				executor.domains().SetTxns(rotx.(kv.TemporalTx), uint(i)) // before commitment
+			}
 			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
@@ -938,7 +977,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)

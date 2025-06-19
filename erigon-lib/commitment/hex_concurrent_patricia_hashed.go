@@ -263,19 +263,16 @@ func (p *ConcurrentPatriciaHashed) Warmup(ctx PatriciaContext, hashedKey []byte)
 		fmt.Printf("WARMUP %x\n", hashedKey)
 	}
 	p.root.ResetContext(ctx)
-	// p.root.readOnly = true
-	// defer func() {
-	// 	p.root.readOnly = false
-	// 	p.root.currentKeyLen = 0
-	// }()
 	if err := p.root.Warmup(ctx, hashedKey); err != nil {
 		return fmt.Errorf("warmup: %w", err)
 	}
-	//for i := range p.mounts {
-	//	if err := p.mounts[i].warmup(hashedKey); err != nil {
-	//		return fmt.Errorf("warmup: %w", err)
-	//	}
-	//}
+	if hashedKey[0] > 15 {
+		return nil // key supposed to be hashed and nibblised, so if nibble is > 15, it is not a key for this trie
+	}
+	p.mounts[hashedKey[0]].ResetContext(ctx)
+	if err := p.mounts[hashedKey[0]].Warmup(ctx, hashedKey); err != nil {
+		return fmt.Errorf("warmup %x: %w", hashedKey[0], err)
+	}
 	return nil
 }
 
@@ -307,6 +304,11 @@ func (p *ConcurrentPatriciaHashed) Reset() {
 	for i := 0; i < len(p.mounts); i++ {
 		p.mounts[i].Reset()
 	}
+}
+
+func (p *ConcurrentPatriciaHashed) ResetMountContext(ctx PatriciaContext, i uint) {
+	p.mounts[i].ResetContext(ctx)
+	p.ctx[i] = ctx
 }
 
 // Set context for state IO

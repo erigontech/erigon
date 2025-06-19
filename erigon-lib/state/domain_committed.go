@@ -143,6 +143,10 @@ func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, st
 	return rv, endTx / sd.StepSize(), false, nil
 }
 
+func (sd *SharedDomains) SetTxns(tx kv.TemporalTx, i uint) {
+	sd.sdCtx.SetTxn(tx, i)
+}
+
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix)
 	return

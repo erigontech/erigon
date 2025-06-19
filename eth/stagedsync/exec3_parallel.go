@@ -242,6 +242,17 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				if pe.doms.BlockNum() != pe.outputBlockNum.GetValueUint64() {
 					panic(fmt.Errorf("%d != %d", pe.doms.BlockNum(), pe.outputBlockNum.GetValueUint64()))
 				}
+				for i := 0; i < 16; i++ {
+					// rotx := agg.BeginFilesRo()
+					// rotx := cfg.db.BeginRw(context.Background())
+					rotx, err := pe.cfg.db.BeginRo(ctx)
+					if err != nil {
+						return err
+					}
+					defer rotx.Rollback()
+
+					pe.doms.SetTxns(rotx.(kv.TemporalTx), uint(i))
+				}
 				_, err := pe.doms.ComputeCommitment(ctx, true, pe.outputBlockNum.GetValueUint64(), pe.outputTxNum.Load(), pe.execStage.LogPrefix())
 				if err != nil {
 					return err

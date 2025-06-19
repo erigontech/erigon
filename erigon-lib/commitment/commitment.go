@@ -1062,7 +1062,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			} else {
 				err = t.nibbles[u.hashedKey[0]].Collect(u.hashedKey, toBytesZeroCopy(key))
 			}
-			if COM_WARMUP && t.Warmup != nil {
+			if t.Warmup != nil {
 				go t.Warmup(u.hashedKey)
 			}
 			if err != nil {
@@ -1084,7 +1084,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			pivot.hashedKey = t.hasher(toBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
-			if COM_WARMUP && t.Warmup != nil {
+			if t.Warmup != nil {
 				go t.Warmup(pivot.hashedKey)
 			}
 		}
@@ -1099,7 +1099,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			} else {
 				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
 			}
-			if COM_WARMUP && t.Warmup != nil {
+			if t.Warmup != nil {
 				go t.Warmup(hashedKey)
 			}
 			if err != nil {

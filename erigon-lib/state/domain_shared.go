@@ -502,64 +502,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (sd *SharedDomains) GetWithCursor(domain kv.Domain, k []byte, c kv.Cursor, aggTx *AggregatorRoTx) (v []byte, step uint64, err error) {
-	if v, prevStep, ok := sd.get(domain, k); ok {
-		return v, prevStep, nil
-	}
-	v, step, found, err := aggTx.DebugGetLatestFromCursor(domain, k, c)
-	if err != nil {
-		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
-	}
-	if found {
-		return v, step, nil
-	}
-
-	v, foundInFile, startTxNum, endTxNum, err := aggTx.DebugGetLatestFromFiles(domain, k, 0)
-	if err != nil {
-		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
-	}
-	if !foundInFile {
-		return nil, 0, nil
-	}
-	// aggTx := sd.AggTx()
-	// if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
-	// 	// sd cache values as is (without transformation) so safe to return
-	// 	return v, prevStep, nil
-	// }
-	// v, step, found, err := sd.roTtx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
-	// if err != nil {
-	// 	return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
-	// }
-	// if found {
-	// 	// db store values as is (without transformation) so safe to return
-	// 	return v, step, nil
-	// }
-
-	// // getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
-	// // of file where the value is stored (not exact step when kv has been set)
-	// v, _, startTx, endTx, err := sd.roTtx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
-	// if err != nil {
-	// 	return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
-	// }
-	if domain == kv.CommitmentDomain {
-		prefix := k
-		if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-			sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
-			return v, endTxNum / sd.StepSize(), nil
-		}
-
-		// replace shortened keys in the branch with full keys to allow HPH work seamlessly
-		rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTxNum, endTxNum, aggTx)
-		if err != nil {
-			return nil, 0, err
-		}
-		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv) // keep dereferenced value in cache (to avoid waste on another dereference)
-		return rv, endTxNum / sd.StepSize(), nil
-	}
-
-	return v, endTxNum / sd.StepSize(), nil
-}
-
 // TemporalDomain satisfaction
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []byte, step uint64, err error) {
 	if tx == nil {
