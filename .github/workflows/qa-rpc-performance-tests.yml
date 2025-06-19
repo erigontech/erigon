@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  performance-test-suite:
+  mainnet-rpc-perf-tests:
     strategy:
       matrix:
         include:
