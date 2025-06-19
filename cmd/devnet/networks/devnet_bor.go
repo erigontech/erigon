@@ -20,16 +20,18 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/jinzhu/copier"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/args"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	account_services "github.com/erigontech/erigon/cmd/devnet/services/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
@@ -231,7 +233,8 @@ func NewBorDevnetWithLocalHeimdall(
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {
-	config := *params.BorDevnetChainConfig
+	var config chain.Config
+	copier.Copy(&config, params.BorDevnetChainConfig)
 	borConfig := config.Bor.(*borcfg.BorConfig)
 	if sprintSize > 0 {
 		borConfig.Sprint = map[string]uint64{"0": sprintSize}

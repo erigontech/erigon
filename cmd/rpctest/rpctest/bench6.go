@@ -19,7 +19,7 @@ package rpctest
 import (
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func Bench6(erigon_url string) error {
@@ -39,7 +39,7 @@ func Bench6(erigon_url string) error {
 	}
 	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
-	accounts := make(map[libcommon.Address]struct{})
+	accounts := make(map[common.Address]struct{})
 	firstBn := 100000
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
 		req_id++

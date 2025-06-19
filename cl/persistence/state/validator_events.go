@@ -21,7 +21,7 @@ import (
 	"errors"
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
@@ -51,7 +51,7 @@ func NewStateEvents() *StateEvents {
 }
 
 func NewStateEventsFromBytes(buf []byte) *StateEvents {
-	return &StateEvents{buf: libcommon.Copy(buf)}
+	return &StateEvents{buf: common.Copy(buf)}
 }
 
 func (se *StateEvents) AddValidator(validatorIndex uint64, validator solid.Validator) {
@@ -78,7 +78,7 @@ func (se *StateEvents) ChangeWithdrawableEpoch(validatorIndex uint64, withdrawab
 	se.buf = binary.BigEndian.AppendUint64(se.buf, withdrawableEpoch)
 }
 
-func (se *StateEvents) ChangeWithdrawalCredentials(validatorIndex uint64, withdrawalCredentials libcommon.Hash) {
+func (se *StateEvents) ChangeWithdrawalCredentials(validatorIndex uint64, withdrawalCredentials common.Hash) {
 	se.mu.Lock()
 	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeWithdrawalCredentials))
@@ -116,7 +116,7 @@ func (se *StateEvents) ChangeSlashed(validatorIndex uint64, slashed bool) {
 func (se *StateEvents) CopyBytes() []byte {
 	se.mu.Lock()
 	defer se.mu.Unlock()
-	return libcommon.Copy(se.buf)
+	return common.Copy(se.buf)
 }
 
 func (se *StateEvents) Reset() {
@@ -129,7 +129,7 @@ func (se *StateEvents) Reset() {
 func ReplayEvents(onAddValidator func(validatorIndex uint64, validator solid.Validator) error,
 	onChangeExitEpoch func(validatorIndex uint64, exitEpoch uint64) error,
 	onChangeWithdrawableEpoch func(validatorIndex uint64, withdrawableEpoch uint64) error,
-	onChangeWithdrawalCredentials func(validatorIndex uint64, withdrawalCredentials libcommon.Hash) error,
+	onChangeWithdrawalCredentials func(validatorIndex uint64, withdrawalCredentials common.Hash) error,
 	onChangeActivationEpoch func(validatorIndex uint64, activationEpoch uint64) error,
 	onChangeActivationEligibilityEpoch func(validatorIndex uint64, activationEligibilityEpoch uint64) error,
 	onChangeSlashed func(validatorIndex uint64, slashed bool) error,

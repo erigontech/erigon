@@ -9,10 +9,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 )
 
 func chargeGas(
@@ -20,11 +20,12 @@ func chargeGas(
 	tx *types.AccountAbstractionTransaction,
 	gasPool *core.GasPool,
 	ibs *state.IntraBlockState,
+	preTxCost uint64,
 ) error {
 	baseFee := uint256.MustFromBig(header.BaseFee)
 	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
 
-	totalGasLimit := params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	totalGasLimit := preTxCost + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 
@@ -35,10 +36,10 @@ func chargeGas(
 	}
 
 	if balance.Cmp(preCharge) < 0 {
-		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", core.ErrInsufficientFunds, chargeFrom.Hex(), balance, preCharge)
+		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", core.ErrInsufficientFunds, chargeFrom.Hex(), &balance, preCharge)
 	}
 
-	if err := ibs.SubBalance(*chargeFrom, preCharge, 0); err != nil {
+	if err := ibs.SubBalance(*chargeFrom, *preCharge, 0); err != nil {
 		return err
 	}
 
@@ -67,7 +68,7 @@ func refundGas(
 
 	chargeFrom := tx.GasPayer()
 
-	if err := ibs.AddBalance(*chargeFrom, refund, tracing.BalanceIncreaseGasReturn); err != nil {
+	if err := ibs.AddBalance(*chargeFrom, *refund, tracing.BalanceIncreaseGasReturn); err != nil {
 		return err
 	}
 
@@ -85,10 +86,10 @@ func payCoinbase(
 	effectiveTip := u256.Num0
 
 	if tx.FeeCap.Gt(baseFee) {
-		effectiveTip = math.Min256(tx.Tip, new(uint256.Int).Sub(tx.FeeCap, baseFee))
+		effectiveTip = math.U256Min(tx.Tip, new(uint256.Int).Sub(tx.FeeCap, baseFee))
 	}
 
 	amount := new(uint256.Int).SetUint64(gasUsed)
 	amount.Mul(amount, effectiveTip)
-	return ibs.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee)
+	return ibs.AddBalance(coinbase, *amount, tracing.BalanceIncreaseRewardTransactionFee)
 }

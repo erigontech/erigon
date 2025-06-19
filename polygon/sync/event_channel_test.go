@@ -18,6 +18,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -65,7 +66,9 @@ func TestEventChannel(t *testing.T) {
 
 		go func() {
 			err := ch.Run(ctx)
-			require.ErrorIs(t, err, context.Canceled)
+			if !errors.Is(err, context.Canceled) {
+				panic("expected another error")
+			}
 		}()
 
 		ch.PushEvent("event1")
@@ -75,6 +78,6 @@ func TestEventChannel(t *testing.T) {
 		events := ch.Events()
 		require.Equal(t, "event2", <-events)
 		require.Equal(t, "event3", <-events)
-		require.Equal(t, 0, len(events))
+		require.Empty(t, events)
 	})
 }

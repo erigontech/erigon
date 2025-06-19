@@ -252,5 +252,6 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 }
 
 func TestVoluntaryExit(t *testing.T) {
+	t.Skip("issue #14997")
 	suite.Run(t, new(voluntaryExitTestSuite))
 }

@@ -24,10 +24,9 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 var (
@@ -86,10 +85,6 @@ type ContractTransactor interface {
 	EstimateGas(ctx context.Context, call ethereum.CallMsg) (gas uint64, err error)
 	// SendTransaction injects the transaction into the pending pool for execution.
 	SendTransaction(ctx context.Context, txn types.Transaction) error
-
-	//// HeaderByNumber returns a block header from the current canonical chain. If
-	//// number is nil, the latest known header is returned.
-	//HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
 }
 
 // ContractFilterer defines the methods needed to access log events using one-off

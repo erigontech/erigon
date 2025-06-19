@@ -26,8 +26,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
 func NewPublisher(logger log.Logger, messageSender *MessageSender, peerTracker *PeerTracker) *Publisher {

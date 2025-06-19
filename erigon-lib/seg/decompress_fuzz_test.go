@@ -93,7 +93,7 @@ func FuzzDecompressMatch(f *testing.F) {
 			}
 			g.Reset(savePos)
 			word, nexPos := g.Next(nil)
-			if bytes.Compare(word, expected) != 0 {
+			if !bytes.Equal(word, expected) {
 				t.Fatalf("bytes.Compare: expected match: %v with word %v\n", expected, word)
 			}
 			if pos1 != pos2 && pos2 != nexPos {
@@ -101,7 +101,7 @@ func FuzzDecompressMatch(f *testing.F) {
 			}
 			g.Reset(savePos)
 			word2, nexPos2 := g.FastNext(buf[:0])
-			if bytes.Compare(word2, expected) != 0 {
+			if !bytes.Equal(word2, expected) {
 				t.Fatalf("bytes.Compare: expected match: %v with word %v\n", expected, word)
 			}
 			if pos1 != pos2 && pos2 != nexPos && nexPos != nexPos2 {

@@ -22,30 +22,50 @@ package misc
 import (
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+)
+
+var (
+	blobBaseCost = big.NewInt(int64(params.BlobBaseCost))
+	gasPerBlob   = big.NewInt(int64(params.GasPerBlob))
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
 // Updated for EIP-7691: currentHeaderTime is used to determine the fork, and hence params
+// Also updated for EIP-7918: Blob base fee bounded by execution cost
 func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeaderTime uint64) uint64 {
-	var excessBlobGas, blobGasUsed uint64
+	var parentExcessBlobGas, parentBlobGasUsed uint64
 	if parent.ExcessBlobGas != nil {
-		excessBlobGas = *parent.ExcessBlobGas
+		parentExcessBlobGas = *parent.ExcessBlobGas
 	}
 	if parent.BlobGasUsed != nil {
-		blobGasUsed = *parent.BlobGasUsed
+		parentBlobGasUsed = *parent.BlobGasUsed
 	}
-
 	arbOsVersion := types.GetArbOSVersion(parent, config)
-	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock(currentHeaderTime, arbOsVersion) {
+	target := config.GetTargetBlobsPerBlock(currentHeaderTime, arbOsVersion)
+	targetBlobGas := target * params.GasPerBlob
+
+	if parentExcessBlobGas+parentBlobGasUsed < targetBlobGas {
 		return 0
 	}
-	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock(currentHeaderTime, arbOsVersion)
+	if config.IsOsaka(currentHeaderTime) {
+		// EIP-7918: Blob base fee bounded by execution cost
+		max := config.GetMaxBlobsPerBlock(currentHeaderTime, arbOsVersion)
+		parentBlobBaseFee, err := GetBlobGasPrice(config, parentExcessBlobGas, parent.Time)
+		if err != nil {
+			panic(err) // should never happen assuming the parent is valid
+		}
+		if big.NewInt(0).Mul(blobBaseCost, parent.BaseFee).Cmp(big.NewInt(0).Mul(gasPerBlob, parentBlobBaseFee.ToBig())) > 0 {
+			return parentExcessBlobGas + parentBlobGasUsed*(max-target)/max
+		}
+	}
+	return parentExcessBlobGas + parentBlobGasUsed - targetBlobGas
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
@@ -109,5 +129,5 @@ func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {
-	return uint64(numBlobs) * params.BlobGasPerBlob
+	return uint64(numBlobs) * params.GasPerBlob
 }

@@ -24,7 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/types/accounts"
@@ -41,8 +41,8 @@ func TestGetAccount(t *testing.T) {
 		Nonce:       2,
 		Incarnation: 2,
 		Balance:     *uint256.NewInt(200),
-		Root:        libcommon.BytesToHash([]byte("0x1")),
-		CodeHash:    libcommon.BytesToHash([]byte("0x01")),
+		Root:        common.BytesToHash([]byte("0x1")),
+		CodeHash:    common.BytesToHash([]byte("0x01")),
 	}
 	trie := newEmpty()
 	key1 := []byte("acc1")
@@ -89,11 +89,11 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 		t.Fatal("not equal", keyAcc)
 	}
 
-	value1 := libcommon.HexToHash("0x3").Bytes()
-	value2 := libcommon.HexToHash("0x5").Bytes()
+	value1 := common.HexToHash("0x3").Bytes()
+	value2 := common.HexToHash("0x5").Bytes()
 
-	storageKey1 := libcommon.HexToHash("0x1")
-	storageKey2 := libcommon.HexToHash("0x5")
+	storageKey1 := common.HexToHash("0x1")
+	storageKey2 := common.HexToHash("0x5")
 
 	fullStorageKey1 := dbutils.GenerateCompositeTrieKey(addrHash, storageKey1)
 	fullStorageKey2 := dbutils.GenerateCompositeTrieKey(addrHash, storageKey2)
@@ -113,32 +113,32 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 }
 
 func TestHash(t *testing.T) {
-	addr1 := libcommon.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+	addr1 := common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	acc1 := &accounts.Account{
 		Nonce:    1,
 		Balance:  *uint256.NewInt(209488),
-		Root:     libcommon.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-		CodeHash: libcommon.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
+		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
+		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
 	}
 
-	addr2 := libcommon.HexToAddress("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+	addr2 := common.HexToAddress("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	acc2 := &accounts.Account{
 		Nonce:    0,
 		Balance:  *uint256.NewInt(0),
-		Root:     libcommon.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-		CodeHash: libcommon.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
+		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
+		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
 	}
 
-	addr3 := libcommon.HexToAddress("0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+	addr3 := common.HexToAddress("0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	acc3 := &accounts.Account{
 		Nonce:    0,
 		Balance:  *uint256.NewInt(1010),
-		Root:     libcommon.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-		CodeHash: libcommon.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
+		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
+		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
 	}
 
-	trie := New(libcommon.Hash{})
-	trie2 := NewTestRLPTrie(libcommon.Hash{})
+	trie := New(common.Hash{})
+	trie2 := NewTestRLPTrie(common.Hash{})
 
 	trie.UpdateAccount(addr1.Bytes(), acc1)
 	trie.UpdateAccount(addr2.Bytes(), acc2)
@@ -159,32 +159,32 @@ func TestHash(t *testing.T) {
 	}
 }
 
-func generateAcc() (*ecdsa.PrivateKey, libcommon.Address, libcommon.Hash, error) {
+func generateAcc() (*ecdsa.PrivateKey, common.Address, common.Hash, error) {
 	key, err := crypto.GenerateKey()
 	if err != nil {
-		return nil, libcommon.Address{}, libcommon.Hash{}, err
+		return nil, common.Address{}, common.Hash{}, err
 	}
 
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	hash, err := hashVal(addr[:])
 	if err != nil {
-		return nil, libcommon.Address{}, libcommon.Hash{}, err
+		return nil, common.Address{}, common.Hash{}, err
 	}
 	return key, addr, hash, nil
 }
 
-func hashVal(v []byte) (libcommon.Hash, error) {
+func hashVal(v []byte) (common.Hash, error) {
 	sha := sha3.NewLegacyKeccak256().(keccakState)
 	sha.Reset()
 	_, err := sha.Write(v)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
-	var hash libcommon.Hash
+	var hash common.Hash
 	_, err = sha.Read(hash[:])
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	return hash, nil
 }

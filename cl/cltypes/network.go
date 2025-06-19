@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -95,7 +95,7 @@ func (p *Ping) DecodeSSZ(buf []byte, _ int) error {
 
 // Root is a SSZ wrapper around a Hash
 type Root struct {
-	Root libcommon.Hash
+	Root common.Hash
 }
 
 func (r *Root) EncodeSSZ(buf []byte) ([]byte, error) {

@@ -22,12 +22,12 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
-func FakePreimage(hash libcommon.Hash) libcommon.Hash {
+func FakePreimage(hash common.Hash) common.Hash {
 	result := hash
 	for i, b := range hash {
 		result[i] = b ^ 1
@@ -42,7 +42,7 @@ func FakePreimage(hash libcommon.Hash) libcommon.Hash {
 func NewManualProofRetainer(t *testing.T, acc *accounts.Account, rl *RetainList, keys [][]byte) *DefaultProofRetainer {
 	t.Helper()
 	var accHexKey []byte
-	var storageKeys []libcommon.Hash
+	var storageKeys []common.Hash
 	var storageHexKeys [][]byte
 	for _, key := range keys {
 		switch len(key) {
@@ -53,11 +53,11 @@ func NewManualProofRetainer(t *testing.T, acc *accounts.Account, rl *RetainList,
 			if accHexKey == nil {
 				accHexKey = rl.AddKey(key[:32])
 			}
-			storageKeys = append(storageKeys, FakePreimage(libcommon.BytesToHash(key[40:])))
+			storageKeys = append(storageKeys, FakePreimage(common.BytesToHash(key[40:])))
 			storageHexKeys = append(storageHexKeys, rl.AddKey(key))
 			require.Equal(t, accHexKey, storageHexKeys[0][:64], "all storage keys must be for the same account")
 		default:
-			require.Fail(t, "unexpected key length %d", len(key))
+			require.Fail(t, "unexpected key length", len(key))
 		}
 	}
 	return &DefaultProofRetainer{
@@ -72,15 +72,15 @@ func NewManualProofRetainer(t *testing.T, acc *accounts.Account, rl *RetainList,
 func TestProofRetainerConstruction(t *testing.T) {
 	rl := NewRetainList(0)
 	pr, err := NewProofRetainer(
-		libcommon.Address{0x1},
+		common.Address{0x1},
 		&accounts.Account{
 			Initialised: true,
 			Nonce:       2,
 			Balance:     *uint256.NewInt(6e9),
-			CodeHash:    libcommon.Hash{3},
+			CodeHash:    common.Hash{3},
 			Incarnation: 3,
 		},
-		[]libcommon.Hash{{1}, {2}, {3}},
+		[]common.Hash{{1}, {2}, {3}},
 		rl,
 	)
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestProofRetainerConstruction(t *testing.T) {
 		require.Equal(t, pe.hexKey, key)
 		switch len(key) {
 		case 64: // Account leaf key
-			pe.storageRoot = libcommon.Hash{3}
+			pe.storageRoot = common.Hash{3}
 			pe.storageRootKey = key
 		case 144: // Storage leaf key
 			pe.storageValue = uint256.NewInt(5)
@@ -123,7 +123,7 @@ func TestProofRetainerConstruction(t *testing.T) {
 		pe := pr.ProofElement(key)
 		require.Nil(t, pe)
 	}
-	require.Equal(t, len(validKeys), len(pr.proofs))
+	require.Len(t, pr.proofs, len(validKeys))
 
 	accProof, err := pr.ProofResult()
 	require.NoError(t, err)
@@ -134,17 +134,17 @@ func TestProofRetainerConstruction(t *testing.T) {
 	require.Equal(t, validKeys[7], []byte(accProof.AccountProof[2]))
 
 	require.Len(t, accProof.StorageProof, 3)
-	require.Equal(t, libcommon.Hash{1}, libcommon.HexToHash(accProof.StorageProof[0].Key))
+	require.Equal(t, common.Hash{1}, common.HexToHash(accProof.StorageProof[0].Key))
 	require.Len(t, accProof.StorageProof[0].Proof, 2)
 	require.Equal(t, validKeys[6], []byte(accProof.StorageProof[0].Proof[0]))
 	require.Equal(t, validKeys[5], []byte(accProof.StorageProof[0].Proof[1]))
 
-	require.Equal(t, libcommon.Hash{2}, libcommon.HexToHash(accProof.StorageProof[1].Key))
+	require.Equal(t, common.Hash{2}, common.HexToHash(accProof.StorageProof[1].Key))
 	require.Len(t, accProof.StorageProof[1].Proof, 2)
 	require.Equal(t, validKeys[4], []byte(accProof.StorageProof[1].Proof[0]))
 	require.Equal(t, validKeys[3], []byte(accProof.StorageProof[1].Proof[1]))
 
-	require.Equal(t, libcommon.Hash{3}, libcommon.HexToHash(accProof.StorageProof[2].Key))
+	require.Equal(t, common.Hash{3}, common.HexToHash(accProof.StorageProof[2].Key))
 	require.Len(t, accProof.StorageProof[2].Proof, 3)
 	require.Equal(t, validKeys[2], []byte(accProof.StorageProof[2].Proof[0]))
 	require.Equal(t, validKeys[1], []byte(accProof.StorageProof[2].Proof[1]))
@@ -152,7 +152,7 @@ func TestProofRetainerConstruction(t *testing.T) {
 
 	t.Run("missingStorageRoot", func(t *testing.T) {
 		oldStorageHash := pr.proofs[2].storageRoot
-		pr.proofs[2].storageRoot = libcommon.Hash{}
+		pr.proofs[2].storageRoot = common.Hash{}
 		defer func() { pr.proofs[2].storageRoot = oldStorageHash }()
 		_, err := pr.ProofResult()
 		require.Error(t, err, "did not find storage root in proof elements")

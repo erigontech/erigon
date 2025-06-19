@@ -36,6 +36,7 @@ type TraceConfig struct {
 	Reexec         *uint64
 	NoRefunds      *bool // Turns off gas refunds when tracing
 	StateOverrides *ethapi.StateOverrides
+	BlockOverrides *ethapi.BlockOverrides
 
 	BorTraceEnabled *bool
 	TxIndex         *hexutil.Uint

@@ -28,12 +28,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/tests/contracts"
@@ -69,7 +69,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	var selfDestructorContract *contracts.SelfDestructor
 
 	// There are two blocks
@@ -103,7 +103,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(m.NewStateReader(tx.(kv.TemporalTx)))
 		exist, err := st.Exist(address)
 		if err != nil {
 			return err
@@ -133,7 +133,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+	if err := m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
 		// and that means that the state of the accounts written in the first block was correct.
 		// This test checks that the storage root of the account is properly set to the root of the empty tree
