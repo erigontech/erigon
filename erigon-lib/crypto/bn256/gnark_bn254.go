@@ -17,6 +17,7 @@
 package bn256
 
 import (
+	"encoding/binary"
 	"errors"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
@@ -29,8 +30,8 @@ func UnmarshalCurvePoint(input []byte, point *bn254.G1Affine) error {
 	}
 
 	isAllZeroes := true
-	for b := range input {
-		if b != 0 {
+	for i := 0; i < 64; i += 8 {
+		if 0 != binary.BigEndian.Uint64(input[i:i+8]) {
 			isAllZeroes = false
 			break
 		}
