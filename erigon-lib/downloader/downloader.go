@@ -379,7 +379,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 						}
 
 						// this is lazy as it can be expensive for large files
-						fileHashBytes, err := fileHashBytes(d.ctx, fileInfo, &d.stats, d.lock)
+						fileHashBytes, err := fileHashBytes(d.ctx, cfg.Dirs, fileInfo, &d.stats, d.lock)
 
 						if errors.Is(err, os.ErrNotExist) {
 							hashBytes, _ := hex.DecodeString(download.Hash)
@@ -592,7 +592,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 			}
 
 			if preverified, ok := snapCfg.Preverified.Get(fileInfo.Name()); ok {
-				hashBytes, err := localHashBytes(ctx, fileInfo, db, stats, statsLock)
+				hashBytes, err := localHashBytes(ctx, cfg.Dirs, fileInfo, db, stats, statsLock)
 
 				if err != nil {
 					return fmt.Errorf("localHashBytes: %w", err)
@@ -623,7 +623,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 					return versioned
 				}()
 
-				hashBytes, err := localHashBytes(ctx, fileInfo, db, stats, statsLock)
+				hashBytes, err := localHashBytes(ctx, cfg.Dirs, fileInfo, db, stats, statsLock)
 
 				if err != nil {
 					return fmt.Errorf("localHashBytes: %w", err)
@@ -655,7 +655,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 						return versioned
 					}()
 
-					hashBytes, err := localHashBytes(ctx, fileInfo, db, stats, statsLock)
+					hashBytes, err := localHashBytes(ctx, cfg.Dirs, fileInfo, db, stats, statsLock)
 
 					if err != nil {
 						return err
@@ -720,7 +720,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 	return lock, nil
 }
 
-func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB, stats *AggStats, statsLock *sync.RWMutex) ([]byte, error) {
+func localHashBytes(ctx context.Context, dirs datadir.Dirs, fileInfo snaptype.FileInfo, db kv.RoDB, stats *AggStats, statsLock *sync.RWMutex) ([]byte, error) {
 	var hashBytes []byte
 
 	if db != nil {
@@ -749,10 +749,20 @@ func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB,
 		}
 	}
 
-	return fileHashBytes(ctx, fileInfo, stats, statsLock)
+	meta, err = metainfo.LoadFromFile(filepath.Join(dirs.TorrentCache, fileInfo.Name()+".torrent"))
+	if err == nil {
+		fmt.Println("Using cached torrent file for", fileInfo.Name(), "from", filepath.Join(dirs.TorrentCache, fileInfo.Name()+".torrent"))
+		if spec, err := torrent.TorrentSpecFromMetaInfoErr(meta); err == nil {
+			fmt.Println("sending")
+			return spec.InfoHash.Bytes(), nil
+		}
+	}
+	fmt.Println("No cached torrent file found for", fileInfo.Name(), "in", filepath.Join(dirs.TorrentCache, fileInfo.Name()+".torrent"))
+
+	return fileHashBytes(ctx, dirs, fileInfo, stats, statsLock)
 }
 
-func fileHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, stats *AggStats, statsLock *sync.RWMutex) ([]byte, error) {
+func fileHashBytes(ctx context.Context, dirs datadir.Dirs, fileInfo snaptype.FileInfo, stats *AggStats, statsLock *sync.RWMutex) ([]byte, error) {
 	exists, err := dir.FileExist(fileInfo.Path)
 	if err != nil {
 		return nil, err
@@ -778,6 +788,22 @@ func fileHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, stats *AggSt
 
 	if err != nil {
 		return nil, fmt.Errorf("can't get local hash for %s: %w", fileInfo.Name(), err)
+	}
+
+	{
+		file, err := os.Create(filepath.Join(dirs.TorrentCache, fileInfo.Name()+".torrent"))
+		if err != nil {
+			return nil, fmt.Errorf("can't create torrent file for %s: %w", fileInfo.Name(), err)
+		}
+		defer file.Close()
+
+		writer := bufio.NewWriter(file)
+		defer writer.Flush()
+
+		if err := meta.Write(writer); err != nil {
+			return nil, fmt.Errorf("can't write torrent file for %s: %w", fileInfo.Name(), err)
+		}
+		fmt.Println("Created torrent file cache for", fileInfo.Name(), "in", filepath.Join(dirs.TorrentCache, fileInfo.Name()+".torrent"))
 	}
 
 	spec, err := torrent.TorrentSpecFromMetaInfoErr(meta)
@@ -929,7 +955,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 								go func(fileInfo snaptype.FileInfo, infoHash infohash.T, length int64, completionTime time.Time) {
 									checkGroup.Go(func() error {
-										fileHashBytes, _ := fileHashBytes(d.ctx, fileInfo, &d.stats, d.lock)
+										fileHashBytes, _ := fileHashBytes(d.ctx, d.cfg.Dirs, fileInfo, &d.stats, d.lock)
 
 										if bytes.Equal(infoHash.Bytes(), fileHashBytes) {
 											downloadComplete <- downloadStatus{
@@ -1205,7 +1231,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							// has the local file changed since we downloaded it - if it has just download it otherwise
 							// do a hash check as if we already have the file - we don't need to download it again
 							if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil && fi.ModTime().Equal(*torrentInfo.Completed) {
-								localHash, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock)
+								localHash, complete := localHashCompletionCheck(d.ctx, d.cfg.Dirs, t, fileInfo, downloadComplete, &d.stats, d.lock)
 
 								if complete {
 									d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
@@ -1227,7 +1253,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 								d.logger.Debug("[snapshots] Can't update torrent info", "file", t.Name(), "hash", t.InfoHash(), "err", err)
 							}
 
-							if _, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
+							if _, complete := localHashCompletionCheck(d.ctx, d.cfg.Dirs, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
 								d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
 								continue
 							}
@@ -1235,7 +1261,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 					}
 				} else {
 					if _, ok := waiting[t.Name()]; !ok {
-						if _, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
+						if _, complete := localHashCompletionCheck(d.ctx, d.cfg.Dirs, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
 							d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
 							continue
 						}
@@ -1426,8 +1452,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 	}
 }
 
-func localHashCompletionCheck(ctx context.Context, t *torrent.Torrent, fileInfo snaptype.FileInfo, statusChan chan downloadStatus, stats *AggStats, statsLock *sync.RWMutex) ([]byte, bool) {
-	localHash, err := fileHashBytes(ctx, fileInfo, stats, statsLock)
+func localHashCompletionCheck(ctx context.Context, dirs datadir.Dirs, t *torrent.Torrent, fileInfo snaptype.FileInfo, statusChan chan downloadStatus, stats *AggStats, statsLock *sync.RWMutex) ([]byte, bool) {
+	localHash, err := fileHashBytes(ctx, dirs, fileInfo, stats, statsLock)
 
 	if err == nil {
 		if bytes.Equal(t.InfoHash().Bytes(), localHash) {
@@ -1706,7 +1732,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 			d.logger.Error("Web download failed", "file", name, "err", err)
 		}
 
-		localHash, err := fileHashBytes(d.ctx, info, &d.stats, d.lock)
+		localHash, err := fileHashBytes(d.ctx, d.cfg.Dirs, info, &d.stats, d.lock)
 
 		if err == nil {
 			if !bytes.Equal(infoHash.Bytes(), localHash) {
