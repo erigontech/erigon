@@ -390,7 +390,7 @@ var (
 //	elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
 //	else: return x ** 2 // 16 + 480 * x - 199680
 //
-// where is x is max(length_of_MODULUS, length_of_BASE)
+// where is x is max(base_length, modulus_length)
 func modExpMultComplexityEip198(x *big.Int) *big.Int {
 	switch {
 	case x.Cmp(big64) <= 0:
@@ -418,7 +418,7 @@ func modExpMultComplexityEip198(x *big.Int) *big.Int {
 //	words = math.ceil(x / 8)
 //	return words**2
 //
-// where is x is max(length_of_MODULUS, length_of_BASE)
+// where is x is max(base_length, modulus_length)
 func modExpMultComplexityEip2565(x *big.Int) *big.Int {
 	x.Add(x, big7)
 	x.Rsh(x, 3) // ÷8
@@ -429,13 +429,12 @@ func modExpMultComplexityEip2565(x *big.Int) *big.Int {
 //
 // def mult_complexity(x):
 //
-// max_length = max(base_length, modulus_length)
-// words = math.ceil(max_length / 8)
+// words = math.ceil(x / 8)
 // multiplication_complexity = 16
-// if max_length > 32: multiplication_complexity = 2 * words**2
+// if x > 32: multiplication_complexity = 2 * words**2
 // return multiplication_complexity
 //
-// where is x is max(length_of_MODULUS, length_of_BASE)
+// where is x is max(base_length, modulus_length)
 func modExpMultComplexityEip7883(x *big.Int) *big.Int {
 	if x.Cmp(big32) > 0 {
 		x = modExpMultComplexityEip2565(x)
