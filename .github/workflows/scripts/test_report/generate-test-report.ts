@@ -60,8 +60,8 @@ function mapConclusionToIcon(conclusion: string | null, status: string | null): 
     switch (conclusion) {
         case 'success': return '✅';
         case 'failure': return '❌';
-        case 'cancelled': return '🚫';  // The run was cancelled before it completed.
-        case 'skipped': return '⏭️';  // The run was skipped.
+        case 'cancelled': return '⏭️';  // The run was cancelled before it completed.
+        case 'skipped': return '⏩';  // The run was skipped.
         case 'timed_out': return '⏰️';
         case 'neutral': return '⚪️';
         case 'stale': return '🕸️';  // The run was marked stale by GitHub because it took too long.
@@ -267,6 +267,13 @@ async function run() {
             }
         }
 
+        // Order the table by the first column (Test name)
+        table.sort((a, b) => {
+            if (a[0] < b[0]) return -1;
+            if (a[0] > b[0]) return 1;
+            return 0;
+        });
+        
         // Write the summary table to the GitHub Actions summary
         await core.summary
             .addHeading('Test Report - Branch ' + branch)
