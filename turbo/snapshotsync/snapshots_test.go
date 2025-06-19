@@ -599,13 +599,9 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal("bodies", f.TypeString)
 
 	var e3 bool
-	f, e3, ok = snaptype.ParseFileNameOld("", stat("caplin/v1.0-021150-021200-BlockRoot.seg"))
-	println(f.TypeString, ok)
-	f, e3, ok = snaptype.ParseFileName("", stat("caplin/v1.0-021150-021200-BlockRoot.seg"))
+	f, e3, ok = snaptype.ParseFileName("", "caplin/v1.0-021150-021200-BlockRoot.seg")
 	require.True(ok)
 	require.False(e3)
-	println(f.Type.Enum())
-	//require.Equal(f.Type.Enum(), coresnaptype.BlockSnapshotTypes.Enum())
 	require.Equal(21150000, int(f.From))
 	require.Equal(21200000, int(f.To))
 	require.Equal("BlockRoot", f.TypeString)
