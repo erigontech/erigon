@@ -20,6 +20,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"embed"
@@ -28,6 +29,7 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
+	"sort"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -88,13 +90,13 @@ func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, l
 	return CommitGenesisBlockWithOverride(db, genesis, nil, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overridePragueTime, dirs, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, dirs, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -118,7 +120,7 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 	}
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -134,8 +136,8 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 	}
 
 	applyOverrides := func(config *chain.Config) {
-		if overridePragueTime != nil {
-			config.PragueTime = overridePragueTime
+		if overrideOsakaTime != nil {
+			config.OsakaTime = overrideOsakaTime
 		}
 	}
 
@@ -495,22 +497,21 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			statedb.CreateAccount(common.Address{}, false)
 		}
 
-		keys := sortedAllocKeys(g.Alloc)
-		for _, key := range keys {
-			addr := common.BytesToAddress([]byte(key))
+		addrs := sortedAllocAddresses(g.Alloc)
+		for _, addr := range addrs {
 			account := g.Alloc[addr]
 
 			balance, overflow := uint256.FromBig(account.Balance)
 			if overflow {
 				panic("overflow at genesis allocs")
 			}
-			statedb.AddBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
+			statedb.AddBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
+			var slotVal uint256.Int
 			for key, value := range account.Storage {
-				key := key
-				val := uint256.NewInt(0).SetBytes(value.Bytes())
-				statedb.SetState(addr, key, *val)
+				slotVal.SetBytes(value.Bytes())
+				statedb.SetState(addr, key, slotVal)
 			}
 
 			if len(account.Constructor) > 0 {
@@ -542,6 +543,18 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	head.Root = root
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+}
+
+func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
+	addrs := make([]common.Address, 0, len(m))
+	for addr := range m {
+		addrs = append(addrs, addr)
+	}
+
+	sort.Slice(addrs, func(i, j int) bool {
+		return bytes.Compare(addrs[i][:], addrs[j][:]) < 0
+	})
+	return addrs
 }
 
 func sortedAllocKeys(m types.GenesisAlloc) []string {

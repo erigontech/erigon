@@ -75,7 +75,7 @@ func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, 
 	return nil, nil
 }
 
-func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
 	return nil, nil
 }
 

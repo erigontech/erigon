@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -15,7 +17,6 @@ import (
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
-	"github.com/holiman/uint256"
 )
 
 // Buffer is a structure holding updates, deletes, and reads registered within one change period
@@ -657,21 +658,21 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	return account, nil
 }
 
-func (tds *TrieDbState) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+func (tds *TrieDbState) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
 	if tds.currentBuffer != nil {
 		if _, ok := tds.currentBuffer.deleted[addrHash]; ok {
-			return nil, nil
+			return uint256.Int{}, false, nil
 		}
 	}
 	if tds.aggregateBuffer != nil {
 		if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
-			return nil, nil
+			return uint256.Int{}, false, nil
 		}
 	}
 	seckey, err := common.HashData(key.Bytes())
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 
 	storagePlainKey := dbutils.GenerateStoragePlainKey(address, key)
@@ -686,14 +687,28 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key common.Ha
 	defer tds.tMu.Unlock()
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	if !ok {
-		enc, err := tds.StateReader.ReadAccountStorage(address, key)
+		enc, ok, err := tds.StateReader.ReadAccountStorage(address, key)
 		if err != nil {
-			return nil, err
+			return uint256.Int{}, false, err
 		}
-		return enc, nil
+		return enc, ok, nil
 	}
 
-	return enc, nil
+	var res uint256.Int
+	(&res).SetBytes(enc)
+	return res, true, nil
+}
+
+func (tds *TrieDbState) HasStorage(address common.Address) (bool, error) {
+	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
+	// check if we know about any storage updates with non-empty values
+	for _, v := range tds.currentBuffer.storageUpdates[addrHash] {
+		if len(v) > 0 {
+			return true, nil
+		}
+	}
+	// fallback to underlying state reader if we don't know of non-empty storage slots yet
+	return tds.StateReader.HasStorage(address)
 }
 
 func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) {

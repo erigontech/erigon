@@ -769,7 +769,6 @@ What can do:
 - increase RAM
 - if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 - Use `--db.pagesize=64kb` (less fragmentation, more IO)
-- Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
 - Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
 ### Filesystem's background features are expensive
@@ -790,12 +789,12 @@ XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=
 
 ### Erigon crashes due to kernel allocation limits
 
-Erigon will crash with `cannot allocate memory`.
+Error message: `cannot allocate memory`.
 
-to fix this add the following to `/etc/sysctl.conf` or a .conf file in `/etc/sysctl.d/`
+Add to `/etc/sysctl.conf` (or add .conf file in `/etc/sysctl.d/`)
 
 ```
-vm.overcommit_memory = 1 (it is 0 by default)
-vm.max_map_count = 8388608 (it is 1048576 by default)
+vm.overcommit_memory = 1 
+vm.max_map_count = 8388608 
 ```
 ---------

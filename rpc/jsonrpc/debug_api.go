@@ -21,15 +21,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	jsoniter "github.com/json-iterator/go"
+	"runtime"
+	"runtime/debug"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/accounts"
@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned
@@ -53,31 +52,36 @@ const AccountRangeMaxResultsWithStorage = 256
 // PrivateDebugAPI Exposed RPC endpoints for debugging use
 type PrivateDebugAPI interface {
 	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
-	TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
-	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
-	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
+	TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
+	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
+	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage bool) (state.IteratorDump, error)
 	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
 	GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
-	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
+	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
+	FreeOSMemory()
+	SetGCPercent(v int) int
+	SetMemoryLimit(limit int64) int64
+	GcStats() *debug.GCStats
+	MemStats() *runtime.MemStats
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
-type PrivateDebugAPIImpl struct {
+type DebugAPIImpl struct {
 	*BaseAPI
 	db     kv.TemporalRoDB
 	GasCap uint64
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64) *PrivateDebugAPIImpl {
-	return &PrivateDebugAPIImpl{
+func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64) *DebugAPIImpl {
+	return &DebugAPIImpl{
 		BaseAPI: base,
 		db:      db,
 		GasCap:  gascap,
@@ -85,7 +89,7 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64) *Priva
 }
 
 // storageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
-func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
+func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return StorageRangeResult{}, err
@@ -108,7 +112,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
-func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage bool) (state.IteratorDump, error) {
+func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage bool) (state.IteratorDump, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -133,14 +137,14 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 
 	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		block, err1 := api.blockByHashWithSenders(ctx, tx, hash)
+		header, err1 := api.headerByHash(ctx, hash, tx)
 		if err1 != nil {
 			return state.IteratorDump{}, err1
 		}
-		if block == nil {
-			return state.IteratorDump{}, fmt.Errorf("block %s not found", hash.Hex())
+		if header == nil {
+			return state.IteratorDump{}, fmt.Errorf("header %s not found", hash.Hex())
 		}
-		blockNumber = block.NumberU64()
+		blockNumber = header.Number.Uint64()
 	}
 
 	// Determine how many results we will dump
@@ -156,7 +160,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 	}
 
-	dumper := state.NewDumper(tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)), blockNumber)
+	dumper := state.NewDumper(tx, api._blockReader.TxnumReader(ctx), blockNumber)
 	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -175,7 +179,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
 // [from, to)
-func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
+func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -245,7 +249,7 @@ func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]commo
 }
 
 // GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
-func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
+func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -284,33 +288,33 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	return getModifiedAccounts(tx, startTxNum, endTxNum-1)
 }
 
-func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
+func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	header, err := api.headerByHash(ctx, blockHash, tx)
 	if err != nil {
 		return &AccountResult{}, err
 	}
-	if number == nil {
+	if header == nil || header.Number == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
+	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("canonical hash not found %d", *number)
+		return nil, fmt.Errorf("canonical hash not found %d", header.Number.Uint64())
 	}
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
 		return nil, errors.New("block hash is not canonical")
 	}
 
-	minTxNum, err := api._txNumReader.Min(tx, *number)
+	minTxNum, err := api._txNumReader.Min(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +352,7 @@ type AccountResult struct {
 }
 
 // GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
-func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -369,7 +373,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 }
 
 // Implements debug_getRawBlock - Returns an RLP-encoded block
-func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -390,7 +394,7 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 }
 
 // GetRawReceipts implements debug_getRawReceipts - retrieves and returns an array of EIP-2718 binary-encoded receipts of a single block
-func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
+func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -442,7 +446,7 @@ func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHas
 }
 
 // GetBadBlocks implements debug_getBadBlocks - Returns an array of recent bad blocks that the client has seen on the network
-func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error) {
+func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -479,7 +483,7 @@ func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]
 }
 
 // GetRawTransaction implements debug_getRawTransaction - Returns an array of EIP-2718 binary-encoded transactions
-func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.Hash) (hexutil.Bytes, error) {
+func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.Hash) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -535,4 +539,47 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 	}
 
 	return nil, nil
+}
+
+// MemStats returns detailed runtime memory statistics.
+func (api *DebugAPIImpl) MemStats() *runtime.MemStats {
+	s := new(runtime.MemStats)
+	runtime.ReadMemStats(s)
+	return s
+}
+
+// GcStats returns GC statistics.
+func (api *DebugAPIImpl) GcStats() *debug.GCStats {
+	s := new(debug.GCStats)
+	debug.ReadGCStats(s)
+	return s
+}
+
+// FreeOSMemory forces a garbage collection.
+func (api *DebugAPIImpl) FreeOSMemory() {
+	debug.FreeOSMemory()
+}
+
+// SetGCPercent sets the garbage collection target percentage. It returns the previous
+// setting. A negative value disables GC.
+func (api *DebugAPIImpl) SetGCPercent(v int) int {
+	return debug.SetGCPercent(v)
+}
+
+// SetMemoryLimit sets the GOMEMLIMIT for the process. It returns the previous limit.
+// Note:
+//
+//   - The input limit is provided as bytes. A negative input does not adjust the limit
+//
+//   - A zero limit or a limit that's lower than the amount of memory used by the Go
+//     runtime may cause the garbage collector to run nearly continuously. However,
+//     the application may still make progress.
+//
+//   - Setting the limit too low will cause Geth to become unresponsive.
+//
+//   - Geth also allocates memory off-heap, particularly for fastCache and Pebble,
+//     which can be non-trivial (a few gigabytes by default).
+func (api *DebugAPIImpl) SetMemoryLimit(limit int64) int64 {
+	log.Info("Setting memory limit", "size", common.PrettyDuration(limit))
+	return debug.SetMemoryLimit(limit)
 }

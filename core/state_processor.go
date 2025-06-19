@@ -111,7 +111,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) common.Hash, engine consensus.EngineReader,
+func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine consensus.EngineReader,
 	author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64, cfg vm.Config,
 ) (*types.Receipt, []byte, error) {

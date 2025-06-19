@@ -89,21 +89,18 @@ func (logs Logs) Copy() Logs {
 }
 
 func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
-	topicMap := make(map[int]map[common.Hash]struct{}, 7)
+	topicMap := make([]map[common.Hash]struct{}, len(topics))
 
 	//populate topic map
 	for idx, v := range topics {
+		topicMap[idx] = make(map[common.Hash]struct{})
 		for _, vv := range v {
-			if _, ok := topicMap[idx]; !ok {
-				topicMap[idx] = map[common.Hash]struct{}{}
-			}
 			topicMap[idx][vv] = struct{}{}
 		}
 	}
 
 	o := make(Logs, 0, len(logs))
-	var logCount uint64
-	logCount = 0
+	logCount := uint64(0)
 	for _, v := range logs {
 		// check address if addrMap is not empty
 		if len(addrMap) != 0 {

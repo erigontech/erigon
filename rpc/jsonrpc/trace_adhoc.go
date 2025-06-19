@@ -61,7 +61,7 @@ const (
 	TraceTypeVmTrace   = "vmTrace"
 )
 
-// TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
+// TraceCallParam (see SendTxArgs -- this allows optional params plus don't use MixedcaseAddress
 type TraceCallParam struct {
 	From                 *common.Address   `json:"from"`
 	To                   *common.Address   `json:"to"`
@@ -195,7 +195,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			}
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
-			// User specified 1559 gas feilds (or none), use those
+			// User specified 1559 gas fields (or none), use those
 			gasFeeCap = new(uint256.Int)
 			if args.MaxFeePerGas != nil {
 				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
@@ -221,7 +221,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas.SetFromBig(args.MaxFeePerBlobGas.ToInt())
+			maxFeePerBlobGas = uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt())
 		}
 	}
 	value := new(uint256.Int)
@@ -1054,7 +1054,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1146,7 +1146,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
-	ibs.SetTxContext(0)
+	ibs.SetTxContext(blockCtx.BlockNumber, 0)
 	ibs.SetHooks(ot.Tracer().Hooks)
 
 	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
@@ -1271,11 +1271,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	chainConfig, err := api.chainConfig(ctx, dbtx)
-	if err != nil {
-		return nil, err
-	}
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1449,7 +1445,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 				tracer,
 			)
 		} else {
-			ibs.SetTxContext(txIndex)
+			ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
 			if tracer != nil {
 				ibs.SetHooks(tracer.Hooks)
 			}
@@ -1662,7 +1658,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 			tracer,
 		)
 	} else {
-		ibs.SetTxContext(txIndex)
+		ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
 		txCtx := core.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())

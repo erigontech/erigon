@@ -2,7 +2,12 @@ package state
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"io/fs"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -23,6 +28,10 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 }
 
 func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, salt *uint32, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+	err := Compatibility(dirs)
+	if err != nil {
+		panic(err)
+	}
 	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
 		return nil, err
@@ -58,8 +67,8 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 		return nil, err
 	}
 
-	a.AddDependency(kv.AccountsDomain, kv.CommitmentDomain)
-	a.AddDependency(kv.StorageDomain, kv.CommitmentDomain)
+	a.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
+	a.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
 
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 
@@ -323,8 +332,8 @@ var DomainCompressCfg = seg.Cfg{
 	DictReducerSoftLimit: 2000000,
 	MinPatternLen:        20,
 	MaxPatternLen:        128,
-	SamplingFactor:       4,
-	MaxDictPatterns:      64 * 1024 * 2,
+	SamplingFactor:       1,
+	MaxDictPatterns:      64 * 1024,
 	Workers:              1,
 }
 
@@ -344,4 +353,54 @@ func EnableHistoricalRCache() {
 	cfg.hist.historyDisabled = false
 	cfg.hist.snapshotsDisabled = false
 	Schema.RCacheDomain = cfg
+}
+
+var SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{}
+
+func Compatibility(d datadir.Dirs) error {
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !entry.IsDir() {
+				name := entry.Name()
+				if strings.HasPrefix(name, "v1-") {
+					return errors.New("bad incompatible snapshots with current erigon version. " +
+						"Check twice version or run `erigon seg update-to-new-ver-format` command")
+				}
+				fileInfo, _, _ := snaptype.ParseFileName("", name)
+
+				currentFileVersion := fileInfo.Version
+
+				msVs, ok := SchemeMinSupportedVersions[fileInfo.TypeString]
+				if !ok {
+					//println("file type not supported", fileInfo.TypeString, name)
+					return nil
+				}
+				requiredVersion, ok := msVs[fileInfo.Ext]
+				if !ok {
+					return nil
+				}
+
+				if currentFileVersion.Major < requiredVersion.Major {
+					return fmt.Errorf("version mismatch: need files at least version %d for file %s to start Erigon "+
+						"properly. Doublecheck the version pls. Probably should downgrade to some version of Erigon later than 3.1", requiredVersion.Major, fileInfo.Name())
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

@@ -42,8 +42,8 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/stages"
@@ -372,15 +372,15 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 
 func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*execution.ReadyResponse, error) {
 
+	if err := <-e.blockReader.Ready(ctx); err != nil {
+		return &execution.ReadyResponse{Ready: false}, err
+	}
+
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return &execution.ReadyResponse{Ready: false}, nil
 	}
 	defer e.semaphore.Release(1)
-
-	if err := <-e.blockReader.Ready(ctx); err != nil {
-		return &execution.ReadyResponse{Ready: false}, err
-	}
 	return &execution.ReadyResponse{Ready: true}, nil
 }
 

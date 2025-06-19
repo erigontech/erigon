@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -148,6 +148,10 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	start := time.Now()
 	// Flush changes to db.
 	if fv.sharedDom != nil {
+		_, err := fv.sharedDom.ComputeCommitment(context.Background(), true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment")
+		if err != nil {
+			return err
+		}
 		if err := fv.sharedDom.Flush(fv.ctx, tx); err != nil {
 			return err
 		}

@@ -31,7 +31,6 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
@@ -45,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // EthBackendAPIVersion
@@ -448,7 +446,7 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx.(kv.TemporalTx))
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, s.blockReader))
+	txNumsReader := s.blockReader.TxnumReader(ctx)
 	maxTxNum, err := txNumsReader.Max(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
@@ -485,4 +483,18 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	}
 
 	return &remote.AAValidationReply{Valid: validationTracer.Err() == nil}, nil
+}
+
+func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remote.BlockForTxNumRequest) (*remote.BlockForTxNumResponse, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, ok, err := s.blockReader.BlockForTxNum(ctx, tx, req.Txnum)
+	return &remote.BlockForTxNumResponse{
+		BlockNumber: blockNum,
+		Present:     ok,
+	}, err
 }

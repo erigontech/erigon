@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -37,13 +38,13 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 )
 
 // This is the range in which we sanity check and potentially fix the canonical chain if it is broken.
 // a broken canonical chain is very dangerous, as it can lead to a situation where the RPC and snapshots break down.
 // better to have an hack than to regenerate all chains.
-const fixCanonicalFailsafeRange = 512
+const fixCanonicalFailsafeRange = 16
 
 const startPruneFrom = 1024
 
@@ -201,8 +202,8 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 	rawdb.WriteForkchoiceHead(tx, blockHash)
 }
 
-func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
-	return state.AggTx(tx).CanUnwindToBlockNum(tx)
+func minUnwindableBlock(tx kv.TemporalTx, number uint64) (uint64, error) {
+	return tx.Debug().CanUnwindToBlockNum()
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
@@ -496,10 +497,20 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	status := execution.ExecutionStatus_Success
 
 	if headHash != blockHash {
+		blockHashBlockNum, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+
 		status = execution.ExecutionStatus_BadBlock
 		validationError = "headHash and blockHash mismatch"
 		if log {
-			e.logger.Warn("bad forkchoice", "head", headHash, "hash", blockHash)
+			headNum := "unknown"
+			if headNumber != nil {
+				headNum = strconv.FormatUint(*headNumber, 10)
+			}
+			hashBlockNum := "unknown"
+			if blockHashBlockNum != nil {
+				hashBlockNum = strconv.FormatUint(*blockHashBlockNum, 10)
+			}
+			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
 		}
 	} else {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)

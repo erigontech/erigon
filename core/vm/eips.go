@@ -98,7 +98,7 @@ func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeCo
 	if err != nil {
 		return nil, err
 	}
-	callContext.Stack.push(balance)
+	callContext.Stack.push(&balance)
 	return nil, nil
 }
 
@@ -275,6 +275,13 @@ func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	return nil, nil
 }
 
+func opCLZ(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	x := scope.Stack.peek()
+	// count leading zero bits in x
+	x.SetUint64(256 - uint64(x.BitLen()))
+	return nil, nil
+}
+
 // enable5656 enables EIP-5656 (MCOPY opcode)
 // https://eips.ethereum.org/EIPS/eip-5656
 func enable5656(jt *JumpTable) {
@@ -329,4 +336,13 @@ func enable7702(jt *JumpTable) {
 	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
 	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702
 	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7702
+}
+
+func enable7939(jt *JumpTable) {
+	jt[CLZ] = &operation{
+		execute:     opCLZ,
+		constantGas: GasFastestStep,
+		numPop:      1,
+		numPush:     1,
+	}
 }

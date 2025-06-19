@@ -27,8 +27,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/jwt"
 	"github.com/erigontech/erigon-lib/log/v3"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
-	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 type JsonRpcClientOption func(*JsonRpcClient)

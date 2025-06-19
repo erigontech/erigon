@@ -188,6 +188,8 @@ func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.T
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
 func (db *DB) ReloadSalt() error                                   { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
+func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
+func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
@@ -381,6 +383,14 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 
 func (tx *tx) ListTables() ([]string, error) {
 	return nil, errors.New("function ListTables is not implemented for remoteTx")
+}
+
+func (tx *tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	panic("not implemented")
+}
+
+func (tx *tx) AggForkablesTx(id kv.ForkableId) any {
+	panic("not implemented")
 }
 
 // func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }
@@ -647,8 +657,11 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.las
 // Temporal Methods
 
 func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
-	// TODO: not yet implemented, return 0 for now
-	return 0
+	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remote.HistoryStartFromReq{Domain: uint32(name)})
+	if err != nil {
+		return 0
+	}
+	return reply.StartFrom
 }
 
 func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {

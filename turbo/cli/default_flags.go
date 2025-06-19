@@ -118,6 +118,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentConnsPerFileFlag,
 	&utils.TorrentDownloadSlotsFlag,
 	&utils.TorrentStaticPeersFlag,
+	&utils.TorrentDisableTrackers,
 	&utils.TorrentUploadRateFlag,
 	&utils.TorrentDownloadRateFlag,
 	&utils.TorrentVerbosityFlag,
@@ -177,7 +178,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.PolygonSyncFlag,
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
-	&utils.OverridePragueFlag,
+	&utils.OverrideOsakaFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,

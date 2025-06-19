@@ -88,10 +88,7 @@ func New(datadir string) Dirs {
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
 		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin,
 		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis)
-	err := dirs.RenameOldVersions()
-	if err != nil {
-		panic(err)
-	}
+
 	return dirs
 }
 

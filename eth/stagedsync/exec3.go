@@ -48,8 +48,8 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -139,7 +139,7 @@ func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *stat
 func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *state2.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
+	txNumsReader := cfg.blockReader.TxnumReader(ctx)
 
 	inputTxNum = doms.TxNum()
 
@@ -154,7 +154,7 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, err
 	}
 
-	ok, _blockNum, err := txNumsReader.FindBlockNum(applyTx, doms.TxNum())
+	_blockNum, ok, err := txNumsReader.FindBlockNum(applyTx, doms.TxNum())
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -241,10 +241,12 @@ func ExecV3(ctx context.Context,
 	if !inMemExec && !isMining {
 		if initialCycle {
 			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+			agg.SetMergeWorkers(min(1, estimate.StateV3Collate.Workers()))
 			agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		} else {
-			agg.SetCompressWorkers(1)
 			agg.SetCollateAndBuildWorkers(1)
+			agg.SetMergeWorkers(1)
+			agg.SetCompressWorkers(1)
 		}
 	}
 
@@ -440,7 +442,7 @@ func ExecV3(ctx context.Context,
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
 
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+		readAhead, clean = exec3.BlocksReadAhead(ctx, 4, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
 	}
 
@@ -506,7 +508,7 @@ Loop:
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header) {
+		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return executor.getHeader(ctx, hash, number)
@@ -771,8 +773,8 @@ Loop:
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
-					"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
-					"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
+					"block", outputBlockNum.GetValueUint64(), "txNum", inputTxNum,
+					"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
 					"flush+commitment", t1, "tx.commit", t2, "prune", t3)
 			default:
 			}
@@ -865,7 +867,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *state2.SharedDomains) {
 	}
 }
 
-func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if cfg.badBlockHalt {
 		return false, errors.New("wrong trie root")
 	}
@@ -877,8 +879,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 		return false, nil
 	}
 
-	aggTx := state2.AggTx(applyTx)
-	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
+	unwindToLimit, err := applyTx.Debug().CanUnwindToBlockNum()
 	if err != nil {
 		return false, err
 	}
@@ -889,7 +890,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	allowedUnwindTo, ok, err := aggTx.CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	allowedUnwindTo, ok, err := applyTx.Debug().CanUnwindBeforeBlockNum(unwindTo)
 	if err != nil {
 		return false, err
 	}
@@ -940,7 +941,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		return handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
+		return handleIncorrectRootHashError(header, applyTx.(kv.TemporalRwTx), cfg, e, maxBlockNum, logger, u)
 	}
 	if !inMemExec {
 		if err := doms.Flush(ctx, applyTx); err != nil {

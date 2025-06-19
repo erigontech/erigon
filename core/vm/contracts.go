@@ -29,6 +29,7 @@ import (
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -171,23 +172,24 @@ var PrecompiledContractsPrague = map[common.Address]PrecompiledContract{
 }
 
 var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{0x01}): &ecrecover{},
-	common.BytesToAddress([]byte{0x02}): &sha256hash{},
-	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
-	common.BytesToAddress([]byte{0x04}): &dataCopy{},
-	common.BytesToAddress([]byte{0x05}): &bigModExp{osaka: true},
-	common.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{0x09}): &blake2F{},
-	common.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
-	common.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
-	common.BytesToAddress([]byte{0x0c}): &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{0x0d}): &bls12381G2Add{},
-	common.BytesToAddress([]byte{0x0e}): &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{0x0f}): &bls12381Pairing{},
-	common.BytesToAddress([]byte{0x10}): &bls12381MapFpToG1{},
-	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
+	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
+	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
+	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
+	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
+	common.BytesToAddress([]byte{0x05}):       &bigModExp{osaka: true},
+	common.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x09}):       &blake2F{},
+	common.BytesToAddress([]byte{0x0a}):       &pointEvaluation{},
+	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
+	common.BytesToAddress([]byte{0x0c}):       &bls12381G1MultiExp{},
+	common.BytesToAddress([]byte{0x0d}):       &bls12381G2Add{},
+	common.BytesToAddress([]byte{0x0e}):       &bls12381G2MultiExp{},
+	common.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
+	common.BytesToAddress([]byte{0x10}):       &bls12381MapFpToG1{},
+	common.BytesToAddress([]byte{0x11}):       &bls12381MapFp2ToG2{},
+	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
 var (
@@ -388,7 +390,7 @@ var (
 //	elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
 //	else: return x ** 2 // 16 + 480 * x - 199680
 //
-// where is x is max(length_of_MODULUS, length_of_BASE)
+// where is x is max(base_length, modulus_length)
 func modExpMultComplexityEip198(x *big.Int) *big.Int {
 	switch {
 	case x.Cmp(big64) <= 0:
@@ -416,7 +418,7 @@ func modExpMultComplexityEip198(x *big.Int) *big.Int {
 //	words = math.ceil(x / 8)
 //	return words**2
 //
-// where is x is max(length_of_MODULUS, length_of_BASE)
+// where is x is max(base_length, modulus_length)
 func modExpMultComplexityEip2565(x *big.Int) *big.Int {
 	x.Add(x, big7)
 	x.Rsh(x, 3) // ÷8
@@ -427,21 +429,18 @@ func modExpMultComplexityEip2565(x *big.Int) *big.Int {
 //
 // def mult_complexity(x):
 //
-//	words = math.ceil(x / 8)
-//	multiplication_complexity = 0
-//	if x <= 32: multiplication_complexity = words**2
-//	elif x > 32: multiplication_complexity = 2 * words**2
-//	return multiplication_complexity
+// words = math.ceil(x / 8)
+// multiplication_complexity = 16
+// if x > 32: multiplication_complexity = 2 * words**2
+// return multiplication_complexity
 //
-// where is x is max(length_of_MODULUS, length_of_BASE)
+// where is x is max(base_length, modulus_length)
 func modExpMultComplexityEip7883(x *big.Int) *big.Int {
-	lessOrEq32 := x.Cmp(big32) <= 0
-	x = modExpMultComplexityEip2565(x)
-	if lessOrEq32 {
-		return x
-	} else {
+	if x.Cmp(big32) > 0 {
+		x = modExpMultComplexityEip2565(x)
 		return x.Lsh(x, 1) // ×2
 	}
+	return x.SetUint64(16)
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -485,10 +484,10 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	adjExpLen = math.BigMax(adjExpLen, big1)
 
 	// Calculate the gas cost of the operation
-	gas := new(big.Int).Set(math.BigMax(modLen, baseLen))
+	gas := new(big.Int).Set(math.BigMax(modLen, baseLen)) // max_length
 	if c.osaka {
 		// EIP-7883: ModExp Gas Cost Increase
-		gas = modExpMultComplexityEip7883(gas)
+		gas = modExpMultComplexityEip7883(gas /*max_length */)
 
 		gas.Mul(gas, adjExpLen)
 		gas.Div(gas, big3)
@@ -603,17 +602,18 @@ func newTwistPoint(blob []byte) (*bn256.G2, error) {
 // runBn256Add implements the Bn256Add precompile, referenced by both
 // Byzantium and Istanbul operations.
 func runBn256Add(input []byte) ([]byte, error) {
-	x, err := newCurvePoint(getData(input, 0, 64))
+	x := bn254.G1Affine{}
+	err := bn256.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
-	y, err := newCurvePoint(getData(input, 64, 64))
+
+	y := bn254.G1Affine{}
+	err = bn256.UnmarshalCurvePointG1(getData(input, 64, 64), &y)
 	if err != nil {
 		return nil, err
 	}
-	res := new(bn256.G1)
-	res.Add(x, y)
-	return res.Marshal(), nil
+	return bn256.MarshalCurvePointG1(x.Add(&x, &y)), nil
 }
 
 // bn256Add implements a native elliptic curve point addition conforming to
@@ -645,13 +645,12 @@ func (c *bn256AddByzantium) Run(input []byte) ([]byte, error) {
 // runBn256ScalarMul implements the Bn256ScalarMul precompile, referenced by
 // both Byzantium and Istanbul operations.
 func runBn256ScalarMul(input []byte) ([]byte, error) {
-	p, err := newCurvePoint(getData(input, 0, 64))
+	x := bn254.G1Affine{}
+	err := bn256.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
-	res := new(bn256.G1)
-	res.ScalarMult(p, new(big.Int).SetBytes(getData(input, 64, 32)))
-	return res.Marshal(), nil
+	return bn256.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
 }
 
 // bn256ScalarMulIstanbul implements a native elliptic curve scalar
@@ -695,28 +694,37 @@ var (
 // Byzantium and Istanbul operations.
 func runBn256Pairing(input []byte) ([]byte, error) {
 	// Handle some corner cases cheaply
+	if len(input) == 0 {
+		return true32Byte, nil
+	}
 	if len(input)%192 > 0 {
 		return nil, errBadPairingInput
 	}
+
 	// Convert the input into a set of coordinates
-	var (
-		cs []*bn256.G1
-		ts []*bn256.G2
-	)
+	as := make([]bn254.G1Affine, 0, len(input)/192)
+	bs := make([]bn254.G2Affine, 0, len(input)/192)
 	for i := 0; i < len(input); i += 192 {
-		c, err := newCurvePoint(input[i : i+64])
+		ai := bn254.G1Affine{}
+		err := bn256.UnmarshalCurvePointG1(input[i:i+64], &ai)
 		if err != nil {
 			return nil, err
 		}
-		t, err := newTwistPoint(input[i+64 : i+192])
+
+		bi := bn254.G2Affine{}
+		err = bn256.UnmarshalCurvePointG2(input[i+64:i+192], &bi)
 		if err != nil {
 			return nil, err
 		}
-		cs = append(cs, c)
-		ts = append(ts, t)
+		as = append(as, ai)
+		bs = append(bs, bi)
 	}
-	// Execute the pairing checks and return the results
-	if bn256.PairingCheck(cs, ts) {
+
+	success, err := bn254.PairingCheck(as, bs)
+	if err != nil {
+		return nil, err
+	}
+	if success {
 		return true32Byte, nil
 	}
 	return false32Byte, nil

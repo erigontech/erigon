@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -47,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type HistoricalTraceWorker struct {
@@ -175,7 +173,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -190,11 +188,11 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks, *rw.vmCfg)
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks, *rw.vmCfg)
 			if err != nil {
 				return nil, err
 			}
-			txTask.Logs = append(txTask.Logs, logs...)
+			txTask.Logs = append(txTask.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 			return ret, err
 		}
 
@@ -214,7 +212,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		txTask.Tracer.Reset() // txTask is retryable
 		rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
-		ibs.SetTxContext(txTask.TxIndex)
+		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
@@ -254,7 +252,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
 			txTask.TraceFroms = txTask.Tracer.Froms()
 			txTask.TraceTos = txTask.Tracer.Tos()
 		}
@@ -394,7 +392,16 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 	defer applyWorker.LogStats()
 	applyWorker.ResetTx(tx)
 
+	//logEvery := time.NewTicker(1 * time.Second)
+	//defer logEvery.Stop()
+
 	for outputTxNum.Load() <= toTxNum {
+		//select {
+		//case <-logEvery.C:
+		//	log.Info("[dbg] out", "chanLen", rws.ChanLen(), "chanCapacity", rws.ChanCapacity(), "heapLen", rws.Len(), "heapCapacity", rws.Capacity())
+		//default:
+		//}
+
 		err = rws.DrainNonBlocking(ctx)
 		if err != nil {
 			return err
@@ -407,6 +414,7 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 		if processedTxNum > 0 {
 			outputTxNum.Store(processedTxNum)
 		}
+
 	}
 	//if outputTxNum.Load() != toTxNum {
 	//	return fmt.Errorf("not all txnums proceeded: toTxNum=%d, outputTxNum=%d", toTxNum, outputTxNum.Load())
@@ -483,7 +491,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	txNumsReader := cfg.BlockReader.TxnumReader(ctx)
 
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
@@ -512,19 +520,19 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		if err != nil {
 			return err
 		}
-		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%dk-%dk", fromBlock/1_000, toBlock/1_000), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
+		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%.1fm-%.1fm", float64(fromBlock)/1_000_000, float64(toBlock)/1_000_000), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
 	}
 
-	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
+	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header, err error) {
 		if tx != nil && WorkerCount == 1 {
-			h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
+			h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
 		} else {
 			cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
-				h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
+				h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
 				return nil
 			})
 		}
-		return h
+		return h, err
 	}
 
 	outTxNum := &atomic.Uint64{}
@@ -542,6 +550,12 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		workersExited.Store(true)
 	}()
 
+	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
+	// can't use OS-level ReadAhead - because Data >> RAM
+	// it also warmsup state a bit - by touching senders/coninbase accounts and code
+	readAhead, clean := BlocksReadAhead(ctx, 4, cfg.ChainDB, cfg.Engine, cfg.BlockReader)
+	defer clean()
+
 	inputTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return err
@@ -549,6 +563,11 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 	for blockNum := fromBlock; blockNum <= toBlock && !workersExited.Load(); blockNum++ {
+		select {
+		case readAhead <- blockNum:
+		default:
+		}
+
 		var b *types.Block
 		b, err = blockWithSenders(ctx, nil, tx, br, blockNum)
 		if err != nil {
@@ -565,7 +584,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) common.Hash {
+		getHashFn := func(n uint64) (common.Hash, error) {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return f(n)
@@ -610,7 +629,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 			//select {
 			//case <-logEvery.C:
-			//	log.Info("[dbg] in", "in", in.Len())
+			//	log.Info("[dbg] in", "len", in.Len(), "cap", in.Capacity())
 			//default:
 			//}
 		}
@@ -646,7 +665,7 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader int
 	}
 	return b, err
 }
-func BlkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+func BlkRangeToSteps(tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return 0, 0, err
@@ -656,12 +675,12 @@ func BlkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.T
 		return 0, 0, err
 	}
 
-	stepSize := libstate.AggTx(tx).StepSize()
+	stepSize := tx.Debug().StepSize()
 	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
 }
 
-func BlkRangeToStepsOnDB(db kv.RoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	tx, err := db.BeginRo(context.Background())
+func BlkRangeToStepsOnDB(db kv.TemporalRoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+	tx, err := db.BeginTemporalRo(context.Background())
 	if err != nil {
 		return 0, 0, err
 	}

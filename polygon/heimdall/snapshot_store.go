@@ -199,7 +199,7 @@ func (s *SpanSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum
 }
 
 func (s *SpanSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
-	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Span])
+	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Span], 0, true)
 }
 
 type MilestoneSnapshotStore struct {
@@ -330,7 +330,7 @@ func (s *MilestoneSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlo
 }
 
 func (s *MilestoneSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
-	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Milestone])
+	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Milestone], 1, true)
 }
 
 type CheckpointSnapshotStore struct {
@@ -451,7 +451,7 @@ func (s *CheckpointSnapshotStore) RangeFromBlockNum(ctx context.Context, startBl
 }
 
 func (s *CheckpointSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
-	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Checkpoint])
+	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Checkpoint], 1, true)
 }
 
 func validateSnapshots[T Entity](
@@ -462,6 +462,8 @@ func validateSnapshots[T Entity](
 	snaps *RoSnapshots,
 	t snaptype.Type,
 	makeEntity func() T,
+	firstEntityId uint64,
+	alsoCheckDb bool,
 ) error {
 	tx := snaps.ViewType(t)
 	defer tx.Close()
@@ -472,7 +474,7 @@ func validateSnapshots[T Entity](
 	}
 
 	var accumulatedErr error
-	var prev *T
+	expectedId := firstEntityId
 	for _, seg := range segs {
 		idx := seg.Src().Index()
 		if idx == nil || idx.KeyCount() == 0 {
@@ -495,16 +497,11 @@ func validateSnapshots[T Entity](
 				"end", entity.BlockNumRange().End,
 				"segmentFrom", seg.From(),
 				"segmentTo", seg.To(),
+				"expectedId", expectedId,
 			)
 
-			if prev == nil {
-				prev = &entity
-				continue
-			}
-
-			expectedId := (*prev).RawId() + 1
 			if expectedId == entity.RawId() {
-				prev = &entity
+				expectedId++
 				continue
 			}
 
@@ -512,13 +509,17 @@ func validateSnapshots[T Entity](
 				accumulatedErr = errors.New("missing entities")
 			}
 
-			accumulatedErr = fmt.Errorf("%w: snap [%d, %d)", accumulatedErr, expectedId, entity.RawId())
+			accumulatedErr = fmt.Errorf("%w: snap [%d, %d, %s)", accumulatedErr, expectedId, entity.RawId(), seg.Src().FileName())
 			if failFast {
 				return accumulatedErr
 			}
 
-			prev = &entity
+			expectedId = entity.RawId() + 1
 		}
+	}
+
+	if !alsoCheckDb {
+		return accumulatedErr
 	}
 
 	// make sure snapshots connect with data in the db and there are no gaps at all
@@ -526,10 +527,10 @@ func validateSnapshots[T Entity](
 	if err != nil {
 		return err
 	}
-	if !ok || prev == nil {
-		return nil
+	if !ok {
+		return accumulatedErr
 	}
-	for i := (*prev).RawId() + 1; i <= lastInDb; i++ {
+	for i := expectedId; i <= lastInDb; i++ {
 		_, ok, err := dbStore.Entity(ctx, i)
 		if err != nil {
 			return err
@@ -538,6 +539,10 @@ func validateSnapshots[T Entity](
 			continue
 		}
 		// we've found a gap between snapshots and db
+		if accumulatedErr == nil {
+			accumulatedErr = errors.New("missing entities")
+		}
+
 		accumulatedErr = fmt.Errorf("%w: db [%d]", accumulatedErr, i)
 		if failFast {
 			return accumulatedErr

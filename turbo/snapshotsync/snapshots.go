@@ -495,7 +495,7 @@ func (s *RoTx) Close() {
 type BlockSnapshots interface {
 	LogStat(label string)
 	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps bool) error
+	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
 	Delete(fileName string) error
@@ -567,7 +567,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 
 	s.segmentsMin.Store(segmentsMin)
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 
 	if cfg.NoDownloader {
 		s.DownloadComplete()
@@ -674,7 +674,7 @@ func (s *RoSnapshots) HasType(in snaptype.Type) bool {
 type ready struct {
 	mu     sync.Mutex
 	on     chan struct{}
-	state  atomic.Bool
+	state  bool
 	inited bool
 }
 
@@ -697,21 +697,15 @@ func (r *ready) set() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.init()
-	if r.state.Load() {
+	if r.state {
 		return
 	}
-	if r.state.CompareAndSwap(false, true) {
-		close(r.on)
-	}
+	r.state = true
+	close(r.on)
 }
 
 func (s *RoSnapshots) Ready(ctx context.Context) <-chan error {
 	errc := make(chan error)
-
-	if s.ready.state.Load() {
-		close(errc)
-		return errc
-	}
 
 	go func() {
 		select {
@@ -817,7 +811,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 	return newVisibleSegments
 }
 
-func (s *RoSnapshots) recalcVisibleFiles() {
+func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
@@ -838,12 +832,12 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		if len(newVisibleSegments) > 0 {
 			to = newVisibleSegments[len(newVisibleSegments)-1].to - 1
 		}
-		if s.alignMin {
+		if alignMin {
 			maxVisibleBlocks = append(maxVisibleBlocks, to)
 		}
 	}
 
-	if s.alignMin {
+	if alignMin {
 		// all types must have same hight
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
@@ -980,7 +974,7 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -1003,7 +997,7 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 		return err
 	}
 
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
@@ -1173,7 +1167,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		return err
 	}
 
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
@@ -1183,8 +1177,8 @@ func (s *RoSnapshots) OpenFolder() error {
 	return nil
 }
 
-func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps bool) error {
-	defer s.recalcVisibleFiles()
+func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error {
+	defer s.recalcVisibleFiles(alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -1210,7 +1204,7 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
@@ -1365,7 +1359,7 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	v := s.View()
 	defer v.Close()
 
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 	if err := s.delete(fileName); err != nil {
 		return fmt.Errorf("can't delete file: %w", err)
 	}

@@ -19,7 +19,7 @@ import (
 type BorSpanRootRelation struct{}
 
 func (r *BorSpanRootRelation) RootNum2Num(from state.RootNum, tx kv.Tx) (state.Num, error) {
-	return Num(heimdall.SpanIdAt(uint64(from))), nil
+	return Num(CustomSpanIdAt(uint64(from))), nil
 }
 
 func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (ForkableId, *state.Forkable[UnmarkedTxI]) {
@@ -38,7 +38,7 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 
 	indexb := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, false), borspanId, log)
 	indexb.SetFirstEntityNumFetcher(func(from, to RootNum, seg *seg.Decompressor) Num {
-		return Num(heimdall.SpanIdAt(uint64(from)))
+		return Num(CustomSpanIdAt(uint64(from)))
 	})
 
 	uma, err := state.NewUnmarkedForkable(borspanId,
@@ -96,8 +96,9 @@ func TestUnmarkedPrune(t *testing.T) {
 			borSpanId, uma := setupBorSpans(t, log, dir, db)
 
 			ctx := context.Background()
-			cfg := borSpanId.SnapshotConfig()
-			entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
+			cfg := ee.Registry.SnapshotConfig(borSpanId)
+			extras_count := uint64(5) // db
+			entries_count = cfg.MinimumSize + cfg.SafetyMargin + extras_count
 
 			uma_tx := uma.BeginTemporalTx()
 			defer uma_tx.Close()
@@ -118,27 +119,60 @@ func TestUnmarkedPrune(t *testing.T) {
 			require.NoError(t, rwtx.Commit())
 			uma_tx.Close()
 
+			built := true
+			from := RootNum(0)
+			var df *state.FilesItem
+			ps := background.NewProgressSet()
+
+			for built {
+				df, built, err = uma.BuildFile(ctx, from, RootNum(entries_count), db, 1, ps)
+				require.NoError(t, err)
+				if df != nil {
+					uma.IntegrateDirtyFile(df)
+					_, endTxNum := df.Range()
+					from = RootNum(endTxNum)
+				}
+			}
+			uma.RecalcVisibleFiles(RootNum(entries_count))
+
+			uma_tx = uma.BeginTemporalTx()
+			defer uma_tx.Close()
+
 			rwtx, err = db.BeginRw(ctx)
 			defer rwtx.Rollback()
 			require.NoError(t, err)
 
-			ndels, err := uma_tx.Prune(ctx, pruneTo, 1000, rwtx)
+			stat, err := uma_tx.Prune(ctx, pruneTo, 1000, nil, rwtx)
 			require.NoError(t, err)
 
-			spanId := heimdall.SpanIdAt(uint64(pruneTo))
-			require.Equal(t, ndels, uint64(spanId))
+			visibleFilesMaxNum := CustomSpanIdAt(min(uint64(pruneTo), entries_count-cfg.SafetyMargin-extras_count))
+			require.Equal(t, stat.PruneCount, uint64(visibleFilesMaxNum))
 
 			require.NoError(t, rwtx.Commit())
+			uma_tx.Close()
 			uma_tx = uma.BeginTemporalTx()
 			defer uma_tx.Close()
 			rwtx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			defer rwtx.Rollback()
 		})
-		if pruneTo >= RootNum(entries_count+1) {
+		if uint64(CustomSpanIdAt(uint64(pruneTo))) >= entries_count+1 {
 			break
 		}
 	}
+}
+
+const (
+	customSpanLength    = 10 // Number of blocks in a span
+	customZerothSpanEnd = 2  // End block of 0th span
+)
+
+// SpanIdAt returns the corresponding span id for the given block number.
+func CustomSpanIdAt(blockNum uint64) heimdall.SpanId {
+	if blockNum > customZerothSpanEnd {
+		return heimdall.SpanId(1 + (blockNum-customZerothSpanEnd-1)/customSpanLength)
+	}
+	return 0
 }
 
 func TestBuildFiles_Unmarked(t *testing.T) {
@@ -151,7 +185,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
 	require.NoError(t, err)
-	cfg := borSpanId.SnapshotConfig()
+	cfg := ee.Registry.SnapshotConfig(borSpanId)
 	num_files := uint64(5)
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
@@ -173,7 +207,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	built := true
 	i := 0
 	from, to := RootNum(0), RootNum(entries_count)
-	files := make([]state.FilesItem, 0)
+	files := make([]*state.FilesItem, 0)
 	for built {
 		file, built2, err := uma.BuildFile(ctx, from, to, db, 1, ps)
 		require.NoError(t, err)
@@ -193,7 +227,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	}
 
 	require.Len(t, files, int(num_files))
-	uma.IntegrateDirtyFiles2(files)
+	uma.IntegrateDirtyFiles(files)
 	uma.RecalcVisibleFiles(RootNum(entries_count))
 
 	uma_tx = uma.BeginTemporalTx()
@@ -204,10 +238,10 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	require.NoError(t, err)
 
 	firstRootNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxRootNum()
-	firstSpanIdNotInSnap := Num(heimdall.SpanIdAt(uint64(firstRootNumNotInSnap)))
-	del, err := uma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
+	firstSpanIdNotInSnap := Num(CustomSpanIdAt(uint64(firstRootNumNotInSnap)))
+	stat, err := uma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, nil, rwtx)
 	require.NoError(t, err)
-	require.Equal(t, del, uint64(firstSpanIdNotInSnap))
+	require.Equal(t, uint64(CustomSpanIdAt(uint64(firstRootNumNotInSnap)-uint64(uma.PruneFrom()))), stat.PruneCount)
 
 	require.NoError(t, rwtx.Commit())
 	uma_tx = uma.BeginTemporalTx()

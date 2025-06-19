@@ -27,8 +27,9 @@ import (
 
 const (
 	GasLimitBoundDivisor uint64 = 1024               // The bound divisor of the gas limit, used in update calculations.
-	MinGasLimit          uint64 = 5000               // Minimum the gas limit may ever be.
-	MaxGasLimit          uint64 = 0x7fffffffffffffff // Maximum the gas limit may ever be.
+	MinBlockGasLimit     uint64 = 5000               // Minimum the block gas limit may ever be.
+	MaxBlockGasLimit     uint64 = 0x7fffffffffffffff // Maximum the block gas limit may ever be.
+	MaxTxnGasLimit       uint64 = 30_000_000         // See EIP-7825: Transaction Gas Limit Cap.
 	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
@@ -178,7 +179,15 @@ const (
 	PointEvaluationGas   uint64 = 50000
 	FieldElementsPerBlob        = 4096 // each field element is 32 bytes
 	BlobSize                    = FieldElementsPerBlob * 32
-	BlobGasPerBlob       uint64 = 0x20000
+	GasPerBlob           uint64 = 1 << 17
+	BlobBaseCost         uint64 = 1 << 14 // EIP-7918: Blob base fee bounded by execution cost
+
+	// EIP-7594: PeerDAS - Peer Data Availability Sampling
+	// See https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/polynomial-commitments-sampling.md
+	FieldElementsPerExtBlob        = 2 * FieldElementsPerBlob                       // Number of field elements in a Reed-Solomon extended blob
+	FieldElementsPerCell    uint64 = 64                                             // Number of Field elements in a cell
+	BytesPerCell                   = FieldElementsPerCell * 32                      // The number of bytes in a cell
+	CellsPerExtBlob                = FieldElementsPerExtBlob / FieldElementsPerCell // The number of cells in an extended blob
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas uint64 = 3450

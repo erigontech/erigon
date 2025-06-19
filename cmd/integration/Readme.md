@@ -5,7 +5,7 @@ etc...
 
 All commands require parameter `--datadir=<datadir>` - I will skip it for readability.
 
-```
+```sh
 integration --help
 integration print_stages
 
@@ -44,7 +44,7 @@ Pre-requirements of `state_stages` command:
 - Headers/Bodies must be downloaded
 - TxSenders stage must be executed
 
-```
+```sh
 make all
 ./build/bin/integration state_stages --datadir=<datadir> --unwind=10 --unwind.every=20 --pprof
 integration reset_state # drops all stages after Senders stage (including it's db tables DB tables)
@@ -52,7 +52,7 @@ integration reset_state # drops all stages after Senders stage (including it's d
 
 For example:
 
-```
+```sh
 --unwind=1 --unwind.every=10  # 10 blocks forward, 1 block back, 10 blocks forward, ...
 --unwind=10 --unwind.every=1  # 1 block forward, 10 blocks back, 1 blocks forward, ...
 --unwind=10  # 10 blocks back, then stop
@@ -71,7 +71,7 @@ until https://github.com/erigontech/erigon/issues/13674 is fixed)
 In Erigon3 - better do `rm -rf chaindata` (for bor maybe also need remove `polygon-bridge`, `bor`, `heimdall` folders
 until https://github.com/erigontech/erigon/issues/13674 is fixed)
 
-```
+```sh
 0. You will need 2x disk space (can be different disks).
 1. Stop Erigon
 2. Create new db with new --db.pagesize:
@@ -89,7 +89,7 @@ If you face db-open error like `MDBX_PROBLEM: Unexpected internal error`. First:
 like https://www.memtest86.com to test RAM and tools like https://www.smartmontools.org to test Disk. If hardware is
 fine: can try manually recover db (see `./build/bin/mdbx_chk -h` for more details):
 
-```
+```sh
 make db-tools
 
 ./build/bin/mdbx_chk -0 -d /erigon/chaindata
@@ -115,7 +115,7 @@ It allows to process this blocks again
 
 ## How to re-exec all blocks
 
-```cgo
+```sh
 # Option 1 (on empty datadir):
 erigon --snap.skip-state-snapshot-download
 
@@ -127,20 +127,44 @@ integration stage_exec
 # Option 2 is good 
 ```
 
-## How to re-generate some Domain/Index
+## How to re-gen CommitmentDomain
 
-```cgo
+```sh
+integration commitment_rebuild
+```
+
+## How to re-generate optional Domain/Index
+
+```sh
 # By parallel executing blocks on existing historical state. Can be 1 or many domains:
-erigon seg rm-state-snapshots --domain=rcache,logtopics,logaddrs,tracesfrom,tracesto
-integration stage_custom_trace --domain=rcache,logindex,traceindex --reset
-integration stage_custom_trace --domain=rcache,logindex,traceindex
+erigon seg rm-state-snapshots --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
+integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto --reset
+integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
 ```
 
 ## How to re-gen bor checkpoints
 
-```cgo
+```sh
 rm -rf datadir/heimdall
 rm -rf datadir/snapshots/*borch*
 # Start erigon, it will gen. Then:
 erigon seg integrity --datadir /erigon-data/ --check=BorCheckpoints
+```
+
+## See tables size
+
+```sh
+./build/bin/mdbx_stat -efa /erigon-data/chaindata/   | awk '
+    BEGIN { pagesize = 4096 }
+    /^  Pagesize:/ { pagesize = $2 }
+    /^Status of/ { table = $3 }
+    /Branch pages:/ { branch = $3 }
+    /Leaf pages:/ { leaf = $3 }
+    /Overflow pages:/ { overflow = $3 }
+    /Entries:/ {
+      total_pages = branch + leaf + overflow
+      size_gb = (total_pages * pagesize) / (1024^3)
+      printf "%-30s %.3fG\n", table, size_gb
+    }
+  ' | grep -v '0.000G'
 ```

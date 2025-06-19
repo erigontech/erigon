@@ -405,6 +405,9 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 		}
 
 		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots, onFinishRetire)
+		if errors.Is(err, heimdall.ErrHeimdallDataIsNotReady) {
+			return
+		}
 		if err != nil {
 			br.logger.Warn("[snapshots] retire blocks", "err", err)
 			return

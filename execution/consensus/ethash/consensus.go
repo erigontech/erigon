@@ -221,8 +221,8 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		return errOlderBlockTime
 	}
 	// Verify that the gas limit is <= 2^63-1
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	if header.GasLimit > params.MaxBlockGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxBlockGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
@@ -673,8 +673,8 @@ func accumulateRewards(config *chain.Config, state *state.IntraBlockState, heade
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	for i, uncle := range uncles {
 		if i < len(uncleRewards) {
-			state.AddBalance(uncle.Coinbase, &uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
+			state.AddBalance(uncle.Coinbase, uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
 		}
 	}
-	state.AddBalance(header.Coinbase, &minerReward, tracing.BalanceIncreaseRewardMineBlock)
+	state.AddBalance(header.Coinbase, minerReward, tracing.BalanceIncreaseRewardMineBlock)
 }

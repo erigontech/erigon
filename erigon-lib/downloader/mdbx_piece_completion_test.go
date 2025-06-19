@@ -19,10 +19,11 @@ package downloader
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -40,13 +41,13 @@ func TestMdbxPieceCompletion(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, b.Ok)
 
-	require.NoError(t, pc.Set(pk, false, false))
+	require.NoError(t, pc.Set(pk, false))
 
 	b, err = pc.Get(pk)
 	require.NoError(t, err)
 	assert.Equal(t, storage.Completion{Complete: false, Ok: true}, b)
 
-	require.NoError(t, pc.Set(pk, true, false))
+	require.NoError(t, pc.Set(pk, true))
 
 	b, err = pc.Get(pk)
 	require.NoError(t, err)

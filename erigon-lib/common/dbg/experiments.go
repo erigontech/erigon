@@ -34,7 +34,7 @@ var (
 	MaxReorgDepth       = EnvInt("MAX_REORG_DEPTH", 512)
 	EnableHistoryExpiry = EnvBool("ENABLE_HISTORY_EXPIRY", false)
 
-	doMemstat           = EnvBool("NO_MEMSTAT", true)
+	noMemstat           = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
@@ -85,9 +85,10 @@ var (
 )
 
 func ReadMemStats(m *runtime.MemStats) {
-	if doMemstat {
-		runtime.ReadMemStats(m)
+	if noMemstat {
+		return
 	}
+	runtime.ReadMemStats(m)
 }
 
 func MdbxLockInRam() bool { return mdbxLockInRam }
