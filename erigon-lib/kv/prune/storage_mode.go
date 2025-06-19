@@ -177,7 +177,7 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode, chaindata string) (Mode, err
 	if pruneMode.Initialised {
 		// Little initial design flaw: we used maxUint64 as default value for prune distance so history expiry was not accounted for.
 		if pm.History == DefaultBlocksPruneMode && pruneMode.History == DefaultBlocksPruneMode {
-			return pm, errors.New("history expiry upgrade requires to delete chaindata, rm -rf " + chaindata + " and restart with --prune.mode=archive --prune.distance=0")
+			return pruneMode, nil
 		}
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
