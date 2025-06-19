@@ -570,6 +570,7 @@ func TestParseCompressedFileName(t *testing.T) {
 		"preverified.toml":                             &fstest.MapFile{},
 		"idx/v1-tracesto.40-44.ef":                     &fstest.MapFile{},
 		"v1.0-021700-021800-bodies.seg.torrent":        &fstest.MapFile{},
+		"caplin/v1.0-021150-021200-BlockRoot.seg":      &fstest.MapFile{},
 	}
 	stat := func(name string) string {
 		s, err := fs.Stat(name)
@@ -598,6 +599,13 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal("bodies", f.TypeString)
 
 	var e3 bool
+	f, e3, ok = snaptype.ParseFileName("", "caplin/v1.0-021150-021200-BlockRoot.seg")
+	require.True(ok)
+	require.False(e3)
+	require.Equal(21150000, int(f.From))
+	require.Equal(21200000, int(f.To))
+	require.Equal("BlockRoot", f.TypeString)
+
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx"))
 	require.True(ok)
 	require.False(e3)

@@ -89,7 +89,9 @@ func (m *mdbxPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, 
 	return
 }
 
-func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool, awaitFlush bool) error {
+func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
+	awaitFlush := true
+
 	if c, err := m.Get(pk); err == nil && c.Ok && c.Complete == b {
 		return nil
 	}

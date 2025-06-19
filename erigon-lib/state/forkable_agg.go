@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -625,7 +626,125 @@ func (r *ForkableAggTemporalTx) HasRootNumUpto(ctx context.Context, forId Forkab
 	})
 }
 
+func (r *ForkableAggTemporalTx) Unwind(ctx context.Context, to RootNum, tx kv.RwTx) error {
+	return loopOverDebugDbsExec(r, kv.AllForkableId, func(db ForkableDbCommonTxI) error {
+		_, err := db.Unwind(ctx, to, tx)
+		return err
+	})
+}
+
+func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, timeout time.Duration, tx kv.RwTx) (err error) {
+	if dbg.NoPrune() {
+		return
+	}
+
+	limit := uint64(1000)
+	if timeout > 5*time.Hour {
+		limit = 1_000_000
+	} else if timeout >= time.Minute {
+		limit = 10_000
+	}
+
+	localTimeout := time.NewTicker(timeout)
+	defer localTimeout.Stop()
+	timeoutErr := fmt.Errorf("prune timeout")
+
+	aggLogEvery := time.NewTicker(600 * time.Second)
+	defer aggLogEvery.Stop()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	aggStat := ForkablePruneStat{}
+
+	err = loopOverDebugDbsExec(r, kv.AllForkableId, func(db ForkableDbCommonTxI) error {
+		stat, err := db.Prune(ctx, toRootNum, limit, aggLogEvery, tx)
+		if err != nil {
+			return err
+		}
+
+		aggStat.Accumulate(&stat)
+
+		select {
+		case <-localTimeout.C:
+			return timeoutErr
+		case <-logEvery.C:
+			r.f.logger.Info("forkable prune progress", "toRootNum", toRootNum, "stat", aggStat)
+		case <-ctx.Done():
+			r.f.logger.Info("forkable prune cancelled", "toRootNum", toRootNum, "stat", aggStat)
+			return ctx.Err()
+		default:
+			return nil
+		}
+
+		return nil
+	})
+	if errors.Is(err, timeoutErr) {
+		r.f.logger.Warn("forkable prune timeout")
+		return nil
+	}
+	r.f.logger.Info("forkable prune finished", "toRootNum", toRootNum, "stat", aggStat)
+	return err
+}
+
+func (r *ForkableAggTemporalTx) Close() {
+	if r == nil || r.f == nil {
+		return
+	}
+	r.f = nil
+	for _, mt := range r.marked {
+		if mt != nil {
+			mt.Close()
+		}
+	}
+
+	for _, ut := range r.unmarked {
+		if ut != nil {
+			ut.Close()
+		}
+	}
+
+	for _, bt := range r.buffered {
+		if bt != nil {
+			bt.Close()
+		}
+	}
+}
+
+// loop over all forkables (with some variations)
+// assume AllForkableId when needed to exec for all forkables
+func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) error) error {
+	for i, mt := range r.marked {
+		if forId.MatchAll() && r.f.marked[i].a == forId {
+			dbg := mt.(ForkableDebugAPI[MarkedDbTxI])
+			if err := fn(dbg.DebugDb()); err != nil {
+				return err
+			}
+		}
+	}
+
+	for i, ut := range r.unmarked {
+		if forId.MatchAll() && r.f.unmarked[i].a == forId {
+			dbg := ut.(ForkableDebugAPI[UnmarkedDbTxI])
+			if err := fn(dbg.DebugDb()); err != nil {
+				return err
+			}
+		}
+	}
+
+	for i, bt := range r.buffered {
+		if forId.MatchAll() && r.f.buffered[i].a == forId {
+			dbg := bt.(ForkableDebugAPI[BufferedDbTxI])
+			if err := fn(dbg.DebugDb()); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) (R, error)) (R, error) {
+	// since only single call can return, doesn't support AllForkableId
 	for i, mt := range r.marked {
 		if r.f.marked[i].a == forId {
 			dbg := mt.(ForkableDebugAPI[MarkedDbTxI])
@@ -682,28 +801,4 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 	}
 
 	panic(fmt.Sprintf("no forkable with id %s", ee.Registry.Name(forId)))
-}
-
-func (r *ForkableAggTemporalTx) Close() {
-	if r == nil || r.f == nil {
-		return
-	}
-	r.f = nil
-	for _, mt := range r.marked {
-		if mt != nil {
-			mt.Close()
-		}
-	}
-
-	for _, ut := range r.unmarked {
-		if ut != nil {
-			ut.Close()
-		}
-	}
-
-	for _, bt := range r.buffered {
-		if bt != nil {
-			bt.Close()
-		}
-	}
 }
