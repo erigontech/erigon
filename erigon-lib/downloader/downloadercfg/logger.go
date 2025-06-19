@@ -17,32 +17,47 @@
 package downloadercfg
 
 import (
+	"bytes"
 	"fmt"
-	"strings"
 
-	lg "github.com/anacrolix/log"
+	analog "github.com/anacrolix/log"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func init() {
-	lg.Default.Handlers = []lg.Handler{adapterHandler{}}
+	// Erigon's inherited log library does filtering per handler. anacrolix/log does filtering at
+	// the logger level...
+	analog.Default.Handlers = []analog.Handler{adapterHandler{}}
 }
 
-func Int2LogLevel(level int) (lvl lg.Level, dbg bool, err error) {
+// Converts flag int to Erigon log level. Surely there's a helper for this somewhere else...
+func Int2LogLevel(level int) (lvl log.Lvl, err error) {
+	if level < 0 || level > 5 {
+		err = fmt.Errorf("invalid level set, expected a number between 0-5 but got: %d", level)
+		return
+	}
+	lvl = log.Lvl(level)
+	return
+}
+
+// dbg was an old field I guess used for the fact analog doesn't have a trace level. Probably don't
+// need it anymore.
+func erigonToAnalogLevel(level log.Lvl) (lvl analog.Level, dbg bool, err error) {
 	switch level {
-	case 0:
-		lvl = lg.Critical
-	case 1:
-		lvl = lg.Error
-	case 2:
-		lvl = lg.Warning
-	case 3:
-		lvl = lg.Info
-	case 4:
-		lvl = lg.Debug
-	case 5:
-		lvl = lg.Debug
+	case log.LvlCrit:
+		lvl = analog.Critical
+	case log.LvlError:
+		lvl = analog.Error
+	case log.LvlWarn:
+		lvl = analog.Warning
+	case log.LvlInfo:
+		lvl = analog.Info
+	case log.LvlDebug:
+		lvl = analog.Debug
+	case log.LvlTrace:
+		// Should this be analog.NotSet?
+		lvl = analog.Debug
 		dbg = true
 	default:
 		return lvl, dbg, fmt.Errorf("invalid level set, expected a number between 0-5 but got: %d", level)
@@ -50,94 +65,53 @@ func Int2LogLevel(level int) (lvl lg.Level, dbg bool, err error) {
 	return lvl, dbg, nil
 }
 
+func anacrolixToErigonLogLevel(level analog.Level) log.Lvl {
+	switch level {
+	case analog.Never:
+		// This should never occur. Maybe log that a message leaked?
+		panic(level)
+		//nolint
+		return log.LvlTrace + 1
+	case analog.NotSet:
+		// This is usually bad practice. Set an appropriate default so it doesn't happen.
+		return log.LvlWarn
+	case analog.Debug:
+		return log.LvlDebug
+	case analog.Info:
+		return log.LvlInfo
+	case analog.Warning:
+		return log.LvlWarn
+	case analog.Error:
+		return log.LvlError
+	case analog.Critical:
+		return log.LvlCrit
+	case analog.Disabled:
+		panic(level)
+		// This should never occur. Maybe log that a message leaked?
+		//nolint
+		return log.LvlError
+	default:
+		// This shouldn't happen...
+		panic(level)
+	}
+}
+
 type noopHandler struct{}
 
-func (b noopHandler) Handle(r lg.Record) {
+func (b noopHandler) Handle(r analog.Record) {
 }
 
 type adapterHandler struct{}
 
-func (b adapterHandler) Handle(r lg.Record) {
-	lvl := r.Level
-
-	switch lvl {
-	case lg.Debug:
-		str := r.String()
-		skip := strings.Contains(str, "completion change") || strings.Contains(str, "hashed piece") ||
-			strings.Contains(str, "set torrent=") ||
-			strings.Contains(str, "all initial dials failed") ||
-			strings.Contains(str, "local and remote peer ids are the same") ||
-			strings.Contains(str, "connection at") || strings.Contains(str, "don't want conns right now") ||
-			strings.Contains(str, "is mutually complete") ||
-			strings.Contains(str, "sending PEX message") || strings.Contains(str, "received pex message") ||
-			strings.Contains(str, "announce to") || strings.Contains(str, "announcing to") ||
-			strings.Contains(str, "EOF") || strings.Contains(str, "closed") || strings.Contains(str, "connection reset by peer") || strings.Contains(str, "use of closed network connection") || strings.Contains(str, "broken pipe") ||
-			strings.Contains(str, "inited with remoteAddr")
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Debug(str)
-	case lg.Info:
-		str := r.String()
-		skip := strings.Contains(str, "EOF")
-		//strings.Contains(str, "banning ip <nil>") ||
-		//strings.Contains(str, "spurious timer") { // suppress useless errors
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Info(str)
-	case lg.Warning:
-		str := r.String()
-		skip := strings.Contains(str, "EOF") ||
-			strings.Contains(str, "requested chunk too long") ||
-			strings.Contains(str, "banned ip") ||
-			//strings.Contains(str, "banning webseed") ||
-			strings.Contains(str, "TrackerClient closed") ||
-			strings.Contains(str, "being sole dirtier of piece") ||
-			strings.Contains(str, "webrtc conn for unloaded torrent") ||
-			strings.Contains(str, "could not find offer for id") ||
-			strings.Contains(str, "received invalid reject") ||
-			strings.Contains(str, "reservation cancelled")
-
-		if skip {
-			log.Debug(str)
-			break
-		}
-		log.Warn(str)
-	case lg.Error:
-		str := r.String()
-		skip := strings.Contains(str, "EOF") ||
-			strings.Contains(str, "short write") ||
-			strings.Contains(str, "disabling data download")
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Error(str)
-	case lg.Critical:
-		str := r.String()
-		skip := strings.Contains(str, "EOF") ||
-			strings.Contains(str, "torrent closed") ||
-			strings.Contains(str, "don't want conns")
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Error(str)
-	default:
-		str := r.String()
-		skip := strings.Contains(str, "EOF") || strings.Contains(str, "unhandled response status") ||
-			strings.Contains(str, "error doing webseed request")
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
-	}
+func (b adapterHandler) Handle(r analog.Record) {
+	// Note that anacrolix/log now partly supports stdlib slog, so if Erigon switches to that, it
+	// would be better to use that too. anacrolix/torrent might change eventually too.
+	lvl := anacrolixToErigonLogLevel(r.Level)
+	msg := "[downloader torrent client] " + string(bytes.TrimSuffix(analog.LineFormatter(r), []byte{'\n'}))
+	log.Log(lvl, msg)
 }
 
+// TODO: Ditch this.
 type RetryableHttpLogger struct {
 	l log.Logger
 }

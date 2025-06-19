@@ -526,7 +526,23 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
 	}
 
-	if err := g.Wait(); err != nil {
+	err := func() error {
+		defer func() {
+			r := recover()
+			if err, ok := r.(error); ok {
+				var pe errgroup.PanicError
+				if errors.As(err, &pe) {
+					a.logger.Crit("panic error in Aggregator errgroup", "err", pe, "stack", string(pe.Stack))
+					os.Stderr.Write(pe.Stack)
+				}
+			}
+			if r != nil {
+				panic(r)
+			}
+		}()
+		return g.Wait()
+	}()
+	if err != nil {
 		return err
 	}
 
