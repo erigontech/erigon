@@ -297,6 +297,7 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
 func TestPrecompiledBn256ScalarMul(t *testing.T)      { testJson("bn256ScalarMul", "07", t) }
 func BenchmarkPrecompiledBn256ScalarMul(b *testing.B) { benchJson("bn256ScalarMul", "07", b) }
+func TestPrecompiledBn256ScalarMulFail(t *testing.T)  { testJsonFail("bn256ScalarMul", "07", t) }
 
 // Tests the sample inputs from the elliptic curve pairing check EIP 197.
 func TestPrecompiledBn256Pairing(t *testing.T)      { testJson("bn256Pairing", "08", t) }

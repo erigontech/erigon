@@ -704,6 +704,17 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 	return s
 }
 
+func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done func()) {
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to get stream from pool")
+	}
+	stream.Reset(r, inputLimit)
+	return stream, func() {
+		streamPool.Put(stream)
+	}
+}
+
 // Remaining returns number of bytes remaining to be read
 func (s *Stream) Remaining() uint64 {
 	return s.remaining
