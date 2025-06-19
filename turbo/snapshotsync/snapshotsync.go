@@ -19,12 +19,16 @@ package snapshotsync
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
 	"time"
 
+	"google.golang.org/grpc"
+
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -37,9 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"google.golang.org/grpc"
-
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
@@ -160,11 +161,13 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 }
 
 func isStateSnapshot(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor") || strings.HasPrefix(name, "domain")
+	return isStateHistory(name) || strings.HasPrefix(name, "domain")
 }
-
+func isStateHistory(name string) bool {
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
+}
 func canSnapshotBePruned(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions") || strings.Contains(name, "accessor")
+	return isStateHistory(name) || strings.Contains(name, "transactions")
 }
 
 func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
@@ -182,23 +185,20 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			continue
 		}
 		var _, to uint64
-		var err error
 		if isStateSnapshot(name) {
 			// parse "from" (0) and "to" (64) from the name
-			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
-			rangeString := strings.Split(name, ".")[1]
-			rangeNums := strings.Split(rangeString, "-")
-			// convert the range to uint64
-			to, err = strconv.ParseUint(rangeNums[1], 10, 64)
-			if err != nil {
-				return nil, err
+			// parse the snapshot "kind". e.g kind of 'idx/v1.0-accounts.0-64.ef' is "idx/v1.0-accounts"
+			res, _, ok := snaptype.ParseFileName("", name)
+			if !ok {
+				return blackList, errors.New("invalid state snapshot name")
 			}
+			to = res.To
 			if stepPrune < to {
 				continue
 			}
 			blackList[name] = struct{}{}
 		} else {
-			// e.g 'v1-000000-000100-beaconblocks.seg'
+			// e.g 'v1.0-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 			s, _, ok := snaptype.ParseFileName("", name)
 			if !ok {
@@ -225,7 +225,7 @@ type blockReader interface {
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
-func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint64, blockPruneTo, historyPruneTo uint64) (uint64, uint64, error) {
+func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint64, historyPruneTo uint64) (uint64, uint64, error) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
 	minStepToDownload := uint64(math.MaxUint32)
@@ -263,7 +263,11 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 		if !strings.HasPrefix(p.Name, "domain") {
 			continue
 		}
-		rangeString := strings.Split(p.Name, ".")[1]
+		name := strings.TrimPrefix(p.Name, "domain/")
+		versionString := strings.Split(name, "-")[0]
+		name = strings.TrimPrefix(name, versionString)
+
+		rangeString := strings.Split(name, ".")[1]
 		rangeNums := strings.Split(rangeString, "-")
 		// convert the range to uint64
 		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
@@ -284,7 +288,7 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
@@ -319,7 +323,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if err != nil {
 			return err
 		}
-		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, blockPrune, historyPrune)
+		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, historyPrune)
 		if err != nil {
 			return err
 		}
@@ -342,7 +346,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
 			continue
 		}
-		if !blobs && strings.Contains(p.Name, "blobsidecars") {
+		if !blobs && strings.Contains(p.Name, snaptype.BlobSidecars.Name()) {
 			continue
 		}
 		if !caplinState && strings.Contains(p.Name, "caplin/") {
@@ -352,6 +356,13 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
 			continue
 		}
+		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
+			continue
+		}
+		if !syncCfg.PersistReceiptsCacheV2 && isStateHistory(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
+			continue
+		}
+
 		if _, ok := blackListForPruning[p.Name]; ok {
 			continue
 		}
@@ -405,6 +416,12 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 
 	if blockReader.FreezingCfg().Verify {
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
+			return err
+		}
+	}
+
+	if !headerchain {
+		if err := agg.ReloadSalt(); err != nil {
 			return err
 		}
 	}

@@ -24,7 +24,7 @@ import (
 	"github.com/maticnetwork/crand"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
@@ -115,7 +115,7 @@ func TestGetSignerSuccessionNumber_ProposerNotFound(t *testing.T) {
 	signer := snap.ValidatorSet.Validators[3].Address
 
 	_, err := snap.GetSignerSuccessionNumber(signer)
-	require.NotNil(t, err)
+	require.Error(t, err)
 
 	e, ok := err.(*valset.UnauthorizedProposerError)
 	require.True(t, ok)
@@ -132,7 +132,7 @@ func TestGetSignerSuccessionNumber_SignerNotFound(t *testing.T) {
 
 	dummySignerAddress := randomAddress()
 	_, err := snap.GetSignerSuccessionNumber(dummySignerAddress)
-	require.NotNil(t, err)
+	require.Error(t, err)
 
 	e, ok := err.(*valset.UnauthorizedSignerError)
 	require.True(t, ok)
@@ -156,6 +156,6 @@ func buildRandomValidatorSet(numVals int) []*valset.Validator {
 	return validators
 }
 
-func randomAddress() libcommon.Address {
+func randomAddress() common.Address {
 	return crand.NewRand().Address()
 }

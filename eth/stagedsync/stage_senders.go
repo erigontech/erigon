@@ -27,8 +27,9 @@ import (
 
 	"github.com/erigontech/secp256k1"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -37,8 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -136,8 +136,10 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		}(i)
 	}
 
-	collectorSenders := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	collectorSenders := etl.NewCollectorWithAllocator(logPrefix, cfg.tmpdir, etl.SmallSortableBuffers, logger)
 	defer collectorSenders.Close()
+	collectorSenders.SortAndFlushInBackground(true)
+	collectorSenders.LogLvl(log.LvlDebug)
 
 	errCh := make(chan senderRecoveryError)
 	go func() {
@@ -177,10 +179,10 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	}()
 
 	var minBlockNum uint64 = math.MaxUint64
-	var minBlockHash libcommon.Hash
+	var minBlockHash common.Hash
 	var minBlockErr error
 	handleRecoverErr := func(recErr senderRecoveryError) error {
-		if recErr.blockHash == (libcommon.Hash{}) {
+		if recErr.blockHash == (common.Hash{}) {
 			return recErr.err
 		}
 
@@ -203,12 +205,12 @@ Loop:
 		if err != nil {
 			return err
 		}
-		if err := libcommon.Stopped(quitCh); err != nil {
+		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
 
 		blockNumber := binary.BigEndian.Uint64(k)
-		blockHash := libcommon.BytesToHash(v)
+		blockHash := common.BytesToHash(v)
 
 		if blockNumber > to {
 			break
@@ -315,14 +317,14 @@ Loop:
 type senderRecoveryError struct {
 	err         error
 	blockNumber uint64
-	blockHash   libcommon.Hash
+	blockHash   common.Hash
 }
 
 type senderRecoveryJob struct {
 	body        *types.Body
 	key         []byte
 	senders     []byte
-	blockHash   libcommon.Hash
+	blockHash   common.Hash
 	blockNumber uint64
 	blockTime   uint64
 	index       int
@@ -361,14 +363,14 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		}
 
 		// prevent sending to close channel
-		if err := libcommon.Stopped(quit); err != nil {
+		if err := common.Stopped(quit); err != nil {
 			job.err = err
-		} else if err = libcommon.Stopped(ctx.Done()); err != nil {
+		} else if err = common.Stopped(ctx.Done()); err != nil {
 			job.err = err
 		}
 		out <- job
 
-		if errors.Is(job.err, libcommon.ErrStopped) {
+		if errors.Is(job.err, common.ErrStopped) {
 			return
 		}
 	}

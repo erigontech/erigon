@@ -5,7 +5,7 @@ etc...
 
 All commands require parameter `--datadir=<datadir>` - I will skip it for readability.
 
-```
+```sh
 integration --help
 integration print_stages
 
@@ -14,39 +14,27 @@ integration stage_senders
 integration stage_exec
 integration stage_exec --block=1_000_000 # stop at 1M block
 integration stage_exec --sync.mode.chaintip # every block: `ComputeCommitment`, `rwtx.Commit()`, write diffs/changesets
-integration stage_hash_state
-integration stage_trie
-integration stage_history
-integration stage_tx_lookup
 
 # Unwind single stage 10 blocks backward
 integration stage_exec --unwind=10
 
 # Drop data of single stage
 integration stage_exec --reset
-integration stage_history --reset
 
 # Unwind single stage N blocks backward
 integration stage_exec --unwind=N
-integration stage_history --unwind=N
 
 # Run stage prune to block N
 integration stage_exec --prune.to=N
-integration stage_history --prune.to=N
 
-# Reset stage_headers
+# To remove all blocks (together with bodies/txs) from db 
 integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
 
 # Exec blocks, but don't commit changes (loose them)
 integration stage_exec --no-commit
-...
 
 # Run txn replay with domains [requires 6th stage to be done before run]
-integration state_domains --chain sepolia --last-step=4 # stop replay when 4th step is merged
 integration read_domains --chain sepolia account <addr> <addr> ... # read values for given accounts
-
-# hack which allows to force clear unwind stack of all stages
-clear_unwind_stack
 ```
 
 ## For testing run all stages in "N blocks forward M blocks re-org" loop
@@ -56,7 +44,7 @@ Pre-requirements of `state_stages` command:
 - Headers/Bodies must be downloaded
 - TxSenders stage must be executed
 
-```
+```sh
 make all
 ./build/bin/integration state_stages --datadir=<datadir> --unwind=10 --unwind.every=20 --pprof
 integration reset_state # drops all stages after Senders stage (including it's db tables DB tables)
@@ -64,7 +52,7 @@ integration reset_state # drops all stages after Senders stage (including it's d
 
 For example:
 
-```
+```sh
 --unwind=1 --unwind.every=10  # 10 blocks forward, 1 block back, 10 blocks forward, ...
 --unwind=10 --unwind.every=1  # 1 block forward, 10 blocks back, 1 blocks forward, ...
 --unwind=10  # 10 blocks back, then stop
@@ -73,18 +61,17 @@ For example:
 --chaindata.reference # When finish all cycles, does comparison to this db file.
 ```
 
-## "Wrong trie root" problem - temporary solution
+## How to unwind node
 
-```
-make all
-./build/bin/integration stage_hash_state --datadir=<datadir> --reset
-./build/bin/integration stage_trie --datadir=<datadir> --reset
-# Then run TurobGeth as usually. It will take 2-3 hours to re-calculate dropped db tables
-```
+In Erigon3 - better do `rm -rf chaindata` (for bor maybe also need remove `polygon-bridge`, `bor`, `heimdall` folders
+until https://github.com/erigontech/erigon/issues/13674 is fixed)
 
 ## Copy data to another db
 
-```
+In Erigon3 - better do `rm -rf chaindata` (for bor maybe also need remove `polygon-bridge`, `bor`, `heimdall` folders
+until https://github.com/erigontech/erigon/issues/13674 is fixed)
+
+```sh
 0. You will need 2x disk space (can be different disks).
 1. Stop Erigon
 2. Create new db with new --db.pagesize:
@@ -102,7 +89,7 @@ If you face db-open error like `MDBX_PROBLEM: Unexpected internal error`. First:
 like https://www.memtest86.com to test RAM and tools like https://www.smartmontools.org to test Disk. If hardware is
 fine: can try manually recover db (see `./build/bin/mdbx_chk -h` for more details):
 
-```
+```sh
 make db-tools
 
 ./build/bin/mdbx_chk -0 -d /erigon/chaindata
@@ -122,4 +109,56 @@ It allows to process this blocks again
 
 ```
 1. ./build/bin/integration clear_bad_blocks --datadir=<datadir>
+```
+
+# FAQ
+
+## How to re-exec all blocks
+
+```sh
+# Option 1 (on empty datadir):
+erigon --snap.skip-state-snapshot-download
+
+# Option 2 (on synced datadir):
+erigon seg rm-all-state-snapshots
+integration stage_exec --reset
+integration stage_exec 
+
+# Option 2 is good 
+```
+
+## How to re-generate some Domain/Index
+
+```sh
+# By parallel executing blocks on existing historical state. Can be 1 or many domains:
+erigon seg rm-state-snapshots --domain=rcache,logtopics,logaddrs,tracesfrom,tracesto
+integration stage_custom_trace --domain=rcache,logindex,traceindex --reset
+integration stage_custom_trace --domain=rcache,logindex,traceindex
+```
+
+## How to re-gen bor checkpoints
+
+```sh
+rm -rf datadir/heimdall
+rm -rf datadir/snapshots/*borch*
+# Start erigon, it will gen. Then:
+erigon seg integrity --datadir /erigon-data/ --check=BorCheckpoints
+```
+
+## See tables size
+
+```sh
+./build/bin/mdbx_stat -efa /erigon-data/chaindata/   | awk '
+    BEGIN { pagesize = 4096 }
+    /^  Pagesize:/ { pagesize = $2 }
+    /^Status of/ { table = $3 }
+    /Branch pages:/ { branch = $3 }
+    /Leaf pages:/ { leaf = $3 }
+    /Overflow pages:/ { overflow = $3 }
+    /Entries:/ {
+      total_pages = branch + leaf + overflow
+      size_gb = (total_pages * pagesize) / (1024^3)
+      printf "%-30s %.3fG\n", table, size_gb
+    }
+  ' | grep -v '0.000G'
 ```

@@ -26,16 +26,16 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
@@ -76,7 +76,7 @@ func (c ChainReaderWriterEth1) CurrentHeader(ctx context.Context) *types.Header 
 	return ret
 }
 
-func (c ChainReaderWriterEth1) GetHeader(ctx context.Context, hash libcommon.Hash, number uint64) *types.Header {
+func (c ChainReaderWriterEth1) GetHeader(ctx context.Context, hash common.Hash, number uint64) *types.Header {
 	resp, err := c.executionModule.GetHeader(ctx, &execution.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
@@ -96,7 +96,7 @@ func (c ChainReaderWriterEth1) GetHeader(ctx context.Context, hash libcommon.Has
 	return ret
 }
 
-func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash libcommon.Hash) *types.Block {
+func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash common.Hash) *types.Block {
 	header := c.GetHeaderByHash(ctx, hash)
 	if header == nil {
 		return nil
@@ -156,7 +156,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
 }
 
-func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash libcommon.Hash) *types.Header {
+func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header {
 	resp, err := c.executionModule.GetHeader(ctx, &execution.GetSegmentRequest{
 		BlockNumber: nil,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
@@ -196,7 +196,7 @@ func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uin
 	return ret
 }
 
-func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash libcommon.Hash, number uint64) *big.Int {
+func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, number uint64) *big.Int {
 	resp, err := c.executionModule.GetTD(ctx, &execution.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
@@ -211,7 +211,7 @@ func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash libcommon.Hash, n
 	return eth1_utils.ConvertBigIntFromRpc(resp.Td)
 }
 
-func (c ChainReaderWriterEth1) GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error) {
+func (c ChainReaderWriterEth1) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
 	grpcHashes := make([]*types2.H256, len(hashes))
 	for i := range grpcHashes {
 		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
@@ -258,7 +258,7 @@ func (c ChainReaderWriterEth1) Ready(ctx context.Context) (bool, error) {
 	return resp.Ready, nil
 }
 
-func (c ChainReaderWriterEth1) HeaderNumber(ctx context.Context, hash libcommon.Hash) (*uint64, error) {
+func (c ChainReaderWriterEth1) HeaderNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
 	resp, err := c.executionModule.GetHeaderHashNumber(ctx, gointerfaces.ConvertHashToH256(hash))
 	if err != nil {
 		return nil, err
@@ -269,7 +269,7 @@ func (c ChainReaderWriterEth1) HeaderNumber(ctx context.Context, hash libcommon.
 	return resp.BlockNumber, nil
 }
 
-func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash libcommon.Hash) (bool, error) {
+func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
 	resp, err := c.executionModule.IsCanonicalHash(ctx, gointerfaces.ConvertHashToH256(hash))
 	if err != nil {
 		return false, err
@@ -339,13 +339,13 @@ func (c ChainReaderWriterEth1) InsertBlockAndWait(ctx context.Context, block *ty
 	return c.InsertBlocksAndWait(ctx, blocks)
 }
 
-func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash libcommon.Hash, number uint64) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
+func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execution.ExecutionStatus, *string, common.Hash, error) {
 	resp, err := c.executionModule.ValidateChain(ctx, &execution.ValidationRequest{
 		Hash:   gointerfaces.ConvertHashToH256(hash),
 		Number: number,
 	})
 	if err != nil {
-		return 0, nil, libcommon.Hash{}, err
+		return 0, nil, common.Hash{}, err
 	}
 	var validationError *string
 	if len(resp.ValidationError) > 0 {
@@ -354,7 +354,7 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash libcommon
 	return resp.ValidationStatus, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash libcommon.Hash) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
+func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash) (execution.ExecutionStatus, *string, common.Hash, error) {
 	resp, err := c.executionModule.UpdateForkChoice(ctx, &execution.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),
@@ -362,7 +362,7 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, s
 		Timeout:            c.fcuTimeoutMillis,
 	})
 	if err != nil {
-		return 0, nil, libcommon.Hash{}, err
+		return 0, nil, common.Hash{}, err
 	}
 	var validationError *string
 	if len(resp.ValidationError) > 0 {
@@ -371,7 +371,7 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, s
 	return resp.Status, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, finalizedHash, safeHash libcommon.Hash, err error) {
+func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, finalizedHash, safeHash common.Hash, err error) {
 	var resp *execution.ForkChoice
 	resp, err = c.executionModule.GetForkChoice(ctx, &emptypb.Empty{})
 	if err != nil {
@@ -382,7 +382,7 @@ func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, fin
 		gointerfaces.ConvertH256ToHash(resp.SafeBlockHash), nil
 }
 
-func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
 	resp, err := c.executionModule.HasBlock(ctx, &execution.GetSegmentRequest{
 		BlockHash: gointerfaces.ConvertHashToH256(hash),
 	})
@@ -392,7 +392,7 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash libcommon.Hash
 	return resp.HasBlock, nil
 }
 
-func (c ChainReaderWriterEth1) AssembleBlock(baseHash libcommon.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
+func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
 	request := &execution.AssembleBlockRequest{
 		Timestamp:             uint64(attributes.Timestamp),
 		PrevRandao:            gointerfaces.ConvertHashToH256(attributes.PrevRandao),

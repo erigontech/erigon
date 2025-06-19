@@ -32,7 +32,7 @@ import (
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -101,7 +102,7 @@ func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load() }
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
-		"blocks", libcommon.PrettyCounter(s.SegmentsMax()+1), "indices", libcommon.PrettyCounter(s.IndicesMax()+1))
+		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1))
 }
 
 func (s *CaplinSnapshots) LS() {
@@ -422,7 +423,7 @@ func (v *CaplinView) BlobSidecarsSegment(slot uint64) (*snapshotsync.VisibleSegm
 func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
-	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
+	segName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
 	compressCfg := seg.DefaultCfg
@@ -440,7 +441,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	defer tx.Rollback()
 
 	skippedInARow := 0
-	var prevBlockRoot libcommon.Hash
+	var prevBlockRoot common.Hash
 
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
@@ -453,7 +454,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if err != nil {
 			return err
 		}
-		if blockRoot != (libcommon.Hash{}) && prevBlockRoot != (libcommon.Hash{}) && parentRoot != prevBlockRoot {
+		if blockRoot != (common.Hash{}) && prevBlockRoot != (common.Hash{}) && parentRoot != prevBlockRoot {
 			return fmt.Errorf("parent block root mismatch at slot %d", i)
 		}
 
@@ -496,7 +497,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage.BlobStorage, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
-	segName := snaptype.BlobSidecars.FileName(0, fromSlot, toSlot)
+	segName := snaptype.BlobSidecars.FileName(version.ZeroVersion, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
 	compressCfg := seg.DefaultCfg
@@ -652,7 +653,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	return s.OpenFolder()
 }
 
-func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
+func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			panic(fmt.Sprintf("ReadHeader(%d), %s, %s\n", slot, rec, dbg.Stack()))
@@ -666,25 +667,25 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 
 	seg, ok := view.BeaconBlocksSegment(slot)
 	if !ok {
-		return nil, 0, libcommon.Hash{}, nil
+		return nil, 0, common.Hash{}, nil
 	}
 
 	idxSlot := seg.Src().Index()
 
 	if idxSlot == nil {
-		return nil, 0, libcommon.Hash{}, nil
+		return nil, 0, common.Hash{}, nil
 	}
 	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
 	gg := seg.Src().MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
-		return nil, 0, libcommon.Hash{}, nil
+		return nil, 0, common.Hash{}, nil
 	}
 
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
-		return nil, 0, libcommon.Hash{}, nil
+		return nil, 0, common.Hash{}, nil
 	}
 	// Decompress this thing
 	buffer := buffersPool.Get().(*bytes.Buffer)

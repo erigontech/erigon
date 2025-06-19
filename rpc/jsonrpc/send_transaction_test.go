@@ -35,12 +35,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -91,6 +91,10 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 }
 
 func TestSendRawTransaction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 
@@ -127,7 +131,7 @@ func TestSendRawTransaction(t *testing.T) {
 
 	//send same txn second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
-	require.NotNil(err)
+	require.Error(err)
 	expectedErr := txpool_proto.ImportResult_name[int32(txpool_proto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
 	require.Equal(expectedErr, err.Error())
 	mockSentry.ReceiveWg.Wait()

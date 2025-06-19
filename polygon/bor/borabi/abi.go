@@ -19,7 +19,7 @@ package borabi
 import (
 	"strings"
 
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
 )
 
 const (

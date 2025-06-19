@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestation, checkBitsLength bool, mix libcommon.Hash, idxs []uint64) ([]uint64, error) {
+func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestation, checkBitsLength bool, mix common.Hash, idxs []uint64) ([]uint64, error) {
 	slot := attestation.Data.Slot
 	epoch := slot / r.cfg.SlotsPerEpoch
 	clversion := r.cfg.GetCurrentStateVersion(epoch)
@@ -97,7 +97,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 }
 
 // computeCommittee uses cache to compute compittee
-func (r *HistoricalStatesReader) ComputeCommittee(mix libcommon.Hash, indicies []uint64, slot uint64, count, index uint64) ([]uint64, error) {
+func (r *HistoricalStatesReader) ComputeCommittee(mix common.Hash, indicies []uint64, slot uint64, count, index uint64) ([]uint64, error) {
 	cfg := r.cfg
 	lenIndicies := uint64(len(indicies))
 
@@ -126,7 +126,7 @@ func committeeCount(cfg *clparams.BeaconChainConfig, epoch uint64, idxs []uint64
 	return committeCount
 }
 
-func (r *HistoricalStatesReader) readHistoricalBlockRoot(kvGetter state_accessors.GetValFn, slot, index uint64) (libcommon.Hash, error) {
+func (r *HistoricalStatesReader) readHistoricalBlockRoot(kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
 	slotSubIndex := slot % r.cfg.SlotsPerHistoricalRoot
 	needFromGenesis := true
 
@@ -148,12 +148,12 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(kvGetter state_accessor
 	}
 	br, err := kvGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(slotLookup))
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if len(br) != 32 {
-		return libcommon.Hash{}, fmt.Errorf("invalid block root length %d", len(br))
+		return common.Hash{}, fmt.Errorf("invalid block root length %d", len(br))
 	}
-	return libcommon.BytesToHash(br), nil
+	return common.BytesToHash(br), nil
 
 }
 

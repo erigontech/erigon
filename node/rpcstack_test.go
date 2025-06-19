@@ -35,9 +35,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 // TestCorsHandler makes sure CORS are properly handled on the http server.
@@ -52,7 +52,7 @@ func TestCorsHandler(t *testing.T) {
 
 	resp2 := rpcRequest(t, url, "origin", "bad")
 	defer resp2.Body.Close()
-	assert.Equal(t, "", resp2.Header.Get("Access-Control-Allow-Origin"))
+	assert.Empty(t, resp2.Header.Get("Access-Control-Allow-Origin"))
 }
 
 // TestVhosts makes sure vhosts is properly handled on the http server.
@@ -63,11 +63,11 @@ func TestVhosts(t *testing.T) {
 
 	resp := rpcRequest(t, url, "host", "test")
 	defer resp.Body.Close()
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	resp2 := rpcRequest(t, url, "host", "bad")
 	defer resp2.Body.Close()
-	assert.Equal(t, resp2.StatusCode, http.StatusForbidden)
+	assert.Equal(t, http.StatusForbidden, resp2.StatusCode)
 }
 
 // TestVhostsAny makes sure vhosts any is properly handled on the http server.
@@ -78,11 +78,11 @@ func TestVhostsAny(t *testing.T) {
 
 	resp := rpcRequest(t, url, "host", "test")
 	defer resp.Body.Close()
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	resp2 := rpcRequest(t, url, "host", "bad")
 	defer resp2.Body.Close()
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 type originTest struct {
@@ -237,7 +237,7 @@ func Test_checkPath(t *testing.T) {
 
 	for i, tt := range tests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			assert.Equal(t, tt.expected, checkPath(tt.req, tt.prefix)) //nolint:scopelint
+			assert.Equal(t, tt.expected, checkPath(tt.req, tt.prefix))
 		})
 	}
 }

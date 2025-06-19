@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -62,7 +62,7 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 			continue
 		}
 		// TODO: seek(from)
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), hi.hc.h.compression)
+		g := hi.hc.iit.dataReader(item.src.decompressor)
 
 		idx := hi.hc.iit.statelessIdxReader(i)
 		var offset uint64
@@ -116,7 +116,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		txNum, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
+		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -410,7 +410,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		txNum, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
+		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
 		}

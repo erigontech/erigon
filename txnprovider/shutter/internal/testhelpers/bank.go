@@ -20,9 +20,9 @@ import (
 	"crypto/ecdsa"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type Bank struct {
@@ -42,7 +42,7 @@ func NewBank(initialBalance *big.Int) Bank {
 	}
 }
 
-func (b Bank) Address() libcommon.Address {
+func (b Bank) Address() common.Address {
 	return crypto.PubkeyToAddress(b.privKey.PublicKey)
 }
 

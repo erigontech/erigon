@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	txPoolProto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates new message call transaction or a contract creation for previously-signed transactions.
@@ -22,22 +22,23 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	}
 
 	// TODO arbitrum - this code is still needed?
-	//if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType || txn.Type() == types.SetCodeTxType {
-	//	baseFeeBig, err := api.BaseFee(ctx)
-	//	if err != nil {
-	//		return common.Hash{}, err
-	//	}
-	//
-	//	// If the transaction fee cap is already specified, ensure the
-	//	// effective gas fee is less than fee cap.
-	//	if err := checkDynamicTxFee(txn.GetFeeCap(), baseFeeBig); err != nil {
-	//		return common.Hash{}, err
-	//	}
-	//} else {
-	// If the transaction fee cap is already specified, ensure the
-	// fee of the given transaction is _reasonable_.
-	if err := CheckTxFee(txn.GetFeeCap().ToBig(), txn.GetGasLimit(), api.FeeCap); err != nil {
-		return common.Hash{}, err
+	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType || txn.Type() == types.SetCodeTxType {
+		baseFeeBig, err := api.BaseFee(ctx)
+		if err != nil {
+			return common.Hash{}, err
+		}
+
+		// If the transaction fee cap is already specified, ensure the
+		// effective gas fee is less than fee cap.
+		if err := checkDynamicTxFee(txn.GetFeeCap(), baseFeeBig); err != nil {
+			return common.Hash{}, err
+		}
+	} else {
+		// If the transaction fee cap is already specified, ensure the
+		// fee of the given transaction is _reasonable_.
+		if err := CheckTxFee(txn.GetFeeCap().ToBig(), txn.GetGasLimit(), api.FeeCap); err != nil {
+			return common.Hash{}, err
+		}
 	}
 
 	if !txn.Protected() && !api.AllowUnprotectedTxs {

@@ -8,10 +8,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
@@ -62,11 +62,11 @@ func (p *Printer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpCont
 	fmt.Printf("OnFault: pc=%v, op=%v, gas=%v, cost=%v, depth=%v, err=%v\n", pc, op, gas, cost, depth, err)
 }
 
-func (p *Printer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (p *Printer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	fmt.Printf("CaptureEnter: depth=%v, typ=%v from=%v, to=%v, input=%s, gas=%v, value=%v\n", depth, typ, from, to, hexutil.Bytes(input), gas, value)
 }
 
-func (p *Printer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+func (p *Printer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	buf, err := json.Marshal(tx)
 	if err != nil {
 		fmt.Printf("err: %v\n", err)
@@ -105,19 +105,19 @@ func (p *Printer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 	fmt.Printf("OnGenesisBlock: b=%v, allocLength=%d\n", b.NumberU64(), len(alloc))
 }
 
-func (p *Printer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+func (p *Printer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	fmt.Printf("OnBalanceChange: a=%v, prev=%v, new=%v\n", a, prev, new)
 }
 
-func (p *Printer) OnNonceChange(a libcommon.Address, prev, new uint64) {
+func (p *Printer) OnNonceChange(a common.Address, prev, new uint64) {
 	fmt.Printf("OnNonceChange: a=%v, prev=%v, new=%v\n", a, prev, new)
 }
 
-func (p *Printer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+func (p *Printer) OnCodeChange(a common.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
 	fmt.Printf("OnCodeChange: a=%v, prevCodeHash=%v, prev=%s, codeHash=%v, code=%s\n", a, prevCodeHash, hexutil.Bytes(prev), codeHash, hexutil.Bytes(code))
 }
 
-func (p *Printer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {
+func (p *Printer) OnStorageChange(a common.Address, k common.Hash, prev, new uint256.Int) {
 	fmt.Printf("OnStorageChange: a=%v, k=%v, prev=%v, new=%v\n", a, k, prev, new)
 }
 
@@ -134,15 +134,15 @@ func (p *Printer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
 	fmt.Printf("OnGasChange: old=%v, new=%v, diff=%v\n", old, new, new-old)
 }
 
-func (p *Printer) CaptureArbitrumTransfer(from *libcommon.Address, to *libcommon.Address, value *uint256.Int, before bool, reason string) {
+func (p *Printer) CaptureArbitrumTransfer(from *common.Address, to *common.Address, value *uint256.Int, before bool, reason string) {
 	fmt.Printf("CaptureArbitrumTransfer: from=%v, to=%v, value=%v\n", from, to, value)
 }
 
-func (p *Printer) CaptureArbitrumStorageGet(key libcommon.Hash, depth int, before bool) {
+func (p *Printer) CaptureArbitrumStorageGet(key common.Hash, depth int, before bool) {
 	fmt.Printf("CaptureArbitrumStorageGet: key=%v, depth=%v\n", key, depth)
 }
 
-func (p *Printer) CaptureArbitrumStorageSet(key libcommon.Hash, value libcommon.Hash, depth int, before bool) {
+func (p *Printer) CaptureArbitrumStorageSet(key common.Hash, value common.Hash, depth int, before bool) {
 	fmt.Printf("CaptureArbitrumStorageSet: key=%v, value=%v, depth=%d\n", key, value, depth)
 }
 

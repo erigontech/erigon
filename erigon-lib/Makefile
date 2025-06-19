@@ -60,7 +60,7 @@ protoc-clean:
 	rm -f "$(GOBIN)/protoc"*
 	rm -rf "$(PROTOC_INCLUDE)"
 
-grpc: protoc-all
+grpc: protoc-clean protoc-all
 	go mod vendor
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
 		--go_opt=Mtypes/types.proto=./typesproto \
@@ -109,8 +109,11 @@ lint-mod-tidy:
 lint-deps: lintci-deps
 lint: lintci lint-mod-tidy
 
-test:
+test-short:
 	$(GOTEST_NOFUZZ) -short -coverprofile=coverage-test.out ./...
 
 test-all:
 	$(GOTEST) -coverprofile=coverage-test-all.out ./...
+
+test-all-race:
+	$(GOTEST) -coverprofile=coverage-test-all.out -race ./...

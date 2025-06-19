@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const TestcontractABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"ty
 var TestcontractBin = "0x608060405234801561001057600080fd5b503360009081526020819052604090206064905561023a806100336000396000f3fe608060405234801561001057600080fd5b506004361061009e5760003560e01c8063c2ce0ef711610066578063c2ce0ef714610114578063c53e5ae314610127578063cb946a0714610127578063d592ed1f1461013a578063f64c050d1461011457600080fd5b806327e235e3146100a3578063660cc200146100d5578063780900dc146100df57806382ab890a146100df578063a7f43779146100ff575b600080fd5b6100c36100b13660046101a5565b60006020819052908152604090205481565b60405190815260200160405180910390f35b6100dd610142565b005b6100dd6100ed3660046101d5565b33600090815260208190526040902055565b6100dd33600090815260208190526040812055565b6100dd6101223660046101d5565b61015c565b6100dd6101353660046101d5565b610179565b6100dd610190565b3360009081526020819052604081205561015a6101ee565b565b3360009081526020819052604090208190556101766101ee565b50565b336000908152602081905260408120829055819080fd5b33600090815260208190526040812081905580fd5b6000602082840312156101b757600080fd5b81356001600160a01b03811681146101ce57600080fd5b9392505050565b6000602082840312156101e757600080fd5b5035919050565b634e487b7160e01b600052600160045260246000fdfea2646970667358221220cbc0ec1bd2504a9e5d6a3f3a8b92de36a1af219062eec962f407d937d0acadc664736f6c63430008130033"
 
 // DeployTestcontract deploys a new Ethereum contract, binding an instance of Testcontract to it.
-func DeployTestcontract(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Testcontract, error) {
+func DeployTestcontract(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Testcontract, error) {
 	parsed, err := abi.JSON(strings.NewReader(TestcontractABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(TestcontractBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(TestcontractBin), backend)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &Testcontract{TestcontractCaller: TestcontractCaller{contract: contract}, TestcontractTransactor: TestcontractTransactor{contract: contract}, TestcontractFilterer: TestcontractFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type TestcontractTransactorRaw struct {
 }
 
 // NewTestcontract creates a new instance of Testcontract, bound to a specific deployed contract.
-func NewTestcontract(address libcommon.Address, backend bind.ContractBackend) (*Testcontract, error) {
+func NewTestcontract(address common.Address, backend bind.ContractBackend) (*Testcontract, error) {
 	contract, err := bindTestcontract(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewTestcontract(address libcommon.Address, backend bind.ContractBackend) (*
 }
 
 // NewTestcontractCaller creates a new read-only instance of Testcontract, bound to a specific deployed contract.
-func NewTestcontractCaller(address libcommon.Address, caller bind.ContractCaller) (*TestcontractCaller, error) {
+func NewTestcontractCaller(address common.Address, caller bind.ContractCaller) (*TestcontractCaller, error) {
 	contract, err := bindTestcontract(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewTestcontractCaller(address libcommon.Address, caller bind.ContractCaller
 }
 
 // NewTestcontractTransactor creates a new write-only instance of Testcontract, bound to a specific deployed contract.
-func NewTestcontractTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*TestcontractTransactor, error) {
+func NewTestcontractTransactor(address common.Address, transactor bind.ContractTransactor) (*TestcontractTransactor, error) {
 	contract, err := bindTestcontract(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewTestcontractTransactor(address libcommon.Address, transactor bind.Contra
 }
 
 // NewTestcontractFilterer creates a new log filterer instance of Testcontract, bound to a specific deployed contract.
-func NewTestcontractFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*TestcontractFilterer, error) {
+func NewTestcontractFilterer(address common.Address, filterer bind.ContractFilterer) (*TestcontractFilterer, error) {
 	contract, err := bindTestcontract(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewTestcontractFilterer(address libcommon.Address, filterer bind.ContractFi
 }
 
 // bindTestcontract binds a generic wrapper to an already deployed contract.
-func bindTestcontract(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindTestcontract(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(TestcontractABI))
 	if err != nil {
 		return nil, err
@@ -195,7 +195,7 @@ func (_Testcontract *TestcontractTransactorRaw) Transact(opts *bind.TransactOpts
 // Balances is a free data retrieval call binding the contract method 0x27e235e3.
 //
 // Solidity: function balances(address ) view returns(uint256)
-func (_Testcontract *TestcontractCaller) Balances(opts *bind.CallOpts, arg0 libcommon.Address) (*big.Int, error) {
+func (_Testcontract *TestcontractCaller) Balances(opts *bind.CallOpts, arg0 common.Address) (*big.Int, error) {
 	var out []interface{}
 	err := _Testcontract.contract.Call(opts, &out, "balances", arg0)
 
@@ -212,14 +212,14 @@ func (_Testcontract *TestcontractCaller) Balances(opts *bind.CallOpts, arg0 libc
 // Balances is a free data retrieval call binding the contract method 0x27e235e3.
 //
 // Solidity: function balances(address ) view returns(uint256)
-func (_Testcontract *TestcontractSession) Balances(arg0 libcommon.Address) (*big.Int, error) {
+func (_Testcontract *TestcontractSession) Balances(arg0 common.Address) (*big.Int, error) {
 	return _Testcontract.Contract.Balances(&_Testcontract.CallOpts, arg0)
 }
 
 // Balances is a free data retrieval call binding the contract method 0x27e235e3.
 //
 // Solidity: function balances(address ) view returns(uint256)
-func (_Testcontract *TestcontractCallerSession) Balances(arg0 libcommon.Address) (*big.Int, error) {
+func (_Testcontract *TestcontractCallerSession) Balances(arg0 common.Address) (*big.Int, error) {
 	return _Testcontract.Contract.Balances(&_Testcontract.CallOpts, arg0)
 }
 

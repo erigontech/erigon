@@ -15,7 +15,7 @@ import (
 
 	chain "github.com/erigontech/erigon-lib/chain"
 	common "github.com/erigontech/erigon-lib/common"
-	types "github.com/erigontech/erigon/core/types"
+	types "github.com/erigontech/erigon-lib/types"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -25,8 +25,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/chain"
-	params2 "github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -35,9 +34,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -75,7 +74,7 @@ type EthBackendServer struct {
 }
 
 type EthBackend interface {
-	Etherbase() (libcommon.Address, error)
+	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
 	NetPeerCount() (uint64, error)
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
@@ -105,7 +104,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifi
 		defer func() {
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
-					logger.Warn("[rpc] terminted subscription to `logs` events", "reason", err)
+					logger.Warn("[rpc] terminated subscription to `logs` events", "reason", err)
 				}
 			}
 		}()
@@ -202,7 +201,7 @@ func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (
 }
 
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
-	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(libcommon.Address{})}
+	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(common.Address{})}
 
 	base, err := s.eth.Etherbase()
 	if err != nil {
@@ -238,7 +237,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				s.logger.Warn("[rpc] terminted subscription to `newHeaders` events", "reason", err)
+				s.logger.Warn("[rpc] terminated subscription to `newHeaders` events", "reason", err)
 			}
 		}
 	}()
@@ -271,7 +270,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	return &remote.ClientVersionReply{NodeName: libcommon.MakeName("erigon", params.Version)}, nil
+	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", params.Version)}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupRequest) (*remote.TxnLookupReply, error) {
@@ -458,21 +457,33 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	stateReader.SetTxNum(maxTxNum)
 	ibs := state.New(stateReader)
 
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &libcommon.Address{}, s.chainConfig)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &common.Address{}, s.chainConfig)
 
-	//ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: nil, ReadOnly: true})
-	//ibs.SetHooks(ot.Tracer().Hooks)
-	//ot.OnTxStart(evm.GetVMContext(), nil, libcommon.Address{})
+	senderCodeSize, err := ibs.GetCodeSize(*aaTxn.SenderAddress)
+	if err != nil {
+		return nil, err
+	}
 
-	totalGasLimit := params2.TxAAGas + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
+	validationTracer := aa.NewValidationRulesTracer(*aaTxn.SenderAddress, senderCodeSize != 0)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: validationTracer.Hooks(), ReadOnly: true})
+	ibs.SetHooks(validationTracer.Hooks())
+
+	vmConfig := evm.Config()
+	var arbosVersion uint64
+	rules := s.chainConfig.Rules(header.Number.Uint64(), header.Time, arbosVersion)
+	hasEIP3860 := vmConfig.HasEip3860(rules)
+
+	preTxCost, err := aaTxn.PreTransactionGasCost(rules, hasEIP3860)
+	if err != nil {
+		return nil, err
+	}
+
+	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	if err != nil {
-		log.Info("err", "err", err.Error())
+		log.Info("RIP-7560 validation err", "err", err.Error())
 		return &remote.AAValidationReply{Valid: false}, nil
 	}
 
-	// read tracer
-
-	return &remote.AAValidationReply{Valid: true}, nil
+	return &remote.AAValidationReply{Valid: validationTracer.Err() == nil}, nil
 }

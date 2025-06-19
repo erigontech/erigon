@@ -17,8 +17,8 @@
 package statefull
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
@@ -31,6 +31,6 @@ func (c ChainContext) Engine() consensus.Engine {
 	return c.Bor
 }
 
-func (c ChainContext) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
+func (c ChainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
 	return c.Chain.GetHeader(hash, number)
 }

@@ -33,18 +33,19 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/execution/testutil"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -61,13 +62,13 @@ func (bt *BlockTest) UnmarshalJSON(in []byte) error {
 }
 
 type btJSON struct {
-	Blocks     []btBlock                `json:"blocks"`
-	Genesis    btHeader                 `json:"genesisBlockHeader"`
-	Pre        types.GenesisAlloc       `json:"pre"`
-	Post       types.GenesisAlloc       `json:"postState"`
-	BestBlock  libcommon.UnprefixedHash `json:"lastblockhash"`
-	Network    string                   `json:"network"`
-	SealEngine string                   `json:"sealEngine"`
+	Blocks     []btBlock             `json:"blocks"`
+	Genesis    btHeader              `json:"genesisBlockHeader"`
+	Pre        types.GenesisAlloc    `json:"pre"`
+	Post       types.GenesisAlloc    `json:"postState"`
+	BestBlock  common.UnprefixedHash `json:"lastblockhash"`
+	Network    string                `json:"network"`
+	SealEngine string                `json:"sealEngine"`
 }
 
 type btBlock struct {
@@ -81,27 +82,27 @@ type btBlock struct {
 
 type btHeader struct {
 	Bloom                 types.Bloom
-	Coinbase              libcommon.Address
-	MixHash               libcommon.Hash
+	Coinbase              common.Address
+	MixHash               common.Hash
 	Nonce                 types.BlockNonce
 	Number                *big.Int
-	Hash                  libcommon.Hash
-	ParentHash            libcommon.Hash
-	ReceiptTrie           libcommon.Hash
-	StateRoot             libcommon.Hash
-	TransactionsTrie      libcommon.Hash
-	UncleHash             libcommon.Hash
+	Hash                  common.Hash
+	ParentHash            common.Hash
+	ReceiptTrie           common.Hash
+	StateRoot             common.Hash
+	TransactionsTrie      common.Hash
+	UncleHash             common.Hash
 	ExtraData             []byte
 	Difficulty            *big.Int
 	GasLimit              uint64
 	GasUsed               uint64
 	Timestamp             uint64
 	BaseFeePerGas         *big.Int
-	WithdrawalsRoot       *libcommon.Hash
+	WithdrawalsRoot       *common.Hash
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
-	ParentBeaconBlockRoot *libcommon.Hash
-	RequestsHash          *libcommon.Hash
+	ParentBeaconBlockRoot *common.Hash
+	RequestsHash          *common.Hash
 }
 
 type btHeaderMarshaling struct {
@@ -117,9 +118,9 @@ type btHeaderMarshaling struct {
 }
 
 func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
-	config, ok := Forks[bt.json.Network]
+	config, ok := testutil.Forks[bt.json.Network]
 	if !ok {
-		return UnsupportedForkError{bt.json.Network}
+		return testutil.UnsupportedForkError{Name: bt.json.Network}
 	}
 
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
@@ -140,14 +141,14 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 		return err
 	}
 
-	tx, err := m.DB.BeginRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
 	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if libcommon.Hash(bt.json.BestBlock) != cmlast {
+	if common.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
 	newDB := state.New(m.NewStateReader(tx))
@@ -341,7 +342,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		for loc, val := range acct.Storage {
 			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
 			val2 := uint256.NewInt(0)
-			statedb.GetState(addr, &loc, val2)
+			statedb.GetState(addr, loc, val2)
 			if !val1.Eq(val2) {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
 			}
@@ -352,7 +353,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 
 func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *mock.MockSentry) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
-	bmap := make(map[libcommon.Hash]btBlock, len(bt.json.Blocks))
+	bmap := make(map[common.Hash]btBlock, len(bt.json.Blocks))
 	for _, b := range validBlocks {
 		bmap[b.BlockHeader.Hash] = b
 	}

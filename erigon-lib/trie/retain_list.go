@@ -29,7 +29,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 
@@ -38,7 +38,7 @@ import (
 
 type RetainDecider interface {
 	Retain([]byte) bool
-	IsCodeTouched(libcommon.Hash) bool
+	IsCodeTouched(common.Hash) bool
 }
 
 type RetainDeciderWithMarker interface {
@@ -102,10 +102,10 @@ func (pr *MultiAccountProofRetainer) ProofElement(prefix []byte) *proofElement {
 // calculation has completed.
 type DefaultProofRetainer struct {
 	rl             *RetainList
-	addr           libcommon.Address
+	addr           common.Address
 	acc            *accounts.Account
 	accHexKey      []byte
-	storageKeys    []libcommon.Hash
+	storageKeys    []common.Hash
 	storageHexKeys [][]byte
 	proofs         []*proofElement
 }
@@ -115,8 +115,8 @@ type DefaultProofRetainer struct {
 // storage keys are added to the given RetainList.  The ProofRetainer should be
 // set onto the FlatDBTrieLoader via SetProofRetainer before performing its Load
 // operation in order to appropriately collect the proof elements.
-func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys []libcommon.Hash, rl *RetainList) (*DefaultProofRetainer, error) {
-	addrHash, err := libcommon.HashData(addr[:])
+func NewProofRetainer(addr common.Address, a *accounts.Account, storageKeys []common.Hash, rl *RetainList) (*DefaultProofRetainer, error) {
+	addrHash, err := common.HashData(addr[:])
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys [
 
 	storageHexKeys := make([][]byte, len(storageKeys))
 	for i, sk := range storageKeys {
-		storageHash, err := libcommon.HashData(sk[:])
+		storageHash, err := common.HashData(sk[:])
 		if err != nil {
 			return nil, err
 		}
@@ -198,7 +198,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 		}
 	}
 
-	if pr.acc.Initialised && result.StorageHash == (libcommon.Hash{}) {
+	if pr.acc.Initialised && result.StorageHash == (common.Hash{}) {
 		return nil, errors.New("did not find storage root in proof elements")
 	}
 
@@ -259,7 +259,7 @@ type proofElement struct {
 
 	// storageRoot stores the storage root if this is writing
 	// an account leaf
-	storageRoot libcommon.Hash
+	storageRoot common.Hash
 
 	// storageRootKey stores the actual hexKey from which the storageRoot came.
 	// This is needed because other proof nodes can be included in the negative
@@ -286,12 +286,12 @@ type RetainList struct {
 	lteIndex    int  // Index of the "LTE" key in the keys slice. Next one is "GT"
 	hexes       [][]byte
 	markers     []bool
-	codeTouches map[libcommon.Hash]struct{}
+	codeTouches map[common.Hash]struct{}
 }
 
 // NewRetainList creates new RetainList
 func NewRetainList(minLength int) *RetainList {
-	return &RetainList{minLength: minLength, codeTouches: make(map[libcommon.Hash]struct{})}
+	return &RetainList{minLength: minLength, codeTouches: make(map[common.Hash]struct{})}
 }
 
 func (rl *RetainList) Len() int {
@@ -331,11 +331,11 @@ func (rl *RetainList) AddMarker(marker bool) {
 }
 
 // AddCodeTouch adds a new code touch into the resolve set
-func (rl *RetainList) AddCodeTouch(codeHash libcommon.Hash) {
+func (rl *RetainList) AddCodeTouch(codeHash common.Hash) {
 	rl.codeTouches[codeHash] = struct{}{}
 }
 
-func (rl *RetainList) IsCodeTouched(codeHash libcommon.Hash) bool {
+func (rl *RetainList) IsCodeTouched(codeHash common.Hash) bool {
 	_, ok := rl.codeTouches[codeHash]
 	return ok
 }
@@ -360,7 +360,7 @@ func (rl *RetainList) ensureInited() {
 // come in monotonically ascending order, we optimise for this, though
 // the function would still work if the order is different
 func (rl *RetainList) Retain(prefix []byte) bool {
-	// if bytes.HasPrefix(prefix, libcommon.FromHex("0x0d05")) {
+	// if bytes.HasPrefix(prefix, common.FromHex("0x0d05")) {
 	// 	fmt.Println("here!!!!!")
 	// }
 

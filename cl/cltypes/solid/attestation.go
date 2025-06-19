@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -39,10 +39,10 @@ const (
 
 // Attestation type represents a statement or confirmation of some occurrence or phenomenon.
 type Attestation struct {
-	AggregationBits *BitList          `json:"aggregation_bits"`
-	Data            *AttestationData  `json:"data"`
-	Signature       libcommon.Bytes96 `json:"signature"`
-	CommitteeBits   *BitVector        `json:"committee_bits,omitempty"` // Electra EIP-7549
+	AggregationBits *BitList         `json:"aggregation_bits"`
+	Data            *AttestationData `json:"data"`
+	Signature       common.Bytes96   `json:"signature"`
+	CommitteeBits   *BitVector       `json:"committee_bits,omitempty"` // Electra EIP-7549
 }
 
 func (a *Attestation) GetCommitteeIndexFromBits() (uint64, error) {
@@ -131,10 +131,10 @@ func (a *Attestation) Clone() clonable.Clonable {
 func (a *Attestation) UnmarshalJSON(data []byte) error {
 	// Unmarshal as normal into a temporary struct
 	type tempAttestation struct {
-		AggregationBits *BitList          `json:"aggregation_bits"`
-		Data            *AttestationData  `json:"data"`
-		Signature       libcommon.Bytes96 `json:"signature"`
-		CommitteeBits   *BitVector        `json:"committee_bits,omitempty"`
+		AggregationBits *BitList         `json:"aggregation_bits"`
+		Data            *AttestationData `json:"data"`
+		Signature       common.Bytes96   `json:"signature"`
+		CommitteeBits   *BitVector       `json:"committee_bits,omitempty"`
 	}
 
 	// For Electra, the committee bits are present in the JSON
@@ -173,10 +173,10 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 //	data: AttestationData
 //	signature: BLSSignature
 type SingleAttestation struct {
-	CommitteeIndex uint64            `json:"committee_index,string"`
-	AttesterIndex  uint64            `json:"attester_index,string"`
-	Data           *AttestationData  `json:"data"`
-	Signature      libcommon.Bytes96 `json:"signature"`
+	CommitteeIndex uint64           `json:"committee_index,string"`
+	AttesterIndex  uint64           `json:"attester_index,string"`
+	Data           *AttestationData `json:"data"`
+	Signature      common.Bytes96   `json:"signature"`
 }
 
 func (s *SingleAttestation) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -206,11 +206,14 @@ func (s *SingleAttestation) Static() bool {
 	return true
 }
 
-func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestation {
+func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int) *Attestation {
 	committeeBits := NewBitVector(maxCommitteesPerSlot)
 	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
-	aggregationBits := NewBitList(0, aggregationBitsSizeElectra)
-	aggregationBits.SetOnBit(maxValidatorsPerCommittee*int(s.CommitteeIndex) + memberIndexInCommittee)
+	// flip the bit for the validator and also mark the last bit
+	bytes := make([]byte, committeeLen/8+1)
+	bytes[memberIndexInCommittee/8] |= 1 << (memberIndexInCommittee % 8)
+	bytes[committeeLen/8] |= 1 << (committeeLen % 8)
+	aggregationBits := BitlistFromBytes(bytes, aggregationBitsSizeElectra)
 	return &Attestation{
 		AggregationBits: aggregationBits,
 		Data:            s.Data,

@@ -21,7 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // TODO:(tjayrush)
@@ -50,7 +50,7 @@ type GethTrace struct {
 // GethTraces an array of GethTraces
 type GethTraces []*GethTrace
 
-// ParityTrace A trace in the desired format (Parity/OpenEthereum) See: https://openethereum.github.io/wiki/JSONRPC-trace-module
+// ParityTrace A trace in the desired format (Parity/OpenEthereum) See: https://openethereum.github.io/JSONRPC-trace-module
 type ParityTrace struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
 	Action              interface{}  `json:"action"` // Can be either CallTraceAction or CreateTraceAction

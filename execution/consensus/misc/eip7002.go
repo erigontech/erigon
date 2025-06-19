@@ -17,21 +17,31 @@
 package misc
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
-func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) *types.FlatRequest {
+// See https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md#system-call
+func DequeueWithdrawalRequests7002(syscall consensus.SystemCall, state *state.IntraBlockState) (*types.FlatRequest, error) {
+	codeSize, err := state.GetCodeSize(params.WithdrawalRequestAddress)
+	if err != nil {
+		return nil, err
+	}
+	if codeSize == 0 {
+		return nil, fmt.Errorf("[EIP-7002] Syscall failure: Empty Code at WithdrawalRequestAddress=%x", params.WithdrawalRequestAddress)
+	}
+
 	res, err := syscall(params.WithdrawalRequestAddress, nil)
 	if err != nil {
-		log.Warn("Err with syscall to WithdrawalRequestAddress", "err", err)
-		return nil
+		return nil, fmt.Errorf("[EIP-7002] Unprecedented Syscall failure WithdrawalRequestAddress=%x error=%s", params.WithdrawalRequestAddress, err.Error())
 	}
 	if res != nil {
 		// Just append the contract output
-		return &types.FlatRequest{Type: types.WithdrawalRequestType, RequestData: res}
+		return &types.FlatRequest{Type: types.WithdrawalRequestType, RequestData: res}, nil
 	}
-	return nil
+	return nil, nil
 }
