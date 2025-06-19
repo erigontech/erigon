@@ -2,6 +2,7 @@
 .git
 .github
 .cache
+Dockerfile*
 **/*_test.go
 **/*.a
 **/*.dylib
