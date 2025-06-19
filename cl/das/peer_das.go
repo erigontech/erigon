@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/kzg"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
@@ -26,6 +27,7 @@ type PeerDas interface {
 	IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error)
 	CustodyGroupCount() uint64
 	DataRecoverAndPrune(ctx context.Context) error
+	UpdateValidatorsCustody(cgc uint64)
 }
 
 type peerdas struct {
@@ -36,6 +38,7 @@ type peerdas struct {
 	sentinel      sentinelproto.SentinelClient
 	// cgc is expected to be dynamic value, which varies with the number of validators connecting to the beacon node
 	custodyGroupCount atomic.Uint64
+	peerDasState      *peerdasstate.PeerDasState
 }
 
 func NewPeerDas(
@@ -45,12 +48,14 @@ func NewPeerDas(
 	sentinel sentinelproto.SentinelClient,
 ) PeerDas {
 	kzg.InitKZG()
+	state := peerdasstate.NewPeerDasState()
 	p := &peerdas{
 		rpc:               rpc,
 		beaconConfig:      beaconConfig,
 		columnStorage:     columnStorage,
 		custodyGroupCount: atomic.Uint64{},
 		sentinel:          sentinel,
+		peerDasState:      state,
 	}
 	p.custodyGroupCount.Store(p.beaconConfig.CustodyRequirement)
 	return p
@@ -94,6 +99,9 @@ func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (b
 	}
 
 	return len(custodyColumns) == 0, nil
+}
+
+func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 }
 
 func (d *peerdas) DataRecoverAndPrune(ctx context.Context) error {
