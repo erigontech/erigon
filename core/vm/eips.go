@@ -276,9 +276,9 @@ func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 }
 
 func opCLZ(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	x := scope.Stack.pop()
+	x := scope.Stack.peek()
 	// count leading zero bits in x
-	scope.Stack.push(new(uint256.Int).SetUint64(256 - uint64(x.BitLen())))
+	x.SetUint64(256 - uint64(x.BitLen()))
 	return nil, nil
 }
 
