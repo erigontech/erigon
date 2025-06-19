@@ -125,8 +125,8 @@ async function run() {
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
         const branch= process.env.BRANCH_NAME ?? github.context.ref.replace(/^refs\/\w+\//, '');   // The branch name, defaults to the current branch
-        const { owner, repo } = github.context.repo;
-        //const {owner, repo} = {owner: 'erigontech', repo: 'erigon'};  // For testing purposes, you can hardcode the owner and repo
+        //const { owner, repo } = github.context.repo;
+        const {owner, repo} = {owner: 'erigontech', repo: 'erigon'};  // For testing purposes, you can hardcode the owner and repo
 
         endDate.setUTCHours(23, 59, 59, 999);
 
@@ -217,7 +217,7 @@ async function run() {
         const days = getDateStringsBetween(start, end);
 
         // Prepare the summary table header
-        const table: SummaryRow[] = [
+        const table: SummaryRow[] = [  // format: [Test, Job, Date1, Date2, ...]
             [ // header row
                 {data: 'Test', header: true},
                 {data: 'Job', header: true},
@@ -242,7 +242,8 @@ async function run() {
                     jobName = mapChain(jobSummary.name);
                 }
 
-                let row = [removeQAAndChainInfo(workflowSummary.name), jobName]
+                let testName = removeQAAndChainInfo(workflowSummary.name)
+                let row = [testName, jobName]
                 let jobConclusions = [];
 
                 for (const day of days) {
@@ -267,13 +268,14 @@ async function run() {
             }
         }
 
-        // Order the table by the first column (Test name)
+        // Order the table by the first column (Test name) except for the header row
         table.sort((a, b) => {
+            if (typeof a[0] === 'object' && 'header' in a[0] && a[0].header === true) return 0; // Keep the header row at the top
             if (a[0] < b[0]) return -1;
             if (a[0] > b[0]) return 1;
             return 0;
         });
-        
+
         // Write the summary table to the GitHub Actions summary
         await core.summary
             .addHeading('Test Report - Branch ' + branch)
