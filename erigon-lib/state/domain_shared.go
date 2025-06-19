@@ -523,7 +523,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 // DomainPut
 // Optimizations:
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
-//   - user can append k2 into k1, then underlying methods will not preform append
+//   - user can append k2 into k1, then underlying methods will not perform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	if v == nil {
@@ -563,7 +563,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 // DomainDel
 // Optimizations:
 //   - user can prvide `prevVal != nil` - then it will not read prev value from storage
-//   - user can append k2 into k1, then underlying methods will not preform append
+//   - user can append k2 into k1, then underlying methods will not perform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
