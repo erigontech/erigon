@@ -1,8 +1,13 @@
+.DS_Store
+.git
+.github
+.cache
 **/*_test.go
 **/*.a
 **/*.dylib
 **/*.o
 **/*.dSYM
+**/.DS_Store
 
 build
 tests/testdata
