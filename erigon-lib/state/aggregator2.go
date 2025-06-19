@@ -207,7 +207,7 @@ var Schema = SchemaGen{
 	},
 	CodeDomain: domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compressing Code with keys doesn't show any benefits. Compression of values shows 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
 		Accessors:   AccessorBTree | AccessorExistence,
 		largeValues: true,
@@ -374,7 +374,7 @@ func checkSnapshotsCompatibility(d datadir.Dirs) error {
 				if strings.HasPrefix(name, "v1-") {
 					return errors.New("The datadir has bad snapshot files or they are " +
 						"incompatible with the current erigon version. If you want to upgrade from an" +
-						"older version, you may run the follwing to rename files to the " +
+						"older version, you may run the following to rename files to the " +
 						"new version: `erigon seg update-to-new-ver-format`")
 				}
 				fileInfo, _, _ := snaptype.ParseFileName("", name)
@@ -394,7 +394,7 @@ func checkSnapshotsCompatibility(d datadir.Dirs) error {
 				if currentFileVersion.Major < requiredVersion.Major {
 					return fmt.Errorf("snapshot file major version mismatch for file %s, "+
 						" requiredVersion: %d, currentVersion: %d"+
-						" You may wanna downgrade to an older version (not older than 3.1)",
+						" You may want to downgrade to an older version (not older than 3.1)",
 						fileInfo.Name(), requiredVersion.Major, currentFileVersion.Major)
 				}
 			}
