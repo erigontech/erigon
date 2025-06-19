@@ -62,10 +62,36 @@ func New(ctx context.Context, ethClock eth_clock.EthereumClock, beaconConfig *cl
 
 // SetStatus sets the current network status against which we can validate peers.
 func (h *HandShaker) SetStatus(status *cltypes.Status) {
+	if status == nil {
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.set = true
-	h.status = status
+
+	if status.ForkDigest != [4]byte{} {
+		h.status.ForkDigest = status.ForkDigest
+	}
+
+	if status.FinalizedRoot != [32]byte{} {
+		h.status.FinalizedRoot = status.FinalizedRoot
+	}
+
+	if status.FinalizedEpoch != 0 {
+		h.status.FinalizedEpoch = status.FinalizedEpoch
+	}
+
+	if status.HeadRoot != [32]byte{} {
+		h.status.HeadRoot = status.HeadRoot
+	}
+
+	if status.HeadSlot != 0 {
+		h.status.HeadSlot = status.HeadSlot
+	}
+
+	if status.EarliestAvailableSlot != nil {
+		h.status.EarliestAvailableSlot = status.EarliestAvailableSlot
+	}
 }
 
 // Status returns the underlying status (only for giving out responses)
