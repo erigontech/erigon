@@ -121,7 +121,7 @@ type SpanResponseV2 struct {
 			Proposer   validator   `json:"proposer"`
 		} `json:"validator_set"`
 		SelectedProducers []validator `json:"selected_producers"`
-		ChainID           string      `json:"chain_id"`
+		BorChainID        string      `json:"bor_chain_id"`
 	} `json:"span"`
 }
 
@@ -155,7 +155,7 @@ func (r *SpanResponseV2) ToSpan() (*Span, error) {
 			Proposer:   &proposer,
 		},
 		SelectedProducers: make([]valset.Validator, 0, len(r.Span.SelectedProducers)),
-		ChainID:           r.Span.ChainID,
+		ChainID:           r.Span.BorChainID,
 	}
 
 	for i := range r.Span.ValidatorSet.Validators {
