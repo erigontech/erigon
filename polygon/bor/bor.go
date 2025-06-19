@@ -1497,12 +1497,10 @@ func (c *Bor) fetchAndCommitSpan(
 	var heimdallSpan *heimdall.Span
 
 	if c.HeimdallClient == nil {
-		// fixme: move to a new mock or fake and remove c.HeimdallClient completely
 		s, err := c.getNextHeimdallSpanForTest(newSpanID, state, header, chain, syscall)
 		if err != nil {
 			return err
 		}
-
 		heimdallSpan = s
 	} else if c.useSpanReader {
 		span, ok, err := c.spanReader.Span(context.Background(), newSpanID)
@@ -1510,15 +1508,27 @@ func (c *Bor) fetchAndCommitSpan(
 			return err
 		}
 		if !ok {
-			return errors.New(fmt.Sprintf("error fetching span %v", newSpanID))
+			return fmt.Errorf("error fetching span %v", newSpanID)
 		}
-
 		heimdallSpan = span
 	} else {
-		heimdallSpan = chain.Chain.(ChainHeaderReader).BorSpan(newSpanID)
+		if chain.Chain == nil {
+			return fmt.Errorf("chain.Chain is nil in fetchAndCommitSpan")
+		}
+		borSpan, ok := chain.Chain.(ChainHeaderReader)
+		if !ok {
+			return fmt.Errorf("chain.Chain does not implement ChainHeaderReader")
+		}
+		heimdallSpan = borSpan.BorSpan(newSpanID)
+		if heimdallSpan == nil {
+			return fmt.Errorf("BorSpan returned nil for spanID %v", newSpanID)
+		}
 	}
 
-	// check if chain id matches with heimdall span
+	if heimdallSpan == nil {
+		return fmt.Errorf("heimdallSpan is nil in fetchAndCommitSpan")
+	}
+
 	if heimdallSpan.ChainID != c.chainConfig.ChainID.String() {
 		return fmt.Errorf(
 			"chain id proposed span, %s, and bor chain id, %s, doesn't match",
