@@ -1326,25 +1326,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		defer agg.Close()
 		defer db.Close()
 	}
-<<<<<<< HEAD
 	tx, err := db.BeginTemporalRo(ctx)
-=======
-	err = chainDB.View(ctx, func(tx kv.Tx) error {
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := blockReader.TxnumReader(ctx).FindBlockNum(tx, endTxNumMinimax)
-			return histBlockNumProgress, err
-		})
-		return nil
-	})
->>>>>>> 47f89b1ca9 (share and use txnumreader cache via blockreader (#15597))
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
 	stats.LogStats(tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-		histBlockNumProgress, _, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
+		histBlockNumProgress, _, err := blockReader.TxnumReader(ctx).FindBlockNum(tx, endTxNumMinimax)
 		return histBlockNumProgress, err
 	})
 

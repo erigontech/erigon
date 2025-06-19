@@ -20,15 +20,14 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 
 	"github.com/erigontech/erigon/turbo/services"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/trie"
 )
 
 type TrieCfg struct {
@@ -61,7 +60,7 @@ func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, t
 
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
-func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (common.Hash, error) {
+func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (libcommon.Hash, error) {
 	txNumsReader := cfg.blockReader.TxnumReader(ctx)
 	rh, err := cfg.agg.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader)
 	if err != nil {

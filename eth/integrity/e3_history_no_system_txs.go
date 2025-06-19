@@ -43,14 +43,8 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
-<<<<<<< HEAD
-=======
-
-	skipForPerf := 11
-	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
 	txNumsReader := blockReader.TxnumReader(ctx)
 
->>>>>>> 47f89b1ca9 (share and use txnumreader cache via blockreader (#15597))
 	for j := 0; j < 256; j++ {
 		j := j
 		for jj := 0; jj < 255; jj++ {
@@ -68,8 +62,6 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 					return err
 				}
 				defer keys.Close()
-
-				txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 
 				for keys.HasNext() {
 					key, _, err := keys.Next()

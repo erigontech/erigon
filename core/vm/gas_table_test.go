@@ -202,7 +202,7 @@ func TestCreateGas(t *testing.T) {
 		defer domains.Close()
 		txc.Doms = domains
 
-		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
+		stateReader := rpchelper.NewLatestDomainStateReader(domains)
 		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
 
 		s := state.New(stateReader)
