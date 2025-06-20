@@ -45,13 +45,14 @@ jobs:
     needs: source-of-changes
     concurrency:
       # concurrency group: there can be at most one running and one pending job in a 
-      # concurrency group at any time. So for commits on main/release, we use different 
-      # concurrency group per commit; for other branches, we use a branch-level CG.
+      # concurrency group at any time. So for commits on main/release, we use null CG --
+      # i.e. no CG all jobs can be parallel/queued; 
+      # for other branches, we use a branch-level CG.
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('tests-all-erigon-{0}-{1}-{2}', matrix.os, github.ref, github.sha) ||
-          format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
+          (github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/'))
+          && format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
+          || null
         }}
       cancel-in-progress: true
     strategy:
