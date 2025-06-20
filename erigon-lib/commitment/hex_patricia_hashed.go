@@ -84,11 +84,14 @@ type HexPatriciaHashed struct {
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
+	// configuration part
 	mounted      bool                 // true if this trie is mounted to some root trie
 	mountedNib   int                  // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
 	mountedTries []*HexPatriciaHashed // list of mounted tries to unmount
 
 	memoizationOff bool // if true, do not rely on memoized hashes
+	readOnly       bool // if true, do not allow any modifications to trie branches or trie state itself
+
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
@@ -104,6 +107,38 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 
 	subTrie.mountTo(hph, forNibble)
 	return subTrie
+}
+
+func (hph *HexPatriciaHashed) Warmup(ctx PatriciaContext, hashedKey []byte) error {
+	// should not affect trie state
+	hph.readOnly = true
+	defer func() {
+		hph.readOnly = false
+		hph.currentKeyLen = 0
+	}()
+	hph.ResetContext(ctx)
+
+	for hph.needFolding(hashedKey) {
+		//foldDone := hph.metrics.StartFolding(plainKey)
+		if err := hph.fold(); err != nil {
+			return fmt.Errorf("fold: %w", err)
+		}
+		//foldDone()
+	}
+	// Now unfold until we step on an empty cell
+	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
+		//unfoldDone := hph.metrics.StartUnfolding(plainKey)
+		if err := hph.unfold(hashedKey, unfolding); err != nil {
+			return fmt.Errorf("unfold: %w", err)
+		}
+		//unfoldDone()
+		if printLater {
+			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
+		}
+		// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
+	}
+	return nil
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHashed {
@@ -1621,6 +1656,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	updateKey := hexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
+	hph.branchEncoder.SkipEncoding = hph.readOnly
+
 	if hph.trace {
 		fmt.Printf("fold: (row=%d, {%s}, depth=%d) prefix [%x] touchMap: %016b afterMap: %016b \n",
 			row, updatedNibs(hph.touchMap[row]&hph.afterMap[row]), depth, hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
@@ -1653,6 +1690,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			}
 		}
 		hph.activeRows--
+		//hph.currentKeyLen = max(upDepth-1, 0)
 		if upDepth > 0 {
 			hph.currentKeyLen = upDepth - 1
 		} else {
@@ -1764,9 +1802,11 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 
 		hph.keccak2.Reset()
-		pt := rlp.GenerateStructLen(hph.hashAuxBuffer[:], totalBranchLen)
-		if _, err := hph.keccak2.Write(hph.hashAuxBuffer[:pt]); err != nil {
-			return err
+		if !hph.readOnly {
+			pt := rlp.GenerateStructLen(hph.hashAuxBuffer[:], totalBranchLen)
+			if _, err := hph.keccak2.Write(hph.hashAuxBuffer[:pt]); err != nil {
+				return err
+			}
 		}
 
 		b := [...]byte{0x80}
@@ -1775,12 +1815,15 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
-		for i := lastNibble; i < 17; i++ {
-			if _, err := hph.keccak2.Write(b[:]); err != nil {
-				return err
-			}
-			if hph.trace {
-				fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
+		if !hph.readOnly {
+			//lastNibble = 17 // do not write empty cells and do not udpate parent cell hash
+			for i := lastNibble; i < 17; i++ {
+				if _, err := hph.keccak2.Write(b[:]); err != nil {
+					return err
+				}
+				if hph.trace {
+					fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
+				}
 			}
 		}
 		upCell.extLen = depth - upDepth - 1
@@ -1794,13 +1837,17 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 		upCell.storageAddrLen = 0
 		upCell.hashLen = 32
-		if _, err := hph.keccak2.Read(upCell.hash[:]); err != nil {
-			return err
+
+		if !hph.readOnly {
+			if _, err := hph.keccak2.Read(upCell.hash[:]); err != nil {
+				return err
+			}
 		}
 		if hph.trace {
 			fmt.Printf("} [%x]\n", upCell.hash[:])
 		}
 		hph.activeRows--
+		//hph.currentKeyLen = max(upDepth-1, 0)
 		if upDepth > 0 {
 			hph.currentKeyLen = upDepth - 1
 		} else {
@@ -1933,6 +1980,9 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
 		}
 		// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
+	}
+	if hph.readOnly {
+		return nil
 	}
 
 	if stateUpdate == nil {
@@ -2129,6 +2179,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
+	hph.readOnly = false
 
 	if collectCommitmentMetrics {
 		hph.metrics.Reset()
@@ -2140,6 +2191,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 
 	defer func() { logEvery.Stop() }()
+	defer func() {
+		log.Debug("commitment finished", "keys", common.PrettyCounter(ki), "spent", time.Since(start), "warmup", COM_WARMUP)
+	}()
 
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
