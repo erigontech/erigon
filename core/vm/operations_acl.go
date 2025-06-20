@@ -317,38 +317,69 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 }
 
 var (
-	gasCallEIP7907         = makeGasFuncVariantEIP7907(gasCallEIP7702, 1)
-	gasDelegateCallEIP7907 = makeGasFuncVariantEIP7907(gasDelegateCallEIP7702, 1)
-	gasStaticCallEIP7907   = makeGasFuncVariantEIP7907(gasStaticCallEIP7702, 1)
-	gasCallCodeEIP7907     = makeGasFuncVariantEIP7907(gasCallCodeEIP7702, 1)
-	gasExtCodeCopyEIP7907  = makeGasFuncVariantEIP7907(gasExtCodeCopyEIP2929, 0)
+	gasCallEIP7907         = makeGasFuncCodeAccessVariantEIP7907(gasCallEIP7702, 1)
+	gasDelegateCallEIP7907 = makeGasFuncCodeAccessVariantEIP7907(gasDelegateCallEIP7702, 1)
+	gasStaticCallEIP7907   = makeGasFuncCodeAccessVariantEIP7907(gasStaticCallEIP7702, 1)
+	gasCallCodeEIP7907     = makeGasFuncCodeAccessVariantEIP7907(gasCallCodeEIP7702, 1)
+	gasExtCodeCopyEIP7907  = makeGasFuncCodeAccessVariantEIP7907(gasExtCodeCopyEIP2929, 0)
+	gasCreateEIP7907       = makeGasFuncCreateVariantEIP7907(gasCreateEip3860)
+	gasCreate2EIP7907      = makeGasFuncCreateVariantEIP7907(gasCreate2Eip3860)
 )
 
-func makeGasFuncVariantEIP7907(oldGasFunc gasFunc, addressStackIndex int) gasFunc {
+func makeGasFuncCodeAccessVariantEIP7907(oldGasFunc gasFunc, addressStackIndex int) gasFunc {
 	return func(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-		dynCost, err := chargeLargeCode(evm, contract, stack.Back(addressStackIndex).Bytes20())
+		cost, err := oldGasFunc(evm, contract, stack, mem, memorySize)
 		if err != nil {
 			return 0, err
 		}
 
-		gas, err := oldGasFunc(evm, contract, stack, mem, memorySize)
-		if dynCost == 0 || err != nil {
-			return gas, err
+		extraCost, err := chargeLargeContractAccessCost(evm, contract, stack.Back(addressStackIndex).Bytes20())
+		if err != nil {
+			return 0, err
 		}
 
-		// add back what we've used here since it will all be charged by the caller
-		contract.Gas += dynCost
+		// add back the extra cost we've charged here since it will all be charged by the caller
+		contract.Gas += extraCost
 
 		var overflow bool
-		if gas, overflow = math.SafeAdd(gas, dynCost); overflow {
+		if cost, overflow = math.SafeAdd(cost, extraCost); overflow {
 			return 0, ErrGasUintOverflow
 		}
 
-		return gas, nil
+		return cost, nil
 	}
 }
 
-func chargeLargeCode(evm *EVM, contract *Contract, addr common.Address) (uint64, error) {
+func makeGasFuncCreateVariantEIP7907(oldGasFunc gasFunc) gasFunc {
+	return func(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+		cost, err := oldGasFunc(evm, contract, stack, mem, memorySize)
+		if err != nil {
+			return 0, err
+		}
+
+		size, overflow := stack.Back(2).Uint64WithOverflow()
+		if overflow {
+			return 0, ErrGasUintOverflow
+		}
+
+		extraCost, err := largeContractCost(size)
+		if err != nil {
+			return 0, err
+		}
+		if extraCost == 0 {
+			return cost, nil
+		}
+
+		cost, overflow = math.SafeAdd(cost, extraCost)
+		if overflow {
+			return 0, ErrGasUintOverflow
+		}
+
+		return cost, nil
+	}
+}
+
+func chargeLargeContractAccessCost(evm *EVM, contract *Contract, addr common.Address) (uint64, error) {
 	ibs := evm.IntraBlockState()
 	if !ibs.AddCodeAddressToAccessList(addr) {
 		return 0, nil // code is already warm, hence no charge
@@ -367,15 +398,26 @@ func chargeLargeCode(evm *EVM, contract *Contract, addr common.Address) (uint64,
 		return 0, err
 	}
 
+	cost, err := largeContractCost(uint64(codeSize))
+	if err != nil {
+		return 0, err
+	}
+	if cost == 0 {
+		return 0, nil
+	}
+
+	if !contract.UseGas(cost, evm.Config().Tracer, tracing.GasChangeCodeColdAccess) {
+		return 0, ErrOutOfGas
+	}
+
+	return cost, nil
+}
+
+func largeContractCost(codeSize uint64) (uint64, error) {
 	if codeSize <= params.LargeCodeThresholdEip7907 {
 		return 0, nil // code is not large enough to be charged
 	}
 
-	dynCost := uint64(codeSize - params.LargeCodeThresholdEip7907)      // excess
-	dynCost = ToWordSize(dynCost) * params.LargeCodeWordGasEip7907 / 32 // ceil32(excess) * gasPerWord // 32
-	if !contract.UseGas(dynCost, evm.Config().Tracer, tracing.GasChangeCodeColdAccess) {
-		return 0, ErrOutOfGas
-	}
-
-	return dynCost, nil
+	cost := codeSize - params.LargeCodeThresholdEip7907                // excess
+	return ToWordSize(cost) * params.LargeCodeWordGasEip7907 / 32, nil // ceil32(excess) * gasPerWord // 32
 }
