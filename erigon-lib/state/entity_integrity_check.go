@@ -49,7 +49,7 @@ var (
 
 type DirtyFilesGetter func() *btree2.BTreeG[*FilesItem]
 
-// DependencyIntegrityChecker: used when a dependent domain has
+// an DependencyIntegrityChecker used when a dependent domain has
 // references to a dependency domain. e.g. commitment.kv has
 // references to accounts.kv.
 // instance should be held by dependency domain
