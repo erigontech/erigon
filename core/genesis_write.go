@@ -600,8 +600,12 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	}
 
 	head.Root = root
+	block := types.NewBlock(head, nil, nil, nil, withdrawals)
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+	b, _ := json.MarshalIndent(block.HeaderNoCopy(), "", "  ")
+	fmt.Println(string(b))
+
+	return block, statedb, nil
 }
 
 func sortedAllocKeys(m types.GenesisAlloc) []string {
