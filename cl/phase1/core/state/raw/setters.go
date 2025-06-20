@@ -574,3 +574,8 @@ func (b *BeaconState) SetEarlistConsolidationEpoch(epoch uint64) {
 	b.earliestConsolidationEpoch = epoch
 	b.markLeaf(EarliestConsolidationEpochLeafIndex)
 }
+
+func (b *BeaconState) SetProposerLookahead(proposerLookahead solid.Uint64VectorSSZ) {
+	b.proposerLookahead = proposerLookahead
+	b.markLeaf(ProposerLookaheadLeafIndex)
+}
