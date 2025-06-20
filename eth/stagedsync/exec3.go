@@ -829,18 +829,18 @@ Loop:
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
 
-			//for i := 0; i < 16; i++ {
-			//	// rotx := agg.BeginFilesRo()
-			//	// rotx := cfg.db.BeginRw(context.Background())
-			//
-			//	rotx, err := cfg.db.BeginRo(ctx)
-			//	if err != nil {
-			//		return err
-			//	}
-			//	defer rotx.Rollback()
-			//
-			//	executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
-			//}
+			for i := 0; i < 16; i++ {
+				// rotx := agg.BeginFilesRo()
+				// rotx := cfg.db.BeginRw(context.Background())
+
+				rotx, err := cfg.db.BeginRo(ctx)
+				if err != nil {
+					return err
+				}
+				defer rotx.Rollback()
+
+				executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
+			}
 			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
