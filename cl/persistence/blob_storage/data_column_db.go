@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -32,7 +31,7 @@ type DataColumnStorage interface {
 	ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	GetSavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error)
-	//Prune() error
+	Prune(keepSlotDistance uint64) error
 }
 
 type dataColumnStorageImpl struct {
@@ -236,13 +235,9 @@ func (s *dataColumnStorageImpl) acquireMutexBySlot(slot uint64) *sync.RWMutex {
 	return s.dbMutexes[index]
 }
 
-func (s *dataColumnStorageImpl) Prune() error {
-	if s.slotsKept == math.MaxUint64 {
-		return nil
-	}
-
+func (s *dataColumnStorageImpl) Prune(keepSlotDistance uint64) error {
 	currentSlot := s.ethClock.GetCurrentSlot()
-	currentSlot -= s.slotsKept
+	currentSlot -= keepSlotDistance
 	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
 	var startPrune uint64
 	minSlotsForBlobSidecarRequest := s.beaconChainConfig.MinSlotsForBlobsSidecarsRequest()
