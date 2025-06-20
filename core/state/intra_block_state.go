@@ -1556,6 +1556,15 @@ func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Ha
 	return sdb.accessList.Contains(addr, slot)
 }
 
+func (ibs *IntraBlockState) AddCodeAddressToAccessList(codeAddr common.Address) bool {
+	if ibs.accessList.AddCodeAccess(codeAddr) {
+		ibs.journal.append(accessListAddCodeAccessChange{codeAddr})
+		return true
+	}
+
+	return false
+}
+
 func (s *IntraBlockState) accountRead(addr common.Address, account *accounts.Account) {
 	if s.versionMap != nil {
 		// record the originating account data so that
