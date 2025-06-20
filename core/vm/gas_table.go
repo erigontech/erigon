@@ -312,7 +312,7 @@ func gasCreate2(_ *EVM, contract *Contract, stack *Stack, mem *Memory, memorySiz
 	return gas, nil
 }
 
-func gasCreateEip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasCreateEip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -321,7 +321,7 @@ func gasCreateEip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, mem
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > params.MaxInitCodeSize {
+	if size > uint64(MaxInitCodeSize(evm.chainRules)) {
 		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
 	}
 	numWords := ToWordSize(size)
@@ -334,7 +334,7 @@ func gasCreateEip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, mem
 	return gas, nil
 }
 
-func gasCreate2Eip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -343,7 +343,7 @@ func gasCreate2Eip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, me
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > params.MaxInitCodeSize {
+	if size > uint64(MaxInitCodeSize(evm.chainRules)) {
 		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
 	}
 	numWords := ToWordSize(size)

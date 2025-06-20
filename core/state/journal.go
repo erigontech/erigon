@@ -22,8 +22,9 @@ package state
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
@@ -158,6 +159,9 @@ type (
 	accessListAddSlotChange struct {
 		address common.Address
 		slot    common.Hash
+	}
+	accessListAddCodeAccessChange struct {
+		codeAddr common.Address
 	}
 
 	transientStorageChange struct {
@@ -422,5 +426,14 @@ func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
 }
 
 func (ch accessListAddSlotChange) dirtied() *common.Address {
+	return nil
+}
+
+func (ch accessListAddCodeAccessChange) revert(s *IntraBlockState) error {
+	s.accessList.DeleteCodeAccess(ch.codeAddr)
+	return nil
+}
+
+func (ch accessListAddCodeAccessChange) dirtied() *common.Address {
 	return nil
 }

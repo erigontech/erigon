@@ -315,3 +315,112 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		return gas, nil
 	}
 }
+
+var (
+	gasCallEIP7907         = makeGasFuncCodeAccessVariantEIP7907(gasCallEIP7702, 1)
+	gasDelegateCallEIP7907 = makeGasFuncCodeAccessVariantEIP7907(gasDelegateCallEIP7702, 1)
+	gasStaticCallEIP7907   = makeGasFuncCodeAccessVariantEIP7907(gasStaticCallEIP7702, 1)
+	gasCallCodeEIP7907     = makeGasFuncCodeAccessVariantEIP7907(gasCallCodeEIP7702, 1)
+	gasExtCodeCopyEIP7907  = makeGasFuncCodeAccessVariantEIP7907(gasExtCodeCopyEIP2929, 0)
+	gasCreateEIP7907       = makeGasFuncCreateVariantEIP7907(gasCreateEip3860)
+	gasCreate2EIP7907      = makeGasFuncCreateVariantEIP7907(gasCreate2Eip3860)
+)
+
+func makeGasFuncCodeAccessVariantEIP7907(oldGasFunc gasFunc, addressStackIndex int) gasFunc {
+	return func(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+		cost, err := oldGasFunc(evm, contract, stack, mem, memorySize)
+		if err != nil {
+			return 0, err
+		}
+
+		extraCost, err := chargeLargeContractAccessCost(evm, contract, stack.Back(addressStackIndex).Bytes20())
+		if err != nil {
+			return 0, err
+		}
+		if extraCost == 0 {
+			return cost, nil
+		}
+
+		// add back the extra cost we've charged here since it will all be charged by the caller
+		contract.Gas += extraCost
+
+		var overflow bool
+		if cost, overflow = math.SafeAdd(cost, extraCost); overflow {
+			return 0, ErrGasUintOverflow
+		}
+
+		return cost, nil
+	}
+}
+
+func makeGasFuncCreateVariantEIP7907(oldGasFunc gasFunc) gasFunc {
+	return func(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+		cost, err := oldGasFunc(evm, contract, stack, mem, memorySize)
+		if err != nil {
+			return 0, err
+		}
+
+		size, overflow := stack.Back(2).Uint64WithOverflow()
+		if overflow {
+			return 0, ErrGasUintOverflow
+		}
+
+		extraCost, err := largeContractCost(size)
+		if err != nil {
+			return 0, err
+		}
+		if extraCost == 0 {
+			return cost, nil
+		}
+
+		cost, overflow = math.SafeAdd(cost, extraCost)
+		if overflow {
+			return 0, ErrGasUintOverflow
+		}
+
+		return cost, nil
+	}
+}
+
+func chargeLargeContractAccessCost(evm *EVM, contract *Contract, addr common.Address) (uint64, error) {
+	ibs := evm.IntraBlockState()
+	if !ibs.AddCodeAddressToAccessList(addr) {
+		return 0, nil // code is already warm, hence no charge
+	}
+
+	delegate, ok, err := ibs.GetDelegatedDesignation(addr)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		addr = delegate
+	}
+
+	codeSize, err := ibs.GetCodeSize(addr)
+	if err != nil {
+		return 0, err
+	}
+
+	cost, err := largeContractCost(uint64(codeSize))
+	if err != nil {
+		return 0, err
+	}
+	if cost == 0 {
+		return 0, nil
+	}
+
+	if !contract.UseGas(cost, evm.Config().Tracer, tracing.GasChangeCodeColdAccess) {
+		return 0, ErrOutOfGas
+	}
+
+	return cost, nil
+}
+
+func largeContractCost(codeSize uint64) (uint64, error) {
+	if codeSize <= params.LargeCodeThresholdEip7907 {
+		return 0, nil // code is not large enough to be charged
+	}
+
+	cost := codeSize - params.LargeCodeThresholdEip7907           // excess
+	return ToWordSize(cost) * params.LargeCodeWordGasEip7907, nil // ceil32(excess) / 32 * gasPerWord
+}
