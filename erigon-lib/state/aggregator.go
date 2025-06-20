@@ -273,7 +273,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	ue := FromII(dd.InvertedIndex.iiCfg.name)
 	a.checker.AddDependency(ue, &DependentInfo{
 		entity: ue,
-		filesGetter: func() *btree.BTreeG {
+		filesGetter: func() *btree.BTreeG[*FilesItem] {
 			return h.dirtyFiles
 		},
 		accessors: h.Accessors,
