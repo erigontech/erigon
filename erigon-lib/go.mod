@@ -9,7 +9,7 @@ replace (
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250501041114-4a48ac232c83
-	github.com/erigontech/interfaces v0.0.0-20250602082224-daf6311709c1
+	github.com/erigontech/interfaces v0.0.0-20250617105115-44025d7ddebf
 	github.com/erigontech/mdbx-go v0.39.8
 	github.com/erigontech/secp256k1 v1.2.0
 )
@@ -181,5 +181,3 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
-
-replace github.com/erigontech/interfaces => ../../interfaces
