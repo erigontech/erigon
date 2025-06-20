@@ -543,33 +543,22 @@ func ReadPrealloc(fileSys fs.FS, filename string) types.GenesisAlloc {
 	return ga
 }
 
+var genesisBlockByChainName = make(map[string]*types.Genesis)
+
+func init() {
+	genesisBlockByChainName[networkname.Mainnet] = MainnetGenesisBlock()
+	genesisBlockByChainName[networkname.Holesky] = HoleskyGenesisBlock()
+	genesisBlockByChainName[networkname.Sepolia] = SepoliaGenesisBlock()
+	genesisBlockByChainName[networkname.Hoodi] = HoodiGenesisBlock()
+	genesisBlockByChainName[networkname.Gnosis] = GnosisGenesisBlock()
+	genesisBlockByChainName[networkname.Chiado] = ChiadoGenesisBlock()
+	genesisBlockByChainName[networkname.Test] = TestGenesisBlock()
+}
+
 func GenesisBlockByChainName(chain string) *types.Genesis {
-	switch chain {
-	case networkname.Mainnet:
-		return MainnetGenesisBlock()
-	case networkname.Holesky:
-		return HoleskyGenesisBlock()
-	case networkname.Sepolia:
-		return SepoliaGenesisBlock()
-	case networkname.Hoodi:
-		return HoodiGenesisBlock()
-	// case networkname.Amoy:
-	// 	return AmoyGenesisBlock()
-	// case networkname.BorMainnet:
-	// 	return BorMainnetGenesisBlock()
-	// case networkname.BorDevnet:
-	// 	return BorDevnetGenesisBlock()
-	case networkname.Gnosis:
-		return GnosisGenesisBlock()
-	case networkname.Chiado:
-		return ChiadoGenesisBlock()
-	case networkname.Test:
-		return TestGenesisBlock()
-	default:
-		return nil
-	}
+	return genesisBlockByChainName[chain]
 }
 
 func RegisterGenesisBlock(chain string, genesis *types.Genesis) {
-	// TODO(yperbasis) implement
+	genesisBlockByChainName[chain] = genesis
 }
