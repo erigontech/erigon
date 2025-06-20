@@ -363,8 +363,8 @@ func chargeLargeCode(evm *EVM, contract *Contract, addr common.Address) (uint64,
 		return 0, nil // code is not large enough to be charged
 	}
 
-	dynCost := uint64(codeSize - params.LargeCodeThresholdEip7907) // excess
-	dynCost = ToWordSize(dynCost) * params.LargeCodeWordGasEip7907 // ceil32(excess) * gasPerWord
+	dynCost := uint64(codeSize - params.LargeCodeThresholdEip7907)      // excess
+	dynCost = ToWordSize(dynCost) * params.LargeCodeWordGasEip7907 / 32 // ceil32(excess) * gasPerWord // 32
 	if !contract.UseGas(dynCost, evm.Config().Tracer, tracing.GasChangeCodeColdAccess) {
 		return 0, ErrOutOfGas
 	}
