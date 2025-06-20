@@ -354,6 +354,14 @@ func chargeLargeCode(evm *EVM, contract *Contract, addr common.Address) (uint64,
 		return 0, nil // code is already warm, hence no charge
 	}
 
+	delegate, ok, err := ibs.GetDelegatedDesignation(addr)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		addr = delegate
+	}
+
 	codeSize, err := ibs.GetCodeSize(addr)
 	if err != nil {
 		return 0, err
