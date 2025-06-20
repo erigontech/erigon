@@ -20,14 +20,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync"
 )
 
 func TestCustomTraceReceiptDomain(t *testing.T) {

@@ -19,13 +19,12 @@ package stagedsync
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 type ChainEventNotifier interface {
