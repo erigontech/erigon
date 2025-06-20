@@ -490,9 +490,9 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	if sdc.limitReadAsOfTxNum > 0 && !sdc.domainsOnly { // do not store branches if explicitly operate on history
 		return nil
 	}
-	//if sdc.trace {
-	fmt.Printf("[SDC] PutBranch: %x: %x txn %d\n", prefix, data, sdc.txNum)
-	//}
+	if sdc.trace {
+		fmt.Printf("[SDC] PutBranch: %x: %x txn %d\n", prefix, data, sdc.txNum)
+	}
 	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
