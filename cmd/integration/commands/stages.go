@@ -83,6 +83,8 @@ import (
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	stages2 "github.com/erigontech/erigon/turbo/stages"
+
+	_ "github.com/erigontech/erigon/polygon/genesis" // Register Polygon genesis blocks
 )
 
 var cmdStageSnapshots = &cobra.Command{

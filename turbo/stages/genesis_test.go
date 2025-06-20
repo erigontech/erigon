@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/genesis"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -112,7 +113,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == bor-mainnet",
 			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return core.CommitGenesisBlock(db, core.BorMainnetGenesisBlock(), datadir.New(tmpdir), logger)
+				return core.CommitGenesisBlock(db, genesis.BorMainnetGenesisBlock(), datadir.New(tmpdir), logger)
 			},
 			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.BorMainnetGenesisHash},
 			wantHash:   params.BorMainnetGenesisHash,
@@ -122,7 +123,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == amoy",
 			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return core.CommitGenesisBlock(db, core.AmoyGenesisBlock(), datadir.New(tmpdir), logger)
+				return core.CommitGenesisBlock(db, genesis.AmoyGenesisBlock(), datadir.New(tmpdir), logger)
 			},
 			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.AmoyGenesisHash},
 			wantHash:   params.AmoyGenesisHash,
