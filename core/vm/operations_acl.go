@@ -337,6 +337,9 @@ func makeGasFuncCodeAccessVariantEIP7907(oldGasFunc gasFunc, addressStackIndex i
 		if err != nil {
 			return 0, err
 		}
+		if extraCost == 0 {
+			return cost, nil
+		}
 
 		// add back the extra cost we've charged here since it will all be charged by the caller
 		contract.Gas += extraCost
