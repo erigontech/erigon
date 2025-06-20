@@ -54,7 +54,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"

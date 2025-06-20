@@ -35,11 +35,11 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {

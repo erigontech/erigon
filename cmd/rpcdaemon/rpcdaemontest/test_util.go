@@ -46,9 +46,9 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type testAddresses struct {

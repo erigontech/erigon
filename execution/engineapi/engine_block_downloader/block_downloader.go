@@ -36,10 +36,10 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/stages/bodydownload"
+	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/bodydownload"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 const (

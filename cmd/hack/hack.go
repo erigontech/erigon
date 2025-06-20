@@ -52,7 +52,7 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"

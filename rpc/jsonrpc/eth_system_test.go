@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/execution/stages/mock"
 )
 
 func TestGasPrice(t *testing.T) {

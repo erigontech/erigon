@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/stages/headerdownload"
 )
 
 // download is the process that reverse download a specific block hash.

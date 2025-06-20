@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/execution/stages/mock"
 )
 
 func blockNumbersFromTraces(t *testing.T, b []byte) []int {
