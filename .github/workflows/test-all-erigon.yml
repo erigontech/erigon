@@ -53,7 +53,7 @@ jobs:
           format('tests-all-erigon-{0}-{1}-{2}', matrix.os, github.ref, github.sha) ||
           format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
         }}
-      cancel-in-progress: ${{ needs.source-of-changes.outputs.changed_files != 'true' }}
+      cancel-in-progress: true
     strategy:
       matrix:
         os:
