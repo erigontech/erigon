@@ -28,12 +28,12 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/tests/testports"
-	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
