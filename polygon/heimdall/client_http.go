@@ -355,7 +355,7 @@ func (c *HttpClient) FetchCheckpoint(ctx context.Context, number int64) (*Checkp
 			return nil, err
 		}
 
-		return &response.Checkpoint, nil
+		return response.ToCheckpoint(number)
 	}
 
 	response, err := FetchWithRetry[CheckpointResponseV1](ctx, c, url, c.logger)
@@ -434,7 +434,7 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 			return nil, err
 		}
 
-		return &response.Milestone, nil
+		return response.ToMilestone(number)
 	}
 
 	response, err := FetchWithRetryEx[MilestoneResponseV1](ctx, c, url, isRecoverableError, c.logger)
