@@ -37,7 +37,7 @@ ARG BUILDER_IMAGE="golang:1.24-bookworm" \
 FROM --platform=$BUILDPLATFORM tonistiigi/xx AS xx
 
 ### Erigon Builder section:
-FROM ${BUILDER_IMAGE} AS builder 
+FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS builder 
 ARG TARGETARCH \
     TARGETVARIANT \
     TARGETPLATFORM \
