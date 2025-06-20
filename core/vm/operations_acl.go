@@ -317,11 +317,11 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 }
 
 var (
-	gasCallEIP7907         = makeGasFuncVariantEIP7907(gasCallEIP7702, 2)
-	gasDelegateCallEIP7907 = makeGasFuncVariantEIP7907(gasDelegateCallEIP7702, 2)
-	gasStaticCallEIP7907   = makeGasFuncVariantEIP7907(gasStaticCallEIP7702, 2)
-	gasCallCodeEIP7907     = makeGasFuncVariantEIP7907(gasCallCodeEIP7702, 2)
-	gasExtCodeCopyEIP7907  = makeGasFuncVariantEIP7907(gasExtCodeCopyEIP2929, 1)
+	gasCallEIP7907         = makeGasFuncVariantEIP7907(gasCallEIP7702, 1)
+	gasDelegateCallEIP7907 = makeGasFuncVariantEIP7907(gasDelegateCallEIP7702, 1)
+	gasStaticCallEIP7907   = makeGasFuncVariantEIP7907(gasStaticCallEIP7702, 1)
+	gasCallCodeEIP7907     = makeGasFuncVariantEIP7907(gasCallCodeEIP7702, 1)
+	gasExtCodeCopyEIP7907  = makeGasFuncVariantEIP7907(gasExtCodeCopyEIP2929, 0)
 )
 
 func makeGasFuncVariantEIP7907(oldGasFunc gasFunc, addressStackIndex int) gasFunc {
