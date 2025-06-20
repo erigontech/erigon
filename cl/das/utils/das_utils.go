@@ -1,4 +1,4 @@
-package das
+package peerdasutils
 
 import (
 	"encoding/binary"
@@ -202,4 +202,25 @@ func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, 
 	}
 
 	return convertCells, convertProofs, nil
+}
+
+func GetCustodyColumns(nodeID enode.ID, cgc uint64) (map[cltypes.CustodyIndex]bool, error) {
+	// TODO: cache the following computations in terms of custody columns
+	sampleSize := max(clparams.GetBeaconConfig().SamplesPerSlot, cgc)
+	groups, err := GetCustodyGroups(nodeID, sampleSize)
+	if err != nil {
+		return nil, err
+	}
+	// compute all required custody columns
+	custodyColumns := map[cltypes.CustodyIndex]bool{}
+	for _, group := range groups {
+		columns, err := ComputeColumnsForCustodyGroup(group)
+		if err != nil {
+			return nil, err
+		}
+		for _, column := range columns {
+			custodyColumns[column] = true
+		}
+	}
+	return custodyColumns, nil
 }
