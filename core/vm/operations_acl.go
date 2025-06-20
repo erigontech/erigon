@@ -317,16 +317,16 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 }
 
 var (
-	gasCallEIP7907         = makeGasFuncVariantEIP7907(gasCallEIP7702)
-	gasDelegateCallEIP7907 = makeGasFuncVariantEIP7907(gasDelegateCallEIP7702)
-	gasStaticCallEIP7907   = makeGasFuncVariantEIP7907(gasStaticCallEIP7702)
-	gasCallCodeEIP7907     = makeGasFuncVariantEIP7907(gasCallCodeEIP7702)
-	gasExtCodeCopyEIP7907  = makeGasFuncVariantEIP7907(gasExtCodeCopyEIP2929)
+	gasCallEIP7907         = makeGasFuncVariantEIP7907(gasCallEIP7702, 2)
+	gasDelegateCallEIP7907 = makeGasFuncVariantEIP7907(gasDelegateCallEIP7702, 2)
+	gasStaticCallEIP7907   = makeGasFuncVariantEIP7907(gasStaticCallEIP7702, 2)
+	gasCallCodeEIP7907     = makeGasFuncVariantEIP7907(gasCallCodeEIP7702, 2)
+	gasExtCodeCopyEIP7907  = makeGasFuncVariantEIP7907(gasExtCodeCopyEIP2929, 1)
 )
 
-func makeGasFuncVariantEIP7907(oldGasFunc gasFunc) gasFunc {
+func makeGasFuncVariantEIP7907(oldGasFunc gasFunc, addressStackIndex int) gasFunc {
 	return func(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-		dynCost, err := chargeLargeCode(evm, contract, stack.Back(1).Bytes20())
+		dynCost, err := chargeLargeCode(evm, contract, stack.Back(addressStackIndex).Bytes20())
 		if err != nil {
 			return 0, err
 		}
