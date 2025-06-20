@@ -232,6 +232,7 @@ var snapshotCommand = cli.Command{
 				&cli.PathFlag{Name: "src", Required: true},
 				&cli.StringFlag{Name: "key", Required: true},
 			}),
+			Description: "Search for a key in a btree index",
 		},
 		{
 			Name: "rm-all-state-snapshots",
