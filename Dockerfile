@@ -54,7 +54,9 @@ COPY --from=xx / /
 
 COPY go.mod go.sum /erigon/
 COPY ./erigon-lib/go.mod ./erigon-lib/go.sum /erigon/erigon-lib/
-RUN xx-apt-get install -y libc6-dev && \
+
+## some packages required only for arm64:
+RUN xx-apt-get install -y libc6-dev g++ && \
     xx-go mod download && \
     xx-go mod tidy
 
