@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type HistoricalTraceWorker struct {
@@ -384,7 +383,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.BlockReader))
+	txNumsReader := cfg.BlockReader.TxnumReader(ctx)
 
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {

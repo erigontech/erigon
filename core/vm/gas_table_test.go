@@ -42,11 +42,12 @@ import (
 	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/params"
 
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -190,8 +191,6 @@ func TestCreateGas(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		var stateReader state.StateReader
-		var stateWriter state.StateWriter
 		var txc wrap.TxContainer
 		txc.Tx = tx
 
@@ -203,9 +202,8 @@ func TestCreateGas(t *testing.T) {
 		defer domains.Close()
 		txc.Doms = domains
 
-		//stateReader = rpchelper.NewLatestStateReader(domains)
-		stateReader = rpchelper.NewLatestDomainStateReader(domains)
-		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
+		stateReader := rpchelper.NewLatestDomainStateReader(domains)
+		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)

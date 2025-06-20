@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -134,6 +135,8 @@ type FullBlockReader interface {
 	Ready(ctx context.Context) <-chan error
 
 	AllTypes() []snaptype.Type
+
+	TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files

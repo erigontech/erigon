@@ -336,7 +336,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	cfg.blockReader.Snapshots().LogStat("download")
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.blockReader))
+	txNumsReader := cfg.blockReader.TxnumReader(ctx)
 	if temporal, ok := tx.(*temporal.Tx); ok {
 		stats.LogStats(temporal, logger, func(endTxNumMinimax uint64) (uint64, error) {
 			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)

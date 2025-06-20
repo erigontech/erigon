@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
@@ -466,4 +467,8 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	}
 
 	return peers, nil
+}
+
+func (back *RemoteBackend) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+	return back.blockReader.TxnumReader(ctx)
 }

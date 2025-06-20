@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/remotedb"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal"
@@ -454,7 +453,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
-		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
+		txNumsReader := blockReader.TxnumReader(ctx)
 
 		agg, err := libstate.NewAggregator2(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)
 		if err != nil {

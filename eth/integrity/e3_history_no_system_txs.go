@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
@@ -44,6 +43,8 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
+	txNumsReader := blockReader.TxnumReader(ctx)
+
 	for j := 0; j < 256; j++ {
 		j := j
 		for jj := 0; jj < 255; jj++ {
@@ -61,8 +62,6 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 					return err
 				}
 				defer keys.Close()
-
-				txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
 
 				for keys.HasNext() {
 					key, _, err := keys.Next()
