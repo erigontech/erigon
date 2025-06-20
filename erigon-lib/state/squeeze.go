@@ -433,6 +433,15 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			domains.sdCtx.SetLimitReadAsOfTxNum(domains.TxNum()+1, true) // this helps to read state from correct file during commitment
 
+			for i := uint(0); i < 16; i++ {
+				ttx, err := rwDb.BeginTemporalRo(ctx)
+				if err != nil {
+					return nil, fmt.Errorf("CommitmentRebuild: BeginTemporalRo %w", err)
+				}
+				defer ttx.Rollback()
+				domains.sdCtx.SetTxn(ttx, i)
+			}
+
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, blockNum, lastTxnumInShard-1, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
@@ -546,6 +555,8 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, blockNum, tx
 	if err != nil {
 		return nil, err
 	}
+	sd.sdCtx.CloseSubTxns()
+
 	logger.Info("sealing", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"root", hex.EncodeToString(rh), "commitment", time.Since(sf).String(),
 		"collection", collectionSpent.String())

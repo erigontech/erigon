@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math/rand"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -63,6 +65,58 @@ func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 		}
 	}).MapSize(128 * datasize.MB).MustOpen()
 	b.Cleanup(db.Close)
+	return db
+}
+
+func BaseCaseMultiRoutines(t *testing.T) kv.RwDB {
+	t.Helper()
+	db := BaseCaseDB(t)
+	table := "Table"
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	c, err := tx.RwCursorDupSort(table)
+	require.NoError(t, err)
+	t.Cleanup(c.Close)
+
+	// Insert some dupsorted records
+	require.NoError(t, c.Put([]byte("key1"), []byte("value1.1")))
+	require.NoError(t, c.Put([]byte("key3"), []byte("value3.1")))
+	require.NoError(t, c.Put([]byte("key1"), []byte("value1.3")))
+	require.NoError(t, c.Put([]byte("key3"), []byte("value3.3")))
+	c.Close()
+	tx.Commit()
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 4; i++ {
+		ttx, err := db.BeginRo(context.Background())
+		require.NoError(t, err)
+		i = i
+
+		fmt.Printf("Starting routine %d\n", i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			go func() {
+				cc, err := ttx.Cursor(table)
+				require.NoError(t, err)
+				fmt.Printf("Routine %d: cursor opened\n", i)
+
+				for k, v, err := cc.First(); err == nil && k != nil; k, v, err = cc.Next() {
+					require.NoError(t, err)
+					fmt.Printf("cursor %d: key=%s, value=%s\n", i, k, v)
+				}
+				cc.Close()
+				ttx.Rollback()
+
+			}()
+		}()
+
+	}
+	wg.Wait()
+
 	return db
 }
 
@@ -880,6 +934,29 @@ func TestDB_BatchFull(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+func TestDB_MultiTxnRoutines(t *testing.T) {
+	db := BaseCaseMultiRoutines(t)
+	db.Close()
+	//for i := 0; i < 4; i++ {
+	//	tx, err := db.BeginRo(context.Background())
+	//	require.NoError(t, err)
+	//	i = i
+	//
+	//	go func() {
+	//		cc, err := tx.Cursor(table)
+	//		require.NoError(t, err)
+	//
+	//		defer cc.Close()
+	//		for k, v, err := cc.First(); err == nil && k != nil; k, v, err = cc.Next() {
+	//			require.NoError(t, err)
+	//			fmt.Printf("cursor %d: key=%s, value=%s\n", i, k, v)
+	//		}
+	//
+	//	}()
+	//
+	//}
+	//
 }
 
 func TestDB_BatchTime(t *testing.T) {

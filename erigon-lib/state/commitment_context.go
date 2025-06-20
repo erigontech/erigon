@@ -57,9 +57,16 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 
 		stepSize: sd.StepSize(),
 	}
+	if ctx.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
+		fmt.Printf("[SharedDomainsCommitmentContext] Using concurrent patricia trie\n")
+	}
 	ctx.mainTtx = trieCtx
 	if commitment.COM_WARMUP {
+		fmt.Printf("[SharedDomainsCommitmentContext] Warmup enabled\n")
 		ctx.updates.Warmup = func(hashedKey []byte) error {
+			if ctx.subTtx[hashedKey[0]] == nil {
+				panic("SharedDomainsCommitmentContext.Warmup: subTtx is nil for key " + common.Bytes2Hex(hashedKey))
+			}
 			return ctx.patriciaTrie.Warmup(ctx.subTtx[hashedKey[0]], hashedKey)
 		}
 	}

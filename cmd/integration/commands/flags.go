@@ -147,6 +147,10 @@ func withDomain(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&domain, "domain", "", "Comma separated names of domain/inverted_indices")
 }
 
+func withExperimentalCommitment(cmd *cobra.Command) {
+	cmd.Flags().Bool("experimental.commitment-concurrent", false, "Enable experimental commitment calculation")
+}
+
 func withIntegrityChecks(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", false, "enable slow data-integrity checks")
 	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", false, "enable fast data-integrity checks")
