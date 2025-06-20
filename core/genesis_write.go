@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"slices"
 	"sort"
@@ -284,7 +285,7 @@ func MainnetGenesisBlock() *types.Genesis {
 		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
 		GasLimit:   5000,
 		Difficulty: big.NewInt(17179869184),
-		Alloc:      readPrealloc("allocs/mainnet.json"),
+		Alloc:      ReadPrealloc(allocs, "allocs/mainnet.json"),
 	}
 }
 
@@ -296,7 +297,7 @@ func HoleskyGenesisBlock() *types.Genesis {
 		GasLimit:   25000000,
 		Difficulty: big.NewInt(1),
 		Timestamp:  1695902100,
-		Alloc:      readPrealloc("allocs/holesky.json"),
+		Alloc:      ReadPrealloc(allocs, "allocs/holesky.json"),
 	}
 }
 
@@ -309,7 +310,7 @@ func SepoliaGenesisBlock() *types.Genesis {
 		GasLimit:   30000000,
 		Difficulty: big.NewInt(131072),
 		Timestamp:  1633267481,
-		Alloc:      readPrealloc("allocs/sepolia.json"),
+		Alloc:      ReadPrealloc(allocs, "allocs/sepolia.json"),
 	}
 }
 
@@ -322,48 +323,7 @@ func HoodiGenesisBlock() *types.Genesis {
 		GasLimit:   0x2255100, // 36M
 		Difficulty: big.NewInt(1),
 		Timestamp:  1742212800,
-		Alloc:      readPrealloc("allocs/hoodi.json"),
-	}
-}
-
-// AmoyGenesisBlock returns the Amoy network genesis block.
-func AmoyGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params2.AmoyChainConfig,
-		Nonce:      0,
-		Timestamp:  1700225065,
-		GasLimit:   10000000,
-		Difficulty: big.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      readPrealloc("allocs/amoy.json"),
-	}
-}
-
-// BorMainnetGenesisBlock returns the Bor Mainnet network genesis block.
-func BorMainnetGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params2.BorMainnetChainConfig,
-		Nonce:      0,
-		Timestamp:  1590824836,
-		GasLimit:   10000000,
-		Difficulty: big.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      readPrealloc("allocs/bor_mainnet.json"),
-	}
-}
-
-func BorDevnetGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params2.BorDevnetChainConfig,
-		Nonce:      0,
-		Timestamp:  1558348305,
-		GasLimit:   10000000,
-		Difficulty: big.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      readPrealloc("allocs/bor_devnet.json"),
+		Alloc:      ReadPrealloc(allocs, "allocs/hoodi.json"),
 	}
 }
 
@@ -374,7 +334,7 @@ func GnosisGenesisBlock() *types.Genesis {
 		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
-		Alloc:      readPrealloc("allocs/gnosis.json"),
+		Alloc:      ReadPrealloc(allocs, "allocs/gnosis.json"),
 	}
 }
 
@@ -385,7 +345,7 @@ func ChiadoGenesisBlock() *types.Genesis {
 		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
-		Alloc:      readPrealloc("allocs/chiado.json"),
+		Alloc:      ReadPrealloc(allocs, "allocs/chiado.json"),
 	}
 }
 func TestGenesisBlock() *types.Genesis {
@@ -419,7 +379,7 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis 
 		ExtraData:  append(append(make([]byte, 32), faucet[:]...), make([]byte, crypto.SignatureLength)...),
 		GasLimit:   11500000,
 		Difficulty: big.NewInt(1),
-		Alloc:      readPrealloc("allocs/dev.json"),
+		Alloc:      ReadPrealloc(allocs, "allocs/dev.json"),
 	}
 }
 
@@ -568,8 +528,8 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 	return keys
 }
 
-func readPrealloc(filename string) types.GenesisAlloc {
-	f, err := allocs.Open(filename)
+func ReadPrealloc(fileSys fs.FS, filename string) types.GenesisAlloc {
+	f, err := fileSys.Open(filename)
 	if err != nil {
 		panic(fmt.Sprintf("Could not open genesis preallocation for %s: %v", filename, err))
 	}
@@ -593,12 +553,12 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return SepoliaGenesisBlock()
 	case networkname.Hoodi:
 		return HoodiGenesisBlock()
-	case networkname.Amoy:
-		return AmoyGenesisBlock()
-	case networkname.BorMainnet:
-		return BorMainnetGenesisBlock()
-	case networkname.BorDevnet:
-		return BorDevnetGenesisBlock()
+	// case networkname.Amoy:
+	// 	return AmoyGenesisBlock()
+	// case networkname.BorMainnet:
+	// 	return BorMainnetGenesisBlock()
+	// case networkname.BorDevnet:
+	// 	return BorDevnetGenesisBlock()
 	case networkname.Gnosis:
 		return GnosisGenesisBlock()
 	case networkname.Chiado:
@@ -608,4 +568,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 	default:
 		return nil
 	}
+}
+
+func RegisterGenesisBlock(chain string, genesis *types.Genesis) {
+	// TODO(yperbasis) implement
 }
