@@ -18,6 +18,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/urfave/cli/v2"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/turbo/debug"
 )
 
@@ -76,6 +78,16 @@ func initGenesis(cliCtx *cli.Context) error {
 	genesis := new(types.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
+	}
+
+	if genesis.Config.BorJSON != nil {
+		borConfig := &borcfg.BorConfig{}
+		err = json.Unmarshal(genesis.Config.BorJSON, borConfig)
+		if err != nil {
+			panic(fmt.Sprintf("Could not parse 'bor' config for %s: %v", genesisPath, err))
+		}
+
+		genesis.Config.Bor = borConfig
 	}
 
 	// Open and initialise both full and light databases
