@@ -418,6 +418,6 @@ func largeContractCost(codeSize uint64) (uint64, error) {
 		return 0, nil // code is not large enough to be charged
 	}
 
-	cost := codeSize - params.LargeCodeThresholdEip7907                // excess
-	return ToWordSize(cost) * params.LargeCodeWordGasEip7907 / 32, nil // ceil32(excess) * gasPerWord // 32
+	cost := codeSize - params.LargeCodeThresholdEip7907           // excess
+	return ToWordSize(cost) * params.LargeCodeWordGasEip7907, nil // ceil32(excess) / 32 * gasPerWord
 }
