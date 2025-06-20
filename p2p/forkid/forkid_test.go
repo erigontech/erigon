@@ -26,7 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-p2p/testutil"
+	"github.com/erigontech/erigon/p2p/testutil"
 )
 
 // TestValidation tests that a local peer correctly validates and accepts a remote
