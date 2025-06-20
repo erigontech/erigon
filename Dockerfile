@@ -33,23 +33,33 @@ ARG BUILDER_IMAGE="golang:1.24-bookworm" \
        9090 \
        6060"
 
+## Use xx - Dockerfile cross-compilation helpers
+FROM --platform=$BUILDPLATFORM tonistiigi/xx AS xx
+
 ### Erigon Builder section:
 FROM ${BUILDER_IMAGE} AS builder 
 ARG TARGETARCH \
     TARGETVARIANT \
+    TARGETPLATFORM \
     BUILD_DBTOOLS \
     BUILD_SILKWORM \
     BINARIES
 
+SHELL ["/bin/bash", "-c"]
+
 WORKDIR /erigon
+
+## Copy helpers:
+COPY --from=xx / /
+
+COPY go.mod go.sum /erigon
+COPY ./erigon-lib/go.mod ./erigon-lib/go.sum /erigon/erigon-lib/
+RUN xx-apt install -y libc6-dev gcc g++
+RUN --mount=type=cache,target=/go/pkg/mod xx-go mod download
 
 COPY . /erigon
 
-SHELL ["/bin/bash", "-c"]
-
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache \
-    echo "DEBUG: building on ${TARGETARCH}${TARGETVARIANT}" && \
+RUN echo "DEBUG: building on ${TARGETARCH}${TARGETVARIANT}" && \
     if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then \
         echo "DEBUG: detected architecture AMD64v1"; \
         export CPU_FLAGS="GOAMD64_VERSION=v1 GOARCH=amd64"; \
@@ -65,14 +75,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         export FLAG_SILKWORM=",nosilkworm"; \
     fi && \
     echo "DEBUG: cmd - make ${CPU_FLAGS} ${BINARIES} GOBIN=/build FLAG_SILKWORM=${FLAG_SILKWORM} ." && \
-    make ${CPU_FLAGS} ${BINARIES} GOBIN=/build BUILD_TAGS=nosqlite,noboltdb${FLAG_SILKWORM} && \
+    make GO=xx-go CGO_ENABLED=1 ${CPU_FLAGS} ${BINARIES} GOBIN=/build BUILD_TAGS=nosqlite,noboltdb${FLAG_SILKWORM} && \
     if [ "x${BUILD_SILKWORM}" == "xtrue" ] && [ "x${TARGETARCH}" == "xamd64" ]; then \
         echo "DEBUG: BUILD_SILKWORM=${BUILD_SILKWORM} - installing libsilkworm_capi.so lib on architecture ARM64"; \
         find $(go env GOMODCACHE)/github.com/erigontech -name libsilkworm_capi.so -exec install {} /build \; ;\
     fi && \
     if [ "x${BUILD_DBTOOLS}" == "xtrue" ]; then \
         echo "Building db-tools:"; \
-        make GOBIN=/build db-tools; \
+        make GO=xx-go CGO_ENABLED=1 GOBIN=/build db-tools; \
     fi && \
     find /build -ls
 

@@ -106,9 +106,6 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         id: docker-buildx
         uses: docker/setup-buildx-action@v3
@@ -127,7 +124,6 @@ jobs:
           echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           cd erigon
           docker buildx build \
-          --builder ${{ steps.docker-buildx.outputs.name }} \
           --cache-from=type=local,src=${GITHUB_WORKSPACE}/docker-build-cache \
           --cache-to=type=local,compression=uncompressed,mode=max,dest=${GITHUB_WORKSPACE}/docker-build-cache-new \
           --file ${{ env.DOCKERFILE_PATH }} \
