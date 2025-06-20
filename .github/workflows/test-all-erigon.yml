@@ -50,7 +50,7 @@ jobs:
       # for other branches, we use a branch-level CG.
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || github.ref == 'refs/heads/ci_fix3') && 
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || github.ref == 'refs/heads/ci_fix4') && 
           format('tests-all-erigon-{0}-{1}-{2}', matrix.os, github.ref, github.sha) ||
           format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
         }}
