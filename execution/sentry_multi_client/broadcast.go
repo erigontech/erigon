@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon-p2p/protocols/eth"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/stages/headerdownload"
 )
 
 func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {

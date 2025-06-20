@@ -52,8 +52,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	params2 "github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // So we can deterministically seed different blockchains

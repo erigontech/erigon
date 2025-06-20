@@ -27,12 +27,12 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -41,8 +41,8 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // Tests block header storage and retrieval operations.

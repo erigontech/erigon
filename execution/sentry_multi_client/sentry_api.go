@@ -28,8 +28,8 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-p2p/protocols/eth"
 	"github.com/erigontech/erigon-p2p/sentry"
-	"github.com/erigontech/erigon/turbo/stages/bodydownload"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/stages/bodydownload"
+	"github.com/erigontech/erigon/execution/stages/headerdownload"
 )
 
 // Methods of sentry called by Core

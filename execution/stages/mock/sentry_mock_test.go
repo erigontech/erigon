@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon-p2p/protocols/eth"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/turbo/stages"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/execution/stages"
+	"github.com/erigontech/erigon/execution/stages/mock"
 )
 
 func TestEmptyStageSync(t *testing.T) {
