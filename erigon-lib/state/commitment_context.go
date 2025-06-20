@@ -38,6 +38,15 @@ type SharedDomainsCommitmentContext struct {
 	trace bool
 }
 
+func (sdc *SharedDomainsCommitmentContext) SetTxNum(txnum uint64) {
+	for i := range sdc.subTtx {
+		if sdc.subTtx[i] != nil {
+			sdc.subTtx[i].txNum = txnum
+		}
+	}
+	sdc.mainTtx.txNum = txnum
+}
+
 // Limits max txNum for read operations. If set to 0, all read operations will be from latest value.
 // If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
@@ -479,9 +488,9 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	if sdc.limitReadAsOfTxNum > 0 && !sdc.domainsOnly { // do not store branches if explicitly operate on history
 		return nil
 	}
-	if sdc.trace {
-		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
-	}
+	//if sdc.trace {
+	fmt.Printf("[SDC] PutBranch: %x: %x txn %d\n", prefix, data, sdc.txNum)
+	//}
 	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
