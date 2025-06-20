@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -22,23 +21,21 @@ import (
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
-	InitLocalNodeId(nodeId enode.ID)
+	peerdasstate.PeerDasStateReader
 	DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
 	IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error)
-	CustodyGroupCount() uint64
 	DataRecoverAndPrune(ctx context.Context) error
 	UpdateValidatorsCustody(cgc uint64)
 }
 
 type peerdas struct {
-	nodeId        enode.ID
+	peerdasstate.PeerDasStateReader
+	state         *peerdasstate.PeerDasState
+	nodeID        enode.ID
 	rpc           *rpc.BeaconRpcP2P
 	beaconConfig  *clparams.BeaconChainConfig
 	columnStorage blob_storage.DataColumnStorage
 	sentinel      sentinelproto.SentinelClient
-	// cgc is expected to be dynamic value, which varies with the number of validators connecting to the beacon node
-	custodyGroupCount atomic.Uint64
-	peerDasState      *peerdasstate.PeerDasState
 }
 
 func NewPeerDas(
@@ -46,19 +43,20 @@ func NewPeerDas(
 	beaconConfig *clparams.BeaconChainConfig,
 	columnStorage blob_storage.DataColumnStorage,
 	sentinel sentinelproto.SentinelClient,
-) PeerDas {
+	nodeID enode.ID,
+) (PeerDas, peerdasstate.PeerDasStateReader) {
 	kzg.InitKZG()
-	state := peerdasstate.NewPeerDasState()
+	state := peerdasstate.NewPeerDasState(beaconConfig, nodeID)
 	p := &peerdas{
-		rpc:               rpc,
-		beaconConfig:      beaconConfig,
-		columnStorage:     columnStorage,
-		custodyGroupCount: atomic.Uint64{},
-		sentinel:          sentinel,
-		peerDasState:      state,
+		PeerDasStateReader: state,
+		state:              state,
+		nodeID:             nodeID,
+		rpc:                rpc,
+		beaconConfig:       beaconConfig,
+		columnStorage:      columnStorage,
+		sentinel:           sentinel,
 	}
-	p.custodyGroupCount.Store(p.beaconConfig.CustodyRequirement)
-	return p
+	return p, state
 }
 
 func (d *peerdas) p2pTopicsControl(ctx context.Context) {
@@ -75,21 +73,13 @@ func (d *peerdas) p2pTopicsControl(ctx context.Context) {
 	}
 }
 
-func (d *peerdas) InitLocalNodeId(nodeId enode.ID) {
-	d.nodeId = nodeId
-}
-
-func (d *peerdas) CustodyGroupCount() uint64 {
-	return d.custodyGroupCount.Load()
-}
-
 func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
-	existingColumns, err := d.columnStorage.SavedColumnIndex(ctx, blockRoot)
+	existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
 	if err != nil {
 		return false, err
 	}
 
-	custodyColumns, err := d.getCustodyColumns()
+	custodyColumns, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		return false, err
 	}
@@ -102,6 +92,11 @@ func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (b
 }
 
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
+	adCgcChanged := d.state.SetCustodyGroupCount(cgc)
+	if adCgcChanged {
+		// advertise cgc changed
+		// try backfill the missing columns
+	}
 }
 
 func (d *peerdas) DataRecoverAndPrune(ctx context.Context) error {
@@ -299,30 +294,9 @@ mainloop:
 	return nil
 }
 
-func (d *peerdas) getCustodyColumns() (map[CustodyIndex]bool, error) {
-	// TODO: cache the following computations in terms of custody columns
-	sampleSize := max(d.beaconConfig.SamplesPerSlot, d.custodyGroupCount.Load())
-	groups, err := GetCustodyGroups(d.nodeId, sampleSize)
-	if err != nil {
-		return nil, err
-	}
-	// compute all required custody columns
-	custodyColumns := map[CustodyIndex]bool{}
-	for _, group := range groups {
-		columns, err := ComputeColumnsForCustodyGroup(group)
-		if err != nil {
-			return nil, err
-		}
-		for _, column := range columns {
-			custodyColumns[column] = true
-		}
-	}
-	return custodyColumns, nil
-}
-
 // composeIdentifierRequest composes the request for the column sidecars by root identifier
 func (d *peerdas) composeIdentifierRequest(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], error) {
-	custodyColumns, err := d.getCustodyColumns()
+	custodyColumns, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		return nil, err
 	}
@@ -361,9 +335,9 @@ func (d *peerdas) composeIdentifierRequest(ctx context.Context, blocks []*cltype
 func (d *peerdas) getExpectedColumnIndex(
 	ctx context.Context,
 	blockRoot common.Hash,
-	custodyColumns map[CustodyIndex]bool,
+	custodyColumns map[cltypes.CustodyIndex]bool,
 ) ([]uint64, error) {
-	existingColumns, err := d.columnStorage.SavedColumnIndex(ctx, blockRoot)
+	existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
 	if err != nil {
 		return nil, err
 	}
