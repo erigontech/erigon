@@ -78,6 +78,13 @@ jobs:
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
+    - name: Upload Downloader Torrent Client Status
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: torrent-client-status-${{ env.CHAIN }}
+        path: torrent-client-status.txt
+
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'
       env:
