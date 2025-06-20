@@ -65,6 +65,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 		putter: sd.AsPutDel(tx),
 
 		stepSize: sd.StepSize(),
+		txNum:    sd.txNum,
 	}
 	if ctx.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 		fmt.Printf("[SharedDomainsCommitmentContext] Using concurrent patricia trie\n")
