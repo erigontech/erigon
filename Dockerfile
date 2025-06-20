@@ -52,10 +52,10 @@ WORKDIR /erigon
 ## Copy helpers:
 COPY --from=xx / /
 
-COPY go.mod go.sum /erigon
+COPY go.mod go.sum /erigon/
 COPY ./erigon-lib/go.mod ./erigon-lib/go.sum /erigon/erigon-lib/
 RUN xx-apt install -y libc6-dev gcc g++
-RUN --mount=type=cache,target=/go/pkg/mod xx-go mod download
+RUN --mount=type=cache,target=/go/pkg/mod xx-go mod download && xx-go mod tidy
 
 COPY . /erigon
 
