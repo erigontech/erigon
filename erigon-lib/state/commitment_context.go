@@ -151,6 +151,7 @@ func (sdc *SharedDomainsCommitmentContext) SetTxn(tx kv.TemporalTx, i uint) {
 		putter: sdc.sharedDomains.AsPutDel(tx),
 
 		stepSize: sdc.sharedDomains.StepSize(),
+		txNum:    sdc.sharedDomains.txNum,
 	}
 	sdc.subTtx[i] = trieCtx
 	// sdc.patriciaTrie.ResetContext(trieCtx)
