@@ -54,10 +54,10 @@ COPY --from=xx / /
 
 COPY go.mod go.sum /erigon/
 COPY ./erigon-lib/go.mod ./erigon-lib/go.sum /erigon/erigon-lib/
-RUN xx-apt install -y libc6-dev gcc g++
-RUN --mount=type=cache,target=/go/pkg/mod xx-go mod download && xx-go mod tidy
+RUN xx-go mod download && \
+    xx-go mod tidy
 
-COPY . /erigon
+COPY . /erigon/
 
 RUN echo "DEBUG: building on ${TARGETARCH}${TARGETVARIANT}" && \
     if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then \
