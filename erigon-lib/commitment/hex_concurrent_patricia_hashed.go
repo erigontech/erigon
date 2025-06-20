@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon-lib/etl"
 	"golang.org/x/sync/errgroup"
@@ -115,7 +117,9 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 	}
 	// if p.root.rootPresent && p.root.root.hashedExtLen == 0 { // if root has no extension, we have to unfold
 	zero := []byte{0}
-	for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
+	//for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
+
+	if unfolding := p.root.needUnfolding(zero); unfolding > 0 {
 		if err := p.root.unfold(zero, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
@@ -129,6 +133,9 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 	for i := range p.mounts {
 		if p.mounts[i] == nil {
 			panic(fmt.Sprintf("nibble %x is nil", i))
+		}
+		if p.ctx[i] == nil {
+			panic(fmt.Sprintf("ctx %x is nil", i))
 		}
 		p.mounts[i].mountTo(p.root, i)
 		p.mounts[i].ctx = p.ctx[i]
@@ -175,13 +182,17 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 	g.SetLimit(16)
 
 	for n := 0; n < len(t.nibbles); n++ {
+		ni := n
 		nib := t.nibbles[n]
 		phnib := pph.mounts[n]
-		ni := n
 
 		g.Go(func() error {
 			cnt := 0
+			thisNib := byte(ni)
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+				if hashedKey[0] != thisNib {
+					return fmt.Errorf("hashedKey[0] %x != nibble %x", hashedKey[0], nib)
+				}
 				cnt++
 				if phnib.trace {
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
@@ -233,12 +244,12 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
 func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
-	// start := time.Now()
-	// wasConcurrent := updates.IsConcurrentCommitment()
-	// updCount := updates.Size()
-	// defer func(s time.Time, wasConcurrent bool) {
-	// 	fmt.Printf("commitment time %s; keys %s; was concurrent: %t\n", time.Since(s), common.PrettyCounter(updCount), wasConcurrent)
-	// }(start, wasConcurrent)
+	start := time.Now()
+	wasConcurrent := updates.IsConcurrentCommitment()
+	updCount := updates.Size()
+	defer func(s time.Time, wasConcurrent bool) {
+		fmt.Printf("commitment time %s; keys %s; was concurrent: %t\n", time.Since(s), common.PrettyCounter(updCount), wasConcurrent)
+	}(start, wasConcurrent)
 
 	switch updates.IsConcurrentCommitment() {
 	case true:

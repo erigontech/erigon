@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -948,8 +949,9 @@ func ParseCommitmentMode(s string) Mode {
 
 type Updates struct {
 	hasher keyHasher
-	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
-	Warmup func(key []byte) error    // function to Warmup the key
+	keys   map[string]struct{}    // plain keys to keep only unique keys in etl
+	Warmup func(key []byte) error // function to Warmup the key
+	mu     sync.RWMutex
 	etl    *etl.Collector            // all-in-one collector
 	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
 	ku     map[string]*KeyUpdate
@@ -1089,23 +1091,32 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			}
 		}
 	case ModeDirect:
-		if _, ok := t.keys[key]; !ok {
+		t.mu.RLock()
+		if _, ok := t.keys[key]; ok {
+			t.mu.RUnlock()
+		} else {
+			t.mu.RUnlock()
+
 			keyBytes := toBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
 
+			t.mu.Lock()
 			var err error
 			if !t.sortPerNibble {
 				err = t.etl.Collect(hashedKey, keyBytes)
 			} else {
 				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
 			}
+			if err != nil {
+				log.Warn("failed to collect updated key", "key", key, "err", err)
+			} else {
+				t.keys[key] = struct{}{}
+			}
+			t.mu.Unlock()
+
 			if t.Warmup != nil {
 				go t.Warmup(hashedKey)
 			}
-			if err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
-			t.keys[key] = struct{}{}
 		}
 	default:
 	}

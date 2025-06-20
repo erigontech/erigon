@@ -1961,10 +1961,14 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
+	mnt := ""
+	if hph.mounted {
+		mnt = fmt.Sprintf("mountedNib=%x ", hph.mountedNib)
+	}
 	for hph.needFolding(hashedKey) {
 		foldDone := hph.metrics.StartFolding(plainKey)
 		if err := hph.fold(); err != nil {
-			return fmt.Errorf("fold: %w", err)
+			return fmt.Errorf(mnt+"fold: %w", err)
 		}
 		foldDone()
 	}
@@ -1973,11 +1977,11 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
 		unfoldDone := hph.metrics.StartUnfolding(plainKey)
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
-			return fmt.Errorf("unfold: %w", err)
+			return fmt.Errorf(mnt+"unfold: %w", err)
 		}
 		unfoldDone()
 		if printLater {
-			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
+			fmt.Printf(mnt+": subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
 		}
 		// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
 	}
@@ -1991,13 +1995,13 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			hph.metrics.AccountLoad(plainKey)
 			stateUpdate, err = hph.ctx.Account(plainKey)
 			if err != nil {
-				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+				return fmt.Errorf(mnt+"GetAccount for key %x failed: %w", plainKey, err)
 			}
 		} else {
 			hph.metrics.StorageLoad(plainKey)
 			stateUpdate, err = hph.ctx.Storage(plainKey)
 			if err != nil {
-				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+				return fmt.Errorf(mnt+"GetStorage for key %x failed: %w", plainKey, err)
 			}
 		}
 	}
@@ -2181,6 +2185,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	)
 	hph.readOnly = false
 
+	rootBefore, err := hph.RootHash()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get root hash before processing updates: %w", err)
+	}
+	fmt.Printf("root hash before processing updates: %x\n", rootBefore)
+
 	if collectCommitmentMetrics {
 		hph.metrics.Reset()
 		hph.metrics.updates.Store(updatesCount)
@@ -2190,8 +2200,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}()
 	}
 
-	defer func() { logEvery.Stop() }()
 	defer func() {
+		logEvery.Stop()
 		log.Debug("commitment finished", "keys", common.PrettyCounter(ki), "spent", time.Since(start), "warmup", COM_WARMUP, "concurrent", len(hph.mountedTries) > 0)
 	}()
 
