@@ -103,16 +103,6 @@ func newPragueInstructionSet() JumpTable {
 	return instructionSet
 }
 
-// newOsakaInstructionSet returns the frontier, homestead, byzantium,
-// constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
-// cancun, prague and osaka instructions.
-func newOsakaInstructionSet() JumpTable {
-	instructionSet := newPragueInstructionSet()
-	enable7907(&instructionSet) // EIP-7907: meter contract code size
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
 // newCancunInstructionSet returns the frontier, homestead, byzantium,
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // and cancun instructions.
@@ -304,6 +294,7 @@ func newHomesteadInstructionSet() JumpTable {
 func newOsakaInstructionSet() JumpTable {
 	instructionSet := newPragueInstructionSet()
 	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
+	enable7907(&instructionSet) // EIP-7907: Meter Contract Code Size And Increase Limit
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
