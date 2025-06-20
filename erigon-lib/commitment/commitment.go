@@ -1065,7 +1065,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 				err = t.nibbles[u.hashedKey[0]].Collect(u.hashedKey, toBytesZeroCopy(key))
 			}
 			if t.Warmup != nil {
-				go t.Warmup(u.hashedKey)
+				t.Warmup(u.hashedKey)
 			}
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
@@ -1091,16 +1091,20 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			}
 		}
 	case ModeDirect:
-		t.mu.RLock()
-		if _, ok := t.keys[key]; ok {
-			t.mu.RUnlock()
-		} else {
-			t.mu.RUnlock()
+		if key == "" {
+			log.Warn("empty key in TouchPlainKey, skipping")
+			return
+		}
+		//t.mu.RLock()
+		if _, ok := t.keys[key]; !ok {
+			//	t.mu.RUnlock()
+			//} else {
+			//	t.mu.RUnlock()
 
 			keyBytes := toBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
 
-			t.mu.Lock()
+			//t.mu.Lock()
 			var err error
 			if !t.sortPerNibble {
 				err = t.etl.Collect(hashedKey, keyBytes)
@@ -1112,11 +1116,11 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			} else {
 				t.keys[key] = struct{}{}
 			}
-			t.mu.Unlock()
+			//t.mu.Unlock()
 
-			if t.Warmup != nil {
-				go t.Warmup(hashedKey)
-			}
+			//if t.Warmup != nil {
+			//	go t.Warmup(hashedKey)
+			//}
 		}
 	default:
 	}

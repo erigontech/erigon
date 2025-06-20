@@ -61,15 +61,15 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 		fmt.Printf("[SharedDomainsCommitmentContext] Using concurrent patricia trie\n")
 	}
 	ctx.mainTtx = trieCtx
-	if commitment.COM_WARMUP {
-		fmt.Printf("[SharedDomainsCommitmentContext] Warmup enabled\n")
-		ctx.updates.Warmup = func(hashedKey []byte) error {
-			if ctx.subTtx[hashedKey[0]] == nil {
-				panic("SharedDomainsCommitmentContext.Warmup: subTtx is nil for key " + common.Bytes2Hex(hashedKey))
-			}
-			return ctx.patriciaTrie.Warmup(ctx.subTtx[hashedKey[0]], hashedKey)
+	//if commitment.COM_WARMUP {
+	fmt.Printf("[SharedDomainsCommitmentContext] Warmup enabled\n")
+	ctx.updates.Warmup = func(hashedKey []byte) error {
+		if ctx.subTtx[hashedKey[0]] == nil {
+			panic("SharedDomainsCommitmentContext.Warmup: subTtx is nil for key " + common.Bytes2Hex(hashedKey))
 		}
+		return ctx.patriciaTrie.Warmup(ctx.subTtx[hashedKey[0]], hashedKey)
 	}
+	//}
 	ctx.patriciaTrie.ResetContext(trieCtx)
 	return ctx
 }
@@ -92,7 +92,7 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
-	sdc.CloseSubTxns()
+	//sdc.CloseSubTxns()
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
@@ -146,6 +146,9 @@ func (sdc *SharedDomainsCommitmentContext) SetTxn(tx kv.TemporalTx, i uint) {
 	sdc.subTtx[i] = trieCtx
 	// sdc.patriciaTrie.ResetContext(trieCtx)
 	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
+		if _, ok := tx.(kv.Tx); !ok {
+			panic("SetTxn: tx is not kv.Tx")
+		}
 		sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed).ResetMountContext(trieCtx, i)
 	}
 }

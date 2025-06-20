@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/erigontech/erigon-lib/common"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/etl"
@@ -138,7 +139,8 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 			panic(fmt.Sprintf("ctx %x is nil", i))
 		}
 		p.mounts[i].mountTo(p.root, i)
-		p.mounts[i].ctx = p.ctx[i]
+		//p.mounts[i].ResetContext(p.ctx[i])
+		//p.mounts[i].ctx = p.ctx[i]
 	}
 	return nil
 }
@@ -180,22 +182,32 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
+	processed := new(atomic.Uint64)
+
+	logEvery := time.NewTicker(time.Second * 20)
+	defer logEvery.Stop()
 
 	for n := 0; n < len(t.nibbles); n++ {
 		ni := n
-		nib := t.nibbles[n]
-		phnib := pph.mounts[n]
 
 		g.Go(func() error {
 			cnt := 0
+			n := ni
+			nib := t.nibbles[n]
+			phnib := pph.mounts[n]
 			thisNib := byte(ni)
+			started := time.Now()
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				if hashedKey[0] != thisNib {
 					return fmt.Errorf("hashedKey[0] %x != nibble %x", hashedKey[0], nib)
 				}
+				processed.Add(1)
 				cnt++
 				if phnib.trace {
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+				}
+				if len(plainKey) == 0 {
+					fmt.Printf("empty key %x\n", hashedKey)
 				}
 				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
@@ -205,15 +217,31 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			if err != nil {
 				return err
 			}
+			//if pph.mounts[ni].trace {
+			//fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
+			defer func() {
+				fmt.Printf("FOLDED nib [%x] #%d d=%d %v\n", ni, cnt, phnib.depths[0], time.Since(started))
+			}()
+			//}
 			if cnt == 0 {
 				return nil
 			}
-			if pph.mounts[ni].trace {
-				fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
+			if err = pph.foldNibble(ni); err != nil {
+				return err
 			}
-			return pph.foldNibble(ni)
+			return nil
 		})
 	}
+	go func() {
+		for {
+			select {
+			case <-logEvery.C:
+				fmt.Printf("processed %v keys in %d nibbles\n", common.PrettyCounter(processed.Load()), len(t.nibbles))
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
@@ -251,7 +279,7 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 		fmt.Printf("commitment time %s; keys %s; was concurrent: %t\n", time.Since(s), common.PrettyCounter(updCount), wasConcurrent)
 	}(start, wasConcurrent)
 
-	switch updates.IsConcurrentCommitment() {
+	switch wasConcurrent {
 	case true:
 		rootHash, err = updates.ParallelHashSort(ctx, p)
 	default:
@@ -273,10 +301,10 @@ func (p *ConcurrentPatriciaHashed) Warmup(ctx PatriciaContext, hashedKey []byte)
 	if p.root.trace {
 		fmt.Printf("WARMUP %x\n", hashedKey)
 	}
-	p.root.ResetContext(ctx)
-	if err := p.root.Warmup(ctx, hashedKey); err != nil {
-		return fmt.Errorf("warmup: %w", err)
-	}
+	//p.root.ResetContext(ctx)
+	//if err := p.root.Warmup(ctx, hashedKey); err != nil {
+	//	return fmt.Errorf("warmup: %w", err)
+	//}
 	if hashedKey[0] > 15 {
 		return nil // key supposed to be hashed and nibblised, so if nibble is > 15, it is not a key for this trie
 	}
@@ -325,10 +353,6 @@ func (p *ConcurrentPatriciaHashed) ResetMountContext(ctx PatriciaContext, i uint
 // Set context for state IO
 func (p *ConcurrentPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	p.root.ctx = ctx
-	for i := 0; i < len(p.mounts); i++ {
-		p.mounts[i].ResetContext(ctx)
-		p.ctx[i] = ctx
-	}
 }
 
 func (p *ConcurrentPatriciaHashed) RootHash() (hash []byte, err error) {

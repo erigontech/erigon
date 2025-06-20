@@ -1728,6 +1728,9 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if asserts {
 		dt.valCViewID = tx.ViewID()
 	}
+	if tx == nil {
+		panic(fmt.Errorf("DomainRoTx.valsCursor: tx is nil, DomainRoTx=%s", dt.d.filenameBase))
+	}
 	if dt.d.largeValues {
 		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
 		return dt.valsC, err

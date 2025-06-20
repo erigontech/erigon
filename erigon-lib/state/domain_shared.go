@@ -550,6 +550,8 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 		return sd.updateAccountCode(ks, v, txNum, prevVal, prevStep)
 	case kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
 		sd.put(domain, ks, v, txNum)
+		sd.muMaps.Lock()
+		defer sd.muMaps.Unlock()
 		return sd.domainWriters[domain].PutWithPrev(k, v, txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, v) {

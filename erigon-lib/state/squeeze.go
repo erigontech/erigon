@@ -331,7 +331,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 	ranges := make([]MergeRange, 0)
 	for fi, f := range sf.d[kv.AccountsDomain] {
-		logger.Info(fmt.Sprintf("[commitment_rebuild] shard %d: steps %4d-%4d: %s", fi, f.startTxNum/a.StepSize(), f.endTxNum/a.StepSize(), f.decompressor.FileName()))
+		logger.Info(fmt.Sprintf("[commitment_rebuild] shard %d: %s", fi, f.decompressor.FileName()))
 		ranges = append(ranges, MergeRange{
 			from: f.startTxNum,
 			to:   f.endTxNum,
@@ -389,7 +389,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		batchSize := totalKeys / (shardToLatest - shardFrom) // how many keys could be in one step of this file?
 		shardTo := shardToLatest
 
-		shardSize := min(uint64(math.Pow(2, math.Log2(float64(totalKeys/batchSize)))), 2)
+		shardSize := min(uint64(math.Pow(2, math.Log2(float64(totalKeys/batchSize)))), 1)
 		shardTo = shardFrom + shardSize
 		toTxNumRange = shardTo * a.StepSize()
 		keysInShard := batchSize * shardSize
@@ -416,15 +416,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			domains.sdCtx.SetLimitReadAsOfTxNum(domains.TxNum()+1, true) // this helps to read state from correct file during commitment
 
-			for i := uint(0); i < 16; i++ {
-				ttx, err := rwDb.BeginTemporalRo(ctx)
-				if err != nil {
-					return nil, fmt.Errorf("CommitmentRebuild: BeginTemporalRo %w", err)
-				}
-				defer ttx.Rollback()
-				domains.sdCtx.SetTxn(ttx, i)
-			}
-
 			nextKey := func() (ok bool, k []byte) {
 				if !keyIter.HasNext() {
 					return false, nil
@@ -447,7 +438,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return true, k
 			}
 
-			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, blockNum, lastTxnumInShard-1, rwTx, nextKey, &rebuiltCommitment{
+			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, blockNum, lastTxnumInShard-1, rwTx, rwDb, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
 				TxnFrom:  fromTxNumRange,
@@ -534,7 +525,7 @@ func (sd *SharedDomains) discardWrites(d kv.Domain) {
 	sd.domainWriters[d].h.discard = true
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, blockNum, txNum uint64, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, blockNum, txNum uint64, tx kv.TemporalTx, rwDb kv.TemporalRwDB, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
 	sd.discardWrites(kv.AccountsDomain)
 	sd.discardWrites(kv.StorageDomain)
@@ -545,6 +536,15 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, blockNum, tx
 		"totalKeys", common.PrettyCounter(cfg.Keys), "block", blockNum,
 		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles))
 
+	for i := uint(0); i < 16; i++ {
+		ttx, err := rwDb.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("CommitmentRebuild: BeginTemporalRo %w", err)
+		}
+		defer ttx.Rollback()
+		sd.sdCtx.SetTxn(ttx, i)
+	}
+
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
@@ -554,7 +554,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, blockNum, tx
 			break
 		}
 	}
-	sd.sdCtx.SeekCommitment(ctx, tx)
 	collectionSpent := time.Since(sf)
 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, txNum, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
 	if err != nil {

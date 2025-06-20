@@ -116,7 +116,7 @@ func (hph *HexPatriciaHashed) Warmup(ctx PatriciaContext, hashedKey []byte) erro
 		hph.readOnly = false
 		hph.currentKeyLen = 0
 	}()
-	hph.ResetContext(ctx)
+	//hph.ResetContext(ctx)
 
 	for hph.needFolding(hashedKey) {
 		//foldDone := hph.metrics.StartFolding(plainKey)

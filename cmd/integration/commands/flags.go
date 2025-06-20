@@ -17,6 +17,7 @@
 package commands
 
 import (
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
@@ -148,7 +149,7 @@ func withDomain(cmd *cobra.Command) {
 }
 
 func withExperimentalCommitment(cmd *cobra.Command) {
-	cmd.Flags().Bool("experimental.commitment-concurrent", false, "Enable experimental commitment calculation")
+	cmd.Flags().BoolVar(&libstate.ExperimentalConcurrentCommitment, "experimental.commitment-concurrent", false, "Enable experimental commitment calculation")
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {
