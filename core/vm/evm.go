@@ -424,6 +424,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
+	if evm.chainRules.IsOsaka { // EIP-7907
+		evm.intraBlockState.AddCodeAddressToAccessList(address)
+	}
 	evm.intraBlockState.CreateAccount(address, true)
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
