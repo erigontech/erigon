@@ -407,6 +407,9 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 
 // handleCallMsg executes a call message and returns the answer.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
+	if !msg.hasMethod() || !msg.hasVersion() {
+		return msg.errorResponse(&invalidRequestError{"invalid request"})
+	}
 	switch {
 	case msg.isNotification():
 		h.handleCall(ctx, msg, stream)
