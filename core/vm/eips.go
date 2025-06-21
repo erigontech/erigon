@@ -346,3 +346,13 @@ func enable7939(jt *JumpTable) {
 		numPush:     1,
 	}
 }
+
+func enable7907(jt *JumpTable) {
+	jt[CALL].dynamicGas = gasCallEIP7907
+	jt[CALLCODE].dynamicGas = gasCallCodeEIP7907
+	jt[STATICCALL].dynamicGas = gasStaticCallEIP7907
+	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7907
+	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP7907
+	jt[CREATE].dynamicGas = gasCreateEIP7907
+	jt[CREATE2].dynamicGas = gasCreate2EIP7907
+}

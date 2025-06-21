@@ -424,6 +424,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
+	if evm.chainRules.IsOsaka { // EIP-7907
+		evm.intraBlockState.AddCodeAddressToAccessList(address)
+	}
 	evm.intraBlockState.CreateAccount(address, true)
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
@@ -487,6 +490,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 func (evm *EVM) maxCodeSize() int {
 	if evm.chainConfig.Bor != nil && evm.chainConfig.Bor.IsAhmedabad(evm.Context.BlockNumber) {
 		return params.MaxCodeSizePostAhmedabad
+	}
+	if evm.chainRules.IsOsaka {
+		return params.MaxCodeSizeEip7907
 	}
 	return params.MaxCodeSize
 }
