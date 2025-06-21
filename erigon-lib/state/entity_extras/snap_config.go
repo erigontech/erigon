@@ -80,7 +80,7 @@ func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
 	return s.MergeStages[len(s.MergeStages)-1] / s.RootNumPerStep
 }
 
-func (s *SnapshotConfig) LoadPreverified(pre snapcfg.Preverified) {
+func (s *SnapshotConfig) LoadPreverified(pre snapcfg.PreverifiedItems) {
 	if s.PreverifiedParsed != nil {
 		return
 	}
@@ -102,7 +102,7 @@ type SnapInfo struct {
 	Name     string // filename
 	FileType string
 	// Path     string // full path
-	Ext string // extenstion
+	Ext string // extension
 }
 
 type Version = version.Version
