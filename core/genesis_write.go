@@ -652,6 +652,15 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
+	if g.Config != nil && g.Config.Bor != nil {
+		if g.Config.IsAgra(0) {
+			withdrawals = []*types.Withdrawal{}
+		}
+		head.BlobGasUsed = new(uint64)
+		head.ExcessBlobGas = new(uint64)
+		head.ParentBeaconBlockRoot = &common.Hash{}
+	}
+
 	return
 }
 
