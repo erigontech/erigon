@@ -112,7 +112,7 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 				t.Fatalf("read error: %v", err)
 			}
 			sent = strings.TrimRight(sent, "\r\n")
-			msgs, batch := parseMessage(json.RawMessage(sent))
+			msgs, batch, _ := parseMessage(json.RawMessage(sent))
 			if batch {
 				sort.Slice(msgs, func(i, j int) bool {
 					return string(msgs[i].ID) < string(msgs[j].ID)
@@ -122,7 +122,7 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 					panic(err)
 				}
 				sent = string(b)
-				msgs, _ = parseMessage(json.RawMessage(want))
+				msgs, _, _ = parseMessage(json.RawMessage(want))
 				sort.Slice(msgs, func(i, j int) bool {
 					return string(msgs[i].ID) < string(msgs[j].ID)
 				})
