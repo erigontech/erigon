@@ -10,9 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -27,14 +26,25 @@ import (
 
 type SharedDomainsCommitmentContext struct {
 	//mu            sync.Mutex // protects reads from sharedDomains when trie is concurrent
-	sharedDomains *SharedDomains
-	mainTtx       *TrieContext
+	sharedDomains *SharedDomains // replace with kv.TemporalGetter/PutDel
+
+	mainTtx *TrieContext
+	subTtx  [16]*TrieContext
 
 	updates      *commitment.Updates
 	patriciaTrie commitment.Trie
 	justRestored atomic.Bool // set to true when commitment trie was just restored from snapshot
 
 	trace bool
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetTxNum(txnum uint64) {
+	for i := range sdc.subTtx {
+		if sdc.subTtx[i] != nil {
+			sdc.subTtx[i].txNum = txnum
+		}
+	}
+	sdc.mainTtx.txNum = txnum
 }
 
 // Limits max txNum for read operations. If set to 0, all read operations will be from latest value.
@@ -55,20 +65,41 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 		putter: sd.AsPutDel(tx),
 
 		stepSize: sd.StepSize(),
+		txNum:    sd.txNum,
 	}
 	ctx.mainTtx = trieCtx
+	if commitment.COM_WARMUP {
+		fmt.Printf("[SharedDomainsCommitmentContext] Warmup enabled\n")
+		ctx.updates.Warmup = func(hashedKey []byte) error {
+			if ctx.subTtx[hashedKey[0]] == nil {
+				panic("SharedDomainsCommitmentContext.Warmup: subTtx is nil for key " + common.Bytes2Hex(hashedKey))
+			}
+			return ctx.patriciaTrie.Warmup(ctx.subTtx[hashedKey[0]], hashedKey)
+		}
+	}
 	ctx.patriciaTrie.ResetContext(trieCtx)
 	return ctx
 }
 
+func (sdc *SharedDomainsCommitmentContext) CloseSubTxns() {
+	for i := range sdc.subTtx {
+		if sdc.subTtx[i] != nil {
+			sdc.subTtx[i].roTtx.Rollback()
+			sdc.subTtx[i] = nil
+		}
+	}
+}
+
 func (sdc *SharedDomainsCommitmentContext) Close() {
 	sdc.updates.Close()
+	sdc.CloseSubTxns()
 }
 
 func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
+	//sdc.CloseSubTxns()
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
@@ -85,7 +116,6 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return
 	}
-
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
@@ -106,6 +136,29 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 	}
 
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetTxn(tx kv.TemporalTx, i uint) {
+	if i >= uint(len(sdc.subTtx)) {
+		fmt.Printf("SetTxn: index %d out of range, max %d\n", i, len(sdc.subTtx)-1)
+		return
+	}
+	trieCtx := &TrieContext{
+		roTtx:  tx,
+		getter: sdc.sharedDomains.AsGetter(tx),
+		putter: sdc.sharedDomains.AsPutDel(tx),
+
+		stepSize: sdc.sharedDomains.StepSize(),
+		txNum:    sdc.sharedDomains.txNum,
+	}
+	sdc.subTtx[i] = trieCtx
+	// sdc.patriciaTrie.ResetContext(trieCtx)
+	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
+		if _, ok := tx.(kv.Tx); !ok {
+			panic("SetTxn: tx is not kv.Tx")
+		}
+		sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed).ResetMountContext(trieCtx, i)
+	}
 }
 
 // Evaluates commitment for gathered updates.
@@ -346,7 +399,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		if err != nil {
 			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
 		}
-		log.Debug(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
+		log.Info(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
 	}
 	return cs.blockNum, cs.txNum, nil
 }
@@ -435,7 +488,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 		return nil
 	}
 	if sdc.trace {
-		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
+		fmt.Printf("[SDC] PutBranch: %x: %x txn %d\n", prefix, data, sdc.txNum)
 	}
 	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 	//	sdc.mu.Lock()

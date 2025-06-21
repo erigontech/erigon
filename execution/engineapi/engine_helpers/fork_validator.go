@@ -142,12 +142,20 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accumulator, recentLogs *shards.RecentLogs) error {
+func (fv *ForkValidator) FlushExtendingFork(db kv.TemporalRwDB, tx kv.RwTx, accumulator *shards.Accumulator, recentLogs *shards.RecentLogs) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
 	// Flush changes to db.
 	if fv.sharedDom != nil {
+		for i := 0; i < 16; i++ {
+			ttx, err := db.BeginTemporalRo(fv.ctx)
+			if err != nil {
+				return fmt.Errorf("ForkValidator.FlushExtendingFork: failed to begin temporal read-only transaction: %w", err)
+			}
+			defer ttx.Rollback()
+			fv.sharedDom.SetTxn(ttx, uint(i))
+		}
 		_, err := fv.sharedDom.ComputeCommitment(context.Background(), true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment")
 		if err != nil {
 			return err
