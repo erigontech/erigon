@@ -506,6 +506,15 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 	}
 
+	if g.Config != nil && g.Config.Bor != nil {
+		if g.Config.IsAgra(0) {
+			withdrawals = []*types.Withdrawal{}
+		}
+		head.BlobGasUsed = new(uint64)
+		head.ExcessBlobGas = new(uint64)
+		head.ParentBeaconBlockRoot = &libcommon.Hash{}
+	}
+
 	var root libcommon.Hash
 	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
 
