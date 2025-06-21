@@ -283,7 +283,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.disableStreaming {
 		stream = jsonstream.New(w)
 	}
-	s.serveSingleRequest(ctx, codec, stream)
+
+	errorMsg := s.serveSingleRequest(ctx, codec, stream)
+	if errorMsg != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		codec.WriteJSON(ctx, errorMsg)
+	}
 }
 
 // validateRequest returns a non-zero response code and error message if the
