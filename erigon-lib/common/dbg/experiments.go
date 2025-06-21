@@ -81,6 +81,7 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	BorMaxSyncLookback   = EnvUint("BOR_MAX_SYNC_LOOKBACK", 1024)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

@@ -25,6 +25,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -286,7 +287,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 			"amount", amount,
 		)
 
-		if amount > 1024 {
+		if amount > dbg.BorMaxSyncLookback {
 			// should not ever need to request more than 1024 blocks here in order to backward connect
 			// - if we do then we are missing milestones and need to investigate why
 			// - additionally 1024 blocks should be enough to connect a new block at tip even without milestones
@@ -294,8 +295,8 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 			// - if we ever do get a block from a peer for which 1024 blocks back is not enough to connect it
 			// then we shall drop it as the canonical chain builder will fail to connect it and move on
 			// useful read: https://forum.polygon.technology/t/proposal-improved-ux-with-milestones-for-polygon-pos/11534
-			s.logger.Warn(syncLogPrefix("canonical chain builder root is too far"), "amount", amount)
-			amount = 1024
+			s.logger.Warn(syncLogPrefix("canonical chain builder root is too far"), "max", dbg.BorMaxSyncLookback, "required", amount)
+			amount = dbg.BorMaxSyncLookback
 		}
 
 		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(5 * time.Second)}
