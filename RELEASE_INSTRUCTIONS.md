@@ -23,7 +23,7 @@ INFO [08-01|15:36:04.282] Checked                                  blocks=105738
 
 ## Update DB Schema version if required
 
-In the file `common/dbutils/bucket.go` there is variable `DBSchemaVersion` that needs to be updated if there are any changes in the database schema, leading to data migrations.
+In the file `common/dbutils/bucket.go` there is a variable `DBSchemaVersion` that needs to be updated if there are any changes in the database schema, leading to data migrations.
 In most cases, it is enough to bump minor version.
 
 ## Update remote KV version if required
