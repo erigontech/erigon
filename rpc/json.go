@@ -272,7 +272,7 @@ func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 		msgs := []*jsonrpcMessage{{}}
 		err := json.Unmarshal(raw, &msgs[0])
 		if err != nil {
-			return nil, false, fmt.Errorf("unmarshall error")
+			return nil, false, err
 		}
 		return msgs, false, nil
 	}
