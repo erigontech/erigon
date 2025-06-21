@@ -157,7 +157,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Enable http compression enabled by default. Use --http.compression=false to disable it")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets - Same port as HTTP[S]")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", true, "Enable Websocket compression (RFC 7692) enabled by default is Websockets is enabled. Use --ws.compression=false to disable it")
-  rootCmd.PersistentFlags().IntVar(&cfg.WebsocketPort, "ws.port", nodecfg.DefaultWSPort, "rpc WebSocket server listening port")
+	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketPort, "ws.port", nodecfg.DefaultWSPort, "rpc WebSocket server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpsServerEnabled, "https.enabled", false, "Enable HTTPS server")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpsListenAddress, "https.addr", nodecfg.DefaultHTTPHost, "rpc HTTPS server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.HttpsPort, "https.port", 0, "rpc HTTPS server listening port. default to http.port + 363 if not set")
