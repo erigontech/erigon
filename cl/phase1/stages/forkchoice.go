@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.

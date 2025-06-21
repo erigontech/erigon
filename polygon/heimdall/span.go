@@ -17,8 +17,11 @@
 package heimdall
 
 import (
+	"strconv"
+
 	"github.com/google/btree"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
@@ -75,8 +78,105 @@ type SpanResponseV1 struct {
 	Result Span   `json:"result"`
 }
 
+type validator struct {
+	ValID            string `json:"val_id"`
+	Address          string `json:"signer"`
+	VotingPower      string `json:"voting_power"`
+	ProposerPriority string `json:"proposer_priority"`
+}
+
+func (v *validator) toValidator() (valset.Validator, error) {
+	id, err := strconv.Atoi(v.ValID)
+	if err != nil {
+		return valset.Validator{}, err
+	}
+
+	votingPower, err := strconv.Atoi(v.VotingPower)
+	if err != nil {
+		return valset.Validator{}, err
+	}
+
+	proposerPriority, err := strconv.Atoi(v.VotingPower)
+	if err != nil {
+		return valset.Validator{}, err
+	}
+
+	rr := valset.Validator{
+		ID:               uint64(id),
+		Address:          common.HexToAddress(v.Address),
+		VotingPower:      int64(votingPower),
+		ProposerPriority: int64(proposerPriority),
+	}
+
+	return rr, nil
+}
+
 type SpanResponseV2 struct {
-	Span *Span `json:"span"`
+	Span struct {
+		ID           string `json:"id"`
+		StartBlock   string `json:"start_block"`
+		EndBlock     string `json:"end_block"`
+		ValidatorSet struct {
+			Validators []validator `json:"validators"`
+			Proposer   validator   `json:"proposer"`
+		} `json:"validator_set"`
+		SelectedProducers []validator `json:"selected_producers"`
+		BorChainID        string      `json:"bor_chain_id"`
+	} `json:"span"`
+}
+
+func (r *SpanResponseV2) ToSpan() (*Span, error) {
+	id, err := strconv.Atoi(r.Span.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	startBlock, err := strconv.Atoi(r.Span.StartBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	endBlock, err := strconv.Atoi(r.Span.EndBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	proposer, err := r.Span.ValidatorSet.Proposer.toValidator()
+	if err != nil {
+		return nil, err
+	}
+
+	s := &Span{
+		Id:         SpanId(id),
+		StartBlock: uint64(startBlock),
+		EndBlock:   uint64(endBlock),
+		ValidatorSet: valset.ValidatorSet{
+			Validators: make([]*valset.Validator, 0, len(r.Span.ValidatorSet.Validators)),
+			Proposer:   &proposer,
+		},
+		SelectedProducers: make([]valset.Validator, 0, len(r.Span.SelectedProducers)),
+		ChainID:           r.Span.BorChainID,
+	}
+
+	for i := range r.Span.ValidatorSet.Validators {
+		toAppend, err := r.Span.ValidatorSet.Validators[i].toValidator()
+		if err != nil {
+			return nil, err
+		}
+
+		s.ValidatorSet.Validators = append(s.ValidatorSet.Validators, &toAppend)
+	}
+
+	for i := range r.Span.SelectedProducers {
+		toAppend, err := r.Span.SelectedProducers[i].toValidator()
+		if err != nil {
+			return nil, err
+		}
+
+		s.SelectedProducers = append(s.SelectedProducers, toAppend)
+	}
+
+	return s, nil
 }
 
 type spans []*Span

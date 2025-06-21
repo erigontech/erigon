@@ -70,6 +70,10 @@ const (
 	maxRetries         = 5
 )
 
+var (
+	MaxRetriesUnlimited = -1
+)
+
 type apiVersioner interface {
 	Version() HeimdallVersion
 }
@@ -149,18 +153,19 @@ const (
 	fetchCheckpointList            = "/checkpoints/list"
 	fetchCheckpointListQueryFormat = "page=%d&limit=%d"
 
-	fetchMilestoneAt     = "/milestone/%d"
-	fetchMilestoneLatest = "/milestone/latest"
-	fetchMilestoneCount  = "/milestone/count"
+	fetchMilestoneAtV1     = "/milestone/%d"
+	fetchMilestoneLatestV1 = "/milestone/latest"
+	fetchMilestoneAtV2     = "/milestones/%d"
+	fetchMilestoneLatestV2 = "/milestones/latest"
+	fetchMilestoneCountV1  = "/milestone/count"
+	fetchMilestoneCountV2  = "/milestones/count"
 
 	fetchLastNoAckMilestone = "/milestone/lastNoAck"
 	fetchNoAckMilestone     = "/milestone/noAck/%s"
 	fetchMilestoneID        = "/milestone/ID/%s"
 
-	fetchSpanFormat = "bor/span/%d"
-
 	fetchSpanLatestV1 = "bor/latest-span"
-	fetchSpanLatestV2 = "bor/span/latest"
+	fetchSpanLatestV2 = "bor/spans/latest"
 
 	fetchSpanListFormat = "page=%d&limit=%d" // max limit = 150
 	fetchSpanListPath   = "bor/span/list"
@@ -272,7 +277,7 @@ func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 			return nil, err
 		}
 
-		return response.Span, nil
+		return response.ToSpan()
 	}
 
 	url, err := makeURL(c.urlString, fetchSpanLatestV1, "")
@@ -289,7 +294,7 @@ func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 }
 
 func (c *HttpClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
-	url, err := spanURL(c.urlString, spanID)
+	url, err := makeURL(c.urlString, fmt.Sprintf("bor/span/%d", spanID), "")
 	if err != nil {
 		return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 	}
@@ -297,12 +302,17 @@ func (c *HttpClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error
 	ctx = withRequestType(ctx, spanRequest)
 
 	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+		url, err = makeURL(c.urlString, fmt.Sprintf("bor/spans/%d", spanID), "")
+		if err != nil {
+			return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
+		}
+
 		response, err := FetchWithRetry[SpanResponseV2](ctx, c, url, c.logger)
 		if err != nil {
 			return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 		}
 
-		return response.Span, nil
+		return response.ToSpan()
 
 	}
 
@@ -345,7 +355,7 @@ func (c *HttpClient) FetchCheckpoint(ctx context.Context, number int64) (*Checkp
 			return nil, err
 		}
 
-		return &response.Checkpoint, nil
+		return response.ToCheckpoint(number)
 	}
 
 	response, err := FetchWithRetry[CheckpointResponseV1](ctx, c, url, c.logger)
@@ -379,7 +389,7 @@ func isInvalidMilestoneIndexError(err error) bool {
 
 // FetchMilestone fetches a milestone from heimdall
 func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milestone, error) {
-	url, err := milestoneURL(c.urlString, number)
+	url, err := milestoneURLv1(c.urlString, number)
 	if err != nil {
 		return nil, err
 	}
@@ -411,6 +421,11 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 	}
 
 	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+		url, err := milestoneURLv2(c.urlString, number)
+		if err != nil {
+			return nil, err
+		}
+
 		response, err := FetchWithRetryEx[MilestoneResponseV2](ctx, c, url, isRecoverableError, c.logger)
 		if err != nil {
 			if isInvalidMilestoneIndexError(err) {
@@ -419,7 +434,7 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 			return nil, err
 		}
 
-		return &response.Milestone, nil
+		return response.ToMilestone(number)
 	}
 
 	response, err := FetchWithRetryEx[MilestoneResponseV1](ctx, c, url, isRecoverableError, c.logger)
@@ -481,7 +496,12 @@ func (c *HttpClient) FetchCheckpointCount(ctx context.Context) (int64, error) {
 			return 0, err
 		}
 
-		return response.AckCount, nil
+		count, err := strconv.Atoi(response.AckCount)
+		if err != nil {
+			return 0, err
+		}
+
+		return int64(count), nil
 	}
 
 	response, err := FetchWithRetry[CheckpointCountResponseV1](ctx, c, url, c.logger)
@@ -494,7 +514,7 @@ func (c *HttpClient) FetchCheckpointCount(ctx context.Context) (int64, error) {
 
 // FetchMilestoneCount fetches the milestone count from heimdall
 func (c *HttpClient) FetchMilestoneCount(ctx context.Context) (int64, error) {
-	url, err := milestoneCountURL(c.urlString)
+	url, err := makeURL(c.urlString, fetchMilestoneCountV1, "")
 	if err != nil {
 		return 0, err
 	}
@@ -502,12 +522,22 @@ func (c *HttpClient) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	ctx = withRequestType(ctx, milestoneCountRequest)
 
 	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+		url, err := makeURL(c.urlString, fetchMilestoneCountV2, "")
+		if err != nil {
+			return 0, err
+		}
+
 		response, err := FetchWithRetry[MilestoneCountResponseV2](ctx, c, url, c.logger)
 		if err != nil {
 			return 0, err
 		}
 
-		return response.Count, nil
+		count, err := strconv.Atoi(response.Count)
+		if err != nil {
+			return 0, err
+		}
+
+		return int64(count), nil
 	}
 
 	response, err := FetchWithRetry[MilestoneCountResponseV1](ctx, c, url, c.logger)
@@ -617,7 +647,7 @@ func FetchWithRetryEx[T any](
 	ticker := time.NewTicker(client.retryBackOff)
 	defer ticker.Stop()
 
-	for attempt < client.maxRetries {
+	for client.maxRetries == MaxRetriesUnlimited || attempt < client.maxRetries {
 		attempt++
 
 		request := &HttpRequest{handler: client.handler, url: url, start: time.Now()}
@@ -694,10 +724,6 @@ func Fetch[T any](ctx context.Context, request *HttpRequest, logger log.Logger) 
 	return result, nil
 }
 
-func spanURL(urlString string, spanID uint64) (*url.URL, error) {
-	return makeURL(urlString, fmt.Sprintf(fetchSpanFormat, spanID), "")
-}
-
 func spanListURL(urlString string, page, limit uint64) (*url.URL, error) {
 	return makeURL(urlString, fetchSpanListPath, fmt.Sprintf(fetchSpanListFormat, page, limit))
 }
@@ -742,15 +768,18 @@ func checkpointListURL(urlString string, page uint64, limit uint64) (*url.URL, e
 	return makeURL(urlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormat, page, limit))
 }
 
-func milestoneURL(urlString string, number int64) (*url.URL, error) {
+func milestoneURLv1(urlString string, number int64) (*url.URL, error) {
 	if number == -1 {
-		return makeURL(urlString, fetchMilestoneLatest, "")
+		return makeURL(urlString, fetchMilestoneLatestV1, "")
 	}
-	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAt, number), "")
+	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAtV1, number), "")
 }
 
-func milestoneCountURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchMilestoneCount, "")
+func milestoneURLv2(urlString string, number int64) (*url.URL, error) {
+	if number == -1 {
+		return makeURL(urlString, fetchMilestoneLatestV2, "")
+	}
+	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAtV2, number), "")
 }
 
 func lastNoAckMilestoneURL(urlString string) (*url.URL, error) {

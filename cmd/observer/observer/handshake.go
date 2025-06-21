@@ -29,10 +29,10 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/rlp"
-	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/forkid"
-	"github.com/erigontech/erigon-p2p/protocols/eth"
-	"github.com/erigontech/erigon-p2p/rlpx"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/forkid"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/rlpx"
 	"github.com/erigontech/erigon/params"
 )
 

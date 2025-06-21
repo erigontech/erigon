@@ -47,9 +47,9 @@ var (
 	CommitmentDomainUniversal = FromDomain(kv.CommitmentDomain)
 )
 
-type DirtyFilesGetter func() *btree2.BTreeG[*filesItem]
+type DirtyFilesGetter func() *btree2.BTreeG[*FilesItem]
 
-// an DependencyIntegrityChecker used when a dependent domain has
+// DependencyIntegrityChecker: used when a dependent domain has
 // references to a dependency domain. e.g. commitment.kv has
 // references to accounts.kv.
 // instance should be held by dependency domain
@@ -121,7 +121,7 @@ func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalE
 
 	for _, dependent := range arr {
 		dependentFiles := dependent.filesGetter()
-		file, found := dependentFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
+		file, found := dependentFiles.Get(&FilesItem{startTxNum: startTxNum, endTxNum: endTxNum})
 
 		if allOrAny.All() {
 			// ALL: used for visibleFilesCalc

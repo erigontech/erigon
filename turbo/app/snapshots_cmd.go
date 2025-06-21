@@ -54,7 +54,6 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -233,6 +232,7 @@ var snapshotCommand = cli.Command{
 				&cli.PathFlag{Name: "src", Required: true},
 				&cli.StringFlag{Name: "key", Required: true},
 			}),
+			Description: "Search for a key in a btree index",
 		},
 		{
 			Name: "rm-all-state-snapshots",
@@ -243,11 +243,20 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:  "reset-to-3.0",
+			Name:  "reset-to-old-ver-format",
 			Usage: "change all the snapshots to 3.0 file format",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 				return dirs.RenameNewVersions()
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
+			Name:  "update-to-new-ver-format",
+			Usage: "change all the snapshots to 3.1 file ver format",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				return dirs.RenameOldVersions()
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
@@ -1380,7 +1389,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := blockReader.TxnumReader(ctx).FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 		return nil
@@ -1821,7 +1830,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, blockReader))
+	txNumsReader := blockReader.TxnumReader(ctx)
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)

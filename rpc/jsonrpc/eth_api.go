@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -167,7 +166,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		blocksLRU:           blocksLRU,
 		_blockReader:        blockReader,
 		_txnReader:          blockReader,
-		_txNumReader:        rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(context.Background(), blockReader)),
+		_txNumReader:        blockReader.TxnumReader(context.Background()),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
 		receiptsGenerator:   receipts.NewGenerator(blockReader, engine),

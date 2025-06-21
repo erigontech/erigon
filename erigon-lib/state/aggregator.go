@@ -58,7 +58,6 @@ type Aggregator struct {
 	d               [kv.DomainLen]*Domain
 	iis             []*InvertedIndex
 	dirs            datadir.Dirs
-	tmpdir          string
 	aggregationStep uint64
 
 	dirtyFilesLock           sync.Mutex
@@ -105,7 +104,6 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 		ctxCancel:              ctxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -253,7 +251,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 	ue := FromDomain(dependent)
 	a.checker.AddDependency(ue, &DependentInfo{
 		entity:      ue,
-		filesGetter: func() *btree.BTreeG[*filesItem] { return dd.dirtyFiles },
+		filesGetter: func() *btree.BTreeG[*FilesItem] { return dd.dirtyFiles },
 		accessors:   dd.Accessors,
 	})
 	dd.SetChecker(a.checker)
@@ -275,7 +273,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	ue := FromII(dd.InvertedIndex.iiCfg.name)
 	a.checker.AddDependency(ue, &DependentInfo{
 		entity: ue,
-		filesGetter: func() *btree.BTreeG[*filesItem] {
+		filesGetter: func() *btree.BTreeG[*FilesItem] {
 			return h.dirtyFiles
 		},
 		accessors: h.Accessors,
@@ -420,6 +418,9 @@ func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
 
+type VisibleFile = kv.VisibleFile
+type VisibleFiles = kv.VisibleFiles
+
 func (at *AggregatorRoTx) AllFiles() VisibleFiles {
 	var res VisibleFiles
 	if at == nil {
@@ -442,8 +443,8 @@ func (a *Aggregator) Files() []string {
 	return ac.AllFiles().Fullpaths()
 }
 func (a *Aggregator) LS() {
-	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {
-		dirtyFiles.Walk(func(items []*filesItem) bool {
+	doLS := func(dirtyFiles *btree.BTreeG[*FilesItem]) {
+		dirtyFiles.Walk(func(items []*FilesItem) bool {
 			for _, item := range items {
 				if item.decompressor == nil {
 					continue
@@ -525,7 +526,23 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
 	}
 
-	if err := g.Wait(); err != nil {
+	err := func() error {
+		defer func() {
+			r := recover()
+			if err, ok := r.(error); ok {
+				var pe errgroup.PanicError
+				if errors.As(err, &pe) {
+					a.logger.Crit("panic error in Aggregator errgroup", "err", pe, "stack", string(pe.Stack))
+					os.Stderr.Write(pe.Stack)
+				}
+			}
+			if r != nil {
+				panic(r)
+			}
+		}()
+		return g.Wait()
+	}()
+	if err != nil {
 		return err
 	}
 
@@ -751,30 +768,27 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
+	defer a.buildingFiles.Store(false)
+	if toStep > fromStep {
+		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+	}
+	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+		if err := a.buildFiles(ctx, step); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+				panic(err)
+			}
+			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+			panic(err)
+		}
+		a.onFilesChange(nil)
+	}
+
 	go func() {
-		defer a.buildingFiles.Store(false)
-		if toStep > fromStep {
-			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+		if err := a.MergeLoop(ctx); err != nil {
+			panic(err)
 		}
-		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, step); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-					panic(err)
-				}
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-				panic(err)
-			}
-			a.onFilesChange(nil)
-		}
-
-		go func() {
-			if err := a.MergeLoop(ctx); err != nil {
-				panic(err)
-			}
-			a.onFilesChange(nil)
-		}()
+		a.onFilesChange(nil)
 	}()
-
 	return nil
 }
 
@@ -1374,7 +1388,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 }
 
 func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {
-	mf = &MergedFilesV3{iis: make([]*filesItem, len(at.a.iis))}
+	mf = &MergedFilesV3{iis: make([]*FilesItem, len(at.a.iis))}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(at.a.mergeWorkers)
 	closeFiles := true
@@ -1669,7 +1683,7 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 		}
 	}
 	if fi < 0 {
-		return nil, fmt.Errorf("file not found")
+		return nil, fmt.Errorf("FileStream: file not found: %s, %d-%d", name, fromTxNum/at.StepSize(), toTxNum/at.StepSize())
 	}
 	r := dt.dataReader(dt.files[fi].src.decompressor)
 	return NewSegStreamReader(r, -1), nil
@@ -1808,10 +1822,10 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 		}
 	}
 }
-func (at *Aggregator) MadvNormal() *Aggregator {
-	at.dirtyFilesLock.Lock()
-	defer at.dirtyFilesLock.Unlock()
-	for _, d := range at.d {
+func (a *Aggregator) MadvNormal() *Aggregator {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
 		for _, f := range d.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
@@ -1822,17 +1836,17 @@ func (at *Aggregator) MadvNormal() *Aggregator {
 			f.MadvNormal()
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range a.iis {
 		for _, f := range ii.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
 	}
-	return at
+	return a
 }
-func (at *Aggregator) DisableReadAhead() {
-	at.dirtyFilesLock.Lock()
-	defer at.dirtyFilesLock.Unlock()
-	for _, d := range at.d {
+func (a *Aggregator) DisableReadAhead() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
 		for _, f := range d.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}
@@ -1843,7 +1857,7 @@ func (at *Aggregator) DisableReadAhead() {
 			f.DisableReadAhead()
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range a.iis {
 		for _, f := range ii.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}

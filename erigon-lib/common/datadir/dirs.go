@@ -25,9 +25,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/gofrs/flock"
-
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/gofrs/flock"
 )
 
 // Dirs is the file system folder the node should use for any data storage
@@ -88,10 +88,7 @@ func New(datadir string) Dirs {
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
 		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin,
 		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis)
-	err := dirs.RenameOldVersions()
-	if err != nil {
-		panic(err)
-	}
+
 	return dirs
 }
 
@@ -211,6 +208,7 @@ func (d Dirs) RenameOldVersions() error {
 		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
 	}
 	renamed := 0
+	torrentsRemoved := 0
 	for _, dirPath := range directories {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
@@ -224,13 +222,12 @@ func (d Dirs) RenameOldVersions() error {
 						if err := os.Remove(path); err != nil {
 							return err
 						}
+						torrentsRemoved++
 						return nil
 					}
 					newName := strings.Replace(name, "v1-", "v1.0-", 1)
-					oldPath := path
-					path = filepath.Join(filepath.Dir(path), newName)
-
-					if err := os.Rename(oldPath, path); err != nil {
+					newPath := filepath.Join(filepath.Dir(path), newName)
+					if err := os.Rename(path, newPath); err != nil {
 						return err
 					}
 					renamed++
@@ -238,17 +235,16 @@ func (d Dirs) RenameOldVersions() error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return err
 		}
 	}
-
-	// Удаление директории Downloader
+	log.Info(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
 	if d.Downloader != "" && renamed > 0 {
 		if err := os.RemoveAll(d.Downloader); err != nil {
 			return err
 		}
+		log.Info(fmt.Sprintf("Removed Downloader directory: %s", d.Downloader))
 	}
 
 	return nil

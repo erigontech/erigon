@@ -535,7 +535,6 @@ type RwCursorDupSort interface {
 type (
 	Domain      uint16
 	Appendable  uint16
-	History     string
 	InvertedIdx uint16
 )
 
@@ -574,6 +573,9 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+
+	AggForkablesTx(ForkableId) any // any forkableId, returns that group
+	Unmarked(ForkableId) UnmarkedTx
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -617,6 +619,8 @@ type TemporalRwTx interface {
 	RwTx
 	TemporalTx
 	TemporalPutDel
+
+	UnmarkedRw(ForkableId) UnmarkedRwTx
 
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)

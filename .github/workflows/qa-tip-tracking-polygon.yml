@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tip-tracking-test:
+  bor-mainnet-tip-tracking-test:
     runs-on: [self-hosted, qa, Polygon]
     timeout-minutes: 800
     env:
@@ -78,6 +78,13 @@ jobs:
           echo "Error detected during tests"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Upload Downloader Torrent Client Status
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: torrent-client-status-${{ env.CHAIN }}
+        path: torrent-client-status.txt
 
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'

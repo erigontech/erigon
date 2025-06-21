@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
@@ -48,8 +47,9 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -139,7 +139,7 @@ func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *stat
 func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *state2.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.blockReader))
+	txNumsReader := cfg.blockReader.TxnumReader(ctx)
 
 	inputTxNum = doms.TxNum()
 
@@ -442,7 +442,7 @@ func ExecV3(ctx context.Context,
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
 
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+		readAhead, clean = exec3.BlocksReadAhead(ctx, 4, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
 	}
 
@@ -952,7 +952,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 
 }
 
-func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader interfaces.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	if tx == nil {
 		tx, err = db.BeginRo(ctx)
 		if err != nil {

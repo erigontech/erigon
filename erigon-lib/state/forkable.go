@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
+	"time"
 
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -13,10 +15,6 @@ import (
 )
 
 const MaxUint64 = ^uint64(0)
-
-type RootRelationI interface {
-	RootNum2Num(from RootNum, tx kv.Tx) (Num, error)
-}
 
 type BufferFactory interface {
 	New() etl.Buffer
@@ -71,7 +69,7 @@ func App_WithUpdateCanonical() AppOpts {
 
 // func App
 func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[MarkedTxI], error) {
-	a, err := create[MarkedTxI](id, Marked, valsTbl, canonicalTbl, relation, logger, options...)
+	a, err := create[MarkedTxI](id, kv.Marked, valsTbl, canonicalTbl, relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +88,7 @@ func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relat
 }
 
 func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[UnmarkedTxI], error) {
-	a, err := create[UnmarkedTxI](id, Unmarked, valsTbl, "", relation, logger, options...)
+	a, err := create[UnmarkedTxI](id, kv.Unmarked, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +119,7 @@ func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, 
 }
 
 func NewBufferedForkable(id ForkableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts) (*Forkable[BufferedTxI], error) {
-	a, err := create[BufferedTxI](id, Buffered, valsTbl, "", relation, logger, options...)
+	a, err := create[BufferedTxI](id, kv.Buffered, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +142,7 @@ func NewBufferedForkable(id ForkableId, valsTbl string, relation RootRelationI, 
 	return a, nil
 }
 
-func create[T ForkableBaseTxI](id ForkableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
+func create[T ForkableBaseTxI](id ForkableId, strategy kv.CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
 	a := &Forkable[T]{
 		ProtoForkable: NewProto(id, nil, nil, logger),
 	}
@@ -162,7 +160,7 @@ func (a *Forkable[T]) PruneFrom() Num {
 	return a.pruneFrom
 }
 
-func (a *Forkable[T]) encTs(ts ee.EncToBytesI) []byte {
+func (a *Forkable[T]) encTs(ts kv.EncToBytesI) []byte {
 	return ts.EncToBytes(true)
 }
 
@@ -267,30 +265,34 @@ func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
 	return tx.Put(a.valsTbl, key, val)
 }
 
-func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
+func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (fs ForkablePruneStat, err error) {
 	a := m.ap
 	efrom, err := a.rel.RootNum2Num(from, tx) // for marked, id==num
 	if err != nil {
-		return err
+		return
 	}
 	fromKey := a.encTs(efrom)
-	_, err = ee.DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, tx)
-	return err
+	delCnt, err := ee.DeleteRangeFromTbl(ctx, a.canonicalTbl, fromKey, nil, MaxUint64, nil, a.logger, tx)
+	fs.Set(efrom, Num(MaxUint64), delCnt)
+	return
 }
 
-func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
+func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, logEvery *time.Ticker, tx kv.RwTx) (fs ForkablePruneStat, err error) {
+	pruneTo := min(m.VisibleFilesMaxRootNum(), to)
 	a := m.ap
 	fromKeyPrefix := a.encTs(a.pruneFrom)
-	eto, err := a.rel.RootNum2Num(to, tx)
+	eto, err := a.rel.RootNum2Num(pruneTo, tx)
 	if err != nil {
-		return 0, err
+		return fs, err
 	}
 	toKeyPrefix := a.encTs(eto)
-	if del, err := ee.DeleteRangeFromTbl(a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
-		return del, err
+	del, err := ee.DeleteRangeFromTbl(ctx, a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, logEvery, a.logger, tx)
+	fs.Set(a.pruneFrom, eto, del)
+	if err != nil {
+		return
 	}
-
-	return ee.DeleteRangeFromTbl(a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, tx)
+	_, err = ee.DeleteRangeFromTbl(ctx, a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, logEvery, a.logger, tx)
+	return
 }
 
 func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
@@ -343,27 +345,30 @@ func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
 	return tx.Append(m.ap.valsTbl, m.ap.encTs(entityNum), value)
 }
 
-func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
+func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (fs ForkablePruneStat, err error) {
 	ap := m.ap
 	fromN, err := ap.rel.RootNum2Num(from, tx)
 	if err != nil {
-		return err
+		return fs, err
 	}
-	_, err = ee.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromN), nil, 0, tx)
-	return err
+	delCnt, err := ee.DeleteRangeFromTbl(ctx, ap.valsTbl, ap.encTs(fromN), nil, 0, nil, ap.logger, tx)
+	fs.Set(fromN, Num(MaxUint64), delCnt)
+	return
 }
 
-func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
+func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, logEvery *time.Ticker, tx kv.RwTx) (fs ForkablePruneStat, err error) {
 	ap := m.ap
-	toNum, err := ap.rel.RootNum2Num(to, tx)
+	pruneTo := min(m.VisibleFilesMaxRootNum(), to)
+	toNum, err := ap.rel.RootNum2Num(pruneTo, tx)
 	if err != nil {
-		return 0, err
+		return fs, err
 	}
-	log.Info("pruning", "forkable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)
-	return ee.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
+	delCnt, err := ee.DeleteRangeFromTbl(ctx, ap.valsTbl, eFrom, eTo, limit, logEvery, ap.logger, tx)
+	fs.Set(ap.pruneFrom, toNum, delCnt)
+	return
 }
 
 func (m *UnmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
@@ -417,8 +422,8 @@ func (m *BufferedTx) GetDb(entityNum Num, tx kv.Tx) (data Bytes, err error) {
 
 func (m *BufferedTx) Put(entityNum Num, value Bytes) error {
 	if m.values == nil {
-		m.values = etl.NewCollector(m.id.Name()+".forkable.flush",
-			m.id.Dirs().Tmp, m.factory.New(), m.a.logger).LogLvl(log.LvlTrace)
+		m.values = etl.NewCollector(ee.Registry.Name(m.id)+".forkable.flush",
+			ee.Registry.Dirs(m.id).Tmp, m.factory.New(), m.a.logger).LogLvl(log.LvlTrace)
 	}
 
 	key := m.ap.encTs(entityNum)
@@ -434,22 +439,24 @@ func (m *BufferedTx) Flush(ctx context.Context, tx kv.RwTx) error {
 	return m.values.Load(tx, m.ap.valsTbl, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
 }
 
-func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
+func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, logEvery *time.Ticker, tx kv.RwTx) (fs ForkablePruneStat, err error) {
 	ap := m.ap
-	toNum, err := ap.rel.RootNum2Num(to, tx)
+	pruneTo := min(m.VisibleFilesMaxRootNum(), to)
+	toNum, err := ap.rel.RootNum2Num(pruneTo, tx)
 	if err != nil {
-		return 0, err
+		return
 	}
-	log.Info("pruning", "forkable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)
-	return ee.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
+	delCnt, err := ee.DeleteRangeFromTbl(ctx, ap.valsTbl, eFrom, eTo, limit, logEvery, ap.logger, tx)
+	fs.Set(ap.pruneFrom, toNum, delCnt)
+	return
 }
 
-func (m *BufferedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
+func (m *BufferedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (fs ForkablePruneStat, err error) {
 	// no op
-	return nil
+	return
 }
 
 func (m *BufferedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
@@ -565,3 +572,37 @@ var (
 // 	eTo := ap.encTs(toId)
 // 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 // }
+
+type ForkablePruneStat struct {
+	MinNum, MaxNum Num
+	PruneCount     uint64
+}
+
+var EmptyForkablePruneStat = ForkablePruneStat{MinNum: Num(math.MaxUint64), MaxNum: Num(0)}
+
+func (ps *ForkablePruneStat) Set(minNum, maxNum Num, pruneCount uint64) {
+	ps.MinNum = minNum
+	ps.MaxNum = maxNum
+	ps.PruneCount = pruneCount
+}
+
+func (ps *ForkablePruneStat) PruneNothing() bool {
+	return ps.PruneCount != 0
+}
+
+func (ps *ForkablePruneStat) String() string {
+	if ps.PruneNothing() {
+		return ""
+	}
+
+	return fmt.Sprintf("pruned %d entries from [%d-%d]", ps.PruneCount, ps.MinNum, ps.MaxNum)
+}
+
+func (ps *ForkablePruneStat) Accumulate(other *ForkablePruneStat) {
+	if other == nil {
+		return
+	}
+	ps.PruneCount += other.PruneCount
+	ps.MinNum = min(ps.MinNum, other.MinNum)
+	ps.MaxNum = max(ps.MaxNum, other.MaxNum)
+}

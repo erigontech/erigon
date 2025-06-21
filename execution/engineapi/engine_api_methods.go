@@ -22,10 +22,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/params"
-
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/params"
 )
 
 var ourCapabilities = []string{

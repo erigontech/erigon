@@ -62,7 +62,7 @@ func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (F
 	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId, log,
 		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
 
-	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, ee.IdentityRootRelationInstance, log,
+	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, state.IdentityRootRelationInstance, log,
 		state.App_WithFreezer(freezer),
 		state.App_WithPruneFrom(Num(1)),
 		state.App_WithIndexBuilders(builder),
@@ -133,7 +133,7 @@ func TestMarked_PutToDb(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, returnv == nil) // Equal fails
 
-	require.Equal(t, ma_tx.Type(), state.Marked)
+	require.Equal(t, ma_tx.Type(), kv.Marked)
 }
 
 func TestPrune(t *testing.T) {
@@ -149,8 +149,9 @@ func TestPrune(t *testing.T) {
 			headerId, ma := setupHeader(t, log, dir, db)
 
 			ctx := context.Background()
-			cfg := headerId.SnapshotConfig()
-			entries_count = cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
+			cfg := ee.Registry.SnapshotConfig(headerId)
+			extras_count := uint64(5) // in db
+			entries_count = cfg.MinimumSize + cfg.SafetyMargin + extras_count
 
 			ma_tx := ma.BeginTemporalTx()
 			defer ma_tx.Close()
@@ -181,16 +182,37 @@ func TestPrune(t *testing.T) {
 			require.NoError(t, rwtx.Commit())
 			ma_tx.Close()
 
+			built := true
+			from := RootNum(0)
+			var df *state.FilesItem
+			ps := background.NewProgressSet()
+
+			for built {
+				df, built, err = ma.BuildFile(ctx, from, RootNum(entries_count), db, 1, ps)
+				require.NoError(t, err)
+				if df != nil {
+					ma.IntegrateDirtyFile(df)
+					_, endTxNum := df.Range()
+					from = RootNum(endTxNum)
+				}
+			}
+			ma.RecalcVisibleFiles(RootNum(entries_count))
+
+			ma_tx = ma.BeginTemporalTx()
+			defer ma_tx.Close()
+
 			rwtx, err = db.BeginRw(ctx)
 			defer rwtx.Rollback()
 			require.NoError(t, err)
 
-			del, err := ma_tx.Prune(ctx, pruneTo, 1000, rwtx)
+			stat, err := ma_tx.Prune(ctx, pruneTo, 1000, nil, rwtx)
 			require.NoError(t, err)
 			cfgPruneFrom := int64(ma.PruneFrom())
-			require.Equal(t, int64(del), max(0, min(int64(pruneTo), int64(entries_count))-cfgPruneFrom))
+			visibleFilesMaxRootNum := int64(entries_count - cfg.SafetyMargin - extras_count)
+			require.Equal(t, max(0, min(int64(pruneTo), visibleFilesMaxRootNum)-cfgPruneFrom), int64(stat.PruneCount))
 
 			require.NoError(t, rwtx.Commit())
+			ma_tx.Close()
 			ma_tx = ma.BeginTemporalTx()
 			defer ma_tx.Close()
 			rwtx, err = db.BeginRw(ctx)
@@ -225,7 +247,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
 	require.NoError(t, err)
-	cfg := headerId.SnapshotConfig()
+	cfg := ee.Registry.SnapshotConfig(headerId)
 	entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 2
 	buffer := &bytes.Buffer{}
 
@@ -276,9 +298,9 @@ func TestBuildFiles_Marked(t *testing.T) {
 	require.NoError(t, err)
 
 	firstRootNumNotInSnap := ma_tx.DebugFiles().VisibleFilesMaxRootNum()
-	del, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
+	stat, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, nil, rwtx)
 	require.NoError(t, err)
-	require.Equal(t, del, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
+	require.Equal(t, stat.PruneCount, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
 
 	require.NoError(t, rwtx.Commit())
 	ma_tx = ma.BeginTemporalTx()

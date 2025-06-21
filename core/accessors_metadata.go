@@ -57,6 +57,31 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	return &config, nil
 }
 
+// WriteChainConfig writes the chain config settings to the database.
+func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
+	if cfg == nil {
+		return nil
+	}
+
+	if cfg.Bor != nil {
+		borJSON, err := json.Marshal(cfg.Bor)
+		if err != nil {
+			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
+		}
+		cfg.BorJSON = borJSON
+	}
+
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to JSON encode chain config: %w", err)
+	}
+
+	if err := db.Put(kv.ConfigTable, hash[:], data); err != nil {
+		return fmt.Errorf("failed to store chain config: %w", err)
+	}
+	return nil
+}
+
 func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
 	if err != nil {

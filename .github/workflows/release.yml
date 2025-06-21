@@ -282,12 +282,19 @@ jobs:
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Upload Downloader Torrent Client Status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: torrent-client-status-${{ env.CHAIN }}
+          path: torrent-client-status.txt
+
       - name: Cleanup working directory
         run: rm -drfv *
 
   build-debian-pkg:
     name: Debian packages
-    needs: [ build-release, test-release ]
+    needs: [build-release, test-release]
     if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
     uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
     with:
