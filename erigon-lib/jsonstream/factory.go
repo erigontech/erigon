@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,19 +14,28 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package jsonrpc
+package jsonstream
 
 import (
-	"context"
+	"io"
 
-	"github.com/erigontech/erigon/p2p"
+	jsoniter "github.com/json-iterator/go"
 )
 
-const (
-	// allNodesInfo used in NodeInfo request to receive meta data from all running sentries.
-	allNodesInfo = 0
-)
+const AutoCloseOnError = true
+const InitialBufferSize = 4096
 
-func (api *ErigonImpl) NodeInfo(ctx context.Context) ([]p2p.NodeInfo, error) {
-	return api.ethBackend.NodeInfo(ctx, allNodesInfo)
+func New(out io.Writer) Stream {
+	stream := jsoniter.NewStream(jsoniter.ConfigDefault, out, InitialBufferSize)
+	if AutoCloseOnError {
+		return NewStackStream(stream)
+	}
+	return NewJsoniterStream(stream)
+}
+
+func Wrap(stream *jsoniter.Stream) Stream {
+	if AutoCloseOnError {
+		return NewStackStream(stream)
+	}
+	return NewJsoniterStream(stream)
 }

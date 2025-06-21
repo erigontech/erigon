@@ -153,10 +153,12 @@ const (
 	fetchCheckpointList            = "/checkpoints/list"
 	fetchCheckpointListQueryFormat = "page=%d&limit=%d"
 
-	fetchMilestoneAt      = "/milestone/%d"
-	fetchMilestoneLatest  = "/milestone/latest"
-	fetchMilestoneCountV1 = "/milestone/count"
-	fetchMilestoneCountV2 = "/milestones/count"
+	fetchMilestoneAtV1     = "/milestone/%d"
+	fetchMilestoneLatestV1 = "/milestone/latest"
+	fetchMilestoneAtV2     = "/milestones/%d"
+	fetchMilestoneLatestV2 = "/milestones/latest"
+	fetchMilestoneCountV1  = "/milestone/count"
+	fetchMilestoneCountV2  = "/milestones/count"
 
 	fetchLastNoAckMilestone = "/milestone/lastNoAck"
 	fetchNoAckMilestone     = "/milestone/noAck/%s"
@@ -353,7 +355,7 @@ func (c *HttpClient) FetchCheckpoint(ctx context.Context, number int64) (*Checkp
 			return nil, err
 		}
 
-		return &response.Checkpoint, nil
+		return response.ToCheckpoint(number)
 	}
 
 	response, err := FetchWithRetry[CheckpointResponseV1](ctx, c, url, c.logger)
@@ -387,7 +389,7 @@ func isInvalidMilestoneIndexError(err error) bool {
 
 // FetchMilestone fetches a milestone from heimdall
 func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milestone, error) {
-	url, err := milestoneURL(c.urlString, number)
+	url, err := milestoneURLv1(c.urlString, number)
 	if err != nil {
 		return nil, err
 	}
@@ -419,6 +421,11 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 	}
 
 	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+		url, err := milestoneURLv2(c.urlString, number)
+		if err != nil {
+			return nil, err
+		}
+
 		response, err := FetchWithRetryEx[MilestoneResponseV2](ctx, c, url, isRecoverableError, c.logger)
 		if err != nil {
 			if isInvalidMilestoneIndexError(err) {
@@ -427,7 +434,7 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 			return nil, err
 		}
 
-		return &response.Milestone, nil
+		return response.ToMilestone(number)
 	}
 
 	response, err := FetchWithRetryEx[MilestoneResponseV1](ctx, c, url, isRecoverableError, c.logger)
@@ -761,11 +768,18 @@ func checkpointListURL(urlString string, page uint64, limit uint64) (*url.URL, e
 	return makeURL(urlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormat, page, limit))
 }
 
-func milestoneURL(urlString string, number int64) (*url.URL, error) {
+func milestoneURLv1(urlString string, number int64) (*url.URL, error) {
 	if number == -1 {
-		return makeURL(urlString, fetchMilestoneLatest, "")
+		return makeURL(urlString, fetchMilestoneLatestV1, "")
 	}
-	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAt, number), "")
+	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAtV1, number), "")
+}
+
+func milestoneURLv2(urlString string, number int64) (*url.URL, error) {
+	if number == -1 {
+		return makeURL(urlString, fetchMilestoneLatestV2, "")
+	}
+	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAtV2, number), "")
 }
 
 func lastNoAckMilestoneURL(urlString string) (*url.URL, error) {

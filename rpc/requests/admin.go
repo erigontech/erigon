@@ -19,7 +19,7 @@ package requests
 import (
 	"context"
 
-	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon/p2p"
 )
 
 func (reqGen *requestGenerator) AdminNodeInfo() (p2p.NodeInfo, error) {
