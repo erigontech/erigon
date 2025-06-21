@@ -48,19 +48,20 @@ func TestStateLogger(t *testing.T) {
 				if len(stateDB.journal.entries) != 3 {
 					t.Errorf("Incorrect number of jounal entries expectedBalance: %d, got:%d", 3, len(stateDB.journal.entries))
 				}
-				for i := range stateDB.journal.entries {
-					switch balanceInc := stateDB.journal.entries[i].(type) {
-					case balanceChange:
+				for i, je := range stateDB.journal.entries {
+					switch je.entryType() {
+					case balanceChangeEntry:
 						var expectedPrev *uint256.Int
 						if i == 1 {
 							expectedPrev = uint256.NewInt(0)
 						} else {
 							expectedPrev = uint256.NewInt(2)
 						}
-						if !reflect.DeepEqual(&balanceInc.prev, expectedPrev) {
-							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", common.Address{}, expectedPrev, &balanceInc.prev)
+						prev := je.u256Val
+						if !reflect.DeepEqual(prev, expectedPrev) {
+							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", common.Address{}, expectedPrev, &prev)
 						}
-					case createObjectChange:
+					case createObjectEntry:
 					default:
 						t.Errorf("Invalid journal entry found:  %s", reflect.TypeOf(stateDB.journal.entries[i]))
 					}

@@ -144,9 +144,7 @@ func (so *stateObject) markSelfdestructed() {
 }
 
 func (so *stateObject) touch() {
-	so.db.journal.append(touchChange{
-		account: so.address,
-	})
+	so.db.journal.append(touchChange(so.address))
 	if so.address == ripemd {
 		// Explicitly put it in the dirty-cache, which is otherwise generated from
 		// flattened journals.
@@ -216,11 +214,7 @@ func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) erro
 func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) bool {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
-		so.db.journal.append(fakeStorageChange{
-			account:  &so.address,
-			key:      key,
-			prevalue: so.fakeStorage[key],
-		})
+		so.db.journal.append(fakeStorageChange(so.address, key, so.fakeStorage[key]))
 		so.fakeStorage[key] = value
 		return true
 	}
@@ -246,12 +240,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 	}
 
 	// New value is different, update and journal the change
-	so.db.journal.append(storageChange{
-		account:     &so.address,
-		key:         key,
-		prevalue:    prev,
-		wasCommited: commited,
-	})
+	so.db.journal.append(storageChange(so.address, key, prev, commited))
 
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
 		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
@@ -300,10 +289,7 @@ func (so *stateObject) printTrie() {
 }
 
 func (so *stateObject) SetBalance(amount uint256.Int, reason tracing.BalanceChangeReason) {
-	so.db.journal.append(balanceChange{
-		account: &so.address,
-		prev:    so.data.Balance,
-	})
+	so.db.journal.append(balanceChange(so.address, so.data.Balance))
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
 		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
 	}
@@ -357,11 +343,7 @@ func (so *stateObject) SetCode(codeHash common.Hash, code []byte) error {
 	if err != nil {
 		return err
 	}
-	so.db.journal.append(codeChange{
-		account:  &so.address,
-		prevhash: so.data.CodeHash,
-		prevcode: prevcode,
-	})
+	so.db.journal.append(codeChange(so.address, prevcode, so.data.CodeHash))
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
 		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
 	}
@@ -376,10 +358,7 @@ func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
 }
 
 func (so *stateObject) SetNonce(nonce uint64) {
-	so.db.journal.append(nonceChange{
-		account: &so.address,
-		prev:    so.data.Nonce,
-	})
+	so.db.journal.append(nonceChange(so.address, so.data.Nonce))
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
 		so.db.tracingHooks.OnNonceChange(so.address, so.data.Nonce, nonce)
 	}

@@ -26,28 +26,40 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// journalEntry is a modification entry in the state change journal that can be
-// reverted on demand.
-type journalEntry interface {
-	// revert undoes the changes introduced by this journal entry.
-	revert(*IntraBlockState) error
+type entryType int
 
-	// dirtied returns the Ethereum address modified by this journal entry.
-	dirtied() *common.Address
-}
+const (
+	createObjectEntry entryType = iota
+	addLogEntry
+	touchEntry
+	balanceChangeEntry
+	balanceIncreaseEntry
+	balanceIncreaseTransferEntry
+	nonceChangeEntry
+	resetObjectEntry
+	selfdestructEntry
+	codeChangeEntry
+	storageChangeEntry
+	fakeStorageChangeEntry
+	transientStorageChangeEntry
+	refundEntry
+	accessListAddAccountEntry
+	accessListAddSlotEntry
+)
 
 // journal contains the list of state modifications applied since the last state
 // commit. These are tracked to be able to be reverted in case of an execution
 // exception or revertal request.
 type journal struct {
-	entries []journalEntry         // Current changes tracked by the journal
+	entries []entry                // Current changes tracked by the journal
 	dirties map[common.Address]int // Dirty accounts and the number of changes
 }
 
 // newJournal create a new initialized journal.
 func newJournal() *journal {
 	return &journal{
-		dirties: make(map[common.Address]int),
+		entries: make([]entry, 0, 1024),
+		dirties: map[common.Address]int{},
 	}
 }
 func (j *journal) Reset() {
@@ -56,10 +68,10 @@ func (j *journal) Reset() {
 }
 
 // append inserts a new modification entry to the end of the change journal.
-func (j *journal) append(entry journalEntry) {
+func (j *journal) append(entry entry) {
 	j.entries = append(j.entries, entry)
-	if addr := entry.dirtied(); addr != nil {
-		j.dirties[*addr]++
+	if entry.ops.dirtied() {
+		j.dirties[entry.account]++
 	}
 }
 
@@ -67,13 +79,15 @@ func (j *journal) append(entry journalEntry) {
 // dirty handling too.
 func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 	for i := len(j.entries) - 1; i >= snapshot; i-- {
+		entry := j.entries[i]
 		// Undo the changes made by the operation
-		j.entries[i].revert(statedb)
+		entry.ops.revert(entry, statedb)
 
 		// Drop any dirty tracking induced by the change
-		if addr := j.entries[i].dirtied(); addr != nil {
-			if j.dirties[*addr]--; j.dirties[*addr] == 0 {
-				delete(j.dirties, *addr)
+		if entry.ops.dirtied() {
+			addr := entry.account
+			if j.dirties[addr]--; j.dirties[addr] == 0 {
+				delete(j.dirties, addr)
 			}
 		}
 	}
@@ -93,334 +107,458 @@ func (j *journal) length() int {
 }
 
 type (
-	// Changes to the account trie.
-	createObjectChange struct {
+	ops struct {
+		// revert undoes the changes introduced by this journal entry.
+		revert func(c entry, s *IntraBlockState) error
+		// dirtied returns the Ethereum address modified by this journal entry.
+		dirtied   func() bool
+		entryType func() entryType
+	}
+
+	// journalEntry is a modification entry in the state change journal that can be
+	// reverted on demand.
+	entry struct {
 		account common.Address
-	}
-	resetObjectChange struct {
-		account common.Address
-		prev    *stateObject
-	}
-	selfdestructChange struct {
-		account     *common.Address
-		prev        bool // whether account had already selfdestructed
-		prevbalance uint256.Int
-	}
-
-	// Changes to individual accounts.
-	balanceChange struct {
-		account *common.Address
-		prev    uint256.Int
-	}
-	balanceIncrease struct {
-		account  *common.Address
-		increase uint256.Int
-	}
-	balanceIncreaseTransfer struct {
-		bi *BalanceIncrease
-	}
-	nonceChange struct {
-		account *common.Address
-		prev    uint64
-	}
-	storageChange struct {
-		account     *common.Address
-		key         common.Hash
-		prevalue    uint256.Int
-		wasCommited bool
-	}
-	fakeStorageChange struct {
-		account  *common.Address
-		key      common.Hash
-		prevalue uint256.Int
-	}
-	codeChange struct {
-		account  *common.Address
-		prevcode []byte
-		prevhash common.Hash
-	}
-
-	// Changes to other state values.
-	refundChange struct {
-		prev uint64
-	}
-	addLogChange struct {
-		txIndex int
-	}
-	touchChange struct {
-		account common.Address
-	}
-
-	// Changes to the access list
-	accessListAddAccountChange struct {
-		address common.Address
-	}
-	accessListAddSlotChange struct {
-		address common.Address
-		slot    common.Hash
-	}
-
-	transientStorageChange struct {
-		account  common.Address
-		key      common.Hash
-		prevalue uint256.Int
+		hashVal common.Hash
+		objVal  any
+		u256Val uint256.Int
+		u64Val  uint64
+		ops     *ops
 	}
 )
 
-//type journalEntry2 interface {
-//	createObjectChange | resetObjectChange | selfdestructChange | balanceChange | balanceIncrease | balanceIncreaseTransfer |
-//		nonceChange | storageChange | fakeStorageChange | codeChange |
-//		refundChange | addLogChange | touchChange | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
-//}
-
-func (ch createObjectChange) revert(s *IntraBlockState) error {
-	delete(s.stateObjects, ch.account)
-	delete(s.stateObjectsDirty, ch.account)
-	return nil
+func (c *entry) entryType() entryType {
+	return c.ops.entryType()
 }
 
-func (ch createObjectChange) dirtied() *common.Address {
-	return &ch.account
+var createObjectChangeOps = ops{
+	revert: func(c entry, i *IntraBlockState) error {
+		delete(i.stateObjects, c.account)
+		delete(i.stateObjectsDirty, c.account)
+		return nil
+	},
+	dirtied: func() bool {
+		return true
+	},
+	entryType: func() entryType {
+		return createObjectEntry
+	},
 }
 
-func (ch resetObjectChange) revert(s *IntraBlockState) error {
-	s.setStateObject(ch.account, ch.prev)
-	return nil
-}
-
-func (ch resetObjectChange) dirtied() *common.Address {
-	return nil
-}
-
-func (ch selfdestructChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
-	if err != nil {
-		return err
+// Changes to the account trie.
+func createObjectChange(a common.Address) entry {
+	return entry{
+		account: a,
+		ops:     &createObjectChangeOps,
 	}
-	if obj != nil {
-		obj.selfdestructed = ch.prev
-		obj.setBalance(ch.prevbalance)
-	}
-	if s.versionMap != nil {
-		if obj.original.Balance == ch.prevbalance {
-			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})
-		} else {
-			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
-				v.Val = ch.prev
-			}
-		}
-		s.versionedWrites.Delete(*ch.account, AccountKey{Path: SelfDestructPath})
-	}
-
-	return nil
 }
 
-func (ch selfdestructChange) dirtied() *common.Address {
-	return ch.account
+func resetObjectChange(account common.Address, prev *stateObject) entry {
+	return entry{
+		account: account,
+		objVal:  prev,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				i.setStateObject(c.account, c.objVal.(*stateObject))
+				return nil
+			},
+			dirtied: func() bool {
+				return false
+			},
+			entryType: func() entryType {
+				return resetObjectEntry
+			},
+		},
+	}
+}
+
+func selfdestructChange(account common.Address, prev bool, prevbalance uint256.Int) entry {
+	// whether account had already selfdestructed
+	var u64Val uint64
+	if prev {
+		u64Val = 1
+	}
+	return entry{
+		account: account,
+		u256Val: prevbalance,
+		u64Val:  u64Val,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				obj, err := i.getStateObject(c.account)
+				if err != nil {
+					return err
+				}
+				if obj != nil {
+					obj.selfdestructed = c.u64Val > 0
+					obj.setBalance(c.u256Val)
+				}
+				if i.versionMap != nil {
+					if obj.original.Balance == c.u256Val {
+						i.versionedWrites.Delete(c.account, AccountKey{Path: BalancePath})
+					} else {
+						if v, ok := i.versionedWrites[c.account][AccountKey{Path: BalancePath}]; ok {
+							v.Val = c.u64Val > 0
+						}
+					}
+					i.versionedWrites.Delete(c.account, AccountKey{Path: SelfDestructPath})
+				}
+
+				return nil
+			},
+			dirtied: func() bool {
+				return true
+			},
+			entryType: func() entryType {
+				return selfdestructEntry
+			},
+		},
+	}
 }
 
 var ripemd = common.HexToAddress("0000000000000000000000000000000000000003")
 
-func (ch touchChange) revert(s *IntraBlockState) error {
-	return nil
+var touchChangeOps = ops{
+	revert: func(c entry, i *IntraBlockState) error {
+		return nil
+	},
+	dirtied: func() bool {
+		return true
+	},
+	entryType: func() entryType {
+		return touchEntry
+	},
 }
 
-func (ch touchChange) dirtied() *common.Address { return &ch.account }
-
-func (ch balanceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
-	if err != nil {
-		return err
+func touchChange(a common.Address) entry {
+	return entry{
+		account: a,
+		ops:     &touchChangeOps,
 	}
-	if traceAccount(*ch.account) {
-		fmt.Printf("Revert Balance %x: %d, prev: %d, orig: %d\n", *ch.account, obj.data.Balance, ch.prev, obj.original.Balance)
+}
+
+// Changes to individual accounts.
+func balanceChange(a common.Address, prev uint256.Int) entry {
+	return entry{
+		account: a,
+		u256Val: prev,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				obj, err := i.getStateObject(c.account)
+				if err != nil {
+					return err
+				}
+				if traceAccount(c.account) {
+					fmt.Printf("Revert Balance %x: %d, prev: %d, orig: %d\n", c.account, obj.data.Balance, &c.u256Val, obj.original.Balance)
+				}
+				obj.setBalance(c.u256Val)
+				if i.versionMap != nil {
+					if obj.original.Balance == c.u256Val {
+						i.versionedWrites.Delete(c.account, AccountKey{Path: BalancePath})
+						i.versionMap.Delete(c.account, BalancePath, common.Hash{}, i.txIndex, false)
+					} else {
+						if v, ok := i.versionedWrites[c.account][AccountKey{Path: BalancePath}]; ok {
+							v.Val = c.u256Val
+						}
+					}
+				}
+
+				return nil
+			},
+			dirtied: func() bool {
+				return true
+			},
+			entryType: func() entryType {
+				return balanceChangeEntry
+			},
+		},
 	}
-	obj.setBalance(ch.prev)
-	if s.versionMap != nil {
-		if obj.original.Balance == ch.prev {
-			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})
-			s.versionMap.Delete(*ch.account, BalancePath, common.Hash{}, s.txIndex, false)
-		} else {
-			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
-				v.Val = ch.prev
-			}
-		}
+}
+
+func balanceIncrease(account common.Address, increase uint256.Int) entry {
+	return entry{
+		account: account,
+		u256Val: increase,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				if bi, ok := i.balanceInc[c.account]; ok {
+					bi.increase.Sub(&bi.increase, &c.u256Val)
+					bi.count--
+					if bi.count == 0 {
+						delete(i.balanceInc, c.account)
+					}
+				}
+				return nil
+			},
+			dirtied: func() bool {
+				return true
+			},
+			entryType: func() entryType {
+				return balanceIncreaseEntry
+			},
+		},
 	}
-
-	return nil
 }
 
-func (ch balanceChange) dirtied() *common.Address {
-	return ch.account
-}
-
-func (ch balanceIncrease) revert(s *IntraBlockState) error {
-	if bi, ok := s.balanceInc[*ch.account]; ok {
-		bi.increase.Sub(&bi.increase, &ch.increase)
-		bi.count--
-		if bi.count == 0 {
-			delete(s.balanceInc, *ch.account)
-		}
+func balanceIncreaseTransfer(bi *BalanceIncrease) entry {
+	return entry{
+		objVal: bi,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				c.objVal.(*BalanceIncrease).transferred = false
+				return nil
+			},
+			dirtied: func() bool {
+				return false
+			},
+			entryType: func() entryType {
+				return balanceIncreaseTransferEntry
+			},
+		},
 	}
-	return nil
 }
 
-func (ch balanceIncrease) dirtied() *common.Address {
-	return ch.account
-}
-
-func (ch balanceIncreaseTransfer) dirtied() *common.Address {
-	return nil
-}
-
-func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
-	ch.bi.transferred = false
-	return nil
-}
-func (ch nonceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
-	if err != nil {
-		return err
+func nonceChange(account common.Address, prev uint64) entry {
+	return entry{
+		account: account,
+		u64Val:  prev,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				obj, err := i.getStateObject(c.account)
+				if err != nil {
+					return err
+				}
+				obj.setNonce(c.u64Val)
+				if i.versionMap != nil {
+					if obj.original.Nonce == c.u64Val {
+						i.versionedWrites.Delete(c.account, AccountKey{Path: NoncePath})
+					} else {
+						if v, ok := i.versionedWrites[c.account][AccountKey{Path: NoncePath}]; ok {
+							v.Val = c.u64Val
+						}
+					}
+				}
+				return nil
+			},
+			dirtied: func() bool {
+				return true
+			},
+			entryType: func() entryType {
+				return nonceChangeEntry
+			},
+		},
 	}
-	obj.setNonce(ch.prev)
-	if s.versionMap != nil {
-		if obj.original.Nonce == ch.prev {
-			s.versionedWrites.Delete(*ch.account, AccountKey{Path: NoncePath})
-		} else {
-			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: NoncePath}]; ok {
-				v.Val = ch.prev
-			}
-		}
+}
+
+func codeChange(account common.Address, prevcode []byte, prevhash common.Hash) entry {
+	return entry{
+		account: account,
+		objVal:  prevcode,
+		hashVal: prevhash,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				obj, err := i.getStateObject(c.account)
+				if err != nil {
+					return err
+				}
+				obj.setCode(c.hashVal, c.objVal.([]byte))
+				if i.versionMap != nil {
+					if obj.original.CodeHash == c.hashVal {
+						i.versionedWrites.Delete(c.account, AccountKey{Path: CodePath})
+						i.versionedWrites.Delete(c.account, AccountKey{Path: CodeHashPath})
+					} else {
+						if v, ok := i.versionedWrites[c.account][AccountKey{Path: CodePath}]; ok {
+							v.Val = c.objVal
+						}
+						if v, ok := i.versionedWrites[c.account][AccountKey{Path: CodeHashPath}]; ok {
+							v.Val = c.hashVal
+						}
+					}
+				}
+				return nil
+			},
+			dirtied: func() bool {
+				return true
+			},
+			entryType: func() entryType {
+				return codeChangeEntry
+			},
+		},
 	}
-
-	return nil
 }
 
-func (ch nonceChange) dirtied() *common.Address {
-	return ch.account
-}
-
-func (ch codeChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
-	if err != nil {
-		return err
+func storageChange(account common.Address, key common.Hash, prevalue uint256.Int, wasCommited bool) entry {
+	var u64Val uint64
+	if wasCommited {
+		u64Val = 1
 	}
-	obj.setCode(ch.prevhash, ch.prevcode)
-	if s.versionMap != nil {
-		if obj.original.CodeHash == ch.prevhash {
-			s.versionedWrites.Delete(*ch.account, AccountKey{Path: CodePath})
-			s.versionedWrites.Delete(*ch.account, AccountKey{Path: CodeHashPath})
-		} else {
-			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: CodePath}]; ok {
-				v.Val = ch.prevcode
-			}
-			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: CodeHashPath}]; ok {
-				v.Val = ch.prevhash
-			}
-		}
+	return entry{
+		account: account,
+		hashVal: key,
+		u256Val: prevalue,
+		u64Val:  u64Val,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				obj, err := i.getStateObject(c.account)
+				if err != nil {
+					return err
+				}
+
+				if i.versionMap != nil {
+					if c.u64Val > 0 {
+						i.versionedWrites.Delete(c.account, AccountKey{Path: StatePath, Key: c.hashVal})
+						i.versionMap.Delete(c.account, StatePath, c.hashVal, i.txIndex, false)
+					} else {
+						if v, ok := i.versionedWrites[c.account][AccountKey{Path: StatePath, Key: c.hashVal}]; ok {
+							v.Val = c.u256Val
+						}
+					}
+				}
+				obj.setState(c.hashVal, c.u256Val)
+				return nil
+			},
+			dirtied: func() bool {
+				return true
+			},
+			entryType: func() entryType {
+				return storageChangeEntry
+			},
+		},
 	}
-	return nil
 }
 
-func (ch codeChange) dirtied() *common.Address {
-	return ch.account
-}
-
-func (ch storageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
-	if err != nil {
-		return err
+func fakeStorageChange(account common.Address, key common.Hash, prevalue uint256.Int) entry {
+	return entry{
+		account: account,
+		hashVal: key,
+		u256Val: prevalue,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				obj, err := i.getStateObject(c.account)
+				if err != nil {
+					return err
+				}
+				obj.fakeStorage[c.hashVal] = c.u256Val
+				return nil
+			},
+			dirtied: func() bool {
+				return true
+			},
+			entryType: func() entryType {
+				return fakeStorageChangeEntry
+			},
+		},
 	}
+}
 
-	if s.versionMap != nil {
-		if ch.wasCommited {
-			s.versionedWrites.Delete(*ch.account, AccountKey{Path: StatePath, Key: ch.key})
-			s.versionMap.Delete(*ch.account, StatePath, ch.key, s.txIndex, false)
-		} else {
-			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
-				v.Val = ch.prevalue
-			}
-		}
+func transientStorageChange(account common.Address, key common.Hash, prevalue uint256.Int) entry {
+	return entry{
+		account: account,
+		hashVal: key,
+		u256Val: prevalue,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				i.setTransientState(c.account, c.hashVal, c.u256Val)
+				return nil
+			},
+			dirtied: func() bool {
+				return false
+			},
+			entryType: func() entryType {
+				return transientStorageChangeEntry
+			},
+		},
 	}
-	obj.setState(ch.key, ch.prevalue)
-	return nil
 }
 
-func (ch storageChange) dirtied() *common.Address {
-	return ch.account
-}
-
-func (ch fakeStorageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
-	if err != nil {
-		return err
+// Changes to other state values.
+func refundChange(prev uint64) entry {
+	return entry{
+		u64Val: prev,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				i.refund = c.u64Val
+				return nil
+			},
+			dirtied: func() bool {
+				return false
+			},
+			entryType: func() entryType {
+				return refundEntry
+			},
+		},
 	}
-	obj.fakeStorage[ch.key] = ch.prevalue
-	return nil
 }
 
-func (ch fakeStorageChange) dirtied() *common.Address {
-	return ch.account
-}
-
-func (ch transientStorageChange) revert(s *IntraBlockState) error {
-	s.setTransientState(ch.account, ch.key, ch.prevalue)
-	return nil
-}
-
-func (ch transientStorageChange) dirtied() *common.Address {
-	return nil
-}
-
-func (ch refundChange) revert(s *IntraBlockState) error {
-	s.refund = ch.prev
-	return nil
-}
-
-func (ch refundChange) dirtied() *common.Address {
-	return nil
-}
-
-func (ch addLogChange) revert(s *IntraBlockState) error {
-	if ch.txIndex >= len(s.logs) {
-		panic(fmt.Sprintf("can't revert log index %v, max: %v", ch.txIndex, len(s.logs)-1))
+func addLogChange(txIndex int) entry {
+	return entry{
+		u64Val: uint64(txIndex),
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				txIndex = int(c.u64Val)
+				if txIndex >= len(i.logs) {
+					panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(i.logs)-1))
+				}
+				txnLogs := i.logs[txIndex]
+				i.logs[txIndex] = txnLogs[:len(txnLogs)-1] // revert 1 log
+				if len(i.logs[txIndex]) == 0 {
+					i.logs = i.logs[:len(i.logs)-1] // revert txn
+				}
+				i.logSize--
+				return nil
+			},
+			dirtied: func() bool {
+				return false
+			},
+			entryType: func() entryType {
+				return addLogEntry
+			},
+		},
 	}
-	txnLogs := s.logs[ch.txIndex]
-	s.logs[ch.txIndex] = txnLogs[:len(txnLogs)-1] // revert 1 log
-	if len(s.logs[ch.txIndex]) == 0 {
-		s.logs = s.logs[:len(s.logs)-1] // revert txn
+}
+
+// Changes to the access list
+func accessListAddAccountChange(address common.Address) entry {
+	return entry{
+		account: address,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				/*
+					One important invariant here, is that whenever a (addr, slot) is added, if the
+					addr is not already present, the add causes two journal entries:
+					- one for the address,
+					- one for the (address,slot)
+					Therefore, when unrolling the change, we can always blindly delete the
+					(addr) at this point, since no storage adds can remain when come upon
+					a single (addr) change.
+				*/
+				i.accessList.DeleteAddress(c.account)
+				return nil
+			},
+			dirtied: func() bool {
+				return false
+			},
+			entryType: func() entryType {
+				return accessListAddAccountEntry
+			},
+		},
 	}
-	s.logSize--
-	return nil
 }
 
-func (ch addLogChange) dirtied() *common.Address {
-	return nil
-}
-
-func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
-	/*
-		One important invariant here, is that whenever a (addr, slot) is added, if the
-		addr is not already present, the add causes two journal entries:
-		- one for the address,
-		- one for the (address,slot)
-		Therefore, when unrolling the change, we can always blindly delete the
-		(addr) at this point, since no storage adds can remain when come upon
-		a single (addr) change.
-	*/
-	s.accessList.DeleteAddress(ch.address)
-	return nil
-}
-
-func (ch accessListAddAccountChange) dirtied() *common.Address {
-	return nil
-}
-
-func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
-	s.accessList.DeleteSlot(ch.address, ch.slot)
-	return nil
-}
-
-func (ch accessListAddSlotChange) dirtied() *common.Address {
-	return nil
+func accessListAddSlotChange(address common.Address, slot common.Hash) entry {
+	return entry{
+		account: address,
+		hashVal: slot,
+		ops: &ops{
+			revert: func(c entry, i *IntraBlockState) error {
+				i.accessList.DeleteSlot(c.account, c.hashVal)
+				return nil
+			},
+			dirtied: func() bool {
+				return false
+			},
+			entryType: func() entryType {
+				return accessListAddSlotEntry
+			},
+		},
+	}
 }

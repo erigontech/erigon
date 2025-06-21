@@ -263,7 +263,7 @@ func (sdb *IntraBlockState) Reset() {
 }
 
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
-	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
+	sdb.journal.append(addLogChange(sdb.txIndex))
 	log.TxIndex = uint(sdb.txIndex)
 	log.Index = sdb.logSize
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
@@ -308,14 +308,14 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 
 // AddRefund adds gas to the refund counter
 func (sdb *IntraBlockState) AddRefund(gas uint64) {
-	sdb.journal.append(refundChange{prev: sdb.refund})
+	sdb.journal.append(refundChange(sdb.refund))
 	sdb.refund += gas
 }
 
 // SubRefund removes gas from the refund counter.
 // This method will panic if the refund counter goes below zero
 func (sdb *IntraBlockState) SubRefund(gas uint64) error {
-	sdb.journal.append(refundChange{prev: sdb.refund})
+	sdb.journal.append(refundChange(sdb.refund))
 	if gas > sdb.refund {
 		return errors.New("refund counter below zero")
 	}
@@ -644,10 +644,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 	if sdb.versionMap == nil {
 		// If this account has not been read, add to the balance increment map
 		if _, needAccount := sdb.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
-			sdb.journal.append(balanceIncrease{
-				account:  &addr,
-				increase: amount,
-			})
+			sdb.journal.append(balanceIncrease(addr, amount))
 
 			bi, ok := sdb.balanceInc[addr]
 			if !ok {
@@ -914,11 +911,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr common.Address) (bool, error) {
 		return false, nil
 	}
 	prevBalance := stateObject.Balance()
-	sdb.journal.append(selfdestructChange{
-		account:     &addr,
-		prev:        stateObject.selfdestructed,
-		prevbalance: prevBalance,
-	})
+	sdb.journal.append(selfdestructChange(addr, stateObject.selfdestructed, prevBalance))
 
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
@@ -965,11 +958,7 @@ func (sdb *IntraBlockState) SetTransientState(addr common.Address, key common.Ha
 		return
 	}
 
-	sdb.journal.append(transientStorageChange{
-		account:  addr,
-		key:      key,
-		prevalue: prev,
-	})
+	sdb.journal.append(transientStorageChange(addr, key, prev))
 
 	sdb.setTransientState(addr, key, value)
 }
@@ -1082,7 +1071,7 @@ func (sdb *IntraBlockState) setStateObject(addr common.Address, object *stateObj
 	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
 		object.data.Balance.Add(&object.data.Balance, &bi.increase)
 		bi.transferred = true
-		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
+		sdb.journal.append(balanceIncreaseTransfer(bi))
 	}
 	sdb.stateObjects[addr] = object
 }
@@ -1114,9 +1103,9 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
-		sdb.journal.append(createObjectChange{account: addr})
+		sdb.journal.append(createObjectChange(addr))
 	} else {
-		sdb.journal.append(resetObjectChange{account: addr, prev: previous})
+		sdb.journal.append(resetObjectChange(addr, previous))
 	}
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
@@ -1523,7 +1512,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.
 func (sdb *IntraBlockState) AddAddressToAccessList(addr common.Address) (addrMod bool) {
 	addrMod = sdb.accessList.AddAddress(addr)
 	if addrMod {
-		sdb.journal.append(accessListAddAccountChange{addr})
+		sdb.journal.append(accessListAddAccountChange(addr))
 	}
 	return addrMod
 }
@@ -1536,13 +1525,10 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr common.Address, slot common
 		// scope of 'address' without having the 'address' become already added
 		// to the access list (via call-variant, create, etc).
 		// Better safe than sorry, though
-		sdb.journal.append(accessListAddAccountChange{addr})
+		sdb.journal.append(accessListAddAccountChange(addr))
 	}
 	if slotMod {
-		sdb.journal.append(accessListAddSlotChange{
-			address: addr,
-			slot:    slot,
-		})
+		sdb.journal.append(accessListAddSlotChange(addr, slot))
 	}
 	return addrMod, slotMod
 }
