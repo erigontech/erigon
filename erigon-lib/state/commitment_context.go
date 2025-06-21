@@ -67,9 +67,6 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 		stepSize: sd.StepSize(),
 		txNum:    sd.txNum,
 	}
-	if ctx.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
-		fmt.Printf("[SharedDomainsCommitmentContext] Using concurrent patricia trie\n")
-	}
 	ctx.mainTtx = trieCtx
 	if commitment.COM_WARMUP {
 		fmt.Printf("[SharedDomainsCommitmentContext] Warmup enabled\n")

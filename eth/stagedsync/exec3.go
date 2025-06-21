@@ -764,19 +764,6 @@ Loop:
 					t1, t3 time.Duration
 				)
 
-				for i := 0; i < 16; i++ {
-					// rotx := agg.BeginFilesRo()
-					// rotx := cfg.db.BeginRw(context.Background())
-
-					rotx, err := cfg.db.BeginRo(ctx)
-					if err != nil {
-						return err
-					}
-					defer rotx.Rollback()
-
-					executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
-				}
-
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
@@ -800,6 +787,19 @@ Loop:
 				t2, err := executor.(*serialExecutor).commit(ctx, inputTxNum, outputBlockNum.GetValueUint64(), useExternalTx)
 				if err != nil {
 					return err
+				}
+
+				for i := 0; i < 16; i++ {
+					// rotx := agg.BeginFilesRo()
+					// rotx := cfg.db.BeginRw(context.Background())
+
+					rotx, err := cfg.db.BeginRo(ctx)
+					if err != nil {
+						return err
+					}
+					defer rotx.Rollback()
+
+					executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
 				}
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit

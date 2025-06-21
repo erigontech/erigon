@@ -217,12 +217,12 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			if err != nil {
 				return err
 			}
-			//if pph.mounts[ni].trace {
-			//fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
-			defer func() {
-				fmt.Printf("FOLDED nib [%x] #%d d=%d %v\n", ni, cnt, phnib.depths[0], time.Since(started))
-			}()
-			//}
+			if pph.mounts[ni].trace {
+				//fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
+				defer func() {
+					fmt.Printf("FOLDED nib [%x] #%d d=%d %v\n", ni, cnt, phnib.depths[0], time.Since(started))
+				}()
+			}
 			if cnt == 0 {
 				return nil
 			}
