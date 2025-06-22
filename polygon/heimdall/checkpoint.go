@@ -17,10 +17,12 @@
 package heimdall
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
@@ -145,7 +147,52 @@ type CheckpointResponseV1 struct {
 }
 
 type CheckpointResponseV2 struct {
-	Checkpoint Checkpoint `json:"checkpoint"`
+	Checkpoint struct {
+		Proposer   libcommon.Address `json:"proposer"`
+		StartBlock string            `json:"start_block"`
+		EndBlock   string            `json:"end_block"`
+		RootHash   string            `json:"root_hash"`
+		ChainID    string            `json:"bor_chain_id"`
+		Timestamp  string            `json:"timestamp"`
+	} `json:"checkpoint"`
+}
+
+func (v *CheckpointResponseV2) ToCheckpoint(id int64) (*Checkpoint, error) {
+	r := Checkpoint{
+		Id: CheckpointId(id),
+		Fields: WaypointFields{
+			Proposer: v.Checkpoint.Proposer,
+			ChainID:  v.Checkpoint.ChainID,
+		},
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(v.Checkpoint.RootHash)
+	if err != nil {
+		return nil, err
+	}
+
+	startBlock, err := strconv.Atoi(v.Checkpoint.StartBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	endBlock, err := strconv.Atoi(v.Checkpoint.EndBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Fields.RootHash = libcommon.BytesToHash(decoded)
+	r.Fields.StartBlock = big.NewInt(int64(startBlock))
+	r.Fields.EndBlock = big.NewInt(int64(endBlock))
+
+	timestamp, err := strconv.Atoi(v.Checkpoint.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Fields.Timestamp = uint64(timestamp)
+
+	return &r, nil
 }
 
 type CheckpointCount struct {
