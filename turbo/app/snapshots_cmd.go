@@ -862,7 +862,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
-			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
+			return fmt.Errorf("failed to parse filename %s", info.Name())
 		}
 		from, to := res.From, res.To
 		maxStep = max(maxStep, to)
