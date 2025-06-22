@@ -35,9 +35,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/anacrolix/torrent"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -260,19 +261,65 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		List:  subStages,
 	})
 
+	log.Info("[OtterSync] Starting Ottersync")
+	log.Info(snapshotsync.GreatOtterBanner)
+
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state2.Aggregator)
 	// Download only the snapshots that are for the header chain.
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
+
+	log.Info(fmt.Sprintf("[%s] Syncing header-chain", s.LogPrefix()))
+	if err := snapshotsync.WaitForDownloader(
+		ctx,
+		s.LogPrefix(),
+		cfg.dirs,
+		true, /*headerChain=*/
+		cfg.blobs,
+		cfg.caplinState,
+		cfg.prune,
+		cstate,
+		agg,
+		tx,
+		cfg.blockReader,
+		cfg.chainConfig,
+		cfg.snapshotDownloader,
+		cfg.syncConfig,
+	); err != nil {
 		return err
 	}
+	log.Info(fmt.Sprintf("[%s] Header-chain synced", s.LogPrefix()))
 
 	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true, false); err != nil {
 		return err
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
+	log.Info(fmt.Sprintf("[%s] Syncing remaining snapshots", s.LogPrefix()))
+	if err := snapshotsync.WaitForDownloader(
+		ctx,
+		s.LogPrefix(),
+		cfg.dirs,
+		false, /*headerChain=*/
+		cfg.blobs,
+		cfg.caplinState,
+		cfg.prune,
+		cstate,
+		agg,
+		tx,
+		cfg.blockReader,
+		cfg.chainConfig,
+		cfg.snapshotDownloader,
+		cfg.syncConfig,
+	); err != nil {
+		return err
+	}
+	log.Info(fmt.Sprintf("[%s] Remaining snapshots synced", s.LogPrefix()))
+
+	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
+	// hashes next time.
+	err := downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
+	if err != nil {
+		err = fmt.Errorf("saving snapshot hashes: %w", err)
 		return err
 	}
 

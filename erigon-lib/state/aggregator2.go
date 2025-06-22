@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"io/fs"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -28,9 +29,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 }
 
 func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, salt *uint32, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	err := Compatibility(dirs)
+	err := checkSnapshotsCompatibility(dirs)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
@@ -209,7 +210,7 @@ var Schema = SchemaGen{
 	},
 	CodeDomain: domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compressing Code with keys doesn't show any benefits. Compression of values shows 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
 		Accessors:   AccessorBTree | AccessorExistence,
 		largeValues: true,
@@ -368,7 +369,7 @@ func EnableHistoricalRCache() {
 
 var SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{}
 
-func Compatibility(d datadir.Dirs) error {
+func checkSnapshotsCompatibility(d datadir.Dirs) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
@@ -383,8 +384,10 @@ func Compatibility(d datadir.Dirs) error {
 			if !entry.IsDir() {
 				name := entry.Name()
 				if strings.HasPrefix(name, "v1-") {
-					return errors.New("bad incompatible snapshots with current erigon version. " +
-						"Check twice version or run `erigon seg update-to-new-ver-format` command")
+					return errors.New("The datadir has bad snapshot files or they are " +
+						"incompatible with the current erigon version. If you want to upgrade from an" +
+						"older version, you may run the following to rename files to the " +
+						"new version: `erigon seg update-to-new-ver-format`")
 				}
 				fileInfo, _, _ := snaptype.ParseFileName("", name)
 
@@ -401,8 +404,10 @@ func Compatibility(d datadir.Dirs) error {
 				}
 
 				if currentFileVersion.Major < requiredVersion.Major {
-					return fmt.Errorf("version mismatch: need files at least version %d for file %s to start Erigon "+
-						"properly. Doublecheck the version pls. Probably should downgrade to some version of Erigon later than 3.1", requiredVersion.Major, fileInfo.Name())
+					return fmt.Errorf("snapshot file major version mismatch for file %s, "+
+						" requiredVersion: %d, currentVersion: %d"+
+						" You may want to downgrade to an older version (not older than 3.1)",
+						fileInfo.Name(), requiredVersion.Major, currentFileVersion.Major)
 				}
 			}
 			return nil

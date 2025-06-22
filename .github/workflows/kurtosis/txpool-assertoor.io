@@ -20,6 +20,6 @@ additional_services:
 assertoor_params:
   run_stability_check: false
   run_block_proposal_check: true
-  image: ghcr.io/noku-team/assertoor:latest
+  image: ghcr.io/erigontech/assertoor:latest
   tests:
-  - https://raw.githubusercontent.com/noku-team/assertoor/master/playbooks/dev/tx-pool-check.yaml
+  - https://raw.githubusercontent.com/erigontech/assertoor/master/playbooks/dev/tx-pool-check.yaml

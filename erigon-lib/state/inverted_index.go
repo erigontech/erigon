@@ -1356,6 +1356,15 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger); err != nil {
 		return err
 	}
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		ii.logger.Crit("panic in buildHashMapAccessor", "idxPath", idxPath, "r", r)
+		panic(r)
+	}()
+	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger)
 	if ii.iiCfg.Accessors.Has(AccessorExistence) {
 		if err := buildExistanceFilter(ctx, data, ii.Compression, ii.efAccessorExistenceFilterFilePath(fromStep, toStep), *cfg.Salt, ps); err != nil {
 			return err
