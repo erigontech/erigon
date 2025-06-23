@@ -332,7 +332,16 @@ func (c *HttpClient) FetchSpans(ctx context.Context, page uint64, limit uint64) 
 
 	ctx = withRequestType(ctx, checkpointListRequest)
 
-	response, err := FetchWithRetry[SpanListResponse](ctx, c, url, c.logger)
+	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+		response, err := FetchWithRetry[SpanListResponseV2](ctx, c, url, c.logger)
+		if err != nil {
+			return nil, err
+		}
+
+		return response.ToList()
+	}
+
+	response, err := FetchWithRetry[SpanListResponseV1](ctx, c, url, c.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +383,16 @@ func (c *HttpClient) FetchCheckpoints(ctx context.Context, page uint64, limit ui
 
 	ctx = withRequestType(ctx, checkpointListRequest)
 
-	response, err := FetchWithRetry[CheckpointListResponse](ctx, c, url, c.logger)
+	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+		response, err := FetchWithRetry[CheckpointListResponseV2](ctx, c, url, c.logger)
+		if err != nil {
+			return nil, err
+		}
+
+		return response.ToList()
+	}
+
+	response, err := FetchWithRetry[CheckpointListResponseV1](ctx, c, url, c.logger)
 	if err != nil {
 		return nil, err
 	}
