@@ -29,7 +29,7 @@ type PeerDas interface {
 	IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error)
 	Prune(keepSlotDistance uint64) error
 	UpdateValidatorsCustody(cgc uint64)
-	TryScheduleRecover(blockRoot common.Hash) error
+	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
 }
 
 var (
@@ -47,9 +47,13 @@ type peerdas struct {
 	sentinel      sentinelproto.SentinelClient
 	ethClock      eth_clock.EthereumClock
 	recoverBlobs  chan recoverBlobsRequest
+
+	recoveringMutex sync.Mutex
+	isRecovering    map[common.Hash]bool
 }
 
 func NewPeerDas(
+	ctx context.Context,
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
 	columnStorage blob_storage.DataColumnStorage,
@@ -71,9 +75,12 @@ func NewPeerDas(
 		sentinel:           sentinel,
 		ethClock:           ethClock,
 		recoverBlobs:       make(chan recoverBlobsRequest),
+
+		recoveringMutex: sync.Mutex{},
+		isRecovering:    make(map[common.Hash]bool),
 	}
 	for range numOfBlobRecoveryWorkers {
-		go p.blobsRecoverWorker()
+		go p.blobsRecoverWorker(ctx)
 	}
 	return p, state
 }
@@ -131,18 +138,18 @@ func (d *peerdas) Prune(keepSlotDistance uint64) error {
 	return nil
 }
 
-func (d *peerdas) blobsRecoverWorker() {
-	for toRecover := range d.recoverBlobs {
+func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
+	recover := func(toRecover recoverBlobsRequest) {
 		ctx := context.Background()
 		slot, blockRoot := toRecover.slot, toRecover.blockRoot
 		existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
 		if err != nil {
 			log.Debug("failed to get saved column index", "err", err)
-			continue
+			return
 		}
 		if len(existingColumns) < int(d.beaconConfig.NumberOfColumns+1)/2 {
 			log.Debug("not enough columns to recover", "slot", slot, "blockRoot", blockRoot, "existingColumns", len(existingColumns))
-			continue
+			return
 		}
 
 		// Recover the matrix from the column sidecars
@@ -152,7 +159,7 @@ func (d *peerdas) blobsRecoverWorker() {
 			sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
 			if err != nil {
 				log.Debug("failed to read column sidecar", "err", err)
-				continue
+				return
 			}
 			for i := 0; i < sidecar.Column.Len(); i++ {
 				matrixEntries = append(matrixEntries, cltypes.MatrixEntry{
@@ -170,7 +177,7 @@ func (d *peerdas) blobsRecoverWorker() {
 		blobMatrix, err := peerdasutils.RecoverMatrix(matrixEntries, numberOfBlobs)
 		if err != nil {
 			log.Warn("failed to recover matrix", "err", err, "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
-			continue
+			return
 		}
 
 		// Recover blobs from the matrix
@@ -186,7 +193,7 @@ func (d *peerdas) blobsRecoverWorker() {
 			for i := range len(blobEntries) / 2 {
 				if copied := copy(blob[i*cltypes.BytesPerCell:], blobEntries[i].Cell[:]); copied != cltypes.BytesPerCell {
 					log.Warn("failed to copy cell", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
-					continue
+					return
 				}
 			}
 			// kzg commitment
@@ -196,7 +203,7 @@ func (d *peerdas) blobsRecoverWorker() {
 			proof, err := ckzg.ComputeBlobKZGProof(&ckzgBlob, ckzg.Bytes48(kzgCommitment))
 			if err != nil {
 				log.Warn("failed to compute blob kzg proof", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
-				continue
+				return
 			}
 			copy(kzgProof[:], proof[:])
 			blobSidecar := cltypes.NewBlobSidecar(
@@ -212,14 +219,14 @@ func (d *peerdas) blobsRecoverWorker() {
 		// Save blobs
 		if err := d.blobStorage.WriteBlobSidecars(ctx, blockRoot, blobSidecars); err != nil {
 			log.Warn("failed to write blob sidecars", "err", err, "slot", slot, "blockRoot", blockRoot)
-			continue
+			return
 		}
 
 		// remove column sidecars that are not in our custody group
 		custodyColumns, err := d.state.GetMyCustodyColumns()
 		if err != nil {
 			log.Warn("failed to get my custody columns", "err", err, "slot", slot, "blockRoot", blockRoot)
-			continue
+			return
 		}
 		for _, column := range existingColumns {
 			if _, ok := custodyColumns[cltypes.CustodyIndex(column)]; !ok {
@@ -229,10 +236,44 @@ func (d *peerdas) blobsRecoverWorker() {
 			}
 		}
 	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case toRecover := <-d.recoverBlobs:
+			d.recoveringMutex.Lock()
+			if _, ok := d.isRecovering[toRecover.blockRoot]; ok {
+				d.recoveringMutex.Unlock()
+				continue
+			}
+			d.isRecovering[toRecover.blockRoot] = true
+			d.recoveringMutex.Unlock()
+
+			// check if the blobs are already recovered
+			if count, err := d.blobStorage.KzgCommitmentsCount(context.Background(), toRecover.blockRoot); err == nil && count > 0 {
+				d.recoveringMutex.Lock()
+				delete(d.isRecovering, toRecover.blockRoot)
+				d.recoveringMutex.Unlock()
+				return
+			}
+
+			// recover the blobs
+			recover(toRecover)
+
+			// remove the block from the recovering map
+			d.recoveringMutex.Lock()
+			delete(d.isRecovering, toRecover.blockRoot)
+			d.recoveringMutex.Unlock()
+		}
+	}
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
-	// TODO: implement data recovery
+	d.recoverBlobs <- recoverBlobsRequest{
+		slot:      slot,
+		blockRoot: blockRoot,
+	}
 	return nil
 }
 
