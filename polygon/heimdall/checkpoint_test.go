@@ -17,6 +17,7 @@
 package heimdall
 
 import (
+	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
@@ -24,7 +25,21 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
+	"github.com/stretchr/testify/require"
 )
+
+func TestCheckpointListResponse(t *testing.T) {
+	output := []byte(`{"checkpoint_list": [{"id": "1","proposer": "0x20d8433dc819af087336a725422df4cfbef29710","start_block": "0","end_block": "255","root_hash": "0+EHMZn8iUFWtDMO6qn37fcLQqNUQVbEfL4d7HYrx8E=","bor_chain_id": "2756","timestamp": "1750522061"},{"id": "2","proposer": "0x735de19a997ef33a090c873d1ac27f99d77b843c","start_block": "256","end_block": "511","root_hash": "Hl4oZROMThMttqdzXFvWuELaOI8C3pPiFkQVN0vWUtc=","bor_chain_id": "2756","timestamp": "1750522660"}]}`)
+
+	var v CheckpointListResponseV2
+
+	err := json.Unmarshal(output, &v)
+	require.Nil(t, err)
+
+	list, err := v.ToList()
+	require.Nil(t, err)
+	require.Len(t, list, 2)
+}
 
 func TestCheckpointJsonMarshall(t *testing.T) {
 	heimdalltest.AssertJsonMarshalUnmarshal(t, makeCheckpoint(10, 100))
