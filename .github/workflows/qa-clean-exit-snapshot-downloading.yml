@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   clean-exit-sd-test:
-    runs-on: [self-hosted, qa]
+    runs-on: [self-hosted, qa, long-running]
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa

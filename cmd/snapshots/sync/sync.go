@@ -29,27 +29,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/storage"
-
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/version"
-	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -488,7 +486,7 @@ func (s *torrentSession) Label() string {
 
 func NewTorrentSession(cli *TorrentClient, chain string) *torrentSession {
 	session := &torrentSession{cli, map[string]snapcfg.PreverifiedItem{}}
-	for _, it := range snapcfg.KnownCfg(chain).Preverified {
+	for _, it := range snapcfg.KnownCfg(chain).Preverified.Items {
 		session.items[it.Name] = it
 	}
 

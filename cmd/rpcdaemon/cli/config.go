@@ -148,19 +148,19 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon")
 
-	rootCmd.PersistentFlags().BoolVar(&cfg.HttpServerEnabled, "http.enabled", true, "enable http server")
+	rootCmd.PersistentFlags().BoolVar(&cfg.HttpServerEnabled, "http.enabled", true, "Enable HTTP server")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", nodecfg.DefaultHTTPPort, "HTTP server listening port")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpURL, "http.url", "", "HTTP server listening url. will OVERRIDE http.addr and http.port. will NOT respect http paths. prefix supported are tcp, unix")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", nodecfg.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
-	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Disable http compression")
+	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Enable http compression enabled by default. Use --http.compression=false to disable it")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets - Same port as HTTP[S]")
-	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", false, "Enable Websocket compression (RFC 7692)")
-
-	rootCmd.PersistentFlags().BoolVar(&cfg.HttpsServerEnabled, "https.enabled", false, "enable http server")
+	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", true, "Enable Websocket compression (RFC 7692) enabled by default is Websockets is enabled. Use --ws.compression=false to disable it")
+	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketPort, "ws.port", nodecfg.DefaultWSPort, "rpc WebSocket server listening port")
+	rootCmd.PersistentFlags().BoolVar(&cfg.HttpsServerEnabled, "https.enabled", false, "Enable HTTPS server")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpsListenAddress, "https.addr", nodecfg.DefaultHTTPHost, "rpc HTTPS server listening interface")
-	rootCmd.PersistentFlags().IntVar(&cfg.HttpsPort, "https.port", 0, "rpc HTTPS server listening port. default to http+363 if not set")
+	rootCmd.PersistentFlags().IntVar(&cfg.HttpsPort, "https.port", 0, "rpc HTTPS server listening port. default to http.port + 363 if not set")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpsURL, "https.url", "", "rpc HTTPS server listening url. will OVERRIDE https.addr and https.port. will NOT respect paths. prefix supported are tcp, unix")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpsCertfile, "https.cert", "", "certificate for rpc HTTPS server")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpsKeyFile, "https.key", "", "key file for rpc HTTPS server")
@@ -727,8 +727,9 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	}
 
 	info := []interface{}{
+		"grpc", cfg.GRPCServerEnabled,
+		"http", cfg.HttpServerEnabled,
 		"ws", cfg.WebsocketEnabled,
-		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled,
 	}
 
 	if cfg.SocketServerEnabled {
@@ -776,7 +777,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if err != nil {
 			return fmt.Errorf("could not start separate Websocket RPC api at port %d: %w", cfg.WebsocketPort, err)
 		}
-		info = append(info, "websocket.url", wsAddr)
+		info = append(info, "websocket.url", wsAddr, "ws.compression", cfg.WebsocketCompression)
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -796,12 +797,13 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if err != nil {
 			return fmt.Errorf("could not start RPC api: %w", err)
 		}
-		info = append(info, "http.url", httpAddr)
+		info = append(info, "http.url", httpAddr, "http.compression", cfg.HttpCompression)
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = listener.Shutdown(shutdownCtx)
 			logger.Info("HTTP endpoint closed", "url", httpAddr)
+
 		}()
 	}
 	if cfg.HttpsURL != "" {
@@ -997,7 +999,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
-	engineInfo := []interface{}{"url", engineAddr, "ws", true, "ws.compression", cfg.WebsocketCompression}
+	engineInfo := []interface{}{"url", engineAddr}
 	logger.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
 	return engineListener, engineSrv, engineAddr.String(), nil
