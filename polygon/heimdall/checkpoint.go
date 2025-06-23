@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"strconv"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
@@ -215,13 +216,13 @@ type CheckpointListResponseV1 struct {
 
 type CheckpointListResponseV2 struct {
 	CheckpointList []struct {
-		ID         string         `json:"id"`
-		Proposer   common.Address `json:"proposer"`
-		StartBlock string         `json:"start_block"`
-		EndBlock   string         `json:"end_block"`
-		RootHash   string         `json:"root_hash"`
-		ChainID    string         `json:"bor_chain_id"`
-		Timestamp  string         `json:"timestamp"`
+		ID         string            `json:"id"`
+		Proposer   libcommon.Address `json:"proposer"`
+		StartBlock string            `json:"start_block"`
+		EndBlock   string            `json:"end_block"`
+		RootHash   string            `json:"root_hash"`
+		ChainID    string            `json:"bor_chain_id"`
+		Timestamp  string            `json:"timestamp"`
 	} `json:"checkpoint_list"`
 }
 
