@@ -129,16 +129,13 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 	}
 	// }
 
-	if p.root.trace {
-		fmt.Printf("=========END=ROOT unfold============\n")
-	}
-
 	for nib := range p.mounts {
-		if p.mounts[nib] == nil {
-			panic(fmt.Sprintf("nibble %x is nil", nib))
-		}
 		p.mounts[nib].mountTo(p.root, nib)
 	}
+	if p.root.trace {
+		fmt.Printf("=========ROOT unfolded============\n")
+	}
+
 	return nil
 }
 
