@@ -48,6 +48,8 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
+
+	_ "github.com/erigontech/erigon/polygon" // Register Polygon networks
 )
 
 func init() {

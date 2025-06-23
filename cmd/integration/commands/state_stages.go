@@ -49,6 +49,8 @@ import (
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/shards"
+
+	_ "github.com/erigontech/erigon/polygon" // Register Polygon networks
 )
 
 var stateStages = &cobra.Command{
