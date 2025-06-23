@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/params"
 )
 
 //go:embed allocs
@@ -33,7 +32,7 @@ var allocs embed.FS
 // AmoyGenesisBlock returns the Amoy network genesis block.
 func AmoyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.AmoyChainConfig,
+		Config:     AmoyChainConfig,
 		Nonce:      0,
 		Timestamp:  1700225065,
 		GasLimit:   10000000,
@@ -47,7 +46,7 @@ func AmoyGenesisBlock() *types.Genesis {
 // BorMainnetGenesisBlock returns the Bor Mainnet network genesis block.
 func BorMainnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.BorMainnetChainConfig,
+		Config:     BorMainnetChainConfig,
 		Nonce:      0,
 		Timestamp:  1590824836,
 		GasLimit:   10000000,
@@ -60,7 +59,7 @@ func BorMainnetGenesisBlock() *types.Genesis {
 
 func BorDevnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.BorDevnetChainConfig,
+		Config:     BorDevnetChainConfig,
 		Nonce:      0,
 		Timestamp:  1558348305,
 		GasLimit:   10000000,

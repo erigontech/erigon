@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/chainspec"
 )
 
 // TestCreation tests that different genesis and fork rule combinations result in
@@ -173,7 +174,7 @@ func TestCreation(t *testing.T) {
 		},
 		// Amoy test cases
 		{
-			params.AmoyChainConfig,
+			chainspec.AmoyChainConfig,
 			params.AmoyGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0xbe06a477), Next: 73100}},
@@ -182,7 +183,7 @@ func TestCreation(t *testing.T) {
 		},
 		// Bor mainnet test cases
 		{
-			params.BorMainnetChainConfig,
+			chainspec.BorMainnetChainConfig,
 			params.BorMainnetGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0x0e07e722), Next: 3395000}},

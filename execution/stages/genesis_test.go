@@ -117,7 +117,7 @@ func TestSetupGenesis(t *testing.T) {
 			},
 			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.BorMainnetGenesisHash},
 			wantHash:   params.BorMainnetGenesisHash,
-			wantConfig: params.BorMainnetChainConfig,
+			wantConfig: chainspec.BorMainnetChainConfig,
 		},
 		{
 			name: "custom block in DB, genesis == amoy",
@@ -127,7 +127,7 @@ func TestSetupGenesis(t *testing.T) {
 			},
 			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.AmoyGenesisHash},
 			wantHash:   params.AmoyGenesisHash,
-			wantConfig: params.AmoyChainConfig,
+			wantConfig: chainspec.AmoyChainConfig,
 		},
 		{
 			name: "compatible config in DB",

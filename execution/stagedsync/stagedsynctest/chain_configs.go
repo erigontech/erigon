@@ -20,14 +20,14 @@ import (
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/chainspec"
 )
 
 func BorDevnetChainConfigWithNoBlockSealDelays() *chain.Config {
 	// take care not to mutate global var (shallow copy)
 	var chainConfigCopy chain.Config
-	copier.Copy(&chainConfigCopy, params.BorDevnetChainConfig)
+	copier.Copy(&chainConfigCopy, chainspec.BorDevnetChainConfig)
 	borConfigCopy := *chainConfigCopy.Bor.(*borcfg.BorConfig)
 	borConfigCopy.Period = map[string]uint64{
 		"0": 0,

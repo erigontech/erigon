@@ -23,6 +23,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"path"
 
@@ -30,14 +31,13 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/paths"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 //go:embed chainspecs
 var chainspecs embed.FS
 
-func readChainSpec(filename string) *chain.Config {
-	f, err := chainspecs.Open(filename)
+func ReadChainSpec(fileSys fs.FS, filename string) *chain.Config {
+	f, err := fileSys.Open(filename)
 	if err != nil {
 		panic(fmt.Sprintf("Could not open chainspec for %s: %v", filename, err))
 	}
@@ -48,15 +48,6 @@ func readChainSpec(filename string) *chain.Config {
 	err = decoder.Decode(&spec)
 	if err != nil {
 		panic(fmt.Sprintf("Could not parse chainspec for %s: %v", filename, err))
-	}
-
-	if spec.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		err = json.Unmarshal(spec.BorJSON, borConfig)
-		if err != nil {
-			panic(fmt.Sprintf("Could not parse 'bor' chainspec for %s: %v", filename, err))
-		}
-		spec.Bor = borConfig
 	}
 
 	return spec
@@ -84,16 +75,16 @@ var (
 
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
-	MainnetChainConfig = readChainSpec("chainspecs/mainnet.json")
+	MainnetChainConfig = ReadChainSpec(chainspecs, "chainspecs/mainnet.json")
 
 	// HoleskyChainConfi contains the chain parameters to run a node on the Holesky test network.
-	HoleskyChainConfig = readChainSpec("chainspecs/holesky.json")
+	HoleskyChainConfig = ReadChainSpec(chainspecs, "chainspecs/holesky.json")
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
-	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
+	SepoliaChainConfig = ReadChainSpec(chainspecs, "chainspecs/sepolia.json")
 
 	// HoodiChainConfig contains the chain parameters to run a node on the Hoodi test network.
-	HoodiChainConfig = readChainSpec("chainspecs/hoodi.json")
+	HoodiChainConfig = ReadChainSpec(chainspecs, "chainspecs/hoodi.json")
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Clique consensus.
@@ -113,15 +104,9 @@ var (
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
-	AmoyChainConfig = readChainSpec("chainspecs/amoy.json")
+	GnosisChainConfig = ReadChainSpec(chainspecs, "chainspecs/gnosis.json")
 
-	BorMainnetChainConfig = readChainSpec("chainspecs/bor-mainnet.json")
-
-	BorDevnetChainConfig = readChainSpec("chainspecs/bor-devnet.json")
-
-	GnosisChainConfig = readChainSpec("chainspecs/gnosis.json")
-
-	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
+	ChiadoChainConfig = ReadChainSpec(chainspecs, "chainspecs/chiado.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 )
@@ -150,33 +135,34 @@ func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemor
 	}
 }
 
+var chainConfigByName = make(map[string]*chain.Config)
+var chainConfigByGenesisHash = make(map[common.Hash]*chain.Config)
+
+func init() {
+	chainConfigByName[networkname.Mainnet] = MainnetChainConfig
+	chainConfigByName[networkname.Holesky] = HoleskyChainConfig
+	chainConfigByName[networkname.Sepolia] = SepoliaChainConfig
+	chainConfigByName[networkname.Hoodi] = HoodiChainConfig
+	chainConfigByName[networkname.Gnosis] = GnosisChainConfig
+	chainConfigByName[networkname.Chiado] = ChiadoChainConfig
+	chainConfigByName[networkname.Test] = chain.TestChainConfig
+	chainConfigByName[networkname.Dev] = AllCliqueProtocolChanges
+
+	chainConfigByGenesisHash[MainnetGenesisHash] = MainnetChainConfig
+	chainConfigByGenesisHash[HoleskyGenesisHash] = HoleskyChainConfig
+	chainConfigByGenesisHash[SepoliaGenesisHash] = SepoliaChainConfig
+	chainConfigByGenesisHash[HoodiGenesisHash] = HoodiChainConfig
+	chainConfigByGenesisHash[GnosisGenesisHash] = GnosisChainConfig
+	chainConfigByGenesisHash[ChiadoGenesisHash] = ChiadoChainConfig
+	chainConfigByGenesisHash[TestGenesisHash] = chain.TestChainConfig
+}
+
 func ChainConfigByChainName(chainName string) *chain.Config {
-	switch chainName {
-	case networkname.Mainnet:
-		return MainnetChainConfig
-	case networkname.Dev:
-		return AllCliqueProtocolChanges
-	case networkname.Holesky:
-		return HoleskyChainConfig
-	case networkname.Sepolia:
-		return SepoliaChainConfig
-	case networkname.Hoodi:
-		return HoodiChainConfig
-	case networkname.Amoy:
-		return AmoyChainConfig
-	case networkname.BorMainnet:
-		return BorMainnetChainConfig
-	case networkname.BorDevnet:
-		return BorDevnetChainConfig
-	case networkname.Gnosis:
-		return GnosisChainConfig
-	case networkname.Chiado:
-		return ChiadoChainConfig
-	case networkname.Test:
-		return chain.TestChainConfig
-	default:
-		return nil
-	}
+	return chainConfigByName[chainName]
+}
+
+func RegisterChainConfigByName(chainName string, config *chain.Config) {
+	chainConfigByName[chainName] = config
 }
 
 func GenesisHashByChainName(chain string) *common.Hash {
@@ -207,28 +193,11 @@ func GenesisHashByChainName(chain string) *common.Hash {
 }
 
 func ChainConfigByGenesisHash(genesisHash common.Hash) *chain.Config {
-	switch {
-	case genesisHash == MainnetGenesisHash:
-		return MainnetChainConfig
-	case genesisHash == HoleskyGenesisHash:
-		return HoleskyChainConfig
-	case genesisHash == SepoliaGenesisHash:
-		return SepoliaChainConfig
-	case genesisHash == HoodiGenesisHash:
-		return HoodiChainConfig
-	case genesisHash == AmoyGenesisHash:
-		return AmoyChainConfig
-	case genesisHash == BorMainnetGenesisHash:
-		return BorMainnetChainConfig
-	case genesisHash == BorDevnetGenesisHash:
-		return BorDevnetChainConfig
-	case genesisHash == GnosisGenesisHash:
-		return GnosisChainConfig
-	case genesisHash == ChiadoGenesisHash:
-		return ChiadoChainConfig
-	default:
-		return nil
-	}
+	return chainConfigByGenesisHash[genesisHash]
+}
+
+func RegisterChainConfigByGenesisHash(genesisHash common.Hash, config *chain.Config) {
+	chainConfigByGenesisHash[genesisHash] = config
 }
 
 func NetworkIDByChainName(chain string) uint64 {

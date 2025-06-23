@@ -76,9 +76,9 @@ func DefaultMinerGasLimitByChain(config *Config) uint64 {
 		return DefaultMinerGasLimitHolesky
 	case params.HoodiChainConfig.ChainID.Uint64():
 		return DefaultMinerGasLimitHoodi
-	case params.BorMainnetChainConfig.ChainID.Uint64():
+	case 137:
 		return BorDefaultMinerGasLimit
-	case params.AmoyChainConfig.ChainID.Uint64():
+	case 80002:
 		return DefaultMinerGasLimitAmoy
 	case params.GnosisChainConfig.ChainID.Uint64():
 		return DefaultMinerGasLimitGnosis

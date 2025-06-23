@@ -41,11 +41,11 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/chainspec"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -369,12 +369,12 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 
 func TestValidatorCreate(t *testing.T) {
 	t.Skip("issue #15017")
-	newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
+	newValidator(t, newTestHeimdall(chainspec.BorDevnetChainConfig), map[uint64]*types.Block{})
 }
 
 func TestVerifyHeader(t *testing.T) {
 	t.Skip("issue #15017")
-	v := newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
+	v := newValidator(t, newTestHeimdall(chainspec.BorDevnetChainConfig), map[uint64]*types.Block{})
 
 	chain, err := v.generateChain(1)
 
@@ -400,17 +400,17 @@ func TestVerifyRun(t *testing.T) {
 }
 
 func TestVerifySprint(t *testing.T) {
-	//testVerify(t, 10, 4, int(params.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
+	//testVerify(t, 10, 4, int(chainspec.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func TestVerifySpan(t *testing.T) {
-	//testVerify(t, 10, 4 /*100**/ *int(params.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
+	//testVerify(t, 10, 4 /*100**/ *int(chainspec.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func testVerify(t *testing.T, noValidators int, chainLength int) {
 	log.Root().SetHandler(log.StderrHandler)
 
-	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
+	heimdall := newTestHeimdall(chainspec.BorDevnetChainConfig)
 	blocks := map[uint64]*types.Block{}
 
 	validators := make([]validator, noValidators)
@@ -472,7 +472,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 
 func TestSendBlock(t *testing.T) {
 	t.Skip("issue #15017")
-	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
+	heimdall := newTestHeimdall(chainspec.BorDevnetChainConfig)
 	blocks := map[uint64]*types.Block{}
 
 	s := newValidator(t, heimdall, blocks)

@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/requests"
+
+	_ "github.com/erigontech/erigon/polygon/chainspec" // Register Polygon chains
 )
 
 type NodeArgs struct {
