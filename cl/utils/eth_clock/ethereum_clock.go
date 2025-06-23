@@ -133,18 +133,19 @@ func (t *ethereumClockImpl) GetCurrentEpoch() uint64 {
 }
 
 func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
-
 	currentEpoch := t.GetCurrentEpoch()
 	// Retrieve current fork version.
-	currentForkVersion := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
-	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
-		if currentEpoch >= fork.epoch {
-			currentForkVersion = fork.version
-			continue
+	/*
+		currentForkVersion := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
+		for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
+			if currentEpoch >= fork.epoch {
+				currentForkVersion = fork.version
+				continue
+			}
+			break
 		}
-		break
-	}
-	return t.computeForkDigestForVersion(currentForkVersion)
+		return t.computeForkDigestForVersion(currentForkVersion)*/
+	return t.ComputeForkDigest(currentEpoch)
 }
 
 func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
@@ -239,14 +240,14 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 	// Compute base digest from fork version and genesis validators root
 	baseDigest := computeForkDataRoot(forkVersion, t.genesisValidatorsRoot)
 
-	//if stateVersion < clparams.FuluVersion { // TODO: add back in fulu-devnet2
-	digest = common.Bytes4{}
-	copy(digest[:], baseDigest[:4])
-	return
-	//}
+	if stateVersion < clparams.FuluVersion {
+		digest = common.Bytes4{}
+		copy(digest[:], baseDigest[:4])
+		return
+	}
 
 	// For Fulu and later, XOR base digest with hash of blob parameters
-	/*blobParams := t.beaconCfg.GetBlobParameters(epoch)
+	blobParams := t.beaconCfg.GetBlobParameters(epoch)
 
 	// Hash blob parameters (epoch and max_blobs_per_block)
 	blobParamsBytes := make([]byte, 16)
@@ -260,7 +261,7 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 		digest[i] = baseDigest[i] ^ blobParamsHash[i]
 	}
 
-	return digest, nil*/
+	return digest, nil
 }
 
 func (t *ethereumClockImpl) GenesisValidatorsRoot() common.Hash {
