@@ -44,6 +44,8 @@ const (
 	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
 )
 
+var ErrBlockExceedsMaxRlpSize = errors.New("block exceeds max rlp size")
+
 // A BlockNonce is a 64-bit hash which proves (combined with the
 // mix-hash) that a sufficient amount of computation has been carried
 // out on a block.
@@ -743,6 +745,37 @@ type BodyForStorage struct {
 type RawBlock struct {
 	Header *Header
 	Body   *RawBody
+}
+
+func (r RawBlock) EncodingSize() int {
+	// size of Header
+	headerLen := r.Header.EncodingSize()
+	payloadSize := rlp.ListPrefixLen(headerLen) + headerLen
+
+	// size of Body
+	bodyLen := r.Body.EncodingSize()
+	payloadSize += rlp.ListPrefixLen(bodyLen) + bodyLen
+	return payloadSize
+}
+
+func (r RawBlock) ValidateMaxRlpSize(chainConfig *chain.Config) error {
+	maxRlpSize := chainConfig.GetMaxRlpBlockSize(r.Header.Time)
+	if maxRlpSize == 0 {
+		return nil
+	}
+
+	if blockRlpSize := r.EncodingSize(); blockRlpSize > maxRlpSize {
+		return fmt.Errorf(
+			"%w: blockNum=%d, blockHash=%s, blockRlpSize=%d, maxRlpSize=%d",
+			ErrBlockExceedsMaxRlpSize,
+			r.Header.Number,
+			r.Header.Hash(),
+			blockRlpSize,
+			maxRlpSize,
+		)
+	}
+
+	return nil
 }
 
 func (r RawBlock) AsBlock() (*Block, error) {

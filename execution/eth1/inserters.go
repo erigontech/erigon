@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 )
 
@@ -56,6 +57,11 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		body, err := eth1_utils.ConvertRawBlockBodyFromRpc(block.Body)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
+		}
+		rawBlock := types.RawBlock{Header: header, Body: body}
+		err = rawBlock.ValidateMaxRlpSize(e.config)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot validate block: %s", err)
 		}
 		var parentTd *big.Int
 		height := header.Number.Uint64()
