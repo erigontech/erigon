@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -486,15 +487,16 @@ func (sd *SharedDomains) FlushWithoutCommitment(ctx context.Context, tx kv.RwTx)
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+	fmt.Printf("Flush called with tx %T stack %v\n", tx, dbg.Stack())
 	defer mxFlushTook.ObserveDuration(time.Now())
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
 	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
-	//_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
-	//if err != nil {
-	//	return err
-	//}
+	_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
+	if err != nil {
+		return err
+	}
 
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err

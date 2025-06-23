@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -33,7 +34,7 @@ type SharedDomainsCommitmentContext struct {
 
 	updates      *commitment.Updates
 	patriciaTrie commitment.Trie
-	justRestored atomic.Bool // set to true when commitment trie was just restored from snapshot
+	justRestored atomic.Bool // set to true when commitment trie was just restored from snapshot. First run always sequential.
 
 	trace bool
 }
@@ -51,6 +52,22 @@ func (sdc *SharedDomainsCommitmentContext) SetTxNum(txnum uint64) {
 // If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
 	sdc.mainTtx.SetLimitReadAsOfTxNum(txNum, domainOnly)
+	for i := range sdc.subTtx {
+		if sdc.subTtx[i] != nil {
+			sdc.subTtx[i].SetLimitReadAsOfTxNum(txNum, domainOnly)
+		}
+	}
+}
+
+func newTrieContext(tx kv.TemporalTx, sd *SharedDomains) *TrieContext {
+	return &TrieContext{
+		roTtx:  tx,
+		getter: sd.AsGetter(tx),
+		putter: sd.AsPutDel(tx),
+
+		stepSize: sd.StepSize(),
+		txNum:    sd.TxNum(),
+	}
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
@@ -59,15 +76,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 	}
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
-	trieCtx := &TrieContext{
-		roTtx:  tx,
-		getter: sd.AsGetter(tx),
-		putter: sd.AsPutDel(tx),
-
-		stepSize: sd.StepSize(),
-		txNum:    sd.txNum,
-	}
-	ctx.mainTtx = trieCtx
+	ctx.mainTtx = newTrieContext(tx, sd)
 	if commitment.COM_WARMUP {
 		fmt.Printf("[SharedDomainsCommitmentContext] Warmup enabled\n")
 		ctx.updates.Warmup = func(hashedKey []byte) error {
@@ -77,11 +86,12 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 			return ctx.patriciaTrie.Warmup(ctx.subTtx[hashedKey[0]], hashedKey)
 		}
 	}
-	ctx.patriciaTrie.ResetContext(trieCtx)
+	ctx.patriciaTrie.ResetContext(ctx.mainTtx)
 	return ctx
 }
 
 func (sdc *SharedDomainsCommitmentContext) CloseSubTxns() {
+	fmt.Printf("Closing %d sub transactions; stack %v\n", len(sdc.subTtx), dbg.Stack())
 	for i := range sdc.subTtx {
 		if sdc.subTtx[i] != nil {
 			sdc.subTtx[i].roTtx.Rollback()
@@ -138,26 +148,18 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
+// Set given tx as sub-transaction for patricia trie by index i.
 func (sdc *SharedDomainsCommitmentContext) SetTxn(tx kv.TemporalTx, i uint) {
 	if i >= uint(len(sdc.subTtx)) {
 		fmt.Printf("SetTxn: index %d out of range, max %d\n", i, len(sdc.subTtx)-1)
 		return
 	}
-	trieCtx := &TrieContext{
-		roTtx:  tx,
-		getter: sdc.sharedDomains.AsGetter(tx),
-		putter: sdc.sharedDomains.AsPutDel(tx),
-
-		stepSize: sdc.sharedDomains.StepSize(),
-		txNum:    sdc.sharedDomains.txNum,
-	}
-	sdc.subTtx[i] = trieCtx
-	// sdc.patriciaTrie.ResetContext(trieCtx)
+	sdc.subTtx[i] = newTrieContext(tx, sdc.sharedDomains)
 	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 		if _, ok := tx.(kv.Tx); !ok {
 			panic("SetTxn: tx is not kv.Tx")
 		}
-		sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed).ResetMountContext(trieCtx, i)
+		sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed).ResetMountContext(sdc.subTtx[i], i)
 	}
 }
 
@@ -230,11 +232,13 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 // enable concurrent commitment if we are using concurrent patricia trie and this trie diverges on very top (first branch is straight at nibble 0)
 func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible() error {
 	if pt, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
-		nextConcurrent, err := pt.CanDoConcurrentNext()
+		trieCanConcurrent, err := pt.CanDoConcurrentNext()
 		if err != nil {
 			return err
 		}
-		sdc.updates.SetConcurrentCommitment(nextConcurrent)
+		firstRun := sdc.justRestored.Load()
+		fmt.Printf("enableConcurrentCommitmentIfPossible[%t]: can concurrent %t, firstRun %t\n", trieCanConcurrent && firstRun, trieCanConcurrent, firstRun)
+		sdc.updates.SetConcurrentCommitment(trieCanConcurrent && !firstRun)
 	}
 	return nil
 }

@@ -85,9 +85,9 @@ type HexPatriciaHashed struct {
 	branchEncoder *BranchEncoder
 
 	// configuration part
-	mounted      bool                 // true if this trie is mounted to some root trie
-	mountedNib   int                  // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
-	mountedTries []*HexPatriciaHashed // list of mounted tries to unmount
+	mounted    bool // true if this trie is mounted to some root trie
+	mountedNib int  // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
+	//mountedTries []*HexPatriciaHashed // list of mounted tries to unmount
 
 	memoizationOff bool // if true, do not rely on memoized hashes
 	readOnly       bool // if true, do not allow any modifications to trie branches or trie state itself
@@ -102,8 +102,8 @@ type HexPatriciaHashed struct {
 }
 
 // Clones current trie state to allow concurrent processing.
-func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
-	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx)
+func (hph *HexPatriciaHashed) SpawnSubTrie(forNibble int) *HexPatriciaHashed {
+	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, nil)
 
 	subTrie.mountTo(hph, forNibble)
 	return subTrie
@@ -2202,7 +2202,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	defer func() {
 		logEvery.Stop()
-		log.Debug("commitment finished", "keys", common.PrettyCounter(ki), "spent", time.Since(start), "warmup", COM_WARMUP, "concurrent", len(hph.mountedTries) > 0)
+		log.Debug("commitment finished", "keys", common.PrettyCounter(ki), "spent", time.Since(start), "warmup", COM_WARMUP, "concurrent", hph.Variant() == VariantConcurrentHexPatricia)
 	}()
 
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {

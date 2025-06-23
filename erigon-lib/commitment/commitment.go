@@ -133,7 +133,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	switch tv {
 	case VariantConcurrentHexPatricia:
 		root := NewHexPatriciaHashed(length.Addr, nil)
-		trie := NewConcurrentPatriciaHashed(root, nil)
+		trie := NewConcurrentPatriciaHashed(root)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
@@ -542,6 +542,15 @@ func (branchData BranchData) IsComplete() bool {
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	return ^touchMap&afterMap == 0
+}
+
+// IsFull checks if branchData contains all 16 children
+func (branchData BranchData) IsFull() bool {
+	if len(branchData) < 4 {
+		return false
+	}
+	afterMap := binary.BigEndian.Uint16(branchData[2:])
+	return afterMap == ^uint16(0) // all 16 children are present
 }
 
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1

@@ -698,17 +698,17 @@ Loop:
 
 		mxExecBlocks.Add(1)
 
-		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
+		if true || shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
-			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
+			rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
 
-			//if !bytes.Equal(rh, header.Root.Bytes()) {
-			//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-			//	return errors.New("wrong trie root")
-			//}
+			if !bytes.Equal(rh, header.Root.Bytes()) {
+				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+				return errors.New("wrong trie root")
+			}
 
 			ts += time.Since(start)
 			if shouldGenerateChangesets {
@@ -789,6 +789,7 @@ Loop:
 					return err
 				}
 
+				fmt.Printf("SD reopne txns; stack %v\n", dbg.Stack())
 				for i := 0; i < 16; i++ {
 					// rotx := agg.BeginFilesRo()
 					// rotx := cfg.db.BeginRw(context.Background())
@@ -858,6 +859,18 @@ Loop:
 		}
 		if err = executor.tx().Commit(); err != nil {
 			return err
+		}
+		for i := 0; i < 16; i++ {
+			// rotx := agg.BeginFilesRo()
+			// rotx := cfg.db.BeginRw(context.Background())
+
+			rotx, err := cfg.db.BeginRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer rotx.Rollback()
+
+			executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
 		}
 	}
 
