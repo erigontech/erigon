@@ -14,8 +14,8 @@ import (
 	reflect "reflect"
 
 	common "github.com/erigontech/erigon-lib/common"
-	enode "github.com/erigontech/erigon-p2p/enode"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	enode "github.com/erigontech/erigon/p2p/enode"
 	gomock "go.uber.org/mock/gomock"
 )
 
