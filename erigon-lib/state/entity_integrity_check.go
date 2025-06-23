@@ -48,6 +48,10 @@ func (ue UniversalEntity) String() string {
 	return fmt.Sprintf("unknown:%d", ue)
 }
 
+func (ue UniversalEntity) IsDomain() bool {
+	return ue&0xFFFF == 0x0
+}
+
 var (
 	AccountDomainUniversal    = FromDomain(kv.AccountsDomain)
 	StorageDomainUniversal    = FromDomain(kv.StorageDomain)
