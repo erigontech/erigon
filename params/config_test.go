@@ -25,10 +25,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 )
 
 func TestCheckCompatible(t *testing.T) {
@@ -104,42 +102,6 @@ func TestCheckCompatible(t *testing.T) {
 			t.Errorf("error mismatch:\nstored: %v\nnew: %v\nhead: %v\nerr: %v\nwant: %v", test.stored, test.new, test.head, err, test.wantErr)
 		}
 	}
-}
-
-func TestGetBurntContract(t *testing.T) {
-	// Ethereum
-	assert.Nil(t, MainnetChainConfig.GetBurntContract(0))
-	assert.Nil(t, MainnetChainConfig.GetBurntContract(10_000_000))
-
-	// Gnosis Chain
-	addr := GnosisChainConfig.GetBurntContract(19_040_000)
-	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), *addr)
-	addr = GnosisChainConfig.GetBurntContract(19_040_001)
-	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), *addr)
-
-	// Bor Mainnet
-	addr = BorMainnetChainConfig.GetBurntContract(23850000)
-	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
-	addr = BorMainnetChainConfig.GetBurntContract(23850000 + 1)
-	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
-	addr = BorMainnetChainConfig.GetBurntContract(50523000 - 1)
-	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
-	addr = BorMainnetChainConfig.GetBurntContract(50523000)
-	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x7A8ed27F4C30512326878652d20fC85727401854"), *addr)
-	addr = BorMainnetChainConfig.GetBurntContract(50523000 + 1)
-	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x7A8ed27F4C30512326878652d20fC85727401854"), *addr)
-
-	// Amoy
-	addr = AmoyChainConfig.GetBurntContract(0)
-	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x000000000000000000000000000000000000dead"), *addr)
 }
 
 func TestMainnetBlobSchedule(t *testing.T) {

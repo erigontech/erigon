@@ -42,8 +42,6 @@ import (
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-
-	_ "github.com/erigontech/erigon/polygon/chainspec" // Register Polygon chains
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
