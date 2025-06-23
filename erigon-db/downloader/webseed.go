@@ -30,7 +30,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/hashicorp/go-retryablehttp"
 
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
 )
