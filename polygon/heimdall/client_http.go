@@ -201,7 +201,12 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 				break
 			}
 
-			eventRecords = append(eventRecords, response.EventRecords...)
+			records, err := response.GetEventRecords()
+			if err != nil {
+				return nil, err
+			}
+
+			eventRecords = append(eventRecords, records...)
 
 			if len(response.EventRecords) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
 				break
