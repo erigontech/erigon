@@ -193,7 +193,81 @@ func (s spans) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-type SpanListResponse struct {
+type SpanListResponseV1 struct {
 	Height string `json:"height"`
 	Result spans  `json:"result"`
+}
+
+type SpanListResponseV2 struct {
+	SpanList []struct {
+		ID           string `json:"id"`
+		StartBlock   string `json:"start_block"`
+		EndBlock     string `json:"end_block"`
+		ValidatorSet struct {
+			Validators []validator `json:"validators"`
+			Proposer   validator   `json:"proposer"`
+		} `json:"validator_set"`
+		SelectedProducers []validator `json:"selected_producers"`
+		BorChainID        string      `json:"bor_chain_id"`
+	} `json:"span_list"`
+}
+
+func (v *SpanListResponseV2) ToList() ([]*Span, error) {
+	spans := make([]*Span, 0, len(v.SpanList))
+
+	for i := range v.SpanList {
+		id, err := strconv.Atoi(v.SpanList[i].ID)
+		if err != nil {
+			return nil, err
+		}
+
+		startBlock, err := strconv.Atoi(v.SpanList[i].StartBlock)
+		if err != nil {
+			return nil, err
+		}
+
+		endBlock, err := strconv.Atoi(v.SpanList[i].EndBlock)
+		if err != nil {
+			return nil, err
+		}
+
+		proposer, err := v.SpanList[i].ValidatorSet.Proposer.toValidator()
+		if err != nil {
+			return nil, err
+		}
+
+		s := &Span{
+			Id:         SpanId(id),
+			StartBlock: uint64(startBlock),
+			EndBlock:   uint64(endBlock),
+			ValidatorSet: valset.ValidatorSet{
+				Validators: make([]*valset.Validator, 0, len(v.SpanList[i].ValidatorSet.Validators)),
+				Proposer:   &proposer,
+			},
+			SelectedProducers: make([]valset.Validator, 0, len(v.SpanList[i].SelectedProducers)),
+			ChainID:           v.SpanList[i].BorChainID,
+		}
+
+		for j := range v.SpanList[i].ValidatorSet.Validators {
+			toAppend, err := v.SpanList[i].ValidatorSet.Validators[j].toValidator()
+			if err != nil {
+				return nil, err
+			}
+
+			s.ValidatorSet.Validators = append(s.ValidatorSet.Validators, &toAppend)
+		}
+
+		for j := range v.SpanList[i].SelectedProducers {
+			toAppend, err := v.SpanList[i].SelectedProducers[j].toValidator()
+			if err != nil {
+				return nil, err
+			}
+
+			s.SelectedProducers = append(s.SelectedProducers, toAppend)
+		}
+
+		spans = append(spans, s)
+	}
+
+	return spans, nil
 }
