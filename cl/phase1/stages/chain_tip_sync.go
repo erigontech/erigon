@@ -88,7 +88,7 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 
 	if len(fuluBlocks) > 0 {
 		// download missing column data for the fulu blocks
-		if err = cfg.peerDas.DownloadMissingColumnsByBlocks(ctx, fuluBlocks); err != nil {
+		if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
 			return nil, err
 		}
 	}
