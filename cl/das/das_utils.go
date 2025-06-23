@@ -7,9 +7,9 @@ import (
 	"sort"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/p2p/enode"
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
