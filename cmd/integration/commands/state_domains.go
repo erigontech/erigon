@@ -49,7 +49,7 @@ import (
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
 
-	_ "github.com/erigontech/erigon/polygon" // Register Polygon networks
+	_ "github.com/erigontech/erigon/polygon" // Register Polygon chains
 )
 
 func init() {

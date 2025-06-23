@@ -14,17 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Import this package to register Polygon networks
+// Import this package to register Polygon chains
 package polygon
 
 import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/polygon/genesis"
+	"github.com/erigontech/erigon/polygon/chainspec"
 )
 
 func init() {
-	core.RegisterGenesisBlock(networkname.Amoy, genesis.AmoyGenesisBlock())
-	core.RegisterGenesisBlock(networkname.BorDevnet, genesis.BorDevnetGenesisBlock())
-	core.RegisterGenesisBlock(networkname.BorMainnet, genesis.BorMainnetGenesisBlock())
+	core.RegisterGenesisBlock(networkname.Amoy, chainspec.AmoyGenesisBlock())
+	core.RegisterGenesisBlock(networkname.BorDevnet, chainspec.BorDevnetGenesisBlock())
+	core.RegisterGenesisBlock(networkname.BorMainnet, chainspec.BorMainnetGenesisBlock())
 }
