@@ -26,7 +26,8 @@ on:
 jobs:
 
   Build:
-    runs-on: ubuntu-latest
+    # runs-on: ubuntu-latest
+    runs-on: [devops-01-self-hosted]
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
@@ -68,7 +69,7 @@ jobs:
               export tag_name='2025-03-main-remove-dockerfile';
               export keep_images=1;
               export latest_suffix='';
-              export binaries="erigon downloader evm"
+              export binaries="erigon"
               ;;
             * )
               # use last string after last slash '/' by default if branch contains slash:
