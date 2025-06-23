@@ -765,7 +765,9 @@ func (r RawBlock) ValidateMaxRlpSize(chainConfig *chain.Config) error {
 		return nil
 	}
 
-	if blockRlpSize := r.EncodingSize(); blockRlpSize > maxRlpSize {
+	blockRlpSize := r.EncodingSize()
+	blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
+	if blockRlpSize > maxRlpSize {
 		return fmt.Errorf(
 			"%w: blockNum=%d, blockHash=%s, blockRlpSize=%d, maxRlpSize=%d",
 			ErrBlockExceedsMaxRlpSize,
