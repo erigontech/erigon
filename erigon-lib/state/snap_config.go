@@ -1,4 +1,4 @@
-package entity_extras
+package state
 
 import (
 	"fmt"
@@ -46,7 +46,7 @@ type SnapshotConfig struct {
 	// is aligned to those of the root entity.
 	RootAligned bool
 
-	Integrity IntegrityChecker
+	Integrity *DependencyIntegrityChecker
 
 	Schema SnapNameSchema
 }

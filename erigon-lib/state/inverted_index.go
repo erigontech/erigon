@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -229,14 +228,6 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 	ii.checker = checker
 }
-
-type Accessors = ee.Accessors
-
-const (
-	AccessorBTree     Accessors = ee.AccessorBTree
-	AccessorHashMap   Accessors = ee.AccessorHashMap
-	AccessorExistence Accessors = ee.AccessorExistence
-)
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	var checker func(startTxNum, endTxNum uint64) bool
