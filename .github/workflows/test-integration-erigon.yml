@@ -50,7 +50,7 @@ jobs:
       group: >-
         ${{
           (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('tests-all-erigon-{0}-{1}-{2}', matrix.os, github.ref, github.sha) ||
+          format('tests-all-erigon-{0}-{1}', matrix.os, github.run_id) ||
           format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
         }}
       cancel-in-progress: true
@@ -100,13 +100,13 @@ jobs:
   tests-windows:
     needs: source-of-changes
     concurrency:
-      group: tests-windows-${{ matrix.os }}-${{ github.ref }}
-      cancel-in-progress: >-
+      group: >-
         ${{
-          needs.source-of-changes.outputs.changed_files != 'true' &&
-          !startsWith(github.ref, 'refs/heads/release/') &&
-          github.ref != 'refs/heads/main'
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('tests-all-erigon-{0}-{1}-{2}', matrix.os, github.run_id) ||
+          format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
         }}
+      cancel-in-progress: true
     strategy:
       matrix:
         os: [ windows-2025 ]
