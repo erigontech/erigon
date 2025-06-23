@@ -118,9 +118,8 @@ func ComputeMatrix(blobs [][]byte) ([]cltypes.MatrixEntry, error) {
 }
 
 // RecoverMatrix takes a partial matrix and the total blob count and returns a complete matrix.
-func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([]cltypes.MatrixEntry, error) {
-	numberOfColumns := clparams.GetBeaconConfig().NumberOfColumns
-	matrix := make([]cltypes.MatrixEntry, 0, blobCount*numberOfColumns)
+func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]cltypes.MatrixEntry, error) {
+	matrix := make([][]cltypes.MatrixEntry, 0, blobCount)
 
 	// Process each blob row
 	for blobIndex := uint64(0); blobIndex < blobCount; blobIndex++ {
@@ -141,14 +140,16 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([]clt
 		}
 
 		// Add recovered entries to matrix
-		for cellIndex := range recoveredCells {
-			matrix = append(matrix, cltypes.MatrixEntry{
-				Cell:        recoveredCells[cellIndex],
-				KzgProof:    recoveredProofs[cellIndex],
-				RowIndex:    blobIndex,
-				ColumnIndex: ColumnIndex(cellIndex),
+		blobEntries := make([]cltypes.MatrixEntry, 0, len(recoveredCells))
+		for index := range recoveredCells {
+			blobEntries = append(blobEntries, cltypes.MatrixEntry{
+				Cell:        recoveredCells[index],
+				KzgProof:    recoveredProofs[index],
+				RowIndex:    RowIndex(blobIndex),
+				ColumnIndex: ColumnIndex(index),
 			})
 		}
+		matrix = append(matrix, blobEntries)
 	}
 
 	return matrix, nil
