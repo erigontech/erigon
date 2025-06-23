@@ -1638,6 +1638,11 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		feecapThreshold := uint256.NewInt(0)
 		feecapThreshold.Mul(&found.TxnSlot.FeeCap, uint256.NewInt(100+priceBump))
 		feecapThreshold.Div(feecapThreshold, u256.N100)
+
+		if mt.TxnSlot.Value.Cmp(&found.TxnSlot.Value) > 0 {
+			//Potential latent overdraft attack
+			tipThreshold.Mul(tipThreshold, uint256.NewInt(uint64(p.all.count(mt.TxnSlot.SenderID))))
+		}
 		if mt.TxnSlot.Tip.Cmp(tipThreshold) < 0 || mt.TxnSlot.FeeCap.Cmp(feecapThreshold) < 0 {
 			// Both tip and feecap need to be larger than previously to replace the transaction
 			// In case if the transition is stuck, "poke" it to rebroadcast

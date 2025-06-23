@@ -64,6 +64,14 @@ func (msg *jsonrpcMessage) isNotification() bool {
 	return msg.ID == nil && msg.Method != ""
 }
 
+func (msg *jsonrpcMessage) hasVersion() bool {
+	return msg.Version != ""
+}
+
+func (msg *jsonrpcMessage) hasMethod() bool {
+	return msg.Method != ""
+}
+
 func (msg *jsonrpcMessage) isCall() bool {
 	return msg.hasValidID() && msg.Method != ""
 }
@@ -217,7 +225,10 @@ func (c *jsonCodec) ReadBatch() (messages []*jsonrpcMessage, batch bool, err err
 	if err := c.decode(&rawmsg); err != nil {
 		return nil, false, err
 	}
-	messages, batch = parseMessage(rawmsg)
+	messages, batch, err = parseMessage(rawmsg)
+	if err != nil {
+		return nil, false, err
+	}
 	for i, msg := range messages {
 		if msg == nil {
 			// Message is JSON 'null'. Replace with zero value so it
@@ -256,11 +267,14 @@ func (c *jsonCodec) closed() <-chan interface{} {
 // checks in this function because the raw message has already been syntax-checked when it
 // is called. Any non-JSON-RPC messages in the input return the zero value of
 // jsonrpcMessage.
-func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool) {
+func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 	if !isBatch(raw) {
 		msgs := []*jsonrpcMessage{{}}
-		json.Unmarshal(raw, &msgs[0])
-		return msgs, false
+		err := json.Unmarshal(raw, &msgs[0])
+		if err != nil {
+			return nil, false, err
+		}
+		return msgs, false, nil
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.Token() // skip '['
@@ -269,7 +283,7 @@ func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool) {
 		msgs = append(msgs, new(jsonrpcMessage))
 		dec.Decode(&msgs[len(msgs)-1])
 	}
-	return msgs, true
+	return msgs, true, nil
 }
 
 // isBatch returns true when the first non-whitespace characters is '['

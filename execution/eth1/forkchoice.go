@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/eth/consensuschain"
-	"github.com/erigontech/erigon/eth/stagedsync"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 // This is the range in which we sanity check and potentially fix the canonical chain if it is broken.
