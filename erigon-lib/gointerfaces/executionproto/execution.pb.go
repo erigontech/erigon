@@ -7,13 +7,17 @@
 package executionproto
 
 import (
-	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	"github.com/erigontech/erigon-lib/common"
+
+	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/types"
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 const (
@@ -1051,6 +1055,12 @@ type AssembleBlockRequest struct {
 	SuggestedFeeRecipient *typesproto.H160         `protobuf:"bytes,4,opt,name=suggested_fee_recipient,json=suggestedFeeRecipient,proto3" json:"suggested_fee_recipient,omitempty"`
 	Withdrawals           []*typesproto.Withdrawal `protobuf:"bytes,5,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`                                                            // added in Shapella (EIP-4895)
 	ParentBeaconBlockRoot *typesproto.H256         `protobuf:"bytes,6,opt,name=parent_beacon_block_root,json=parentBeaconBlockRoot,proto3,oneof" json:"parent_beacon_block_root,omitempty"` // added in Dencun (EIP-4788)
+	TxList                *types.Transactions      // CHANGE(taiko)
+	BaseFee               *int64                   // CHANGE(taiko)
+	Beneficiary           common.Address           `json:"beneficiary"  gencodec:"required"`    // CHANGE(taiko)
+	GasLimit              uint64                   `json:"gasLimit"     gencodec:"required"`    // CHANGE(taiko)
+	MixHash               common.Hash              `json:"mixHash"      gencodec:"required"`    // CHANGE(taiko)
+	ExtraData             []byte                   `json:"extraData"       gencodec:"required"` // CHANGE(taiko)
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }

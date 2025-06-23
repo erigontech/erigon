@@ -121,8 +121,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		return header
 	}
 
-	if len(preparedTxns) > 0 {
-		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+	if preparedTxns != nil && len(*preparedTxns) > 0 {
+		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, *preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
 		if err != nil {
 			return err
 		}
@@ -430,6 +430,8 @@ func addTransactionsToMiningBlock(
 	payloadId uint64,
 	logger log.Logger,
 ) (types.Logs, bool, error) {
+	// CHANGE(taiko) : no interrup
+	*interrupt = 0
 	header := current.Header
 	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)

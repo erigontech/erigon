@@ -49,7 +49,7 @@ type MiningBlock struct {
 	Txns             types.Transactions
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
-	PreparedTxns     types.Transactions
+	PreparedTxns     *types.Transactions
 	Requests         types.FlatRequests
 }
 
@@ -183,14 +183,25 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		uncles:    mapset.NewSet[common.Hash](),
 	}
 
-	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
+	gasLimit := &cfg.miner.MiningConfig.GasLimit
+	if cfg.blockBuilderParameters.GasLimit != nil {
+		gasLimit = cfg.blockBuilderParameters.GasLimit
+	}
+
+	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, gasLimit, cfg.blockBuilderParameters.BaseFee)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
 	}
 
 	header.Coinbase = coinbase
+	if cfg.blockBuilderParameters.Beneficiary != nil {
+		header.Coinbase = *cfg.blockBuilderParameters.Beneficiary
+	}
 	header.Extra = cfg.miner.MiningConfig.ExtraData
+	if cfg.blockBuilderParameters.ExtraData != nil {
+		header.Extra = cfg.blockBuilderParameters.ExtraData
+	}
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 	ibs := state.New(state.NewReaderV3(txc.Doms))
@@ -209,12 +220,16 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 
 	if cfg.blockBuilderParameters != nil {
 		header.MixDigest = cfg.blockBuilderParameters.PrevRandao
+		if cfg.blockBuilderParameters.MixHash != nil {
+			header.MixDigest = *cfg.blockBuilderParameters.MixHash
+		}
 		header.ParentBeaconBlockRoot = cfg.blockBuilderParameters.ParentBeaconBlockRoot
 
 		current.ParentHeaderTime = parent.Time
 		current.Header = header
 		current.Uncles = nil
 		current.Withdrawals = cfg.blockBuilderParameters.Withdrawals
+		current.PreparedTxns = cfg.blockBuilderParameters.TxList
 		return nil
 	}
 

@@ -92,10 +92,10 @@ var (
 	HeklaOntakeBlock          = new(big.Int).SetUint64(840_512)
 	MainnetOntakeBlock        = new(big.Int).SetUint64(538_304)
 
-	InternalDevnetPacayaBlock = new(big.Int).SetUint64(10)
+	InternalDevnetPacayaBlock = new(big.Int).SetUint64(0)
 	PreconfDevnetPacayaBlock  = common.Big0
 	HeklaPacayaBlock          = new(big.Int).SetUint64(1_299_888)
-	MainnetPacayaBlock        = new(big.Int).SetUint64(999_999_999_999)
+	MainnetPacayaBlock        = new(big.Int).SetUint64(1_166_000)
 )
 
 var (

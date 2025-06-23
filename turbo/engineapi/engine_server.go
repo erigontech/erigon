@@ -17,6 +17,7 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -639,6 +641,26 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		Timestamp:             timestamp,
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+	}
+
+	// CHANGE(taiko): BlockMetadata contains txlist and other metadata
+	if s.config.Taiko && payloadAttributes.BlockMetadata != nil {
+		req.Timestamp = payloadAttributes.BlockMetadata.Timestamp
+		req.GasLimit = payloadAttributes.BlockMetadata.GasLimit
+		req.MixHash = payloadAttributes.BlockMetadata.MixHash
+		req.Beneficiary = payloadAttributes.BlockMetadata.Beneficiary
+		req.ExtraData = payloadAttributes.BlockMetadata.ExtraData
+		baseFeePerGas := payloadAttributes.BaseFeePerGas.Int64()
+		req.BaseFee = &baseFeePerGas
+
+		// Decode transactions bytes.
+		var txs []types.Transaction
+		if err := types.DecodeTxns(&txs, rlp.NewStream(bytes.NewReader(payloadAttributes.BlockMetadata.TxList), 0)); err != nil {
+			return nil, fmt.Errorf("failed to decode txList: %w", err)
+		}
+		txs[0].MarkAsAnchor()
+		transactions := types.Transactions(txs)
+		req.TxList = &transactions
 	}
 
 	if version >= clparams.CapellaVersion {

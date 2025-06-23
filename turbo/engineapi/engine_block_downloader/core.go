@@ -91,7 +91,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 			return
 		}
 	}
-	_, endBlock, err := e.loadDownloadedHeaders(memoryMutation)
+	startBlock, endBlock, err := e.loadDownloadedHeaders(memoryMutation)
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could not load headers", "err", err)
 		e.status.Store(headerdownload.Idle)
@@ -103,11 +103,12 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 		e.status.Store(headerdownload.Idle)
 		return
 	}
-	headHash, _, _, err := e.chainRW.GetForkChoice(ctx)
-	if err != nil {
-		panic(err)
-	}
-	latestHeader, err := e.blockReader.HeaderByHash(ctx, memoryMutation, headHash)
+	// headHash, _, _, err := e.chainRW.GetForkChoice(ctx)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	latestHeader, err := e.blockReader.HeaderByNumber(ctx, memoryMutation, startBlock-1)
+	// latestHeader, err := e.blockReader.HeaderByHash(ctx, memoryMutation, headHash)
 	if err != nil {
 		panic(err)
 	}
@@ -117,20 +118,28 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 	}
 	e.logger.Info("[EngineBlockDownloader] currentForkChoice:  ", "latestBlockNr", latestBlockNr)
 	targetBlockNr := endBlock
-	increment := uint64(2_000)
+	increment := uint64(500)
+	tx.Rollback()
 	currentBlockNr := latestBlockNr // start from latest fork choice
 	for currentBlockNr < targetBlockNr {
+		tx, err = e.db.BeginRo(ctx)
+		if err != nil {
+			e.logger.Warn("[EngineBlockDownloader] Could not begin tx", "err", err)
+			e.status.Store(headerdownload.Idle)
+			return
+		}
+		memoryMutation = membatchwithdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx)
 		if currentBlockNr+increment >= targetBlockNr { // adjust increment to remainder towards the end
 			increment = targetBlockNr - currentBlockNr
 		}
 		err = e.downloadAndExecLoopIteration(ctx, memoryMutation, currentBlockNr, currentBlockNr+increment)
 		if err != nil {
 			e.logger.Error("[EngineBlockDownloader] failed to execute blocks ", "startBlock", currentBlockNr, "endBlock", currentBlockNr+increment, "err", err)
-			e.status.Store(headerdownload.Idle)
-			return
+			// e.status.Store(headerdownload.Idle)
+			// return
 		}
 		currentBlockNr += increment
-
+		tx.Rollback() // free up the roTx so chaindata doesn't grow
 	}
 	// Can fail, not an issue in this case.
 	e.chainRW.InsertBlockAndWait(ctx, block)

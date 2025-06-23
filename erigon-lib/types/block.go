@@ -1644,6 +1644,10 @@ func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) 
 	return nil
 }
 
+func DecodeTxns(txList *[]Transaction, s *rlp.Stream) error {
+	return decodeTxns(txList, s)
+}
+
 func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
 	var err error
 	if _, err = s.List(); err != nil {

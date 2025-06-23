@@ -569,7 +569,7 @@ func GenerateChainWithReader(config *chain.Config, parent *types.Block, blockRea
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
-func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
+func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64, baseFee *int64) *types.Header {
 	header := types.NewEmptyHeaderForAssembling()
 	header.Root = parent.Root
 	header.ParentHash = parent.Hash()
@@ -580,9 +580,14 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 	parentGasLimit := parent.GasLimit
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if chainConfig.IsLondon(header.Number.Uint64()) {
-		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
-		if !chainConfig.IsLondon(parent.Number.Uint64()) {
-			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+		// CHANGE(taiko): customm basefee from payload attributes
+		if baseFee != nil {
+			header.BaseFee = big.NewInt(*baseFee)
+		} else {
+			header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
+			if !chainConfig.IsLondon(parent.Number.Uint64()) {
+				parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+			}
 		}
 	}
 	if targetGasLimit != nil {

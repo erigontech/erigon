@@ -69,6 +69,12 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
 		Withdrawals:           eth1_utils.ConvertWithdrawalsFromRpc(req.Withdrawals),
+		TxList:                req.TxList,
+		BaseFee:               req.BaseFee,
+		GasLimit:              &req.GasLimit,
+		Beneficiary:           &req.Beneficiary,
+		MixHash:               &req.MixHash,
+		ExtraData:             req.ExtraData,
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
