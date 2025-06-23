@@ -4,10 +4,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // PeerDasState stores the state parameters for peer das. Keep it simple.
