@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"reflect"
 	"sync/atomic"
@@ -760,7 +761,7 @@ func (r RawBlock) EncodingSize() int {
 
 func (r RawBlock) ValidateMaxRlpSize(chainConfig *chain.Config) error {
 	maxRlpSize := chainConfig.GetMaxRlpBlockSize(r.Header.Time)
-	if maxRlpSize == 0 {
+	if maxRlpSize == math.MaxInt {
 		return nil
 	}
 
@@ -840,12 +841,12 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	unclesLen += encodingSizeGeneric(rb.Uncles)
+	unclesLen += EncodingSizeGenericList(rb.Uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if rb.Withdrawals != nil {
-		withdrawalsLen += encodingSizeGeneric(rb.Withdrawals)
+		withdrawalsLen += EncodingSizeGenericList(rb.Withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
@@ -926,12 +927,12 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 	payloadSize += txCountLen
 
 	// size of Uncles
-	unclesLen += encodingSizeGeneric(bfs.Uncles)
+	unclesLen += EncodingSizeGenericList(bfs.Uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bfs.Withdrawals != nil {
-		withdrawalsLen += encodingSizeGeneric(bfs.Withdrawals)
+		withdrawalsLen += EncodingSizeGenericList(bfs.Withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
@@ -1006,16 +1007,16 @@ func (bb Body) EncodingSize() int {
 
 func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
-	txsLen += encodingSizeGeneric(bb.Transactions)
+	txsLen += EncodingSizeGenericList(bb.Transactions)
 	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	unclesLen += encodingSizeGeneric(bb.Uncles)
+	unclesLen += EncodingSizeGenericList(bb.Uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bb.Withdrawals != nil {
-		withdrawalsLen += encodingSizeGeneric(bb.Withdrawals)
+		withdrawalsLen += EncodingSizeGenericList(bb.Withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
@@ -1265,16 +1266,16 @@ func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsL
 	payloadSize += rlp.ListPrefixLen(headerLen) + headerLen
 
 	// size of Transactions
-	txsLen += encodingSizeGeneric(bb.transactions)
+	txsLen += EncodingSizeGenericList(bb.transactions)
 	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	unclesLen += encodingSizeGeneric(bb.uncles)
+	unclesLen += EncodingSizeGenericList(bb.uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bb.withdrawals != nil {
-		withdrawalsLen += encodingSizeGeneric(bb.withdrawals)
+		withdrawalsLen += EncodingSizeGenericList(bb.withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
@@ -1578,7 +1579,7 @@ type rlpEncodable interface {
 	EncodingSize() int
 }
 
-func encodingSizeGeneric[T rlpEncodable](arr []T) (_len int) {
+func EncodingSizeGenericList[T rlpEncodable](arr []T) (_len int) {
 	for _, item := range arr {
 		size := item.EncodingSize()
 		_len += rlp.ListPrefixLen(size) + size

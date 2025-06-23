@@ -19,6 +19,7 @@ package chain
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"sync"
 	"time"
@@ -426,7 +427,7 @@ func (c *Config) GetMaxRlpBlockSize(time uint64) int {
 	if c.IsOsaka(time) {
 		return params.MaxRlpBlockSize
 	}
-	return 0 // means unlimited
+	return math.MaxInt
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
