@@ -722,12 +722,14 @@ func (s txStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteL
 		if eventId >= eventIdTo {
 			break
 		}
-		if err = c1.DeleteCurrent(); err != nil {
-			return deleted, err
-		}
 
 		var event heimdall.EventRecordWithTime
 		if err := event.UnmarshallBytes(v); err != nil {
+			return deleted, err
+		}
+
+		// this needs to be called after v is unmarshalled - it may alter the contents of v
+		if err = c1.DeleteCurrent(); err != nil {
 			return deleted, err
 		}
 
