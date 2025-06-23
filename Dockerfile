@@ -1,4 +1,4 @@
-## A custom Docker image can be built using the following commands:
+## A custom Docker image can be built using some of the following commands:
 ##
 ##   1. docker build -t ${my-local-image-name}:${my-tag} .
 ## 
@@ -21,7 +21,6 @@ ARG BUILDER_IMAGE="golang:1.24-bookworm" \
     UID_ERIGON=1000 \
     GID_ERIGON=1000 \
     BUILD_SILKWORM="false" \
-    VERSION=${VERSION} \
     EXPOSED_PORTS="8545 \
        8551 \
        8546 \
@@ -49,13 +48,13 @@ SHELL ["/bin/bash", "-c"]
 
 WORKDIR /erigon
 
-## Copy helpers:
+## Copy all content of helpers:
 COPY --from=xx / /
 
 COPY go.mod go.sum /erigon/
 COPY ./erigon-lib/go.mod ./erigon-lib/go.sum /erigon/erigon-lib/
 
-## some packages required only for arm64:
+## Make sure required dependencies are installed (some packages required only for arm64):
 RUN xx-apt-get install -y libc6-dev g++ && \
     xx-go mod download && \
     xx-go mod tidy
@@ -112,8 +111,8 @@ LABEL \
     "org.opencontainers.image.created"="${BUILD_DATE}" \
     "org.opencontainers.image.revision"="${VCS_REF}" \
     "org.opencontainers.image.description"="Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier." \
-    "org.opencontainers.image.documentation"="https://erigon.gitbook.io/erigon" \
-    "org.opencontainers.image.source"="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+    "org.opencontainers.image.documentation"="https://docs.erigon.tech/" \
+    "org.opencontainers.image.source"="https://github.com/erigontech/erigon" \
     "org.opencontainers.image.url"="https://github.com/erigontech/erigon/blob/main/Dockerfile"
 
 STOPSIGNAL 2
