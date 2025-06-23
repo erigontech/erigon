@@ -161,10 +161,6 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 			if err != nil {
 				return false, fmt.Errorf("Could not construct block: %w", err)
 			}
-			err = block.ValidateMaxRlpSize(e.chainRW.Config())
-			if err != nil {
-				return false, err
-			}
 			blocksBatch = append(blocksBatch, block)
 			dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)
 
