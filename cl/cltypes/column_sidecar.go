@@ -16,6 +16,7 @@ import (
 const (
 	KzgCommitmentsInclusionProofDepth = 4
 	BytesPerCell                      = 2048
+	BytesPerBlob                      = BytesPerCell * 64
 )
 
 var (
