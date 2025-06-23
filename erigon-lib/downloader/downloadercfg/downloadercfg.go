@@ -348,7 +348,7 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		if err != nil {
 			return nil, err
 		}
-		snapcfg.SetToml(chainName, haveToml)
+		snapcfg.SetToml(chainName, haveToml, true)
 	} else {
 		// Fetch the snapshot hashes from the web
 		fetched, err := snapcfg.LoadRemotePreverified(ctx)
@@ -361,7 +361,9 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 			return nil, fmt.Errorf("remote snapshot hashes was not fetched for chain %s", chainName)
 		}
 	}
-	return snapcfg.KnownCfg(chainName), nil
+	cfg := snapcfg.KnownCfg(chainName)
+	cfg.Local = exists
+	return cfg, nil
 }
 
 // Saves snapshot hashes. This is done only after the full set of snapshots is completed so that
