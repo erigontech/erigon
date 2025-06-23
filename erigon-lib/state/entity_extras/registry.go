@@ -46,7 +46,7 @@ var mu sync.RWMutex
 // dirs: directory where snapshots have to reside
 // salt: for creation of indexes.
 // pre: preverified files are snapshot file lists that gets downloaded initially.
-func RegisterForkable(name string, dirs datadir.Dirs, pre snapcfg.Preverified, options ...EntityIdOption) ForkableId {
+func RegisterForkable(name string, dirs datadir.Dirs, pre snapcfg.PreverifiedItems, options ...EntityIdOption) ForkableId {
 	h := &holder{
 		name: name,
 		dirs: dirs,

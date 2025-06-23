@@ -29,12 +29,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon-p2p/protocols/eth"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/privateapi"
 )
