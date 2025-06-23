@@ -25,9 +25,9 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
