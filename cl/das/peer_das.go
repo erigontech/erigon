@@ -13,11 +13,13 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/kzg"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/p2p/enode"
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
@@ -30,6 +32,10 @@ type PeerDas interface {
 	TryScheduleRecover(blockRoot common.Hash) error
 }
 
+var (
+	numOfBlobRecoveryWorkers = 4
+)
+
 type peerdas struct {
 	peerdasstate.PeerDasStateReader
 	state         *peerdasstate.PeerDasState
@@ -37,14 +43,17 @@ type peerdas struct {
 	rpc           *rpc.BeaconRpcP2P
 	beaconConfig  *clparams.BeaconChainConfig
 	columnStorage blob_storage.DataColumnStorage
+	blobStorage   blob_storage.BlobStorage
 	sentinel      sentinelproto.SentinelClient
 	ethClock      eth_clock.EthereumClock
+	recoverBlobs  chan recoverBlobsRequest
 }
 
 func NewPeerDas(
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
 	columnStorage blob_storage.DataColumnStorage,
+	blobStorage blob_storage.BlobStorage,
 	sentinel sentinelproto.SentinelClient,
 	nodeID enode.ID,
 	ethClock eth_clock.EthereumClock,
@@ -58,12 +67,23 @@ func NewPeerDas(
 		rpc:                rpc,
 		beaconConfig:       beaconConfig,
 		columnStorage:      columnStorage,
+		blobStorage:        blobStorage,
 		sentinel:           sentinel,
 		ethClock:           ethClock,
+		recoverBlobs:       make(chan recoverBlobsRequest),
+	}
+	for range numOfBlobRecoveryWorkers {
+		go p.blobsRecoverWorker()
 	}
 	return p, state
 }
 
+type recoverBlobsRequest struct {
+	slot      uint64
+	blockRoot common.Hash
+}
+
+/*
 func (d *peerdas) p2pTopicsControl(ctx context.Context) {
 	// TODO: check if it's upgraded to fulu by notification
 	ticker := time.NewTicker(time.Second)
@@ -76,7 +96,7 @@ func (d *peerdas) p2pTopicsControl(ctx context.Context) {
 			// check if it's upgraded to fulu
 		}
 	}
-}
+}*/
 
 func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
 	existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
@@ -111,86 +131,109 @@ func (d *peerdas) Prune(keepSlotDistance uint64) error {
 	return nil
 }
 
-func (d *peerdas) TryScheduleRecover(blockRoot common.Hash) error {
-	// TODO: implement data recovery
-	return nil
-}
-
-type downloadRequest struct {
-	beaconConfig  *clparams.BeaconChainConfig
-	mutex         sync.RWMutex
-	downloadTable map[common.Hash]map[uint64]bool
-	cacheRequest  *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]
-}
-
-func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig *clparams.BeaconChainConfig) (*downloadRequest, error) {
-	downloadTable := make(map[common.Hash]map[uint64]bool)
-	for _, block := range blocks {
-		blockRoot, err := block.Block.HashSSZ()
+func (d *peerdas) blobsRecoverWorker() {
+	for toRecover := range d.recoverBlobs {
+		ctx := context.Background()
+		slot, blockRoot := toRecover.slot, toRecover.blockRoot
+		existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
 		if err != nil {
-			return nil, err
+			log.Debug("failed to get saved column index", "err", err)
+			continue
 		}
-		if _, ok := downloadTable[blockRoot]; !ok {
-			downloadTable[blockRoot] = make(map[uint64]bool)
-			for i := range beaconConfig.NumberOfColumns { // try download all columns for now
-				downloadTable[blockRoot][uint64(i)] = true
+		if len(existingColumns) < int(d.beaconConfig.NumberOfColumns+1)/2 {
+			log.Debug("not enough columns to recover", "slot", slot, "blockRoot", blockRoot, "existingColumns", len(existingColumns))
+			continue
+		}
+
+		// Recover the matrix from the column sidecars
+		matrixEntries := []cltypes.MatrixEntry{}
+		var anyColumnSidecar *cltypes.DataColumnSidecar
+		for _, columnIndex := range existingColumns {
+			sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
+			if err != nil {
+				log.Debug("failed to read column sidecar", "err", err)
+				continue
+			}
+			for i := 0; i < sidecar.Column.Len(); i++ {
+				matrixEntries = append(matrixEntries, cltypes.MatrixEntry{
+					Cell:        *sidecar.Column.Get(i),
+					KzgProof:    *sidecar.KzgProofs.Get(i),
+					RowIndex:    uint64(i),
+					ColumnIndex: columnIndex,
+				})
+			}
+			if anyColumnSidecar == nil {
+				anyColumnSidecar = sidecar
+			}
+		}
+		numberOfBlobs := uint64(anyColumnSidecar.Column.Len())
+		blobMatrix, err := peerdasutils.RecoverMatrix(matrixEntries, numberOfBlobs)
+		if err != nil {
+			log.Warn("failed to recover matrix", "err", err, "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
+			continue
+		}
+
+		// Recover blobs from the matrix
+		blobSidecars := make([]*cltypes.BlobSidecar, 0, len(blobMatrix))
+		for blobIndex, blobEntries := range blobMatrix {
+			var (
+				blob           cltypes.Blob
+				kzgCommitment  common.Bytes48
+				kzgProof       common.Bytes48
+				inclusionProof solid.HashVectorSSZ = solid.NewHashVector(cltypes.KzgCommitmentsInclusionProofDepth) // TODO
+			)
+			// blob
+			for i := range len(blobEntries) / 2 {
+				if copied := copy(blob[i*cltypes.BytesPerCell:], blobEntries[i].Cell[:]); copied != cltypes.BytesPerCell {
+					log.Warn("failed to copy cell", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
+					continue
+				}
+			}
+			// kzg commitment
+			copy(kzgCommitment[:], anyColumnSidecar.KzgCommitments.Get(blobIndex)[:])
+			// kzg proof
+			ckzgBlob := ckzg.Blob(blob)
+			proof, err := ckzg.ComputeBlobKZGProof(&ckzgBlob, ckzg.Bytes48(kzgCommitment))
+			if err != nil {
+				log.Warn("failed to compute blob kzg proof", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
+				continue
+			}
+			copy(kzgProof[:], proof[:])
+			blobSidecar := cltypes.NewBlobSidecar(
+				uint64(blobIndex),
+				&blob,
+				kzgCommitment,
+				kzgProof,
+				anyColumnSidecar.SignedBlockHeader,
+				inclusionProof)
+			blobSidecars = append(blobSidecars, blobSidecar)
+		}
+
+		// Save blobs
+		if err := d.blobStorage.WriteBlobSidecars(ctx, blockRoot, blobSidecars); err != nil {
+			log.Warn("failed to write blob sidecars", "err", err, "slot", slot, "blockRoot", blockRoot)
+			continue
+		}
+
+		// remove column sidecars that are not in our custody group
+		custodyColumns, err := d.state.GetMyCustodyColumns()
+		if err != nil {
+			log.Warn("failed to get my custody columns", "err", err, "slot", slot, "blockRoot", blockRoot)
+			continue
+		}
+		for _, column := range existingColumns {
+			if _, ok := custodyColumns[cltypes.CustodyIndex(column)]; !ok {
+				if err := d.columnStorage.RemoveColumnSidecar(ctx, slot, blockRoot, int64(column)); err != nil {
+					log.Warn("failed to remove column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", column)
+				}
 			}
 		}
 	}
-	return &downloadRequest{
-		beaconConfig:  beaconConfig,
-		downloadTable: downloadTable,
-	}, nil
 }
 
-func (d *downloadRequest) removeColumn(blockRoot common.Hash, columnIndex uint64) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	delete(d.downloadTable[blockRoot], columnIndex)
-	if len(d.downloadTable[blockRoot]) == 0 {
-		d.removeBlock(blockRoot)
-	}
-	d.cacheRequest = nil
-}
-
-func (d *downloadRequest) removeBlock(blockRoot common.Hash) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	delete(d.downloadTable, blockRoot)
-	d.cacheRequest = nil
-}
-
-func (d *downloadRequest) isDownloadedOverHalf(blockRoot common.Hash) bool {
-	d.mutex.RLock()
-	defer d.mutex.RUnlock()
-	toDownload, ok := d.downloadTable[blockRoot]
-	if !ok {
-		return true // if the block is not in the download table, it means all columns are already downloaded
-	}
-	return len(toDownload) <= int(d.beaconConfig.NumberOfColumns)/2
-}
-
-func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier] {
-	d.mutex.RLock()
-	defer d.mutex.RUnlock()
-	if d.cacheRequest != nil {
-		return d.cacheRequest
-	}
-	payload := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
-	for blockRoot, columns := range d.downloadTable {
-		id := &cltypes.DataColumnsByRootIdentifier{
-			BlockRoot: blockRoot,
-			Columns:   solid.NewUint64ListSSZ(int(d.beaconConfig.NumberOfColumns)),
-		}
-		for column := range columns {
-			id.Columns.Append(column)
-		}
-		if id.Columns.Length() > 0 {
-			payload.Append(id)
-		}
-	}
-	d.cacheRequest = payload
-	return payload
+func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
+	// TODO: implement data recovery
+	return nil
 }
 
 func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
@@ -285,7 +328,7 @@ mainloop:
 						req.removeColumn(blockRoot, columnIndex)
 						if req.isDownloadedOverHalf(blockRoot) {
 							req.removeBlock(blockRoot)
-							d.TryScheduleRecover(blockRoot)
+							d.TryScheduleRecover(sidecar.SignedBlockHeader.Header.Slot, blockRoot)
 						}
 						return
 					}
@@ -313,7 +356,7 @@ mainloop:
 					req.removeColumn(blockRoot, columnIndex)
 					if req.isDownloadedOverHalf(blockRoot) {
 						req.removeBlock(blockRoot)
-						d.TryScheduleRecover(blockRoot)
+						d.TryScheduleRecover(sidecar.SignedBlockHeader.Header.Slot, blockRoot)
 					}
 				}(sidecar)
 			}
@@ -588,4 +631,89 @@ func (d *peerdas) getExpectedColumnIndex(
 	// TODO: Consider data recovery when having more than 50% of the columns
 	// eg: we can just collect 50% of the columns and then recover the rest
 	return want, nil
+}
+
+// downloadRequest is used to track the download progress of the column sidecars
+type downloadRequest struct {
+	beaconConfig  *clparams.BeaconChainConfig
+	mutex         sync.RWMutex
+	downloadTable map[common.Hash]map[uint64]bool
+	cacheRequest  *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]
+}
+
+func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig *clparams.BeaconChainConfig) (*downloadRequest, error) {
+	downloadTable := make(map[common.Hash]map[uint64]bool)
+	for _, block := range blocks {
+		if block.Version() < clparams.FuluVersion {
+			continue
+		}
+		if block.Block.Body.BlobKzgCommitments.Len() == 0 {
+			continue
+		}
+
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := downloadTable[blockRoot]; !ok {
+			downloadTable[blockRoot] = make(map[uint64]bool)
+			for i := range beaconConfig.NumberOfColumns { // try download all columns for now
+				downloadTable[blockRoot][uint64(i)] = true
+			}
+		}
+	}
+	return &downloadRequest{
+		beaconConfig:  beaconConfig,
+		downloadTable: downloadTable,
+	}, nil
+}
+
+func (d *downloadRequest) removeColumn(blockRoot common.Hash, columnIndex uint64) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	delete(d.downloadTable[blockRoot], columnIndex)
+	if len(d.downloadTable[blockRoot]) == 0 {
+		d.removeBlock(blockRoot)
+	}
+	d.cacheRequest = nil
+}
+
+func (d *downloadRequest) removeBlock(blockRoot common.Hash) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	delete(d.downloadTable, blockRoot)
+	d.cacheRequest = nil
+}
+
+func (d *downloadRequest) isDownloadedOverHalf(blockRoot common.Hash) bool {
+	d.mutex.RLock()
+	defer d.mutex.RUnlock()
+	toDownload, ok := d.downloadTable[blockRoot]
+	if !ok {
+		return true // if the block is not in the download table, it means all columns are already downloaded
+	}
+	return len(toDownload) <= int(d.beaconConfig.NumberOfColumns)/2
+}
+
+func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier] {
+	d.mutex.RLock()
+	defer d.mutex.RUnlock()
+	if d.cacheRequest != nil {
+		return d.cacheRequest
+	}
+	payload := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
+	for blockRoot, columns := range d.downloadTable {
+		id := &cltypes.DataColumnsByRootIdentifier{
+			BlockRoot: blockRoot,
+			Columns:   solid.NewUint64ListSSZ(int(d.beaconConfig.NumberOfColumns)),
+		}
+		for column := range columns {
+			id.Columns.Append(column)
+		}
+		if id.Columns.Length() > 0 {
+			payload.Append(id)
+		}
+	}
+	d.cacheRequest = payload
+	return payload
 }
