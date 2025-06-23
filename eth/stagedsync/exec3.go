@@ -789,19 +789,19 @@ Loop:
 					return err
 				}
 
-				fmt.Printf("SD reopne txns; stack %v\n", dbg.Stack())
-				for i := 0; i < 16; i++ {
-					// rotx := agg.BeginFilesRo()
-					// rotx := cfg.db.BeginRw(context.Background())
+				fmt.Printf("SD reopens txns after commit; stack %v\n", dbg.Stack())
+				// for i := 0; i < 16; i++ {
+				// 	// rotx := agg.BeginFilesRo()
+				// 	// rotx := cfg.db.BeginRw(context.Background())
 
-					rotx, err := cfg.db.BeginRo(ctx)
-					if err != nil {
-						return err
-					}
-					defer rotx.Rollback()
+				// 	rotx, err := cfg.db.BeginRo(ctx)
+				// 	if err != nil {
+				// 		return err
+				// 	}
+				// 	defer rotx.Rollback()
 
-					executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
-				}
+				// 	executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
+				// }
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
 				if !execStage.CurrentSyncCycle.IsInitialCycle {

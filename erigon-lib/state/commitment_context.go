@@ -52,22 +52,6 @@ func (sdc *SharedDomainsCommitmentContext) SetTxNum(txnum uint64) {
 // If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
 	sdc.mainTtx.SetLimitReadAsOfTxNum(txNum, domainOnly)
-	for i := range sdc.subTtx {
-		if sdc.subTtx[i] != nil {
-			sdc.subTtx[i].SetLimitReadAsOfTxNum(txNum, domainOnly)
-		}
-	}
-}
-
-func newTrieContext(tx kv.TemporalTx, sd *SharedDomains) *TrieContext {
-	return &TrieContext{
-		roTtx:  tx,
-		getter: sd.AsGetter(tx),
-		putter: sd.AsPutDel(tx),
-
-		stepSize: sd.StepSize(),
-		txNum:    sd.TxNum(),
-	}
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
@@ -76,7 +60,15 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 	}
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
-	ctx.mainTtx = newTrieContext(tx, sd)
+	trieCtx := &TrieContext{
+		roTtx:  tx,
+		getter: sd.AsGetter(tx),
+		putter: sd.AsPutDel(tx),
+
+		stepSize: sd.StepSize(),
+		txNum:    sd.txNum,
+	}
+	ctx.mainTtx = trieCtx
 	if commitment.COM_WARMUP {
 		fmt.Printf("[SharedDomainsCommitmentContext] Warmup enabled\n")
 		ctx.updates.Warmup = func(hashedKey []byte) error {
@@ -86,7 +78,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 			return ctx.patriciaTrie.Warmup(ctx.subTtx[hashedKey[0]], hashedKey)
 		}
 	}
-	ctx.patriciaTrie.ResetContext(ctx.mainTtx)
+	ctx.patriciaTrie.ResetContext(trieCtx)
 	return ctx
 }
 
@@ -148,18 +140,26 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
-// Set given tx as sub-transaction for patricia trie by index i.
 func (sdc *SharedDomainsCommitmentContext) SetTxn(tx kv.TemporalTx, i uint) {
 	if i >= uint(len(sdc.subTtx)) {
 		fmt.Printf("SetTxn: index %d out of range, max %d\n", i, len(sdc.subTtx)-1)
 		return
 	}
-	sdc.subTtx[i] = newTrieContext(tx, sdc.sharedDomains)
+	trieCtx := &TrieContext{
+		roTtx:  tx,
+		getter: sdc.sharedDomains.AsGetter(tx),
+		putter: sdc.sharedDomains.AsPutDel(tx),
+
+		stepSize: sdc.sharedDomains.StepSize(),
+		txNum:    sdc.sharedDomains.txNum,
+	}
+	sdc.subTtx[i] = trieCtx
+	// sdc.patriciaTrie.ResetContext(trieCtx)
 	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 		if _, ok := tx.(kv.Tx); !ok {
 			panic("SetTxn: tx is not kv.Tx")
 		}
-		sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed).ResetMountContext(sdc.subTtx[i], i)
+		sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed).ResetMountContext(trieCtx, i)
 	}
 }
 

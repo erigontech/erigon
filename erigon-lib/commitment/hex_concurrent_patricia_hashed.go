@@ -15,7 +15,7 @@ import (
 )
 
 // if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
-func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
+func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) bool {
 	hph.Reset()
 
 	hph.root = root.root
@@ -35,15 +35,19 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.mounted = true
 	//root.mountedTries = append(root.mountedTries, hph) // TODO clean up
 
+	shouldSequential := false
+
 	for row := 0; row <= hph.activeRows; row++ {
 		for nib := 0; nib < len(hph.grid[row]); nib++ {
 			hph.grid[row][nib] = root.grid[row][nib]
 			if nib == nibble && hph.grid[row][nib].IsEmpty() {
+				shouldSequential = true
 				fmt.Printf("mountTo: TOP branch nibble %d is empty, skipping\n", nib)
 				// should set non-concurrent commitmetn?
 			}
 		}
 	}
+	return shouldSequential
 }
 
 type ConcurrentPatriciaHashed struct {
@@ -115,7 +119,7 @@ func (p *ConcurrentPatriciaHashed) foldNibble(nib int) error {
 	return nil
 }
 
-func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
+func (p *ConcurrentPatriciaHashed) unfoldRoot() (bool, error) {
 	if p.root.trace {
 		fmt.Printf("=============ROOT unfold============\n")
 	}
@@ -124,19 +128,21 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 	//for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
 	if unfolding := p.root.needUnfolding(emptyPrefix); unfolding > 0 {
 		if err := p.root.unfold(emptyPrefix, unfolding); err != nil {
-			return fmt.Errorf("unfold: %w", err)
+			return false, fmt.Errorf("unfold: %w", err)
 		}
 	}
 	// }
 
+	var shouldSeq bool
 	for nib := range p.mounts {
-		p.mounts[nib].mountTo(p.root, nib)
+		if p.mounts[nib].mountTo(p.root, nib) {
+			shouldSeq = true
+		}
 	}
 	if p.root.trace {
 		fmt.Printf("=========ROOT unfolded============\n")
 	}
-
-	return nil
+	return shouldSeq, nil
 }
 
 func (p *ConcurrentPatriciaHashed) Close() {
@@ -168,14 +174,21 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		return nil, errors.New("sortPerNibble disabled")
 	}
 
-	if err := pph.unfoldRoot(); err != nil {
+	shouldSeq, err := pph.unfoldRoot()
+	if err != nil {
 		return nil, err
+	}
+
+	concurrency := 16
+	if shouldSeq {
+		fmt.Printf("Reset || to sequential mode\n")
+		concurrency = 1
 	}
 
 	clear(t.keys)
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(16)
+	g.SetLimit(concurrency)
 	processed := new(atomic.Uint64)
 	started := time.Now()
 	logEvery := time.NewTicker(time.Second * 20)
@@ -189,6 +202,10 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			n := ni
 			nib := t.nibbles[n]
 			phnib := pph.mounts[n]
+			if shouldSeq {
+				phnib = pph.root // if sequential, use root trie
+			}
+
 			thisNib := byte(ni)
 			started := time.Now()
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -217,13 +234,10 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 					fmt.Printf("FOLDED nib [%x] #%d d=%d %v\n", ni, cnt, phnib.depths[0], time.Since(started))
 				}()
 			}
-			if cnt == 0 {
+			if cnt == 0 || shouldSeq {
 				return nil
 			}
-			if err = pph.foldNibble(ni); err != nil {
-				return err
-			}
-			return nil
+			return pph.foldNibble(ni)
 		})
 	}
 	go func() {

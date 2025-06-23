@@ -190,7 +190,7 @@ type HasDiff interface {
 // if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
 // if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(db kv.TemporalRwDB, tx kv.RwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
@@ -284,6 +284,15 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	}
 	txc := wrap.NewTxContainer(tx, fv.sharedDom)
 
+	for i := 0; i < 16; i++ {
+		ttx, err := db.BeginTemporalRo(fv.ctx)
+		if err != nil {
+			criticalError = fmt.Errorf("ForkValidator.ValidatePayload: failed to begin temporal read-only transaction: %w", err)
+			return
+		}
+		fv.sharedDom.SetTxn(ttx, uint(i))
+	}
+
 	fv.extendingForkNotifications = shards.NewNotifications(nil)
 	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
 }
@@ -319,6 +328,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 	}
+	fv.sharedDom.GetCommitmentContext().CloseSubTxns()
 	fv.timingsCache.Add(header.Hash(), BlockTimings{time.Since(start), 0})
 
 	latestValidHash = header.Hash()
