@@ -22,6 +22,8 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/params"
+
+	_ "github.com/erigontech/erigon/polygon/chainspec" // Register Polygon chains
 )
 
 var (

@@ -1,4 +1,30 @@
-package params
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package chainspec
+
+import (
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/params"
+)
+
+var BorMainnetBootnodes = []string{
+	"enode://b8f1cc9c5d4403703fbf377116469667d2b1823c0daf16b7250aa576bacf399e42c3930ccfcb02c5df6879565a2b8931335565f0e8d3f8e72385ecf4a4bf160a@3.36.224.80:30303",
+	"enode://8729e0c825f3d9cad382555f3e46dcff21af323e89025a0e6312df541f4a9e73abfa562d64906f5e59c51fe6f0501b3e61b07979606c56329c020ed739910759@54.194.245.5:30303",
+}
 
 var AmoyBootnodes = []string{
 	// official
@@ -86,4 +112,12 @@ var AmoyBootnodes = []string{
 	"enode://80e1c02f25076c07068f2f5dfdd7b95099378028dafa22721b5df880834d92506b56c7c96097a61a8a3832cdea714b9515895701422bb89524482d9a64dc0370@103.224.117.213:30304",
 	"enode://f5e68b579adfd18b3cff3f1797eec8d68ac1b3853dcbd84cd5f5849094eb09ee90839c092e98d36832031256185049843d5a6ba5b39140ba321c96a7b4ae1aa0@45.43.19.48:30302",
 	"enode://fb5bf768c9ac9b1eaafa59f5a534de6afc2320c8f865b7ba7e00becf52c0b878d2d8ec934449c550a9c43fda858d1702a1a9c2de025387c6ee58a8069339d84d@34.47.77.183:30303",
+}
+
+func init() {
+	params.RegisterBootnodeURLsByGenesisHash(params.BorMainnetGenesisHash, BorMainnetBootnodes)
+	params.RegisterBootnodeURLsByGenesisHash(params.AmoyGenesisHash, AmoyBootnodes)
+
+	params.RegisterBootnodeURLsByChainName(networkname.BorMainnet, BorMainnetBootnodes)
+	params.RegisterBootnodeURLsByChainName(networkname.Amoy, AmoyBootnodes)
 }
