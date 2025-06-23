@@ -137,9 +137,9 @@ jobs:
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION_LATEST }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
-          --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+          --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}/Dockerfile" \
+          --label org.opencontainers.image.documentation="https://docs.erigon.tech/" \
+          --label org.opencontainers.image.source="https://github.com/erigontech/erigon" \
           --label org.opencontainers.image.version=${{ steps.getCommitId.outputs.id }} \
           --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.id }} \
           --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short_commit_id }} \
@@ -147,7 +147,7 @@ jobs:
           --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
           --push \
           --platform linux/amd64,linux/arm64 .
-          echo "Docker build done"
+          echo "Docker build and push done"
 
       - name: export and print docker build tag, cleanup old docker images
         env:
