@@ -48,8 +48,8 @@ on:
 jobs:
 
   build-release:
-    runs-on: ubuntu-latest
-    # runs-on: [devops-01-self-hosted]
+    #runs-on: ubuntu-latest
+    runs-on: [devops-01-self-hosted]
     #runs-on: ubuntu-latest-devops-xxlarge
     timeout-minutes: 70
     name: Create git tag, build and publish Release Artifacts
