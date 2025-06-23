@@ -93,7 +93,7 @@ func BaseCaseMultiRoutines(t *testing.T) kv.RwDB {
 	for i := 0; i < 4; i++ {
 		ttx, err := db.BeginRo(context.Background())
 		require.NoError(t, err)
-		i = i
+		i := i
 
 		fmt.Printf("Starting routine %d\n", i)
 		wg.Add(1)

@@ -26,7 +26,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -960,7 +959,7 @@ type Updates struct {
 	hasher keyHasher
 	keys   map[string]struct{}    // plain keys to keep only unique keys in etl
 	Warmup func(key []byte) error // function to Warmup the key
-	mu     sync.RWMutex
+
 	etl    *etl.Collector            // all-in-one collector
 	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
 	ku     map[string]*KeyUpdate
