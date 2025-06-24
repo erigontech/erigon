@@ -749,13 +749,9 @@ type RawBlock struct {
 }
 
 func (r RawBlock) EncodingSize() int {
-	// size of Header
 	headerLen := r.Header.EncodingSize()
 	payloadSize := rlp.ListPrefixLen(headerLen) + headerLen
-
-	// size of Body
-	bodyLen := r.Body.EncodingSize()
-	payloadSize += rlp.ListPrefixLen(bodyLen) + bodyLen
+	payloadSize += r.Body.EncodingSize()
 	return payloadSize
 }
 
