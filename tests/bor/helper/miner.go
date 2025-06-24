@@ -17,13 +17,13 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -77,7 +77,15 @@ func NewNodeConfig() *nodecfg.Config {
 }
 
 // InitNode initializes a node with the given genesis file and config
-func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
+func InitMiner(
+	ctx context.Context,
+	logger log.Logger,
+	dirName string,
+	genesis *types.Genesis,
+	privKey *ecdsa.PrivateKey,
+	withoutHeimdall bool,
+	minerID int,
+) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
 
 	nodeCfg := &nodecfg.Config{
@@ -116,12 +124,26 @@ func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *
 		return nil, nil, err
 	}
 
-	torrentLogLevel, _, err := downloadercfg.Int2LogLevel(3)
+	torrentLogLevel, err := downloadercfg.Int2LogLevel(3)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	downloaderConfig, err := downloadercfg.New(ctx, datadir.New(dirName), nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{}, []string{}, "", true, utils.DbWriteMapFlag.Value)
+	downloaderConfig, err := downloadercfg.New(
+		ctx,
+		datadir.New(dirName),
+		nodeCfg.Version,
+		torrentLogLevel,
+		downloadRate,
+		uploadRate,
+		utils.TorrentPortFlag.Value,
+		utils.TorrentConnsPerFileFlag.Value,
+		[]string{},
+		[]string{},
+		"",
+		utils.DbWriteMapFlag.Value,
+		downloadercfg.NewCfgOpts{},
+	)
 	if err != nil {
 		return nil, nil, err
 	}

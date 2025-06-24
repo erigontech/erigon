@@ -17,21 +17,18 @@
 package handlers
 
 import (
+	"math"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
 const maxBlobsThroughoutputPerRequest = 72
-
-func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerElectra(s network.Stream) error {
-	return c.blobsSidecarsByRangeHandler(s, clparams.ElectraVersion)
-}
 
 func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerDeneb(s network.Stream) error {
 	return c.blobsSidecarsByRangeHandler(s, clparams.DenebVersion)
@@ -54,6 +51,12 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 	maxIter := 32
 	currIter := 0
 	for slot := req.StartSlot; slot < req.StartSlot+req.Count; slot++ {
+		if c.beaconConfig.FuluForkEpoch != math.MaxUint64 &&
+			slot >= c.beaconConfig.FuluForkEpoch*c.beaconConfig.SlotsPerEpoch {
+			// deprecated after Fulu upgrade
+			break
+		}
+
 		if currIter >= maxIter {
 			break
 		}
@@ -72,13 +75,12 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 		}
 
 		for i := 0; i < int(blobCount) && written < maxBlobsThroughoutputPerRequest; i++ {
-			version := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
 			// Read the fork digest
-			forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
+			forkDigest, err := c.ethClock.ComputeForkDigest(slot / c.beaconConfig.SlotsPerEpoch)
 			if err != nil {
 				return err
 			}
-			if _, err := s.Write([]byte{0}); err != nil {
+			if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
 				return err
 			}
 			if _, err := s.Write(forkDigest[:]); err != nil {
@@ -91,10 +93,6 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 		}
 	}
 	return nil
-}
-
-func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerElectra(s network.Stream) error {
-	return c.blobsSidecarsByIdsHandler(s, clparams.ElectraVersion)
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) error {
@@ -126,12 +124,17 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 			break
 		}
 		version := c.beaconConfig.GetCurrentStateVersion(*slot / c.beaconConfig.SlotsPerEpoch)
+		if version >= clparams.FuluVersion {
+			// deprecated after Fulu upgrade
+			break
+		}
+
 		// Read the fork digest
-		forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
+		forkDigest, err := c.ethClock.ComputeForkDigest(*slot / c.beaconConfig.SlotsPerEpoch)
 		if err != nil {
 			return err
 		}
-		if _, err := s.Write([]byte{0}); err != nil {
+		if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
 			return err
 		}
 		if _, err := s.Write(forkDigest[:]); err != nil {

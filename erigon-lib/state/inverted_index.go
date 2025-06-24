@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -70,7 +69,7 @@ type InvertedIndex struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visible in zero-copy way
-	dirtyFiles *btree2.BTreeG[*filesItem]
+	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -125,7 +124,7 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 
 	ii := InvertedIndex{
 		iiCfg:      cfg,
-		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newIIVisible(cfg.filenameBase, []visibleFile{}),
 		logger:     logger,
 
@@ -230,14 +229,6 @@ func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 	ii.checker = checker
 }
 
-type Accessors = ee.Accessors
-
-const (
-	AccessorBTree     Accessors = ee.AccessorBTree
-	AccessorHashMap   Accessors = ee.AccessorHashMap
-	AccessorExistence Accessors = ee.AccessorExistence
-)
-
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	c := ii.checker
@@ -250,11 +241,11 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
 }
 
-func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
+func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
 	return ii.missedMapAccessors(ii.dirtyFiles.Items())
 }
 
-func (ii *InvertedIndex) missedMapAccessors(source []*filesItem) (l []*filesItem) {
+func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !ii.Accessors.Has(AccessorHashMap) {
 		return nil
 	}
@@ -265,7 +256,7 @@ func (ii *InvertedIndex) missedMapAccessors(source []*filesItem) (l []*filesItem
 	})
 }
 
-func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
+func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
 	if item.decompressor == nil {
 		return fmt.Errorf("buildEfAccessor: passed item with nil decompressor %s %d-%d", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
 	}
@@ -305,9 +296,9 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 }
 
 func (ii *InvertedIndex) openDirtyFiles() error {
-	var invalidFileItems []*filesItem
+	var invalidFileItems []*FilesItem
 	invalidFileItemsLock := sync.Mutex{}
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
@@ -397,8 +388,8 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
 	}
-	var toClose []*filesItem
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	var toClose []*FilesItem
+	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
 				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
@@ -654,7 +645,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	}
 
 	if txNum < iit.files[0].startTxNum {
-		return false, 0, fmt.Errorf("seek with txNum=%d but data before txNum=%d is not available", txNum, iit.files[0].startTxNum)
+		return false, 0, fmt.Errorf("seekInFiles(invIndex=%s,txNum=%d) but data before txNum=%d not available", iit.name.String(), txNum, iit.files[0].startTxNum)
 	}
 	if iit.files[len(iit.files)-1].endTxNum <= txNum {
 		return false, 0, nil
@@ -1307,6 +1298,14 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		ii.logger.Crit("panic in buildHashMapAccessor", "idxPath", idxPath, "r", r)
+		panic(r)
+	}()
 	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger)
 }
 

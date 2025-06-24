@@ -29,6 +29,16 @@ func SliceMap[T any, U any](s []T, mapFunc func(T) U) []U {
 	return out
 }
 
+func Filter[T any](s []T, filter func(T) bool) []T {
+	var out []T
+	for _, x := range s {
+		if filter(x) {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 func SliceShuffle[T any](s []T) {
 	rand.Shuffle(len(s), func(i, j int) {
 		s[i], s[j] = s[j], s[i]

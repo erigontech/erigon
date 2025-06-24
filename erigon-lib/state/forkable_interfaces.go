@@ -2,19 +2,14 @@ package state
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
-type RootNum = ee.RootNum
-type Num = ee.Num
-type Id = ee.Id
-type EncToBytesI = ee.EncToBytesI
-type ForkableId = ee.ForkableId
-type Bytes = ee.Bytes
+type EncToBytesI = kv.EncToBytesI
 
 // Freezer takes hot data (e.g. from db) and transforms it
 // to snapshot cold data.
@@ -53,7 +48,7 @@ type StartRoTx[T ForkableBaseTxI] interface {
 
 type ForkableTemporalCommonTxI interface {
 	Close()
-	Type() CanonicityStrategy
+	Type() kv.CanonicityStrategy
 }
 
 // no need to take mdbx tx
@@ -68,12 +63,12 @@ type ForkableFilesTxI interface {
 	vfs() visibleFiles
 	GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error)
 
-	Garbage(merged *filesItem) (outs []*filesItem)
+	Garbage(merged *FilesItem) (outs []*FilesItem)
 }
 
 type ForkableDbCommonTxI interface {
-	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error)
-	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
+	Prune(ctx context.Context, to RootNum, limit uint64, logEvery *time.Ticker, tx kv.RwTx) (ForkablePruneStat, error)
+	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (ForkablePruneStat, error)
 	HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error)
 	Close()
 }
@@ -94,7 +89,6 @@ type ForkableDebugAPI[T ForkableDbCommonTxI] interface {
 type MarkedDbTxI interface {
 	ForkableDbCommonTxI
 	GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) // db only (hash==nil => canonical value)
-	Put(num Num, hash []byte, value Bytes, tx kv.RwTx) error
 }
 
 type MarkedTxI interface {
@@ -107,7 +101,6 @@ type MarkedTxI interface {
 type UnmarkedDbTxI interface {
 	ForkableDbCommonTxI
 	GetDb(num Num, tx kv.Tx) (Bytes, error)
-	Append(entityNum Num, value Bytes, tx kv.RwTx) error
 }
 
 type UnmarkedTxI interface {
@@ -132,21 +125,6 @@ type BufferedTxI interface {
 	Put(Num, Bytes) error
 	Flush(context.Context, kv.RwTx) error
 }
-
-type CanonicityStrategy uint8
-
-const (
-	// canonicalTbl & valsTbl
-	Marked CanonicityStrategy = iota
-
-	/*
-		valsTbl; storing only canonical values
-		unwinds are rare or values arrive far apart
-		and so unwind doesn't need to be very performant.
-	*/
-	Unmarked
-	Buffered
-)
 
 /////////////////// config
 

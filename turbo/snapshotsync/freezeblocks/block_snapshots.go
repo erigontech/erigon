@@ -54,7 +54,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -405,6 +405,9 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 		}
 
 		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots, onFinishRetire)
+		if errors.Is(err, heimdall.ErrHeimdallDataIsNotReady) {
+			return
+		}
 		if err != nil {
 			br.logger.Warn("[snapshots] retire blocks", "err", err)
 			return

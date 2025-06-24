@@ -36,8 +36,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 type ChainReaderWriterEth1 struct {

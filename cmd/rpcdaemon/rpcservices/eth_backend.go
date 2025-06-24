@@ -34,11 +34,12 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/services"
@@ -464,4 +465,12 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	}
 
 	return peers, nil
+}
+
+func (back *RemoteBackend) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+	return back.blockReader.TxnumReader(ctx)
+}
+
+func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
+	return back.blockReader.BlockForTxNum(ctx, tx, txNum)
 }
