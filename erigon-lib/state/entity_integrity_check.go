@@ -111,7 +111,7 @@ func (d *DependencyIntegrityChecker) Disable() {
 // All: all dependent files are present
 // Any: there exists a dependent file, which is present
 // NOTE: the caller MUST hold a lock on btree2.BTreeG[*filesItem] returned by filesGetter.
-// examples:
+// example:
 // dependency: account
 // is (dependent) commitment.0-2 present?
 // - if no (or !checkVisibility), don't use it for visibleFiles.
