@@ -607,10 +607,10 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
 				timings = append(timings, pruneTimings...)
 			}
-			// failsafe which is kind of necessary to avoid a situation where the canonical chain is broken.
-			if err := e.fixCanonicalChainIfNecessary(e.bacgroundCtx, tx); err != nil {
-				return err
-			}
+			// // failsafe which is kind of necessary to avoid a situation where the canonical chain is broken.
+			// if err := e.fixCanonicalChainIfNecessary(e.bacgroundCtx, tx); err != nil {
+			// 	return err
+			// }
 			return nil
 		}); err != nil {
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
