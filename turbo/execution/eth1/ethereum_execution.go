@@ -292,7 +292,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 
 	fmt.Println(time.Now(), "update done metric")
 
-	tx, err := e.db.BeginRw(ctx)
+	tx, err := e.db.BeginRwNosync(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +307,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	fmt.Println(time.Now(), "v-payload metric")
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
 	tx.Rollback()
-	tx, err = e.db.BeginRw(ctx)
+	tx, err = e.db.BeginRwNosync(ctx)
 	if err != nil {
 		return nil, err
 	}

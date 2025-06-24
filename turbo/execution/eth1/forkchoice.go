@@ -602,26 +602,35 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 			return
 		}
 		defer e.semaphore.Release(1)
-		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
-				return err
-			}
-			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
-				timings = append(timings, pruneTimings...)
-			}
-			// // failsafe which is kind of necessary to avoid a situation where the canonical chain is broken.
-			// if err := e.fixCanonicalChainIfNecessary(e.bacgroundCtx, tx); err != nil {
-			// 	return err
-			// }
-			return nil
-		}); err != nil {
-			e.logger.Error("runPostForkchoiceInBackground", "error", err)
+
+		tx, err := e.db.BeginRwNosync(e.bacgroundCtx)
+		if err != nil {
+			e.logger.Error("Failed to begin transaction for post-forkchoice", "error", err)
 			return
 		}
+		defer tx.Rollback()
+
+		if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
+			e.logger.Error("Failed to begin transaction for post-forkchoice", "error", err)
+			return
+		}
+		if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
+			timings = append(timings, pruneTimings...)
+		}
+
 		timings = append(timings, "took", time.Since(start))
+
+		start = time.Now()
+		if err := tx.Commit(); err != nil {
+			e.logger.Error("Failed to commit transaction for post-forkchoice", "error", err)
+			return
+		}
+
+		timings = append(timings, "commit", time.Since(start))
 
 		if len(timings) > 0 {
 			e.logger.Info("Timings: Post-Forkchoice (slower than 50ms)", timings...)
 		}
+
 	}()
 }
