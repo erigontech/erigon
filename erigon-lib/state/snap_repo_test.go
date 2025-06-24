@@ -641,6 +641,7 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *Snapshot
 	return populateFiles(t, dirs, name, extensions, dataFolder, &allFiles)
 }
 
+// this function creates mock files (.kvi, .v, .ef, .efi etc.) for the files specified in `allFiles`
 func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []string, dataFolder string, allFiles *dhiiFiles) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
 
