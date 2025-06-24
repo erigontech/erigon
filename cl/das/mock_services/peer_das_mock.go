@@ -15,6 +15,7 @@ import (
 
 	common "github.com/erigontech/erigon-lib/common"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -76,120 +77,6 @@ func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) Do(f func(context.Contex
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) DoAndReturn(f func(context.Context, []*cltypes.SignedBeaconBlock) error) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// GetAdvertisedCgc mocks base method.
-func (m *MockPeerDas) GetAdvertisedCgc() uint64 {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetAdvertisedCgc")
-	ret0, _ := ret[0].(uint64)
-	return ret0
-}
-
-// GetAdvertisedCgc indicates an expected call of GetAdvertisedCgc.
-func (mr *MockPeerDasMockRecorder) GetAdvertisedCgc() *MockPeerDasGetAdvertisedCgcCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAdvertisedCgc", reflect.TypeOf((*MockPeerDas)(nil).GetAdvertisedCgc))
-	return &MockPeerDasGetAdvertisedCgcCall{Call: call}
-}
-
-// MockPeerDasGetAdvertisedCgcCall wrap *gomock.Call
-type MockPeerDasGetAdvertisedCgcCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockPeerDasGetAdvertisedCgcCall) Return(arg0 uint64) *MockPeerDasGetAdvertisedCgcCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockPeerDasGetAdvertisedCgcCall) Do(f func() uint64) *MockPeerDasGetAdvertisedCgcCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasGetAdvertisedCgcCall) DoAndReturn(f func() uint64) *MockPeerDasGetAdvertisedCgcCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// GetEarliestAvailableSlot mocks base method.
-func (m *MockPeerDas) GetEarliestAvailableSlot() uint64 {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetEarliestAvailableSlot")
-	ret0, _ := ret[0].(uint64)
-	return ret0
-}
-
-// GetEarliestAvailableSlot indicates an expected call of GetEarliestAvailableSlot.
-func (mr *MockPeerDasMockRecorder) GetEarliestAvailableSlot() *MockPeerDasGetEarliestAvailableSlotCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetEarliestAvailableSlot", reflect.TypeOf((*MockPeerDas)(nil).GetEarliestAvailableSlot))
-	return &MockPeerDasGetEarliestAvailableSlotCall{Call: call}
-}
-
-// MockPeerDasGetEarliestAvailableSlotCall wrap *gomock.Call
-type MockPeerDasGetEarliestAvailableSlotCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockPeerDasGetEarliestAvailableSlotCall) Return(arg0 uint64) *MockPeerDasGetEarliestAvailableSlotCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockPeerDasGetEarliestAvailableSlotCall) Do(f func() uint64) *MockPeerDasGetEarliestAvailableSlotCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasGetEarliestAvailableSlotCall) DoAndReturn(f func() uint64) *MockPeerDasGetEarliestAvailableSlotCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// GetRealCgc mocks base method.
-func (m *MockPeerDas) GetRealCgc() uint64 {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetRealCgc")
-	ret0, _ := ret[0].(uint64)
-	return ret0
-}
-
-// GetRealCgc indicates an expected call of GetRealCgc.
-func (mr *MockPeerDasMockRecorder) GetRealCgc() *MockPeerDasGetRealCgcCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRealCgc", reflect.TypeOf((*MockPeerDas)(nil).GetRealCgc))
-	return &MockPeerDasGetRealCgcCall{Call: call}
-}
-
-// MockPeerDasGetRealCgcCall wrap *gomock.Call
-type MockPeerDasGetRealCgcCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockPeerDasGetRealCgcCall) Return(arg0 uint64) *MockPeerDasGetRealCgcCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockPeerDasGetRealCgcCall) Do(f func() uint64) *MockPeerDasGetRealCgcCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasGetRealCgcCall) DoAndReturn(f func() uint64) *MockPeerDasGetRealCgcCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -267,6 +154,44 @@ func (c *MockPeerDasPruneCall) Do(f func(uint64) error) *MockPeerDasPruneCall {
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPeerDasPruneCall) DoAndReturn(f func(uint64) error) *MockPeerDasPruneCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// StateReader mocks base method.
+func (m *MockPeerDas) StateReader() peerdasstate.PeerDasStateReader {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StateReader")
+	ret0, _ := ret[0].(peerdasstate.PeerDasStateReader)
+	return ret0
+}
+
+// StateReader indicates an expected call of StateReader.
+func (mr *MockPeerDasMockRecorder) StateReader() *MockPeerDasStateReaderCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateReader", reflect.TypeOf((*MockPeerDas)(nil).StateReader))
+	return &MockPeerDasStateReaderCall{Call: call}
+}
+
+// MockPeerDasStateReaderCall wrap *gomock.Call
+type MockPeerDasStateReaderCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasStateReaderCall) Return(arg0 peerdasstate.PeerDasStateReader) *MockPeerDasStateReaderCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasStateReaderCall) Do(f func() peerdasstate.PeerDasStateReader) *MockPeerDasStateReaderCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasStateReaderCall) DoAndReturn(f func() peerdasstate.PeerDasStateReader) *MockPeerDasStateReaderCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

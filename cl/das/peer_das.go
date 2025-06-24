@@ -2,6 +2,7 @@ package das
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -24,12 +25,12 @@ import (
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
-	peerdasstate.PeerDasStateReader
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
 	IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error)
 	Prune(keepSlotDistance uint64) error
 	UpdateValidatorsCustody(cgc uint64)
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
+	StateReader() peerdasstate.PeerDasStateReader
 }
 
 var (
@@ -37,7 +38,6 @@ var (
 )
 
 type peerdas struct {
-	peerdasstate.PeerDasStateReader
 	state         *peerdasstate.PeerDasState
 	nodeID        enode.ID
 	rpc           *rpc.BeaconRpcP2P
@@ -65,16 +65,15 @@ func NewPeerDas(
 	kzg.InitKZG()
 	state := peerdasstate.NewPeerDasState(beaconConfig, nodeID)
 	p := &peerdas{
-		PeerDasStateReader: state,
-		state:              state,
-		nodeID:             nodeID,
-		rpc:                rpc,
-		beaconConfig:       beaconConfig,
-		columnStorage:      columnStorage,
-		blobStorage:        blobStorage,
-		sentinel:           sentinel,
-		ethClock:           ethClock,
-		recoverBlobs:       make(chan recoverBlobsRequest),
+		state:         state,
+		nodeID:        nodeID,
+		rpc:           rpc,
+		beaconConfig:  beaconConfig,
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+		sentinel:      sentinel,
+		ethClock:      ethClock,
+		recoverBlobs:  make(chan recoverBlobsRequest, 32),
 
 		recoveringMutex: sync.Mutex{},
 		isRecovering:    make(map[common.Hash]bool),
@@ -83,6 +82,10 @@ func NewPeerDas(
 		go p.blobsRecoverWorker(ctx)
 	}
 	return p, state
+}
+
+func (d *peerdas) StateReader() peerdasstate.PeerDasStateReader {
+	return d.state
 }
 
 type recoverBlobsRequest struct {
@@ -237,6 +240,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		}
 	}
 
+	// main loop
 	for {
 		select {
 		case <-ctx.Done():
@@ -244,6 +248,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		case toRecover := <-d.recoverBlobs:
 			d.recoveringMutex.Lock()
 			if _, ok := d.isRecovering[toRecover.blockRoot]; ok {
+				// recovering, skip
 				d.recoveringMutex.Unlock()
 				continue
 			}
@@ -252,6 +257,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 
 			// check if the blobs are already recovered
 			if count, err := d.blobStorage.KzgCommitmentsCount(context.Background(), toRecover.blockRoot); err == nil && count > 0 {
+				// already recovered, skip
 				d.recoveringMutex.Lock()
 				delete(d.isRecovering, toRecover.blockRoot)
 				d.recoveringMutex.Unlock()
@@ -270,17 +276,49 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
-	d.recoverBlobs <- recoverBlobsRequest{
+	// early check if the blobs are recovering
+	d.recoveringMutex.Lock()
+	if _, ok := d.isRecovering[blockRoot]; ok {
+		d.recoveringMutex.Unlock()
+		return nil
+	}
+	d.recoveringMutex.Unlock()
+
+	// schedule
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case d.recoverBlobs <- recoverBlobsRequest{
 		slot:      slot,
 		blockRoot: blockRoot,
+	}:
+	case <-timer.C:
+		return errors.New("failed to schedule recover: timeout")
 	}
 	return nil
 }
 
 func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
-	req, err := initializeDownloadRequest(blocks, d.beaconConfig)
+	req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage)
 	if err != nil {
 		return err
+	}
+
+	toRemove := []common.Hash{}
+	for blockRoot := range req.downloadTable {
+		if req.isColumnDataOverHalf(blockRoot) {
+			// we have over half of the column data, schedule recover immediately
+			slot := req.blockRootToBeaconBlock[blockRoot].Block.Slot
+			if err := d.TryScheduleRecover(slot, blockRoot); err != nil {
+				log.Warn("failed to schedule recover", "err", err, "slot", slot, "blockRoot", blockRoot)
+			} else {
+				toRemove = append(toRemove, blockRoot)
+			}
+		}
+	}
+	// remove the blocks that have over half of the column data
+	for _, blockRoot := range toRemove {
+		req.removeBlock(blockRoot)
 	}
 
 	type resultData struct {
@@ -356,9 +394,19 @@ mainloop:
 						d.rpc.BanPeer(result.pid)
 						return
 					}
+					slot := sidecar.SignedBlockHeader.Header.Slot
+					defer func() {
+						// check if need to schedule recover whenever we download a column sidecar
+						if req.isColumnDataOverHalf(blockRoot) {
+							req.removeBlock(blockRoot)
+							if err := d.TryScheduleRecover(slot, blockRoot); err != nil {
+								log.Warn("failed to schedule recover", "err", err, "slot", slot, "blockRoot", blockRoot)
+							}
+						}
+					}()
+
 					columnIndex := sidecar.Index
 					columnData := sidecar
-
 					exist, err := d.columnStorage.ColumnSidecarExists(ctx, sidecar.SignedBlockHeader.Header.Slot, blockRoot, int64(columnIndex))
 					if err != nil {
 						log.Debug("failed to check if column sidecar exists", "err", err)
@@ -367,10 +415,6 @@ mainloop:
 					}
 					if exist {
 						req.removeColumn(blockRoot, columnIndex)
-						if req.isDownloadedOverHalf(blockRoot) {
-							req.removeBlock(blockRoot)
-							d.TryScheduleRecover(sidecar.SignedBlockHeader.Header.Slot, blockRoot)
-						}
 						return
 					}
 
@@ -394,11 +438,8 @@ mainloop:
 						log.Debug("failed to write column sidecar", "err", err)
 						return
 					}
+					// done. remove the column from the download table
 					req.removeColumn(blockRoot, columnIndex)
-					if req.isDownloadedOverHalf(blockRoot) {
-						req.removeBlock(blockRoot)
-						d.TryScheduleRecover(sidecar.SignedBlockHeader.Header.Slot, blockRoot)
-					}
 				}(sidecar)
 			}
 			wg.Wait()
@@ -676,14 +717,16 @@ func (d *peerdas) getExpectedColumnIndex(
 
 // downloadRequest is used to track the download progress of the column sidecars
 type downloadRequest struct {
-	beaconConfig  *clparams.BeaconChainConfig
-	mutex         sync.RWMutex
-	downloadTable map[common.Hash]map[uint64]bool
-	cacheRequest  *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]
+	beaconConfig           *clparams.BeaconChainConfig
+	mutex                  sync.RWMutex
+	blockRootToBeaconBlock map[common.Hash]*cltypes.SignedBeaconBlock
+	downloadTable          map[common.Hash]map[uint64]bool
+	cacheRequest           *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]
 }
 
-func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig *clparams.BeaconChainConfig) (*downloadRequest, error) {
+func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig *clparams.BeaconChainConfig, columnStorage blob_storage.DataColumnStorage) (*downloadRequest, error) {
 	downloadTable := make(map[common.Hash]map[uint64]bool)
+	blockRootToBeaconBlock := make(map[common.Hash]*cltypes.SignedBeaconBlock)
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion {
 			continue
@@ -696,16 +739,32 @@ func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig
 		if err != nil {
 			return nil, err
 		}
+		blockRootToBeaconBlock[blockRoot] = block
+
+		// get the existing columns from the column storage
+		existingColumns, err := columnStorage.GetSavedColumnIndex(context.Background(), blockRoot)
+		if err != nil {
+			return nil, err
+		}
+		existingColumnsMap := make(map[uint64]bool)
+		for _, column := range existingColumns {
+			existingColumnsMap[column] = true
+		}
+
 		if _, ok := downloadTable[blockRoot]; !ok {
-			downloadTable[blockRoot] = make(map[uint64]bool)
+			table := make(map[uint64]bool)
 			for i := range beaconConfig.NumberOfColumns { // try download all columns for now
-				downloadTable[blockRoot][uint64(i)] = true
+				if !existingColumnsMap[i] {
+					table[i] = true
+				}
 			}
+			downloadTable[blockRoot] = table
 		}
 	}
 	return &downloadRequest{
-		beaconConfig:  beaconConfig,
-		downloadTable: downloadTable,
+		beaconConfig:           beaconConfig,
+		downloadTable:          downloadTable,
+		blockRootToBeaconBlock: blockRootToBeaconBlock,
 	}, nil
 }
 
@@ -726,7 +785,7 @@ func (d *downloadRequest) removeBlock(blockRoot common.Hash) {
 	d.cacheRequest = nil
 }
 
-func (d *downloadRequest) isDownloadedOverHalf(blockRoot common.Hash) bool {
+func (d *downloadRequest) isColumnDataOverHalf(blockRoot common.Hash) bool {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
 	toDownload, ok := d.downloadTable[blockRoot]
