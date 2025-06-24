@@ -41,10 +41,10 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/node/nodecfg"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -98,7 +98,7 @@ var readDomains = &cobra.Command{
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = core.GenesisBlockByChainName(chain)
+		ethConfig.Genesis = chainspec.GenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 
 		var readFromDomain string

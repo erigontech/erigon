@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 //go:embed allocs
@@ -39,7 +39,7 @@ func AmoyGenesisBlock() *types.Genesis {
 		Difficulty: big.NewInt(1),
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      core.ReadPrealloc(allocs, "allocs/amoy.json"),
+		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/amoy.json"),
 	}
 }
 
@@ -53,7 +53,7 @@ func BorMainnetGenesisBlock() *types.Genesis {
 		Difficulty: big.NewInt(1),
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      core.ReadPrealloc(allocs, "allocs/bor_mainnet.json"),
+		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_mainnet.json"),
 	}
 }
 
@@ -66,12 +66,12 @@ func BorDevnetGenesisBlock() *types.Genesis {
 		Difficulty: big.NewInt(1),
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      core.ReadPrealloc(allocs, "allocs/bor_devnet.json"),
+		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_devnet.json"),
 	}
 }
 
 func init() {
-	core.RegisterGenesisBlock(networkname.Amoy, AmoyGenesisBlock())
-	core.RegisterGenesisBlock(networkname.BorDevnet, BorDevnetGenesisBlock())
-	core.RegisterGenesisBlock(networkname.BorMainnet, BorMainnetGenesisBlock())
+	chainspec.RegisterGenesisBlock(networkname.Amoy, AmoyGenesisBlock())
+	chainspec.RegisterGenesisBlock(networkname.BorDevnet, BorDevnetGenesisBlock())
+	chainspec.RegisterGenesisBlock(networkname.BorMainnet, BorMainnetGenesisBlock())
 }

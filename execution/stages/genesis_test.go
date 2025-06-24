@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/params"
 	polychain "github.com/erigontech/erigon/polygon/chain"
@@ -103,7 +104,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == sepolia",
 			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return core.CommitGenesisBlock(db, core.SepoliaGenesisBlock(), datadir.New(tmpdir), logger)
+				return core.CommitGenesisBlock(db, chainspec.SepoliaGenesisBlock(), datadir.New(tmpdir), logger)
 			},
 			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.SepoliaGenesisHash},
 			wantHash:   params.SepoliaGenesisHash,

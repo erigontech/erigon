@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -53,7 +54,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 	logger := log.New()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
-		genesis := core.GenesisBlockByChainName(network)
+		genesis := chainspec.GenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -74,13 +75,13 @@ func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	block, _, err := core.GenesisToBlock(core.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err := core.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err = core.GenesisToBlock(chainspec.GnosisGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	if block.Root() != params.GnosisGenesisStateRoot {
 		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
@@ -89,7 +90,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err = core.GenesisToBlock(chainspec.ChiadoGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	if block.Root() != params.ChiadoGenesisStateRoot {
 		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
@@ -98,7 +99,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.TestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err = core.GenesisToBlock(chainspec.TestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	if block.Root() != params.TestGenesisStateRoot {
 		t.Errorf("wrong test genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
@@ -116,7 +117,7 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	genesis := core.GenesisBlockByChainName(networkname.Mainnet)
+	genesis := chainspec.GenesisBlockByChainName(networkname.Mainnet)
 	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)

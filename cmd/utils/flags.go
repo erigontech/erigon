@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
@@ -2033,7 +2034,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Override any default configs for hard coded networks.
 	switch chain {
 	default:
-		genesis := core.GenesisBlockByChainName(chain)
+		genesis := chainspec.GenesisBlockByChainName(chain)
 		genesisHash := params2.GenesisHashByChainName(chain)
 		if (genesis == nil) || (genesisHash == nil) {
 			Fatalf("ChainDB name is not recognized: %s", chain)
@@ -2054,7 +2055,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		logger.Info("Using developer account", "address", developer)
 
 		// Create a new developer genesis block or reuse existing one
-		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
+		cfg.Genesis = chainspec.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
 		logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
 		if !ctx.IsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)

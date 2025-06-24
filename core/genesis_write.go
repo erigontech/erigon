@@ -23,29 +23,23 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"math/big"
 	"slices"
 	"sort"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -57,11 +51,9 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/chainspec"
 	params2 "github.com/erigontech/erigon/params"
 )
-
-//go:embed allocs
-var allocs embed.FS
 
 // GenesisMismatchError is raised when trying to overwrite an existing
 // genesis block with an incompatible one.
@@ -149,7 +141,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 		custom := true
 		if genesis == nil {
 			logger.Info("Writing main-net genesis block")
-			genesis = MainnetGenesisBlock()
+			genesis = chainspec.MainnetGenesisBlock()
 			custom = false
 		}
 		applyOverrides(genesis.Config)
@@ -312,81 +304,6 @@ type GenAccount struct {
 	Balance *big.Int
 }
 
-// MainnetGenesisBlock returns the Ethereum main net genesis block.
-func MainnetGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params2.MainnetChainConfig,
-		Nonce:      66,
-		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
-		GasLimit:   5000,
-		Difficulty: big.NewInt(17179869184),
-		Alloc:      ReadPrealloc(allocs, "allocs/mainnet.json"),
-	}
-}
-
-// HoleskyGenesisBlock returns the Holesky main net genesis block.
-func HoleskyGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params2.HoleskyChainConfig,
-		Nonce:      4660,
-		GasLimit:   25000000,
-		Difficulty: big.NewInt(1),
-		Timestamp:  1695902100,
-		Alloc:      ReadPrealloc(allocs, "allocs/holesky.json"),
-	}
-}
-
-// SepoliaGenesisBlock returns the Sepolia network genesis block.
-func SepoliaGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params2.SepoliaChainConfig,
-		Nonce:      0,
-		ExtraData:  []byte("Sepolia, Athens, Attica, Greece!"),
-		GasLimit:   30000000,
-		Difficulty: big.NewInt(131072),
-		Timestamp:  1633267481,
-		Alloc:      ReadPrealloc(allocs, "allocs/sepolia.json"),
-	}
-}
-
-// HoodiGenesisBlock returns the Hoodi network genesis block.
-func HoodiGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params2.HoodiChainConfig,
-		Nonce:      0x1234,
-		ExtraData:  []byte(""),
-		GasLimit:   0x2255100, // 36M
-		Difficulty: big.NewInt(1),
-		Timestamp:  1742212800,
-		Alloc:      ReadPrealloc(allocs, "allocs/hoodi.json"),
-	}
-}
-
-func GnosisGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params2.GnosisChainConfig,
-		Timestamp:  0,
-		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
-		GasLimit:   0x989680,
-		Difficulty: big.NewInt(0x20000),
-		Alloc:      ReadPrealloc(allocs, "allocs/gnosis.json"),
-	}
-}
-
-func ChiadoGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params2.ChiadoChainConfig,
-		Timestamp:  0,
-		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
-		GasLimit:   0x989680,
-		Difficulty: big.NewInt(0x20000),
-		Alloc:      ReadPrealloc(allocs, "allocs/chiado.json"),
-	}
-}
-func TestGenesisBlock() *types.Genesis {
-	return &types.Genesis{Config: chain.TestChainConfig}
-}
-
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -399,23 +316,6 @@ var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad3
 // to retieve the mining key
 var DevnetSignKey = func(address common.Address) *ecdsa.PrivateKey {
 	return DevnetSignPrivateKey
-}
-
-// DeveloperGenesisBlock returns the 'geth --dev' genesis block.
-func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis {
-	// Override the default period to the user requested one
-	var config chain.Config
-	copier.Copy(&config, params2.AllCliqueProtocolChanges)
-	config.Clique.Period = period
-
-	// Assemble and return the genesis with the precompiles and faucet pre-funded
-	return &types.Genesis{
-		Config:     &config,
-		ExtraData:  append(append(make([]byte, 32), faucet[:]...), make([]byte, crypto.SignatureLength)...),
-		GasLimit:   11500000,
-		Difficulty: big.NewInt(1),
-		Alloc:      ReadPrealloc(allocs, "allocs/dev.json"),
-	}
 }
 
 // GenesisToBlock creates the genesis block and writes state of a genesis specification
@@ -632,39 +532,4 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 	}
 	slices.Sort(keys)
 	return keys
-}
-
-func ReadPrealloc(fileSys fs.FS, filename string) types.GenesisAlloc {
-	f, err := fileSys.Open(filename)
-	if err != nil {
-		panic(fmt.Sprintf("Could not open genesis preallocation for %s: %v", filename, err))
-	}
-	defer f.Close()
-	decoder := json.NewDecoder(f)
-	ga := make(types.GenesisAlloc)
-	err = decoder.Decode(&ga)
-	if err != nil {
-		panic(fmt.Sprintf("Could not parse genesis preallocation for %s: %v", filename, err))
-	}
-	return ga
-}
-
-var genesisBlockByChainName = make(map[string]*types.Genesis)
-
-func init() {
-	genesisBlockByChainName[networkname.Mainnet] = MainnetGenesisBlock()
-	genesisBlockByChainName[networkname.Holesky] = HoleskyGenesisBlock()
-	genesisBlockByChainName[networkname.Sepolia] = SepoliaGenesisBlock()
-	genesisBlockByChainName[networkname.Hoodi] = HoodiGenesisBlock()
-	genesisBlockByChainName[networkname.Gnosis] = GnosisGenesisBlock()
-	genesisBlockByChainName[networkname.Chiado] = ChiadoGenesisBlock()
-	genesisBlockByChainName[networkname.Test] = TestGenesisBlock()
-}
-
-func GenesisBlockByChainName(chain string) *types.Genesis {
-	return genesisBlockByChainName[chain]
-}
-
-func RegisterGenesisBlock(chain string, genesis *types.Genesis) {
-	genesisBlockByChainName[chain] = genesis
 }
