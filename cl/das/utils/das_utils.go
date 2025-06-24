@@ -35,6 +35,7 @@ func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 	}
 	currentID := uint256.NewInt(0).SetBytes(nodeID.Bytes())
 	custodyGroups := make([]CustodyIndex, 0)
+	custodyGroupLookup := make(map[CustodyIndex]bool)
 	for uint64(len(custodyGroups)) < custodyGroupCount {
 		// Hash current ID and take first 8 bytes
 		idBytes := currentID.Bytes32()
@@ -46,16 +47,9 @@ func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 		custodyGroup := binary.LittleEndian.Uint64(hash[:8]) % cfg.NumberOfCustodyGroups
 
 		// Check if custody group already exists
-		exists := false
-		for _, g := range custodyGroups {
-			if g == custodyGroup {
-				exists = true
-				break
-			}
-		}
-
-		if !exists {
+		if _, ok := custodyGroupLookup[custodyGroup]; !ok {
 			custodyGroups = append(custodyGroups, custodyGroup)
+			custodyGroupLookup[custodyGroup] = true
 		}
 
 		// Increment currentID with overflow protection
