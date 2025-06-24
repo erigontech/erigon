@@ -1539,6 +1539,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	require.NoError(t, agg.OpenFolder())
 
 	tdb := wrapDbWithCtx(db, agg)
+	defer tdb.Close()
 	tx, err := tdb.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -1611,6 +1612,7 @@ func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
 	require.NoError(t, agg.OpenFolder())
 
 	tdb := wrapDbWithCtx(db, agg)
+	defer tdb.Close()
 	tx, err := tdb.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
