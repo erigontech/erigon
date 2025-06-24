@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
@@ -31,7 +31,7 @@ import (
 var chainspecs embed.FS
 
 func readChainSpec(filename string) *chain.Config {
-	spec := params.ReadChainSpec(chainspecs, filename)
+	spec := chainspec.ReadChainSpec(chainspecs, filename)
 	if spec.BorJSON != nil {
 		borConfig := &borcfg.BorConfig{}
 		if err := json.Unmarshal(spec.BorJSON, borConfig); err != nil {
@@ -49,11 +49,11 @@ var (
 )
 
 func init() {
-	params.RegisterChainConfigByName(networkname.Amoy, AmoyChainConfig)
-	params.RegisterChainConfigByName(networkname.BorMainnet, BorMainnetChainConfig)
-	params.RegisterChainConfigByName(networkname.BorDevnet, BorDevnetChainConfig)
+	chainspec.RegisterChainConfigByName(networkname.Amoy, AmoyChainConfig)
+	chainspec.RegisterChainConfigByName(networkname.BorMainnet, BorMainnetChainConfig)
+	chainspec.RegisterChainConfigByName(networkname.BorDevnet, BorDevnetChainConfig)
 
-	params.RegisterChainConfigByGenesisHash(params.AmoyGenesisHash, AmoyChainConfig)
-	params.RegisterChainConfigByGenesisHash(params.BorMainnetGenesisHash, BorMainnetChainConfig)
-	params.RegisterChainConfigByGenesisHash(params.BorDevnetGenesisHash, BorDevnetChainConfig)
+	chainspec.RegisterChainConfigByGenesisHash(chainspec.AmoyGenesisHash, AmoyChainConfig)
+	chainspec.RegisterChainConfigByGenesisHash(chainspec.BorMainnetGenesisHash, BorMainnetChainConfig)
+	chainspec.RegisterChainConfigByGenesisHash(chainspec.BorDevnetGenesisHash, BorDevnetChainConfig)
 }

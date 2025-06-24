@@ -1379,7 +1379,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 
 	var consensusConfig interface{}
 	if cc.Clique != nil {
-		consensusConfig = params.CliqueSnapshot
+		consensusConfig = chainspec.CliqueSnapshot
 	} else if cc.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {

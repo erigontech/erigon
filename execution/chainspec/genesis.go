@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/params"
 )
 
 //go:embed allocs
@@ -58,7 +57,7 @@ func ReadPrealloc(fileSys fs.FS, filename string) types.GenesisAlloc {
 // MainnetGenesisBlock returns the Ethereum main net genesis block.
 func MainnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.MainnetChainConfig,
+		Config:     MainnetChainConfig,
 		Nonce:      66,
 		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
 		GasLimit:   5000,
@@ -70,7 +69,7 @@ func MainnetGenesisBlock() *types.Genesis {
 // HoleskyGenesisBlock returns the Holesky main net genesis block.
 func HoleskyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.HoleskyChainConfig,
+		Config:     HoleskyChainConfig,
 		Nonce:      4660,
 		GasLimit:   25000000,
 		Difficulty: big.NewInt(1),
@@ -82,7 +81,7 @@ func HoleskyGenesisBlock() *types.Genesis {
 // SepoliaGenesisBlock returns the Sepolia network genesis block.
 func SepoliaGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.SepoliaChainConfig,
+		Config:     SepoliaChainConfig,
 		Nonce:      0,
 		ExtraData:  []byte("Sepolia, Athens, Attica, Greece!"),
 		GasLimit:   30000000,
@@ -95,7 +94,7 @@ func SepoliaGenesisBlock() *types.Genesis {
 // HoodiGenesisBlock returns the Hoodi network genesis block.
 func HoodiGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.HoodiChainConfig,
+		Config:     HoodiChainConfig,
 		Nonce:      0x1234,
 		ExtraData:  []byte(""),
 		GasLimit:   0x2255100, // 36M
@@ -107,7 +106,7 @@ func HoodiGenesisBlock() *types.Genesis {
 
 func GnosisGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.GnosisChainConfig,
+		Config:     GnosisChainConfig,
 		Timestamp:  0,
 		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
@@ -118,7 +117,7 @@ func GnosisGenesisBlock() *types.Genesis {
 
 func ChiadoGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.ChiadoChainConfig,
+		Config:     ChiadoChainConfig,
 		Timestamp:  0,
 		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
@@ -135,7 +134,7 @@ func TestGenesisBlock() *types.Genesis {
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis {
 	// Override the default period to the user requested one
 	var config chain.Config
-	copier.Copy(&config, params.AllCliqueProtocolChanges)
+	copier.Copy(&config, AllCliqueProtocolChanges)
 	config.Clique.Period = period
 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded

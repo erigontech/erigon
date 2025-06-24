@@ -18,6 +18,7 @@ package chain
 
 import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -115,8 +116,8 @@ var AmoyBootnodes = []string{
 }
 
 func init() {
-	params.RegisterBootnodeURLsByGenesisHash(params.BorMainnetGenesisHash, BorMainnetBootnodes)
-	params.RegisterBootnodeURLsByGenesisHash(params.AmoyGenesisHash, AmoyBootnodes)
+	params.RegisterBootnodeURLsByGenesisHash(chainspec.BorMainnetGenesisHash, BorMainnetBootnodes)
+	params.RegisterBootnodeURLsByGenesisHash(chainspec.AmoyGenesisHash, AmoyBootnodes)
 
 	params.RegisterBootnodeURLsByChainName(networkname.BorMainnet, BorMainnetBootnodes)
 	params.RegisterBootnodeURLsByChainName(networkname.Amoy, AmoyBootnodes)

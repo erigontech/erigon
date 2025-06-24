@@ -22,6 +22,7 @@ package params
 import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 // MainnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
@@ -130,15 +131,15 @@ const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUD
 func KnownDNSNetwork(genesis common.Hash, protocol string) string {
 	var net string
 	switch genesis {
-	case MainnetGenesisHash:
+	case chainspec.MainnetGenesisHash:
 		net = "mainnet"
-	case SepoliaGenesisHash:
+	case chainspec.SepoliaGenesisHash:
 		net = "sepolia"
-	case HoleskyGenesisHash:
+	case chainspec.HoleskyGenesisHash:
 		net = "holesky"
-	case HoodiGenesisHash:
+	case chainspec.HoodiGenesisHash:
 		net = "hoodi"
-	case BorMainnetGenesisHash:
+	case chainspec.BorMainnetGenesisHash:
 		return "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
 	default:
 		return ""
@@ -150,12 +151,12 @@ var bootnodeURLsByGenesisHash = make(map[common.Hash][]string)
 var bootnodeURLsByChainName = make(map[string][]string)
 
 func init() {
-	bootnodeURLsByGenesisHash[MainnetGenesisHash] = MainnetBootnodes
-	bootnodeURLsByGenesisHash[HoleskyGenesisHash] = HoleskyBootnodes
-	bootnodeURLsByGenesisHash[HoodiGenesisHash] = HoodiBootnodes
-	bootnodeURLsByGenesisHash[SepoliaGenesisHash] = SepoliaBootnodes
-	bootnodeURLsByGenesisHash[GnosisGenesisHash] = GnosisBootnodes
-	bootnodeURLsByGenesisHash[ChiadoGenesisHash] = ChiadoBootnodes
+	bootnodeURLsByGenesisHash[chainspec.MainnetGenesisHash] = MainnetBootnodes
+	bootnodeURLsByGenesisHash[chainspec.HoleskyGenesisHash] = HoleskyBootnodes
+	bootnodeURLsByGenesisHash[chainspec.HoodiGenesisHash] = HoodiBootnodes
+	bootnodeURLsByGenesisHash[chainspec.SepoliaGenesisHash] = SepoliaBootnodes
+	bootnodeURLsByGenesisHash[chainspec.GnosisGenesisHash] = GnosisBootnodes
+	bootnodeURLsByGenesisHash[chainspec.ChiadoGenesisHash] = ChiadoBootnodes
 
 	bootnodeURLsByChainName[networkname.Mainnet] = MainnetBootnodes
 	bootnodeURLsByChainName[networkname.Holesky] = HoleskyBootnodes

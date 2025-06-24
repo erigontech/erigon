@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
@@ -68,21 +69,21 @@ func DefaultMinerGasLimitByChain(config *Config) uint64 {
 	}
 
 	switch config.NetworkID {
-	case params.MainnetChainConfig.ChainID.Uint64():
+	case chainspec.MainnetChainConfig.ChainID.Uint64():
 		return DefaultMinerGasLimitEthMainnet
-	case params.SepoliaChainConfig.ChainID.Uint64():
+	case chainspec.SepoliaChainConfig.ChainID.Uint64():
 		return DefaultMinerGasLimitSepolia
-	case params.HoleskyChainConfig.ChainID.Uint64():
+	case chainspec.HoleskyChainConfig.ChainID.Uint64():
 		return DefaultMinerGasLimitHolesky
-	case params.HoodiChainConfig.ChainID.Uint64():
+	case chainspec.HoodiChainConfig.ChainID.Uint64():
 		return DefaultMinerGasLimitHoodi
 	case 137:
 		return BorDefaultMinerGasLimit
 	case 80002:
 		return DefaultMinerGasLimitAmoy
-	case params.GnosisChainConfig.ChainID.Uint64():
+	case chainspec.GnosisChainConfig.ChainID.Uint64():
 		return DefaultMinerGasLimitGnosis
-	case params.ChiadoChainConfig.ChainID.Uint64():
+	case chainspec.ChiadoChainConfig.ChainID.Uint64():
 		return DefaultMinerGasLimitChiado
 	default:
 		if config.Genesis.Config == nil {
@@ -250,7 +251,7 @@ type Config struct {
 	// Ethash options
 	Ethash ethashcfg.Config
 
-	Clique params.ConsensusSnapshotConfig
+	Clique chainspec.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
 
 	// Transaction pool options

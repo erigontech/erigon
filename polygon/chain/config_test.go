@@ -23,19 +23,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func TestGetBurntContract(t *testing.T) {
 	// Ethereum
-	assert.Nil(t, params.MainnetChainConfig.GetBurntContract(0))
-	assert.Nil(t, params.MainnetChainConfig.GetBurntContract(10_000_000))
+	assert.Nil(t, chainspec.MainnetChainConfig.GetBurntContract(0))
+	assert.Nil(t, chainspec.MainnetChainConfig.GetBurntContract(10_000_000))
 
 	// Gnosis Chain
-	addr := params.GnosisChainConfig.GetBurntContract(19_040_000)
+	addr := chainspec.GnosisChainConfig.GetBurntContract(19_040_000)
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), *addr)
-	addr = params.GnosisChainConfig.GetBurntContract(19_040_001)
+	addr = chainspec.GnosisChainConfig.GetBurntContract(19_040_001)
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), *addr)
 

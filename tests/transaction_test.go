@@ -22,7 +22,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func TestTransaction(t *testing.T) {
@@ -39,7 +39,7 @@ func TestTransaction(t *testing.T) {
 
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
 		t.Parallel()
-		cfg := params.MainnetChainConfig
+		cfg := chainspec.MainnetChainConfig
 		if err := txt.checkFailure(t, test.Run(cfg.ChainID)); err != nil {
 			t.Error(err)
 		}

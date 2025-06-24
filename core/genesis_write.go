@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chainspec"
-	params2 "github.com/erigontech/erigon/params"
 )
 
 // GenesisMismatchError is raised when trying to overwrite an existing
@@ -62,7 +61,7 @@ type GenesisMismatchError struct {
 }
 
 func (e *GenesisMismatchError) Error() string {
-	config := params2.ChainConfigByGenesisHash(e.Stored)
+	config := chainspec.ChainConfigByGenesisHash(e.Stored)
 	if config == nil {
 		return fmt.Sprintf("database contains incompatible genesis (have %x, new %x)", e.Stored, e.New)
 	}
@@ -108,7 +107,7 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 		return g.Config
 	}
 
-	config := params2.ChainConfigByGenesisHash(genesisHash)
+	config := chainspec.ChainConfigByGenesisHash(genesisHash)
 	if config != nil {
 		return config
 	} else {
@@ -195,7 +194,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 	// Special case: don't change the existing config of a private chain if no new
 	// config is supplied. This is useful, for example, to preserve DB config created by erigon init.
 	// In that case, only apply the overrides.
-	if genesis == nil && params2.ChainConfigByGenesisHash(storedHash) == nil {
+	if genesis == nil && chainspec.ChainConfigByGenesisHash(storedHash) == nil {
 		newCfg = storedCfg
 		applyOverrides(newCfg)
 	}
