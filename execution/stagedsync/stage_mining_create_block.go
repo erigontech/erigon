@@ -77,7 +77,7 @@ func (mb *MiningBlock) AvailableRlpSpace(chainConfig *chain.Config, withAddition
 	if mb.withdrawalsRlpSize == nil {
 		var s int
 		if mb.Withdrawals != nil {
-			s := types.EncodingSizeGenericList(mb.Withdrawals)
+			s = types.EncodingSizeGenericList(mb.Withdrawals)
 			s += rlp.ListPrefixLen(s)
 		}
 		mb.withdrawalsRlpSize = &s
