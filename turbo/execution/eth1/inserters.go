@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common/metrics"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
@@ -28,7 +29,7 @@ import (
 )
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
-	fmt.Println("Inserting blocks before checking semaphore")
+	fmt.Println(time.Now(), "Inserting blocks before checking semaphore")
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
 		return &execution.InsertionResult{
@@ -36,17 +37,17 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		}, nil
 	}
 	defer e.semaphore.Release(1)
-	fmt.Println("Inserting blocks after checking semaphore")
+	fmt.Println(time.Now(), "Inserting blocks after checking semaphore")
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
-	fmt.Println("Inserting blocks before beginRW")
+	fmt.Println(time.Now(), "Inserting blocks before beginRW")
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
 	}
 	defer tx.Rollback()
-	fmt.Println("Inserting blocks after beginRW")
+	fmt.Println(time.Now(), "Inserting blocks after beginRW")
 
 	for _, block := range req.Blocks {
 		// Skip frozen blocks.
@@ -90,11 +91,11 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		e.logger.Info("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
-	fmt.Println("Inserting blocks before commit")
+	fmt.Println(time.Now(), "Inserting blocks before commit")
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not commit: %s", err)
 	}
-	fmt.Println("Inserting blocks after commit")
+	fmt.Println(time.Now(), "Inserting blocks after commit")
 
 	return &execution.InsertionResult{
 		Result: execution.ExecutionStatus_Success,
