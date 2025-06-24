@@ -114,7 +114,7 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 	if c.forkChoiceReader.GetPeerDas() == nil {
 		log.Warn("metadata v3: peer das is nil")
 	} else {
-		cgc = c.forkChoiceReader.GetPeerDas().GetAdvertisedCgc()
+		cgc = c.forkChoiceReader.GetPeerDas().StateReader().GetAdvertisedCgc()
 	}
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
 		SeqNumber:         c.me.Seq(),
