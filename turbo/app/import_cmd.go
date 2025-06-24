@@ -43,10 +43,10 @@ import (
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/turbo/debug"
 	turboNode "github.com/erigontech/erigon/turbo/node"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages"
 )
 
 const (
