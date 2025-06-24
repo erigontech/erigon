@@ -16,12 +16,12 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/params"
 )
 
 var (
@@ -62,7 +62,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		Name:               "p2p-mock",
 		NodeDatabase:       "dev/nodes/eth67",
 		PrivateKey:         privateKey,
-		LookupBootnodeURLs: params.BootnodeURLsByGenesisHash,
+		LookupBootnodeURLs: chainspec.BootnodeURLsByGenesisHash,
 	}
 
 	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(

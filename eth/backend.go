@@ -118,7 +118,6 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/finality/flags"
@@ -496,8 +495,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return res
 		}
 
-		p2pConfig.LookupBootnodeURLs = params.BootnodeURLsByGenesisHash
-		p2pConfig.LookupDNSNetwork = params.KnownDNSNetwork
+		p2pConfig.LookupBootnodeURLs = chainspec.BootnodeURLsByGenesisHash
+		p2pConfig.LookupDNSNetwork = chainspec.KnownDNSNetwork
 		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)

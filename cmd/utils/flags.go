@@ -1216,7 +1216,7 @@ func GetBootnodesFromFlags(urlsStr, chain string) ([]*enode.Node, error) {
 	if urlsStr != "" {
 		urls = common.CliString2Array(urlsStr)
 	} else {
-		urls = params2.BootnodeURLsOfChain(chain)
+		urls = chainspec.BootnodeURLsOfChain(chain)
 	}
 	return enode.ParseNodesFromURLs(urls)
 }
@@ -1227,7 +1227,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		urls = common.CliString2Array(ctx.String(StaticPeersFlag.Name))
 	} else {
 		chain := ctx.String(ChainFlag.Name)
-		urls = params2.StaticPeerURLsOfChain(chain)
+		urls = chainspec.StaticPeerURLsOfChain(chain)
 	}
 
 	nodes, err := enode.ParseNodesFromURLs(urls)
@@ -1296,8 +1296,8 @@ func NewP2PConfig(
 		AllowedPorts:       allowedPorts,
 		TmpDir:             dirs.Tmp,
 		MetricsEnabled:     metricsEnabled,
-		LookupBootnodeURLs: params2.BootnodeURLsByGenesisHash,
-		LookupDNSNetwork:   params2.KnownDNSNetwork,
+		LookupBootnodeURLs: chainspec.BootnodeURLsByGenesisHash,
+		LookupDNSNetwork:   chainspec.KnownDNSNetwork,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -2135,7 +2135,7 @@ func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 		return // already set through flags/config
 	}
 	protocol := "all"
-	if url := params2.KnownDNSNetwork(genesis, protocol); url != "" {
+	if url := chainspec.KnownDNSNetwork(genesis, protocol); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
 }

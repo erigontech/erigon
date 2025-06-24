@@ -17,12 +17,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package params
+package chainspec
 
 import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 // MainnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
@@ -131,15 +130,15 @@ const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUD
 func KnownDNSNetwork(genesis common.Hash, protocol string) string {
 	var net string
 	switch genesis {
-	case chainspec.MainnetGenesisHash:
+	case MainnetGenesisHash:
 		net = "mainnet"
-	case chainspec.SepoliaGenesisHash:
+	case SepoliaGenesisHash:
 		net = "sepolia"
-	case chainspec.HoleskyGenesisHash:
+	case HoleskyGenesisHash:
 		net = "holesky"
-	case chainspec.HoodiGenesisHash:
+	case HoodiGenesisHash:
 		net = "hoodi"
-	case chainspec.BorMainnetGenesisHash:
+	case BorMainnetGenesisHash:
 		return "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
 	default:
 		return ""
@@ -151,12 +150,12 @@ var bootnodeURLsByGenesisHash = make(map[common.Hash][]string)
 var bootnodeURLsByChainName = make(map[string][]string)
 
 func init() {
-	bootnodeURLsByGenesisHash[chainspec.MainnetGenesisHash] = MainnetBootnodes
-	bootnodeURLsByGenesisHash[chainspec.HoleskyGenesisHash] = HoleskyBootnodes
-	bootnodeURLsByGenesisHash[chainspec.HoodiGenesisHash] = HoodiBootnodes
-	bootnodeURLsByGenesisHash[chainspec.SepoliaGenesisHash] = SepoliaBootnodes
-	bootnodeURLsByGenesisHash[chainspec.GnosisGenesisHash] = GnosisBootnodes
-	bootnodeURLsByGenesisHash[chainspec.ChiadoGenesisHash] = ChiadoBootnodes
+	bootnodeURLsByGenesisHash[MainnetGenesisHash] = MainnetBootnodes
+	bootnodeURLsByGenesisHash[HoleskyGenesisHash] = HoleskyBootnodes
+	bootnodeURLsByGenesisHash[HoodiGenesisHash] = HoodiBootnodes
+	bootnodeURLsByGenesisHash[SepoliaGenesisHash] = SepoliaBootnodes
+	bootnodeURLsByGenesisHash[GnosisGenesisHash] = GnosisBootnodes
+	bootnodeURLsByGenesisHash[ChiadoGenesisHash] = ChiadoBootnodes
 
 	bootnodeURLsByChainName[networkname.Mainnet] = MainnetBootnodes
 	bootnodeURLsByChainName[networkname.Holesky] = HoleskyBootnodes
