@@ -61,7 +61,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		rawBlock := types.RawBlock{Header: header, Body: body}
 		err = rawBlock.ValidateMaxRlpSize(e.config)
 		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %s", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
 		}
 		var parentTd *big.Int
 		height := header.Number.Uint64()
