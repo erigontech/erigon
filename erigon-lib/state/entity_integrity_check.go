@@ -27,6 +27,10 @@ func FromII(ii kv.InvertedIdx) UniversalEntity {
 	return UniversalEntity(uint32(ii)<<16 | 0x02)
 }
 
+func FromForkable(f kv.ForkableId) UniversalEntity {
+	return UniversalEntity(uint32(f)<<16 | 0x03)
+}
+
 func (ue UniversalEntity) String() string {
 	category := ue & 0xFFFF
 	if category == 0x0 {
@@ -37,6 +41,9 @@ func (ue UniversalEntity) String() string {
 	}
 	if category == 0x2 {
 		return fmt.Sprintf("ii:%s", kv.InvertedIdx(ue>>16))
+	}
+	if category == 0x3 {
+		return fmt.Sprintf("forkable:%s", Registry.Name(kv.ForkableId(ue>>16)))
 	}
 	return fmt.Sprintf("unknown:%d", ue)
 }

@@ -536,6 +536,7 @@ type (
 	Domain      uint16
 	Appendable  uint16
 	InvertedIdx uint16
+	ForkableId  uint16
 )
 
 type TemporalGetter interface {

@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -387,12 +386,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		//    Accede mode will check db existence (may wait with retries). It's ok to fail in this case - some supervisor will restart us.
 
 		// using salt files as proxy for empty directory or not
-		ok, err := ee.CheckSaltFilesExist(cfg.Dirs)
+		ok, err := libstate.CheckSaltFilesExist(cfg.Dirs)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 		if !ok {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, ee.ErrCannotStartWithoutSaltFiles
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, libstate.ErrCannotStartWithoutSaltFiles
 		}
 
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
