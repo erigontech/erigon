@@ -116,7 +116,6 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
 		} else {
 
-			yielded := mapset.NewSet[[32]byte]()
 			var simulationTx kv.StatelessRwTx
 			m := membatch.NewHashBatch(tx, quit, cfg.tmpdir, logger)
 			defer m.Close()
@@ -128,7 +127,10 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			}
 
 			for {
-				txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, stateReader, simulationTx, yielded, logger)
+				// [zkevm] - warning here!  we no longer send an already yielded map here so if this code is
+				// ever required again then there needs to be a manual check for the yielded transactions already in a
+				// block.  see transaction_yielder.go for more details on how zkevm sequencer handles this
+				txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, stateReader, simulationTx, logger)
 				if err != nil {
 					return err
 				}
@@ -190,7 +192,6 @@ func getNextTransactions(
 	executionAt uint64,
 	stateReader state.StateReader,
 	simulationTx kv.StatelessRwTx,
-	alreadyYielded mapset.Set[[32]byte],
 	logger log.Logger,
 ) (types.TransactionsStream, int, error) {
 	txSlots := types2.TxsRlp{}
@@ -204,7 +205,7 @@ func getNextTransactions(
 			remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
 		}
 
-		if _, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingBlobGas, alreadyYielded); err != nil {
+		if _, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingBlobGas); err != nil {
 			return err
 		}
 

@@ -210,6 +210,9 @@ LOOP:
 					// check if we need to stop here based on config
 					if cfg.zkCfg.L1SyncStopBatch > 0 {
 						stopBlockMap[b] = struct{}{}
+						if b > highestBatch {
+							highestBatch = b
+						}
 						if checkStopBlockMap(highestBatch, cfg.zkCfg.L1SyncStopBatch, stopBlockMap) {
 							log.Info("Stopping L1 sync based on stop batch config")
 							break LOOP

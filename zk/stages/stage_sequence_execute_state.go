@@ -134,7 +134,10 @@ func (bs *BatchState) isThereAnyTransactionsToRecover() bool {
 		return false
 	}
 
-	return bs.blockState.hasAnyTransactionForInclusion() || bs.batchL1RecoveryData.recoveredBatchData.IsWorkRemaining
+	// mined blocks vs recovered blocks
+	remainingTransactions := len(bs.blockState.blockL1RecoveryData.Transactions) - len(bs.blockState.builtBlockElements.transactions)
+
+	return remainingTransactions > 0 || bs.batchL1RecoveryData.recoveredBatchData.IsWorkRemaining
 }
 
 func (bs *BatchState) loadBlockL1RecoveryData(decodedBlocksIndex uint64) bool {
@@ -165,11 +168,7 @@ func (bs *BatchState) getCoinbase(cfg *SequenceBlockCfg) common.Address {
 }
 
 func (bs *BatchState) onAddedTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *evmtypes.ExecutionResult, effectiveGas uint8) {
-	slotId, ok := bs.blockState.transactionHashesToSlots[transaction.Hash()]
-	if !ok {
-		log.Warn("[batchState] transaction hash not found in transaction hashes to slots map", "hash", transaction.Hash())
-	}
-	bs.blockState.builtBlockElements.onFinishAddingTransaction(transaction, receipt, execResult, effectiveGas, slotId)
+	bs.blockState.builtBlockElements.onFinishAddingTransaction(transaction, receipt, execResult, effectiveGas)
 	bs.hasAnyTransactionsInThisBatch = true
 }
 
@@ -253,7 +252,6 @@ func newLimboRecoveryData(limboHeaderTimestamp uint64, limboTxHash *common.Hash)
 
 // TYPE BLOCK STATE
 type BlockState struct {
-	transactionsForInclusion []types.Transaction
 	transactionHashesToSlots map[common.Hash]common.Hash
 	builtBlockElements       BuiltBlockElements
 	blockL1RecoveryData      *zktx.DecodedBatchL2Data
@@ -266,18 +264,8 @@ func newBlockState() *BlockState {
 	}
 }
 
-func (bs *BlockState) hasAnyTransactionForInclusion() bool {
-	return len(bs.transactionsForInclusion) > 0
-}
-
 func (bs *BlockState) setBlockL1RecoveryData(blockL1RecoveryData *zktx.DecodedBatchL2Data) {
 	bs.blockL1RecoveryData = blockL1RecoveryData
-
-	if bs.blockL1RecoveryData != nil {
-		bs.transactionsForInclusion = bs.blockL1RecoveryData.Transactions
-	} else {
-		bs.transactionsForInclusion = []types.Transaction{}
-	}
 }
 
 func (bs *BlockState) getDeltaTimestamp() uint64 {
@@ -288,21 +276,12 @@ func (bs *BlockState) getDeltaTimestamp() uint64 {
 	return math.MaxUint64
 }
 
-func (bs *BlockState) getL1EffectiveGases(cfg SequenceBlockCfg, i int) uint8 {
-	if bs.blockL1RecoveryData != nil {
-		return bs.blockL1RecoveryData.EffectiveGasPricePercentages[i]
-	}
-
-	return DeriveEffectiveGasPrice(cfg, bs.transactionsForInclusion[i])
-}
-
 // TYPE BLOCK ELEMENTS
 type BuiltBlockElements struct {
 	transactions     []types.Transaction
 	receipts         types.Receipts
 	effectiveGases   []uint8
 	executionResults []*evmtypes.ExecutionResult
-	txSlots          []common.Hash
 }
 
 func (bbe *BuiltBlockElements) resetBlockBuildingArrays() {
@@ -312,12 +291,11 @@ func (bbe *BuiltBlockElements) resetBlockBuildingArrays() {
 	bbe.executionResults = []*evmtypes.ExecutionResult{}
 }
 
-func (bbe *BuiltBlockElements) onFinishAddingTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *evmtypes.ExecutionResult, effectiveGas uint8, slotId common.Hash) {
+func (bbe *BuiltBlockElements) onFinishAddingTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *evmtypes.ExecutionResult, effectiveGas uint8) {
 	bbe.transactions = append(bbe.transactions, transaction)
 	bbe.receipts = append(bbe.receipts, receipt)
 	bbe.executionResults = append(bbe.executionResults, execResult)
 	bbe.effectiveGases = append(bbe.effectiveGases, effectiveGas)
-	bbe.txSlots = append(bbe.txSlots, slotId)
 }
 
 type resequenceTxMetadata struct {
@@ -356,24 +334,26 @@ func (r *ResequenceBatchJob) CurrentBlock() *dsTypes.FullL2Block {
 	return nil
 }
 
-func (r *ResequenceBatchJob) YieldNextBlockTransactions(decoder zktx.TxDecoder) ([]types.Transaction, error) {
+func (r *ResequenceBatchJob) YieldNextBlockTransactions(decoder zktx.TxDecoder) ([]types.Transaction, []uint8, error) {
 	blockTransactions := make([]types.Transaction, 0)
+	effectivePercentages := make([]uint8, 0)
 	if r.HasMoreBlockToProcess() {
 		block := r.CurrentBlock()
 		r.txIndexMap[block.L2Blockhash] = resequenceTxMetadata{r.StartBlockIndex, 0}
 
 		for i := r.StartTxIndex; i < len(block.L2Txs); i++ {
 			transaction := block.L2Txs[i]
-			tx, _, err := decoder(transaction.Encoded, transaction.EffectiveGasPricePercentage, block.ForkId)
+			tx, effectivePercentage, err := decoder(transaction.Encoded, transaction.EffectiveGasPricePercentage, block.ForkId)
 			if err != nil {
-				return nil, fmt.Errorf("decode tx error: %v", err)
+				return nil, nil, fmt.Errorf("decode tx error: %v", err)
 			}
 			r.txIndexMap[tx.Hash()] = resequenceTxMetadata{r.StartBlockIndex, i}
 			blockTransactions = append(blockTransactions, tx)
+			effectivePercentages = append(effectivePercentages, effectivePercentage)
 		}
 	}
 
-	return blockTransactions, nil
+	return blockTransactions, effectivePercentages, nil
 }
 
 func (r *ResequenceBatchJob) UpdateLastProcessedTx(h common.Hash) {

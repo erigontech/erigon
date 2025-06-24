@@ -10,7 +10,7 @@ import (
 	zktx "github.com/erigontech/erigon/zk/tx"
 	zktypes "github.com/erigontech/erigon/zk/types"
 	"github.com/holiman/uint256"
-	gomock "go.uber.org/mock/gomock"
+	"go.uber.org/mock/gomock"
 )
 
 type mockChecker struct {
@@ -341,7 +341,7 @@ func TestResequenceBatchJob_YieldNextBlockTransactions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			txs, err := tt.job.YieldNextBlockTransactions(mockDecodeTx)
+			txs, _, err := tt.job.YieldNextBlockTransactions(mockDecodeTx)
 			if (err != nil) != tt.expectedError {
 				t.Errorf("ResequenceBatchJob.YieldNextBlockTransactions() error = %v, expectedError %v", err, tt.expectedError)
 				return
@@ -376,7 +376,7 @@ func TestResequenceBatchJob_YieldAndUpdate(t *testing.T) {
 	}
 
 	// First call - should yield transaction 2 from block 0
-	txs, err := job.YieldNextBlockTransactions(mockDecodeTx)
+	txs, _, err := job.YieldNextBlockTransactions(mockDecodeTx)
 	if err != nil {
 		t.Fatalf("First call: Unexpected error: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestResequenceBatchJob_YieldAndUpdate(t *testing.T) {
 	tx2 := txs[0]
 
 	// Second call - should yield empty block (block 1)
-	txs, err = job.YieldNextBlockTransactions(mockDecodeTx)
+	txs, _, err = job.YieldNextBlockTransactions(mockDecodeTx)
 	if err != nil {
 		t.Fatalf("Second call: Unexpected error: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestResequenceBatchJob_YieldAndUpdate(t *testing.T) {
 	job.UpdateLastProcessedTx(job.CurrentBlock().L2Blockhash)
 
 	// Third call - should yield empty block (block 2)
-	txs, err = job.YieldNextBlockTransactions(mockDecodeTx)
+	txs, _, err = job.YieldNextBlockTransactions(mockDecodeTx)
 	if err != nil {
 		t.Fatalf("Third call: Unexpected error: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestResequenceBatchJob_YieldAndUpdate(t *testing.T) {
 	job.UpdateLastProcessedTx(job.CurrentBlock().L2Blockhash)
 
 	// Fourth call - should yield transactions 3 and 4, but we'll only process 3
-	txs, err = job.YieldNextBlockTransactions(mockDecodeTx)
+	txs, _, err = job.YieldNextBlockTransactions(mockDecodeTx)
 	if err != nil {
 		t.Fatalf("Fourth call: Unexpected error: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestResequenceBatchJob_YieldAndUpdate(t *testing.T) {
 	}
 
 	// Final call - should yield transaction 4
-	txs, err = job.YieldNextBlockTransactions(mockDecodeTx)
+	txs, _, err = job.YieldNextBlockTransactions(mockDecodeTx)
 	if err != nil {
 		t.Fatalf("Final call: Unexpected error: %v", err)
 	}

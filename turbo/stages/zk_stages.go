@@ -21,6 +21,7 @@ import (
 	zkStages "github.com/erigontech/erigon/zk/stages"
 	"github.com/erigontech/erigon/zk/syncer"
 	"github.com/erigontech/erigon/zk/txpool"
+	"github.com/erigontech/erigon/zk/sequencer"
 )
 
 // NewDefaultZkStages creates stages for zk syncer (RPC mode)
@@ -109,6 +110,7 @@ func NewSequencerZkStages(ctx context.Context,
 	verifier *legacy_executor_verifier.LegacyExecutorVerifier,
 	infoTreeUpdater *l1infotree.Updater,
 	hook *Hook,
+	txYielder *sequencer.PoolTransactionYielder,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockReader := freezeblocks.NewBlockReader(snapshots, nil)
@@ -149,6 +151,7 @@ func NewSequencerZkStages(ctx context.Context,
 			uint16(cfg.YieldSize),
 			infoTreeUpdater,
 			hook,
+			txYielder,
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg),
 		zkStages.StageZkInterHashesCfg(db, !cfg.DebugDisableStateRootCheck, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg, cfg.Zk),

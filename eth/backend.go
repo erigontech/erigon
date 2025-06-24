@@ -141,6 +141,8 @@ import (
 	"github.com/erigontech/erigon/zk/utils"
 	"github.com/erigontech/erigon/zk/witness"
 	"github.com/erigontech/erigon/zkevm/etherman"
+	"github.com/hashicorp/golang-lru/v2/expirable"
+	"math"
 )
 
 var dataStreamServerFactory = server.NewZkEVMDataStreamServerFactory()
@@ -1193,6 +1195,23 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				cfg.L1HighestBlockType,
 			)
 
+			decodedTxCache := expirable.NewLRU[libcommon.Hash, *types.Transaction](cfg.SequencerDecodedTxCacheSize, nil, cfg.SequencerDecodedTxCacheTTL)
+
+			if cfg.YieldSize > math.MaxUint16 {
+				return nil, errors.New("yieldSize cannot be greater than uint16 max value (65535)")
+			}
+
+			yieldSize := uint16(cfg.YieldSize)
+
+			txYielder := sequencer.NewPoolTransactionYielder(
+				ctx,
+				*cfg.Zk,
+				backend.txPool2,
+				yieldSize,
+				backend.txPool2DB,
+				decodedTxCache,
+			)
+
 			backend.syncStages = stages2.NewSequencerZkStages(
 				backend.sentryCtx,
 				backend.chainDB,
@@ -1213,6 +1232,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				verifier,
 				l1InfoTreeUpdater,
 				hook,
+				txYielder,
 			)
 
 			backend.syncUnwindOrder = zkStages.ZkSequencerUnwindOrder

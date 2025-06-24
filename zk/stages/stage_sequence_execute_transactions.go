@@ -9,7 +9,6 @@ import (
 
 	"io"
 
-	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/log/v3"
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
@@ -17,44 +16,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/zk/utils"
 )
-
-func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, []common.Hash, bool, error) {
-	var ids []common.Hash
-	var transactions []types.Transaction
-	var allConditionsOk bool
-	var err error
-
-	gasLimit := utils.GetBlockGasLimitForFork(forkId)
-
-	ti := utils.StartTimer("txpool", "get-transactions")
-	defer ti.LogTimer()
-
-	cfg.txPool.PreYield()
-	defer cfg.txPool.PostYield()
-
-	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {
-		slots := types2.TxsRlp{}
-		if allConditionsOk, _, err = cfg.txPool.YieldBest(cfg.yieldSize, &slots, poolTx, executionAt, gasLimit, 0, alreadyYielded); err != nil {
-			return err
-		}
-		yieldedTxs, yieldedIds, toRemove, err := extractTransactionsFromSlot(&slots, executionAt, cfg)
-		if err != nil {
-			return err
-		}
-		for _, txId := range toRemove {
-			cfg.txPool.MarkForDiscardFromPendingBest(txId)
-		}
-		transactions = append(transactions, yieldedTxs...)
-		ids = append(ids, yieldedIds...)
-		return nil
-	}); err != nil {
-		return nil, nil, allConditionsOk, err
-	}
-
-	return transactions, ids, allConditionsOk, err
-}
 
 func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, txHash *common.Hash, executionAt uint64) ([]types.Transaction, error) {
 	var transactions []types.Transaction
@@ -217,9 +179,9 @@ func attemptAddTransaction(
 		return nil, nil, txCounters, overflowNone, err
 	}
 
-	counters := batchCounters.CombineCollectorsNoChanges().UsedAsString()
 	if overflow {
-		log.Debug("Transaction overflow detected", "txHash", transaction.Hash(), "coutners", counters)
+		counters := batchCounters.CombineCollectorsNoChanges().UsedAsString()
+		log.Debug("Transaction overflow detected", "txHash", transaction.Hash(), "counters", counters)
 		ibs.RevertToSnapshot(snapshot)
 		return nil, nil, txCounters, overflowCounters, nil
 	}
@@ -228,7 +190,6 @@ func attemptAddTransaction(
 		ibs.RevertToSnapshot(snapshot)
 		return nil, nil, txCounters, overflowGas, nil
 	}
-	log.Debug("Transaction added", "txHash", transaction.Hash(), "coutners", counters)
 
 	// add the gas only if not reverted. This should not be moved above the overflow check
 	header.GasUsed = gasUsed

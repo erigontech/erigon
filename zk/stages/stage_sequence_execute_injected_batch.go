@@ -19,6 +19,7 @@ import (
 	zktx "github.com/erigontech/erigon/zk/tx"
 	zktypes "github.com/erigontech/erigon/zk/types"
 	"github.com/erigontech/erigon/zk/utils"
+	"github.com/erigontech/erigon/zk/sequencer"
 )
 
 const (
@@ -139,7 +140,7 @@ func handleInjectedBatch(
 	ethBlockGasPool := new(core.GasPool).AddGas(transactionGasLimit) // used only in normalcy mode in stage sequencer to create a pool at block level
 
 	// process the tx and we can ignore the counters as an overflow at this stage means no network anyway
-	effectiveGas := DeriveEffectiveGasPrice(*batchContext.cfg, decodedBlocks[0].Transactions[0])
+	effectiveGas := sequencer.DeriveEffectiveGasPrice(*batchContext.cfg.zk, decodedBlocks[0].Transactions[0])
 	receipt, execResult, _, _, err := attemptAddTransaction(*batchContext.cfg, batchContext.sdb, ibs, batchCounters, blockContext, header, decodedBlocks[0].Transactions[0], effectiveGas, false, forkId, 0 /* use 0 for l1InfoIndex in injected batch */, nil, ethBlockGasPool)
 	if err != nil {
 		return nil, nil, nil, 0, err

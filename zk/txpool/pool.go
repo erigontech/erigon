@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/zk/acl"
 
 	"github.com/VictoriaMetrics/metrics"
-	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -212,7 +211,6 @@ type metaTx struct {
 	subPool                   SubPoolMarker
 	currentSubPool            SubPoolType
 	minedBlockNum             uint64
-	alreadyYielded            bool
 }
 
 func newMetaTx(slot *types.TxSlot, isLocal bool, timestamp uint64) *metaTx {
@@ -742,22 +740,12 @@ func (p *TxPool) IsLocal(idHash []byte) bool {
 func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
-func (p *TxPool) ResetYieldedStatus() {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	best := p.pending.best
-	for i := 0; i < len(best.ms); i++ {
-		best.ms[i].alreadyYielded = false
-	}
-}
-
-func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
-	return p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, toSkip)
+func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, int, error) {
+	return p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas)
 }
 
 func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
-	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, set)
+	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas)
 	return onTime, err
 }
 
@@ -1550,6 +1538,7 @@ func (p *TxPool) discardLocked(mt *metaTx, reason DiscardReason) {
 	p.deletedTxs = append(p.deletedTxs, mt)
 	p.all.delete(mt)
 	p.discardReasonsLRU.Add(hashStr, reason)
+
 	if mt.Tx.Type == types.BlobTxType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t - uint64(len(mt.Tx.BlobHashes)))

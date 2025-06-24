@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 
-	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
@@ -156,7 +155,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 
 // zk: the implementation of best here is changed only to not take into account block gas limits as we don't care about
 // these in zk.  Instead we do a quick check on the transaction maximum gas in zk
-func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, int, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -191,15 +190,9 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		mt := best.ms[i]
 		p.Trace("Processing transaction", "txID", mt.Tx.IDHash)
 
-		if toSkip.Contains(mt.Tx.IDHash) {
-			p.Trace("Skipping transaction, already in toSkip", "txID", mt.Tx.IDHash)
-			continue
-		}
-
 		if !isLondon && mt.Tx.Type == 0x2 {
 			// remove ldn txs when not in london
 			toRemove = append(toRemove, mt)
-			toSkip.Add(mt.Tx.IDHash)
 			log.Info("Removing London transaction in non-London environment", "txID", mt.Tx.IDHash)
 			continue
 		}
@@ -252,7 +245,6 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		txs.TxIds[count] = mt.Tx.IDHash
 		copy(txs.Senders.At(count), sender.Bytes())
 		txs.IsLocal[count] = isLocal
-		toSkip.Add(mt.Tx.IDHash)
 		count++
 	}
 
@@ -273,7 +265,7 @@ func (p *TxPool) ForceUpdateLatestBlock(blockNumber uint64) {
 	}
 }
 
-// This function is invoked if a single tx overflow entire zk-counters.
+// MarkForDiscardFromPendingBest function is invoked if a single tx overflow entire zk-counters.
 // In this case there is nothing we can do but to mark is as such
 // and on next "pool iteration" it will be discard
 func (p *TxPool) MarkForDiscardFromPendingBest(txHash common.Hash) {

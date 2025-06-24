@@ -37,6 +37,7 @@ import (
 	zktypes "github.com/erigontech/erigon/zk/types"
 	"github.com/erigontech/erigon/zk/utils"
 	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/erigontech/erigon/zk/sequencer"
 )
 
 const (
@@ -91,6 +92,7 @@ type SequenceBlockCfg struct {
 
 	decodedTxCache *expirable.LRU[common.Hash, *types.Transaction]
 	doneHook       DoneHook
+	txYielder      TxYielder
 }
 
 func StageSequenceBlocksCfg(
@@ -121,6 +123,7 @@ func StageSequenceBlocksCfg(
 	yieldSize uint16,
 	infoTreeUpdater *l1infotree.Updater,
 	doneHook DoneHook,
+	txYielder *sequencer.PoolTransactionYielder,
 ) SequenceBlockCfg {
 
 	decodedTxCache := expirable.NewLRU[common.Hash, *types.Transaction](zk.SequencerDecodedTxCacheSize, nil, zk.SequencerDecodedTxCacheTTL)
@@ -152,6 +155,7 @@ func StageSequenceBlocksCfg(
 		infoTreeUpdater:  infoTreeUpdater,
 		decodedTxCache:   decodedTxCache,
 		doneHook:         doneHook,
+		txYielder:        txYielder,
 	}
 }
 
@@ -181,10 +185,8 @@ func (sCfg *SequenceBlockCfg) toErigonExecuteBlockCfg() stagedsync.ExecuteBlockC
 
 func validateIfDatastreamIsAheadOfExecution(
 	s *stagedsync.StageState,
-	// u stagedsync.Unwinder,
 	ctx context.Context,
 	cfg SequenceBlockCfg,
-	// historyCfg stagedsync.HistoryCfg,
 ) error {
 	roTx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
