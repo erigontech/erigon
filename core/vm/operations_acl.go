@@ -322,8 +322,6 @@ var (
 	gasStaticCallEIP7907   = makeGasFuncCodeAccessVariantEIP7907(gasStaticCallEIP7702, 1)
 	gasCallCodeEIP7907     = makeGasFuncCodeAccessVariantEIP7907(gasCallCodeEIP7702, 1)
 	gasExtCodeCopyEIP7907  = makeGasFuncCodeAccessVariantEIP7907(gasExtCodeCopyEIP2929, 0)
-	gasCreateEIP7907       = makeGasFuncCreateVariantEIP7907(gasCreateEip3860)
-	gasCreate2EIP7907      = makeGasFuncCreateVariantEIP7907(gasCreate2Eip3860)
 )
 
 func makeGasFuncCodeAccessVariantEIP7907(oldGasFunc gasFunc, addressStackIndex int) gasFunc {
@@ -346,35 +344,6 @@ func makeGasFuncCodeAccessVariantEIP7907(oldGasFunc gasFunc, addressStackIndex i
 
 		var overflow bool
 		if cost, overflow = math.SafeAdd(cost, extraCost); overflow {
-			return 0, ErrGasUintOverflow
-		}
-
-		return cost, nil
-	}
-}
-
-func makeGasFuncCreateVariantEIP7907(oldGasFunc gasFunc) gasFunc {
-	return func(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-		cost, err := oldGasFunc(evm, contract, stack, mem, memorySize)
-		if err != nil {
-			return 0, err
-		}
-
-		size, overflow := stack.Back(2).Uint64WithOverflow()
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
-
-		extraCost, err := largeContractCost(size)
-		if err != nil {
-			return 0, err
-		}
-		if extraCost == 0 {
-			return cost, nil
-		}
-
-		cost, overflow = math.SafeAdd(cost, extraCost)
-		if overflow {
 			return 0, ErrGasUintOverflow
 		}
 
