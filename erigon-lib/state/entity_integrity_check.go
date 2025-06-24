@@ -31,10 +31,6 @@ func FromForkable(f kv.ForkableId) UniversalEntity {
 	return UniversalEntity(uint32(f)<<16 | forkableCategory)
 }
 
-func FromForkable(f kv.ForkableId) UniversalEntity {
-	return UniversalEntity(uint32(f)<<16 | 0x03)
-}
-
 func (ue UniversalEntity) String() string {
 	switch ue.category() {
 	case domainCategory:
