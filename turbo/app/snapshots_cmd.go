@@ -70,8 +70,8 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -862,7 +862,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
-			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
+			return fmt.Errorf("failed to parse filename %s", info.Name())
 		}
 		from, to := res.From, res.To
 		maxStep = max(maxStep, to)

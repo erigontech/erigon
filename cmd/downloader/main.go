@@ -57,16 +57,16 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
-	_ "github.com/erigontech/erigon-db/snaptype" //hack
+	_ "github.com/erigontech/erigon-db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
 func main() {
@@ -321,7 +321,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	d.MainLoopInBackground(false)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
-		for _, it := range snapcfg.KnownCfg(chain).Preverified {
+		for _, it := range snapcfg.KnownCfg(chain).Preverified.Items {
 			downloadItems = append(downloadItems, &proto_downloader.AddItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),

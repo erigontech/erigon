@@ -3,10 +3,12 @@ package stages
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
@@ -70,32 +72,53 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 		return nil, nil
 	}
 
-	// Generate blob identifiers from the retrieved blocks
-	ids, err := network2.BlobsIdentifiersFromBlocks(blocks, cfg.beaconCfg)
-	if err != nil {
-		return nil, err
+	sort.Slice(blocks, func(i, j int) bool {
+		return blocks[i].Block.Slot < blocks[j].Block.Slot
+	})
+
+	denebBlocks := []*cltypes.SignedBeaconBlock{}
+	fuluBlocks := []*cltypes.SignedBeaconBlock{}
+	for _, block := range blocks {
+		if block.Version() >= clparams.FuluVersion {
+			fuluBlocks = append(fuluBlocks, block)
+		} else if block.Version() >= clparams.DenebVersion {
+			denebBlocks = append(denebBlocks, block)
+		}
 	}
 
-	var inserted uint64
-
-	// Loop until all blobs are inserted into the blob store
-	for inserted != uint64(ids.Len()) {
-		select {
-		case <-ctx.Done():
-			// Context canceled or timed out
-			return nil, ctx.Err()
-		default:
+	if len(fuluBlocks) > 0 {
+		// download missing column data for the fulu blocks
+		if err = cfg.peerDas.DownloadMissingColumnsByBlocks(ctx, fuluBlocks); err != nil {
+			return nil, err
 		}
+	}
 
-		// Request blobs frantically from the execution client
-		blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
+	if len(denebBlocks) > 0 {
+		// Generate blob identifiers from the retrieved blocks
+		ids, err := network2.BlobsIdentifiersFromBlocks(denebBlocks, cfg.beaconCfg)
 		if err != nil {
-			return nil, fmt.Errorf("failed to request blobs frantically: %w", err)
+			return nil, err
 		}
+		var inserted uint64
+		// Loop until all blobs are inserted into the blob store
+		for inserted != uint64(ids.Len()) {
+			select {
+			case <-ctx.Done():
+				// Context canceled or timed out
+				return nil, ctx.Err()
+			default:
+			}
 
-		// Verify the blobs against identifiers and insert them into the blob store
-		if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
-			return nil, fmt.Errorf("failed to verify blobs against identifiers and insert into the blob store: %w", err)
+			// Request blobs frantically from the execution client
+			blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
+			if err != nil {
+				return nil, fmt.Errorf("failed to request blobs frantically: %w", err)
+			}
+
+			// Verify the blobs against identifiers and insert them into the blob store
+			if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
+				return nil, fmt.Errorf("failed to verify blobs against identifiers and insert into the blob store: %w", err)
+			}
 		}
 	}
 
@@ -223,6 +246,7 @@ MainLoop:
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	totalRequest := args.targetSlot - args.seenSlot
+	log.Debug("[chainTipSync] totalRequest", "totalRequest", totalRequest, "seenSlot", args.seenSlot, "targetSlot", args.targetSlot)
 	// If the execution engine is not ready, wait for it to be ready.
 	ready, err := waitForExecutionEngineToBeFinished(ctx, cfg)
 	if err != nil {
@@ -233,6 +257,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		log.Debug("[chainTipSync] execution engine is not ready yet")
 		return nil
 	}
+
+	log.Debug("[chainTipSync] execution engine is ready")
 
 	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
 		if err := cfg.blockCollector.Flush(context.Background()); err != nil {

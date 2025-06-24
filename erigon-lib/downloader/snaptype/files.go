@@ -97,13 +97,7 @@ func IsCorrectFileName(name string) bool {
 var StateFileRegex = regexp.MustCompile(`^[^.]+\.\d+-\d+$`)
 
 func IsStateFileV2(name string) bool {
-	base := strings.TrimSuffix(name, filepath.Ext(name))
-	parts := strings.SplitN(base, "-", 2)
-	if len(parts) != 2 {
-		return false
-	}
-
-	return StateFileRegex.MatchString(parts[1])
+	return StateFileRegex.MatchString(name)
 }
 
 func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
@@ -139,7 +133,11 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		return res, false, false
 	}
 
-	isStateFile := IsStateFileV2(fileName)
+	for ext := filepath.Ext(croppedFileName); ext != "" && !strings.Contains(ext, "-"); ext = filepath.Ext(croppedFileName) {
+		croppedFileName = strings.TrimSuffix(croppedFileName, ext)
+	}
+
+	isStateFile := IsStateFileV2(croppedFileName)
 
 	if isStateFile { // accounts.24-28
 		idxDot := strings.Index(croppedFileName, ".")
