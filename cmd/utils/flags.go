@@ -70,7 +70,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
-	_ "github.com/erigontech/erigon/polygon/chainspec" // Register Polygon chains
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 // These are all the command line flags we support.

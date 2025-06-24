@@ -59,7 +59,7 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
-	_ "github.com/erigontech/erigon/polygon/chainspec" // Register Polygon chains
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 var (

@@ -48,7 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/chainspec"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/requests"
@@ -86,7 +86,7 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 	return &requestGenerator{
 		chain:      chain,
 		sentry:     sentry,
-		bor:        bor.NewRo(chainspec.BorDevnetChainConfig, db, reader, log.Root()),
+		bor:        bor.NewRo(polychain.BorDevnetChainConfig, db, reader, log.Root()),
 		txBlockMap: map[common.Hash]*types.Block{},
 	}, nil
 }
@@ -141,7 +141,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 	}
 
 	engine := rg.bor
-	chainConfig := chainspec.BorDevnetChainConfig
+	chainConfig := polychain.BorDevnetChainConfig
 
 	reader := blockReader{
 		chain: rg.chain,

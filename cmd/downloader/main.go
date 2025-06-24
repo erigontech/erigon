@@ -65,7 +65,7 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
-	_ "github.com/erigontech/erigon/polygon/chainspec" // Register Polygon chains
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 
 	_ "github.com/erigontech/erigon-db/snaptype"      //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
