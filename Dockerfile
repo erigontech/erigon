@@ -2,7 +2,7 @@
 ##
 ##   1. docker build -t ${my-local-image-name}:${my-tag} .
 ## 
-##   2. docker build --build-arg BINARIES="erigon downloader evm" \
+##   2. docker build \
 ##        --build-arg BUILD_DBTOOLS="true" \
 ##        --build-arg BINARIES="erigon evm downloader"
 ##        --progress plain \

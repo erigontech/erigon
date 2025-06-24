@@ -291,7 +291,7 @@ jobs:
     name: Debian packages
     needs: [ build-release, test-release ]
     if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
-    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@feature/lystopad/2025-03-main-remove-dockerfile
+    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@feature/lystopad/issue-7893
     with:
       application: ${{ needs.build-release.outputs.application }}
       version: ${{ needs.build-release.outputs.parsed-version }}
