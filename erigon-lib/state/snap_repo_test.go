@@ -599,19 +599,39 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *Snapshot
 	extensions := repo.cfg.Schema.(*E3SnapSchema).FileExtensions()
 	v := version.V1_0
 	acc := repo.schema.AccessorList()
+
+	isHistory := strings.HasSuffix(repo.schema.DataFile(v, 0, 1), ".v")
+	isII := strings.HasSuffix(repo.schema.DataFile(v, 0, 1), ".ef")
+
+	var appendFn func(file string)
+	if !isHistory && !isII {
+		appendFn = func(file string) {
+			allFiles.domainFiles = append(allFiles.domainFiles, file)
+		}
+	} else if isHistory {
+		appendFn = func(file string) {
+			allFiles.historyFiles = append(allFiles.historyFiles, file)
+		}
+	} else if isII {
+		// idx
+		appendFn = func(file string) {
+			allFiles.idxFiles = append(allFiles.idxFiles, file)
+		}
+	}
+
 	for _, r := range ranges {
 		from, to := RootNum(r.fromStep*repo.stepSize), RootNum(r.toStep*repo.stepSize)
-		allFiles.domainFiles = append(allFiles.domainFiles, repo.schema.DataFile(v, from, to))
+		appendFn(repo.schema.DataFile(v, from, to))
 		if acc.Has(AccessorBTree) {
 			f := repo.schema.BtIdxFile(v, from, to)
-			allFiles.domainFiles = append(allFiles.domainFiles, f)
+			appendFn(f)
 		}
 		if acc.Has(AccessorExistence) {
-			allFiles.domainFiles = append(allFiles.domainFiles, repo.schema.ExistenceFile(v, from, to))
+			appendFn(repo.schema.ExistenceFile(v, from, to))
 		}
 		if acc.Has(AccessorHashMap) {
 			if containsSubstring(t, AccessorExtensionKvi.String(), extensions) {
-				allFiles.domainFiles = append(allFiles.domainFiles, repo.schema.AccessorIdxFile(v, from, to, 0))
+				appendFn(repo.schema.AccessorIdxFile(v, from, to, 0))
 			} else {
 				allFiles.accessorFiles = append(allFiles.accessorFiles, repo.schema.AccessorIdxFile(v, from, to, 0))
 			}
@@ -621,6 +641,7 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *Snapshot
 	return populateFiles(t, dirs, name, extensions, dataFolder, &allFiles)
 }
 
+// this function creates mock files (.kvi, .v, .ef, .efi etc.) for the files specified in `allFiles`
 func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []string, dataFolder string, allFiles *dhiiFiles) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
 

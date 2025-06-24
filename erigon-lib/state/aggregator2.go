@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"io/fs"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
