@@ -424,9 +424,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
-	if evm.chainRules.IsOsaka { // EIP-7907
-		evm.intraBlockState.AddCodeAddressToAccessList(address)
-	}
 	evm.intraBlockState.CreateAccount(address, true)
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
@@ -472,6 +469,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 				err = ErrCodeStoreOutOfGas
 			}
 		}
+	}
+	if err == nil && evm.chainRules.IsOsaka { // EIP-7907
+		evm.intraBlockState.AddCodeAddressToAccessList(address)
 	}
 
 	// When an error was returned by the EVM or when setting the creation code
