@@ -8,12 +8,17 @@ on:
     - cron: '0 8 * * 1-6'  # Run every day at 08:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   clean-exit-bd-test:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}', github.workflow, github.run_id) ||
+          format('{0}-{1}', github.workflow, github.ref)
+        }}
+      cancel-in-progress: true
+
     runs-on: [self-hosted, qa, Erigon3]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
