@@ -243,6 +243,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			require.NoError(t, err, stepstr)
 			blobs := solid.NewStaticListSSZ[*cltypes.Blob](6, len(cltypes.Blob{}))
 			if step.GetBlobs() != "" {
+				fmt.Println("step.GetBlobs()", step.GetBlobs())
 				err := spectest.ReadSsz(root, c.Version(), step.GetBlobs()+".ssz_snappy", blobs)
 				require.NoError(t, err, stepstr)
 				if step.GetValid() {
@@ -271,7 +272,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 
 			}
 
-			err = forkStore.OnBlock(ctx, blk, true, true, true)
+			err = forkStore.OnBlock(ctx, blk, true, true, false)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {
