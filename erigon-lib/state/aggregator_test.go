@@ -1573,7 +1573,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	exist, err := dir.FileExist(codeMergedFile)
 	require.NoError(t, err)
 	require.True(t, exist)
-	os.Remove(codeMergedFile)
+	require.NoError(t, os.Remove(codeMergedFile))
 
 	require.NoError(t, agg.OpenFolder())
 	tx, err = tdb.BeginTemporalRo(context.Background())
