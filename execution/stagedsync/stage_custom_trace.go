@@ -360,6 +360,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			doms.SetTxNum(txTask.TxNum)
 
 			if produce.ReceiptDomain {
+				var receipt *types.Receipt
+
 				if txTask.IsBlockEnd() { // block changed
 					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
 						// get last receipt and store the last log index + 1
@@ -380,7 +382,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
-				if txTask.Final { // block changed
+				if txTask.IsBlockEnd() { // block changed
 					cumulativeBlobGasUsedInBlock = 0
 				} else {
 					var receipt *types.Receipt

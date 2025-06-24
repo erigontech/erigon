@@ -228,8 +228,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			return false, nil
 		}
 
+		var receipt *types.Receipt
 		if !task.IsBlockEnd() {
-			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 {
 				receipt = blockReceipts[txTask.TxIndex-startTxIndex]
 			}
