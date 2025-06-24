@@ -593,6 +593,8 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		return
 	}
 	go func() {
+		start := time.Now()
+
 		defer e.doingPostForkchoice.Store(false)
 		var timings []interface{}
 		// Wait for semaphore to be available
@@ -616,6 +618,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
 			return
 		}
+		timings = append(timings, "taken", time.Since(start))
 
 		if len(timings) > 0 {
 			e.logger.Info("Timings: Post-Forkchoice (slower than 50ms)", timings...)
