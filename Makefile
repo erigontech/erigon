@@ -1,8 +1,9 @@
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
-GOBINREL = build/bin
-GOBIN = $(CURDIR)/$(GOBINREL)
-UNAME = $(shell uname) # Supported: Darwin, Linux
+GOBINREL := build/bin
+GOBIN := $(CURDIR)/$(GOBINREL)
+GOARCH ?= $(shell go env GOHOSTARCH)
+UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
@@ -13,7 +14,7 @@ ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
-DOCKER_TAG ?= erigontech/erigon:latest
+DOCKER_TAG ?= local-erigon/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
 #
@@ -61,9 +62,15 @@ PACKAGE = github.com/erigontech/erigon
 override GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
 override GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
-GOBUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
+GO_RELEASE_FLAGS := -trimpath -buildvcs=false \
+	-ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)"
+
+# Basic release build. Pass EXTRA_BUILD_TAGS if you want to modify the tags set.
+GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS)
+DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
+GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
+GOTEST = $(GO_BUILD_ENV) GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
 
 default: all
 
@@ -88,13 +95,10 @@ validate_docker_build_args:
 	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
 ## docker:                            validate, update submodules and build with docker
-docker: validate_docker_build_args git-submodules
+docker: 
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
-		--build-arg VERSION=${GIT_TAG} \
-		--build-arg UID=${DOCKER_UID} \
-		--build-arg GID=${DOCKER_GID} \
 		${DOCKER_FLAGS} \
 		.
 
@@ -435,23 +439,7 @@ install:
 	@ls -al "$(DIST)"
 
 PACKAGE_NAME          := github.com/erigontech/erigon
-GOLANG_CROSS_VERSION  ?= v1.21.5
 
-
-.PHONY: release-dry-run
-release-dry-run: git-submodules
-	@docker run \
-		--rm \
-		--privileged \
-		-e CGO_ENABLED=1 \
-		-e GITHUB_TOKEN \
-		-e DOCKER_USERNAME \
-		-e DOCKER_PASSWORD \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v `pwd`:/go/src/$(PACKAGE_NAME) \
-		-w /go/src/$(PACKAGE_NAME) \
-		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip=validate --skip=publish
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473
