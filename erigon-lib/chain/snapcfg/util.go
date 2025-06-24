@@ -481,6 +481,7 @@ var knownPreverified = map[string]Preverified{
 	networkname.BorMainnet: BorMainnet,
 	networkname.Gnosis:     Gnosis,
 	networkname.Chiado:     Chiado,
+	networkname.Hoodi:      Hoodi,
 }
 
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
@@ -579,6 +580,7 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 	Gnosis = fromEmbeddedToml(snapshothashes.Gnosis)
 	Chiado = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi = fromEmbeddedToml(snapshothashes.Hoodi)
+
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
 		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
