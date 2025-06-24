@@ -1574,6 +1574,9 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	exist, err := dir.FileExist(codeMergedFile)
 	require.NoError(t, err)
 	require.True(t, exist)
+	agg.closeDirtyFiles() // because windows
+	agg.OpenList([]string{}, false)
+
 	require.NoError(t, os.Remove(codeMergedFile))
 
 	require.NoError(t, agg.OpenFolder())
