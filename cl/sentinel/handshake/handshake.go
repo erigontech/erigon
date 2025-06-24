@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -41,22 +42,24 @@ import (
 type HandShaker struct {
 	ctx context.Context
 	// Status object to send over.
-	status       *cltypes.Status // Contains status object for handshakes
-	set          bool
-	handler      http.Handler
-	beaconConfig *clparams.BeaconChainConfig
-	ethClock     eth_clock.EthereumClock
+	status             *cltypes.Status // Contains status object for handshakes
+	set                bool
+	handler            http.Handler
+	beaconConfig       *clparams.BeaconChainConfig
+	ethClock           eth_clock.EthereumClock
+	peerDasStateReader peerdasstate.PeerDasStateReader
 
 	mu sync.Mutex
 }
 
-func New(ctx context.Context, ethClock eth_clock.EthereumClock, beaconConfig *clparams.BeaconChainConfig, handler http.Handler) *HandShaker {
+func New(ctx context.Context, ethClock eth_clock.EthereumClock, beaconConfig *clparams.BeaconChainConfig, handler http.Handler, peerDasStateReader peerdasstate.PeerDasStateReader) *HandShaker {
 	return &HandShaker{
-		ctx:          ctx,
-		handler:      handler,
-		ethClock:     ethClock,
-		beaconConfig: beaconConfig,
-		status:       &cltypes.Status{},
+		ctx:                ctx,
+		handler:            handler,
+		ethClock:           ethClock,
+		beaconConfig:       beaconConfig,
+		status:             &cltypes.Status{},
+		peerDasStateReader: peerDasStateReader,
 	}
 }
 
@@ -98,7 +101,12 @@ func (h *HandShaker) SetStatus(status *cltypes.Status) {
 func (h *HandShaker) Status() *cltypes.Status {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.status
+
+	// copy the status and add the earliest available slot
+	status := *h.status
+	earliestAvailableSlot := h.peerDasStateReader.GetEarliestAvailableSlot()
+	status.EarliestAvailableSlot = &earliestAvailableSlot
+	return &status
 }
 
 // Set returns the underlying status (only for giving out responses)
