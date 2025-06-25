@@ -306,7 +306,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 			}
 
 			blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, fetchHeaderHash, fetchAmount, event.PeerId, opts...)
-			if err != nil || len(blocks.Data)==0 {
+			if err != nil || len(blocks.Data) == 0 {
 				if s.ignoreFetchBlocksErrOnTipEvent(err) {
 					s.logger.Debug(
 						syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
@@ -695,7 +695,7 @@ func (s *Sync) Run(ctx context.Context) error {
 	s.logger.Info(syncLogPrefix("running sync component"))
 
 	// This is set to disable heimdall checks casuing a pause during transition
-	// it can be removed post July 2025 where behavior can revert to previous 
+	// it can be removed post July 2025 where behavior can revert to previous
 	// behavior of waitiing for heimdall to sync
 	const HiemdalV1V2Transition = true
 
