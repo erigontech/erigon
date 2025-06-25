@@ -204,7 +204,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
 	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
-	ss := &GrpcServer{p2p: &p2p.Config{LookupBootnodeURLs: emptyBootnodeURL, LookupDNSNetwork: mainnetDNSNetwork}}
+	ss := &GrpcServer{p2p: &p2p.Config{}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{
 		ForkData: &proto_sentry.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},

@@ -52,11 +52,14 @@ import (
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/dnsdisc"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 const (
@@ -277,7 +280,7 @@ func makeP2PServer(
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
 	if len(p2pConfig.BootstrapNodes) == 0 {
-		urls := p2pConfig.LookupBootnodeURLs(genesisHash)
+		urls := chainspec.BootnodeURLsByGenesisHash(genesisHash)
 		bootstrapNodes, err := enode.ParseNodesFromURLs(urls)
 		if err != nil {
 			return nil, fmt.Errorf("bad bootnodes option: %w", err)
@@ -1000,7 +1003,7 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
 		if len(ss.p2p.DiscoveryDNS) == 0 {
-			if url := ss.p2p.LookupDNSNetwork(genesisHash, "all"); url != "" {
+			if url := chainspec.KnownDNSNetwork(genesisHash, "all"); url != "" {
 				ss.p2p.DiscoveryDNS = []string{url}
 			}
 

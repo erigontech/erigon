@@ -495,8 +495,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return res
 		}
 
-		p2pConfig.LookupBootnodeURLs = chainspec.BootnodeURLsByGenesisHash
-		p2pConfig.LookupDNSNetwork = chainspec.KnownDNSNetwork
 		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)

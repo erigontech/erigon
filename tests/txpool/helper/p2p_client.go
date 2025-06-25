@@ -16,7 +16,6 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/nat"
@@ -52,17 +51,16 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:         ":30307",
-		AllowedPorts:       []uint{30303, 30304, 30305, 30306, 30307},
-		ProtocolVersion:    []uint{direct.ETH68, direct.ETH67},
-		MaxPeers:           32,
-		MaxPendingPeers:    1000,
-		NAT:                nat.Any(),
-		NoDiscovery:        true,
-		Name:               "p2p-mock",
-		NodeDatabase:       "dev/nodes/eth67",
-		PrivateKey:         privateKey,
-		LookupBootnodeURLs: chainspec.BootnodeURLsByGenesisHash,
+		ListenAddr:      ":30307",
+		AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307},
+		ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
+		MaxPeers:        32,
+		MaxPendingPeers: 1000,
+		NAT:             nat.Any(),
+		NoDiscovery:     true,
+		Name:            "p2p-mock",
+		NodeDatabase:    "dev/nodes/eth67",
+		PrivateKey:      privateKey,
 	}
 
 	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(
