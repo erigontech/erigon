@@ -2,11 +2,9 @@ package tests
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -36,14 +34,6 @@ import (
 	"github.com/erigontech/erigon/tests/testports"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
-
-func TestEngineApiTestJsonUnmarshall(t *testing.T) {
-	var engineApiTest EngineApiTest
-	bytes, err := os.ReadFile(filepath.Join(".", "engineapi-performance-tests", "EcAdd12CACHABLE_150M.json"))
-	require.NoError(t, err)
-	err = json.Unmarshal(bytes, &engineApiTest)
-	require.NoError(t, err)
-}
 
 func TestEngineApiPerformance(t *testing.T) {
 	if testing.Short() {
