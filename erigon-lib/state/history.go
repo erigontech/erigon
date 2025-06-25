@@ -440,7 +440,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				if err != nil {
 					return err
 				}
-				histKey = historyKey(txNum, keyBuf, histKey[:0])
+				histKey = HistoryKey(txNum, keyBuf, histKey[:0])
 				if err = rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
@@ -760,7 +760,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 					val = nil
 				}
 
-				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
+				histKeyBuf = HistoryKey(vTxNum, prevKey, histKeyBuf)
 				if err := historyWriter.Add(histKeyBuf, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
 				}
@@ -775,7 +775,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				val = nil
 			}
 
-			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
+			histKeyBuf = HistoryKey(vTxNum, prevKey, histKeyBuf)
 			if err := historyWriter.Add(histKeyBuf, val); err != nil {
 				return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, key, err)
 			}
@@ -1266,7 +1266,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	return v, true, nil
 }
 
-func historyKey(txNum uint64, key []byte, buf []byte) []byte {
+func HistoryKey(txNum uint64, key []byte, buf []byte) []byte {
 	if buf == nil || cap(buf) < 8+len(key) {
 		buf = make([]byte, 8+len(key))
 	}
@@ -1277,7 +1277,7 @@ func historyKey(txNum uint64, key []byte, buf []byte) []byte {
 }
 
 func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
-	ht._bufTs = historyKey(txNum, key, ht._bufTs)
+	ht._bufTs = HistoryKey(txNum, key, ht._bufTs)
 	return ht._bufTs
 }
 
