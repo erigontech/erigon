@@ -65,9 +65,9 @@ type Interpreter interface {
 	// Run loops and evaluates the contract's code with the given input data and returns
 	// the return byte-slice and an error if one occurred.
 	Run(contract *Contract, input []byte, static bool) ([]byte, error)
-
-	// `Depth` returns the current call stack's depth.
-	Depth() int
+	Depth() int // `Depth` returns the current call stack's depth.
+	IncDepth()  // Increments the current call stack's depth.
+	DecDepth()  // Decrements the current call stack's depth
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,

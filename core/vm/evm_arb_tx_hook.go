@@ -8,41 +8,78 @@ import (
 	"github.com/holiman/uint256"
 )
 
+// ARB deprecated: remove this implementation on next merge
 // Depth returns the current depth
 func (evm *EVM) Depth() int {
 	return evm.interpreter.Depth()
 }
 
 func (evm *EVM) IncrementDepth() {
-	evm.interpreter.(*EVMInterpreter).IncrementDepth()
+	evm.interpreter.IncDepth()
 }
 
 func (evm *EVM) DecrementDepth() {
-	evm.interpreter.(*EVMInterpreter).DecrementDepth()
+	evm.interpreter.DecDepth()
+}
+
+// Depth returns the current call stack depth.
+func (in *EVMInterpreter) IncDepth() {
+	in.depth++
+}
+
+func (in *EVMInterpreter) DecDepth() {
+	in.depth--
+}
+
+// ARB end of deprecated
+
+func (in *EVMInterpreter) EVM() *EVM {
+	return in.VM.evm
+}
+
+func (in *EVMInterpreter) ReadOnly() bool {
+	return in.VM.readOnly
+}
+
+func (in *EVMInterpreter) SetReturnData(data []byte) {
+	in.returnData = data
+}
+
+func (in *EVMInterpreter) GetReturnData() []byte {
+	return in.returnData
+}
+
+func (in *EVMInterpreter) Config() *Config {
+	c := in.evm.Config()
+	return &c
 }
 
 type TxProcessingHook interface {
-	IsArbitrum() bool                           // returns true if that is arbos.TxProcessor
-	StartTxHook() (bool, uint64, error, []byte) // return 4-tuple rather than *struct to avoid an import cycle
-	GasChargingHook(gasRemaining *uint64) (common.Address, error)
-	PushContract(contract *Contract)
-	PopContract()
-	ForceRefundGas() uint64
-
+	// helpers
 	SetMessage(msg *types.Message, ibs evmtypes.IntraBlockState)
-	NonrefundableGas() uint64
-	DropTip() bool
-	EndTxHook(totalGasUsed uint64, evmSuccess bool)
-	ScheduledTxes() types.Transactions
-	L1BlockNumber(blockCtx evmtypes.BlockContext) (uint64, error)
-	L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKNumber uint64) (common.Hash, error)
-	GasPriceOp(evm *EVM) *uint256.Int
+	IsArbitrum() bool // returns true if that is arbos.TxProcessor
 	FillReceiptInfo(receipt *types.Receipt)
 	MsgIsNonMutating() bool
-	ExecuteWASM(scope *ScopeContext, input []byte, interpreter *EVMInterpreter) ([]byte, error)
 
-	// v40
-	IsCalldataPricingIncreaseEnabled() bool
+	// used within STF
+	StartTxHook() (bool, uint64, error, []byte) // return 4-tuple rather than *struct to avoid an import cycle
+	ScheduledTxes() types.Transactions
+	EndTxHook(totalGasUsed uint64, evmSuccess bool)
+	GasChargingHook(gasRemaining *uint64) (common.Address, error)
+	ForceRefundGas() uint64
+	NonrefundableGas() uint64
+	DropTip() bool
+	IsCalldataPricingIncreaseEnabled() bool // arbos 40/pectra
+
+	// used within evm run
+	ExecuteWASM(scope *ScopeContext, input []byte, interpreter *EVMInterpreter) ([]byte, error)
+	PushContract(contract *Contract)
+	PopContract()
+
+	// vm ops
+	GasPriceOp(evm *EVM) *uint256.Int
+	L1BlockNumber(blockCtx evmtypes.BlockContext) (uint64, error)
+	L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKNumber uint64) (common.Hash, error)
 }
 
 type DefaultTxProcessor struct {
