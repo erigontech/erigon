@@ -66,6 +66,7 @@ type GossipManager struct {
 	blsToExecutionChangeService  services.BLSToExecutionChangeService
 	proposerSlashingService      services.ProposerSlashingService
 	attestationsLimiter          *timeBasedRateLimiter
+	aggregateAndProofLimiter     *timeBasedRateLimiter
 }
 
 func NewGossipReceiver(
@@ -104,6 +105,7 @@ func NewGossipReceiver(
 		blsToExecutionChangeService:  blsToExecutionChangeService,
 		proposerSlashingService:      proposerSlashingService,
 		attestationsLimiter:          newTimeBasedRateLimiter(6*time.Second, 250),
+		aggregateAndProofLimiter:     newTimeBasedRateLimiter(6*time.Second, 250),
 	}
 }
 
@@ -219,10 +221,15 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameBeaconAggregateAndProof:
+		if !g.aggregateAndProofLimiter.tryAcquire() {
+			log.Debug("Received aggregate and proof via gossip, but rate limit exceeded", "index", *data.SubnetId, "size", datasize.ByteSize(len(data.Data)))
+			return services.ErrIgnore
+		}
 		obj := &services.SignedAggregateAndProofForGossip{
 			Receiver:                copyOfPeerData(data),
 			SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
 		}
+
 		if err := obj.SignedAggregateAndProof.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 			return err
 		}
