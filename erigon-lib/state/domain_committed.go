@@ -148,6 +148,7 @@ func (sd *SharedDomains) SetTxn(tx kv.TemporalTx, i uint) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
+	sd.CheckSubTx()
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix)
 	return
 }

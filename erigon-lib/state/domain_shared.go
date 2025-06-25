@@ -90,6 +90,24 @@ type SharedDomains struct {
 	pastChangesAccumulator    map[string]*StateChangeSet
 }
 
+func (sd *SharedDomains) CheckSubTx() bool {
+	for si, stx := range sd.sdCtx.subTtx {
+		if stx == nil {
+			panic(fmt.Errorf("CheckSubTx: unexpected nil sub-tx at index %d", si))
+		}
+		if stx.txNum != sd.txNum {
+			panic(fmt.Errorf("CheckSubTx: sub-tx %d has txNum %d, expected %d", si, stx.txNum, sd.txNum))
+		}
+		if stx.domainsOnly != sd.sdCtx.mainTtx.domainsOnly {
+			panic(fmt.Errorf("CheckSubTx: sub-tx %d has domainsOnly %v, expected %v", si, stx.domainsOnly, sd.sdCtx.mainTtx.domainsOnly))
+		}
+		if rtx, ok := stx.roTtx.(kv.Tx); !ok || rtx == nil {
+			panic(fmt.Errorf("CheckSubTx: sub-tx %d has nil roTtx %T", si, stx.roTtx))
+		}
+	}
+	return true
+}
+
 type HasAgg interface {
 	Agg() any
 }
