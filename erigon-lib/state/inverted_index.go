@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -230,14 +229,6 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 	ii.checker = checker
 }
-
-type Accessors = ee.Accessors
-
-const (
-	AccessorBTree     Accessors = ee.AccessorBTree
-	AccessorHashMap   Accessors = ee.AccessorHashMap
-	AccessorExistence Accessors = ee.AccessorExistence
-)
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	var checker func(startTxNum, endTxNum uint64) bool
@@ -1316,6 +1307,14 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		ii.logger.Crit("panic in buildHashMapAccessor", "idxPath", idxPath, "r", r)
+		panic(r)
+	}()
 	return buildHashMapAccessor2(ctx, data, idxPath, cfg, ps, ii.logger)
 }
 

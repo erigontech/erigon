@@ -19,29 +19,28 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/types"
 )
 
 type Num = state.Num
 type RootNum = state.RootNum
-type ForkableId = ee.ForkableId
+type ForkableId = kv.ForkableId
 type MarkedTxI = state.MarkedTxI
 type UnmarkedTxI = state.UnmarkedTxI
 
-func registerEntity(dirs datadir.Dirs, name string) ee.ForkableId {
+func registerEntity(dirs datadir.Dirs, name string) state.ForkableId {
 	stepSize := uint64(10)
-	return registerEntityWithSnapshotConfig(dirs, name, ee.NewSnapshotConfig(&ee.SnapshotCreationConfig{
+	return registerEntityWithSnapshotConfig(dirs, name, state.NewSnapshotConfig(&state.SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{20, 40},
 		MinimumSize:    10,
 		SafetyMargin:   5,
-	}, ee.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
+	}, state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
 
 }
 
-func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ee.SnapshotConfig) ee.ForkableId {
-	return ee.RegisterForkable(name, dirs, nil, ee.WithSnapshotConfig(cfg))
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *state.SnapshotConfig) state.ForkableId {
+	return state.RegisterForkable(name, dirs, nil, state.WithSnapshotConfig(cfg))
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
@@ -54,7 +53,7 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 
 func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (ForkableId, *state.Forkable[state.MarkedTxI]) {
 	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, ee.ForkableId(0), headerId)
+	require.Equal(t, state.ForkableId(0), headerId)
 
 	// create marked forkable
 	freezer := snaptype.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
@@ -79,7 +78,7 @@ func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs
 		p.Close()
 		p.RecalcVisibleFiles(0)
 
-		ee.Cleanup()
+		state.Cleanup()
 		db.Close()
 		os.RemoveAll(dirs.Snap)
 		os.RemoveAll(dirs.Chaindata)
@@ -93,13 +92,13 @@ func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs
 func TestMarkedForkableRegistration(t *testing.T) {
 	// just registration goes fine
 	t.Cleanup(func() {
-		ee.Cleanup()
+		state.Cleanup()
 	})
 	dirs := datadir.New(t.TempDir())
 	blockId := registerEntity(dirs, "blocks")
-	require.Equal(t, ee.ForkableId(0), blockId)
+	require.Equal(t, state.ForkableId(0), blockId)
 	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, ee.ForkableId(1), headerId)
+	require.Equal(t, state.ForkableId(1), headerId)
 }
 
 func TestMarked_PutToDb(t *testing.T) {
@@ -149,8 +148,9 @@ func TestPrune(t *testing.T) {
 			headerId, ma := setupHeader(t, log, dir, db)
 
 			ctx := context.Background()
-			cfg := ee.Registry.SnapshotConfig(headerId)
-			entries_count = cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
+			cfg := state.Registry.SnapshotConfig(headerId)
+			extras_count := uint64(5) // in db
+			entries_count = cfg.MinimumSize + cfg.SafetyMargin + extras_count
 
 			ma_tx := ma.BeginTemporalTx()
 			defer ma_tx.Close()
@@ -181,16 +181,37 @@ func TestPrune(t *testing.T) {
 			require.NoError(t, rwtx.Commit())
 			ma_tx.Close()
 
+			built := true
+			from := RootNum(0)
+			var df *state.FilesItem
+			ps := background.NewProgressSet()
+
+			for built {
+				df, built, err = ma.BuildFile(ctx, from, RootNum(entries_count), db, 1, ps)
+				require.NoError(t, err)
+				if df != nil {
+					ma.IntegrateDirtyFile(df)
+					_, endTxNum := df.Range()
+					from = RootNum(endTxNum)
+				}
+			}
+			ma.RecalcVisibleFiles(RootNum(entries_count))
+
+			ma_tx = ma.BeginTemporalTx()
+			defer ma_tx.Close()
+
 			rwtx, err = db.BeginRw(ctx)
 			defer rwtx.Rollback()
 			require.NoError(t, err)
 
-			del, err := ma_tx.Prune(ctx, pruneTo, 1000, rwtx)
+			stat, err := ma_tx.Prune(ctx, pruneTo, 1000, nil, rwtx)
 			require.NoError(t, err)
 			cfgPruneFrom := int64(ma.PruneFrom())
-			require.Equal(t, int64(del), max(0, min(int64(pruneTo), int64(entries_count))-cfgPruneFrom))
+			visibleFilesMaxRootNum := int64(entries_count - cfg.SafetyMargin - extras_count)
+			require.Equal(t, max(0, min(int64(pruneTo), visibleFilesMaxRootNum)-cfgPruneFrom), int64(stat.PruneCount))
 
 			require.NoError(t, rwtx.Commit())
+			ma_tx.Close()
 			ma_tx = ma.BeginTemporalTx()
 			defer ma_tx.Close()
 			rwtx, err = db.BeginRw(ctx)
@@ -225,7 +246,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
 	require.NoError(t, err)
-	cfg := ee.Registry.SnapshotConfig(headerId)
+	cfg := state.Registry.SnapshotConfig(headerId)
 	entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 2
 	buffer := &bytes.Buffer{}
 
@@ -276,9 +297,9 @@ func TestBuildFiles_Marked(t *testing.T) {
 	require.NoError(t, err)
 
 	firstRootNumNotInSnap := ma_tx.DebugFiles().VisibleFilesMaxRootNum()
-	del, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
+	stat, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, nil, rwtx)
 	require.NoError(t, err)
-	require.Equal(t, del, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
+	require.Equal(t, stat.PruneCount, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
 
 	require.NoError(t, rwtx.Commit())
 	ma_tx = ma.BeginTemporalTx()

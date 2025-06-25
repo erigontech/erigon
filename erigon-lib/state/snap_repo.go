@@ -10,7 +10,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
 	btree2 "github.com/tidwall/btree"
 )
@@ -35,10 +34,11 @@ type SnapshotRepo struct {
 	// about which visibleFiles needs to be used - repo.current or
 	// rotx.visibleFiles
 	current visibleFiles
+	entity  UniversalEntity
 	name    string
 
-	cfg       *ee.SnapshotConfig
-	schema    ee.SnapNameSchema
+	cfg       *SnapshotConfig
+	schema    SnapNameSchema
 	accessors Accessors
 	stepSize  uint64
 
@@ -46,13 +46,14 @@ type SnapshotRepo struct {
 }
 
 func NewSnapshotRepoForForkable(id ForkableId, logger log.Logger) *SnapshotRepo {
-	return NewSnapshotRepo(ee.Registry.Name(id), ee.Registry.SnapshotConfig(id), logger)
+	return NewSnapshotRepo(Registry.Name(id), FromForkable(id), Registry.SnapshotConfig(id), logger)
 }
 
-func NewSnapshotRepo(name string, cfg *ee.SnapshotConfig, logger log.Logger) *SnapshotRepo {
+func NewSnapshotRepo(name string, entity UniversalEntity, cfg *SnapshotConfig, logger log.Logger) *SnapshotRepo {
 	return &SnapshotRepo{
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		name:       name,
+		entity:     entity,
 		cfg:        cfg,
 		schema:     cfg.Schema,
 		stepSize:   cfg.RootNumPerStep,
@@ -77,11 +78,11 @@ func (f *SnapshotRepo) OpenFolder() error {
 	return nil
 }
 
-func (f *SnapshotRepo) SetIntegrityChecker(integrity ee.IntegrityChecker) {
+func (f *SnapshotRepo) SetIntegrityChecker(integrity *DependencyIntegrityChecker) {
 	f.cfg.Integrity = integrity
 }
 
-func (f *SnapshotRepo) Schema() ee.SnapNameSchema {
+func (f *SnapshotRepo) Schema() SnapNameSchema {
 	return f.schema
 }
 
@@ -237,36 +238,16 @@ func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
 	f.current = f.current[:i+1]
 }
 
-func (f *SnapshotRepo) Garbage(vfs visibleFiles, merged *FilesItem) (garbage []*FilesItem) {
-	f.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.frozen {
-				continue
-			}
-
-			if merged == nil {
-				if hasCoverVisibleFile(vfs, item) {
-					garbage = append(garbage, item)
-				}
-				continue
-			}
-
-			if item.isBefore(merged) && hasCoverVisibleFile(vfs, item) {
-				garbage = append(garbage, item)
-				continue
-			}
-
-			if item.isProperSubsetOf(merged) {
-				if f.cfg.Integrity == nil || !f.cfg.Integrity.Check(ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum)) {
-					garbage = append(garbage, item)
-				}
-			}
+func (f *SnapshotRepo) Garbage(vfs visibleFiles, merged *FilesItem) (outs []*FilesItem) {
+	checker := f.cfg.Integrity
+	var cchecker func(startTxNum, endTxNum uint64) bool
+	if checker != nil {
+		cchecker = func(startTxNum, endTxNum uint64) bool {
+			return checker.CheckDependentPresent(f.entity, Any, startTxNum, endTxNum)
 		}
+	}
 
-		return true
-	})
-
-	return
+	return garbage(f.dirtyFiles, vfs, merged, cchecker)
 }
 
 // TODO: crossRepoIntegrityCheck
@@ -346,7 +327,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 	f.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
-				fPathGen := p.DataFile(version.V1_0, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum))
+				fPathGen := p.DataFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil || !ok {
@@ -374,7 +355,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 			accessors := p.AccessorList()
 
 			if item.index == nil && accessors.Has(AccessorHashMap) {
-				fPathGen := p.AccessorIdxFile(version.V1_0, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum), 0)
+				fPathGen := p.AccessorIdxFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum), 0)
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
@@ -392,7 +373,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 			}
 
 			if item.bindex == nil && accessors.Has(AccessorBTree) {
-				fPathGen := p.BtIdxFile(version.V1_0, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum))
+				fPathGen := p.BtIdxFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
@@ -410,7 +391,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 				}
 			}
 			if item.existence == nil && accessors.Has(AccessorExistence) {
-				fPathGen := p.ExistenceFile(version.V1_0, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum))
+				fPathGen := p.ExistenceFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
@@ -480,94 +461,19 @@ func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 }
 
 func (f *SnapshotRepo) calcVisibleFiles(to RootNum) (roItems []visibleFile) {
-	files := f.dirtyFiles
-	trace := false
-
-	newVisibleFiles := make([]visibleFile, 0, files.Len())
-	integrity := f.cfg.Integrity
-	if trace {
-		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", to)
-	}
-	files.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.endTxNum > to.Uint64() {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: ends after limit", "f", item.decompressor.FileName(), "limitRootNum", to)
-				}
-				continue
-			}
-			if item.canDelete.Load() {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: canDelete=true", "f", item.decompressor.FileName())
-				}
-				continue
-			}
-
-			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
-			if item.decompressor == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
-				}
-				continue
-			}
-			if f.accessors.Has(AccessorBTree) && item.bindex == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if f.accessors.Has(AccessorHashMap) && item.index == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if f.accessors.Has(AccessorExistence) && item.existence == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
-				continue
-			}
-
-			if integrity != nil && !integrity.Check(ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum)) {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: integrity check failed, skipping:", "from", item.startTxNum, "to", item.endTxNum)
-				}
-				continue
-			}
-
-			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
-			// see super-set file, just drop sub-set files from list
-			for len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isProperSubsetOf(item) {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: marked as garbage (is subset)", "item", item.decompressor.FileName(),
-						"of", newVisibleFiles[len(newVisibleFiles)-1].src.decompressor.FileName())
-				}
-				newVisibleFiles[len(newVisibleFiles)-1].src = nil
-				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
-			}
-
-			// log.Warn("willBeVisible", "newVisibleFile", item.decompressor.FileName())
-			newVisibleFiles = append(newVisibleFiles, visibleFile{
-				startTxNum: item.startTxNum,
-				endTxNum:   item.endTxNum,
-				i:          len(newVisibleFiles),
-				src:        item,
-			})
+	checker := f.cfg.Integrity
+	var cchecker func(startTxNum, endTxNum uint64) bool
+	if checker != nil {
+		cchecker = func(startTxNum, endTxNum uint64) bool {
+			return checker.CheckDependentPresent(f.entity, All, startTxNum, endTxNum)
 		}
-		return true
-	})
-	if newVisibleFiles == nil {
-		newVisibleFiles = []visibleFile{}
 	}
-	return newVisibleFiles
+
+	return calcVisibleFiles(f.dirtyFiles, f.accessors, cchecker, false, uint64(to))
 }
 
 // determine freezing ranges, given snapshot creation config
-func getFreezingRange(rootFrom, rootTo RootNum, cfg *ee.SnapshotConfig) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
+func getFreezingRange(rootFrom, rootTo RootNum, cfg *SnapshotConfig) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
 	/**
 	 1. `from`, `to` must be round off to minimum size (atleast)
 	 2. mergeLimit is a function: (from, preverified files, mergeLimit default) -> biggest file size starting `from`
@@ -631,7 +537,7 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *ee.SnapshotConfig) (freezeF
 	return RootNum(_freezeFrom), RootNum(_freezeTo), _freezeTo-_freezeFrom >= cfg.MinimumSize
 }
 
-func getMergeLimit(cfg *ee.SnapshotConfig, from uint64) uint64 {
+func getMergeLimit(cfg *SnapshotConfig, from uint64) uint64 {
 	//return 0
 	maxMergeLimit := cfg.MergeStages[len(cfg.MergeStages)-1]
 

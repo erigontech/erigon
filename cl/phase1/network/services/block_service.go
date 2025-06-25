@@ -152,14 +152,21 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 
 	// [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer -- i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-	blockVersion := b.beaconCfg.GetCurrentStateVersion(msg.Block.Slot / b.beaconCfg.SlotsPerEpoch)
-	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlockByVersion(blockVersion)) {
+	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
+	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
+	var maxBlobsPerBlock uint64
+	if blockVersion >= clparams.FuluVersion {
+		maxBlobsPerBlock = b.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock
+	} else {
+		maxBlobsPerBlock = b.beaconCfg.MaxBlobsPerBlockByVersion(blockVersion)
+	}
+	if msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
 		return ErrInvalidCommitmentsCount
 	}
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) {
+		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594DataNotAvailable) {
 			b.scheduleBlockForLaterProcessing(msg)
 			return ErrIgnore
 		}

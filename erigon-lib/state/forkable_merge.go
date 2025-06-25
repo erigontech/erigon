@@ -8,7 +8,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -75,7 +74,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 			mergedFile.closeFilesAndRemove()
 		}
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("[forkable] merging panic for forkable_%s: %s", ee.Registry.Name(f.a), filesToMerge.String(f.snaps.stepSize))
+			err = fmt.Errorf("[forkable] merging panic for forkable_%s: %s", Registry.Name(f.a), filesToMerge.String(f.snaps.stepSize))
 		}
 	}()
 
@@ -84,7 +83,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	segPath := f.snaps.schema.DataFile(version.V1_0, from, to)
 	cfg := seg.DefaultWordLvlCfg
 	cfg.Workers = compressWorkers
-	r := ee.Registry
+	r := Registry
 	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+r.String(f.a), segPath, r.Dirs(f.a).Tmp, cfg, log.LvlTrace, f.logger)
 	if err != nil {
 		return

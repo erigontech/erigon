@@ -235,7 +235,8 @@ const (
 	LastBeaconSnapshot    = "LastBeaconSnapshot"
 	LastBeaconSnapshotKey = "LastBeaconSnapshotKey"
 
-	BlockRootToKzgCommitments = "BlockRootToKzgCommitments"
+	BlockRootToKzgCommitments  = "BlockRootToKzgCommitments"
+	BlockRootToDataColumnCount = "BlockRootToDataColumnCount"
 
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot  = "BlockRootToParentRoot"
@@ -422,6 +423,7 @@ var ChaindataTables = []string{
 	ParentRootToBlockRoots,
 	// Blob Storage
 	BlockRootToKzgCommitments,
+	BlockRootToDataColumnCount,
 	// State Reconstitution
 	ValidatorEffectiveBalance,
 	ValidatorBalance,
@@ -853,24 +855,6 @@ func String2Domain(in string) (Domain, error) {
 }
 
 const MaxUint16 uint16 = 1<<16 - 1
-
-func (iip Appendable) String() string {
-	switch iip {
-	case ReceiptsAppendable:
-		return "receipts"
-	default:
-		return "unknown Appendable"
-	}
-}
-
-func String2Appendable(in string) (Appendable, error) {
-	switch in {
-	case "receipts":
-		return ReceiptsAppendable, nil
-	default:
-		return Appendable(MaxUint16), fmt.Errorf("unknown Appendable name: %s", in)
-	}
-}
 
 // --- Deprecated
 const (

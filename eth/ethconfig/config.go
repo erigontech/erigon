@@ -31,10 +31,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -183,7 +183,6 @@ type BlocksFreezing struct {
 	ProduceE2         bool // produce new block files
 	ProduceE3         bool // produce new state files
 	NoDownloader      bool // possible to use snapshots without calling Downloader
-	Verify            bool // verify snapshots on startup
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string

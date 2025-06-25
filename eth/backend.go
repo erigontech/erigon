@@ -46,9 +46,11 @@ import (
 
 	"github.com/erigontech/mdbx-go/mdbx"
 
+	"github.com/erigontech/erigon-db/downloader"
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
+	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
-	snaptype2 "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -63,10 +65,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/event"
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -83,13 +81,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon-lib/snaptype"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
-	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/enode"
-	"github.com/erigontech/erigon-p2p/protocols/eth"
-	"github.com/erigontech/erigon-p2p/sentry"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -100,8 +95,6 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
-	"github.com/erigontech/erigon/eth/stagedsync"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/ethstats"
 	"github.com/erigontech/erigon/execution/builder"
@@ -109,11 +102,21 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/clique"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/execution/sentry_multi_client"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	stages2 "github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -126,15 +129,11 @@ import (
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/engineapi"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	stages2 "github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -610,7 +609,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
-			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, heimdall.WithApiVersioner(ctx))
+			heimdallClient = heimdall.NewHttpClient(
+				config.HeimdallURL,
+				logger,
+				heimdall.WithApiVersioner(ctx),
+				heimdall.WithHttpMaxRetries(heimdall.MaxRetriesUnlimited), // HeimdallV2 causes downtime, which can last up to 10-30 mins. It needs to be removed after HeimdallV2 upgrade
+			)
 		} else {
 			heimdallClient = heimdall.NewIdleClient(config.Miner)
 		}
@@ -1003,28 +1007,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
-
-	useSnapshots := blockReader != nil && (blockReader.FreezingCfg().ProduceE2 || blockReader.FreezingCfg().ProduceE3)
-	if !useSnapshots && backend.downloaderClient != nil {
-		for _, p := range blockReader.AllTypes() {
-			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.Name(),
-			})
-		}
-
-		for _, p := range snaptype.CaplinSnapshotTypes {
-			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.Name(),
-			})
-		}
-
-		for _, p := range snaptype2.E3StateTypes {
-			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.Name(),
-			})
-		}
-
-	}
 
 	checkStateRoot := true
 	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, logger, tracer, checkStateRoot)
@@ -1522,8 +1504,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 			downloaderCfg.AddTorrentsFromDisk = false
 		}
 
-		discover := true
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug, discover)
+		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
 		if err != nil {
 			return err
 		}
@@ -1659,7 +1640,7 @@ func (s *Ethereum) Start() error {
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] goroutine terminated")
 			// when we're running in stand alone mode we need to run the downloader before we start the
-			// polygon services becuase they will wait for it to complete before opening thier stores
+			// polygon services because they will wait for it to complete before opening their stores
 			// which make use of snapshots and expect them to be initialize
 			// TODO: get the snapshots to call the downloader directly - which will avoid this
 			go func() {

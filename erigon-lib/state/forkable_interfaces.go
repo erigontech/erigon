@@ -2,19 +2,14 @@ package state
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
-type RootNum = ee.RootNum
-type Num = ee.Num
-type Id = ee.Id
 type EncToBytesI = kv.EncToBytesI
-type ForkableId = ee.ForkableId
-type Bytes = ee.Bytes
 
 // Freezer takes hot data (e.g. from db) and transforms it
 // to snapshot cold data.
@@ -72,8 +67,8 @@ type ForkableFilesTxI interface {
 }
 
 type ForkableDbCommonTxI interface {
-	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error)
-	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
+	Prune(ctx context.Context, to RootNum, limit uint64, logEvery *time.Ticker, tx kv.RwTx) (ForkablePruneStat, error)
+	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (ForkablePruneStat, error)
 	HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error)
 	Close()
 }
