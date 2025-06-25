@@ -244,7 +244,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	}
 
 	dirs := datadir.New(t.TempDir())
-	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence
 		name = "accounts"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
@@ -270,7 +270,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	}
 
 	testFn := func(ranges []testFileRange, vfCount int, needMerge bool, mergeFromStep, mergeToStep uint64) {
-		dataCount, _, _, _ := populateFiles2(t, dirs, name, repo, dirs.SnapDomain, ranges)
+		dataCount, _, _, _ := populateFiles2(t, dirs, repo, ranges)
 		require.Positive(t, dataCount)
 		require.NoError(t, repo.OpenFolder())
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
@@ -361,12 +361,12 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	// visibleFiles for accounts (and commitment) should use 0-1, 1-2
 	// then cleanAfterMerge should leave infact 0-1, 1-2
 
-	dataCount, _, _, _ := populateFiles2(t, dirs, "accounts", accountsR, dirs.SnapDomain, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	dataCount, _, _, _ := populateFiles2(t, dirs, accountsR, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	require.Positive(t, dataCount)
 	require.NoError(t, accountsR.OpenFolder())
 	require.Equal(t, 3, accountsR.dirtyFiles.Len())
 
-	dataCount, _, _, _ = populateFiles2(t, dirs, "commitment", commitmentR, dirs.SnapDomain, []testFileRange{{0, 1}, {1, 2}})
+	dataCount, _, _, _ = populateFiles2(t, dirs, commitmentR, []testFileRange{{0, 1}, {1, 2}})
 	require.Positive(t, dataCount)
 	require.NoError(t, commitmentR.OpenFolder())
 
@@ -397,7 +397,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	fileExistsCheck(t, accountsR, 1, 2, true)
 
 	// now let's add merged commitment and do same checks
-	dataCount, _, _, _ = populateFiles2(t, dirs, "commitment", commitmentR, dirs.SnapDomain, []testFileRange{{0, 2}})
+	dataCount, _, _, _ = populateFiles2(t, dirs, commitmentR, []testFileRange{{0, 2}})
 	require.Positive(t, dataCount)
 	require.NoError(t, commitmentR.OpenFolder())
 
@@ -434,7 +434,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 	}
 
 	dirs := datadir.New(t.TempDir())
-	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence
 		name = "accounts"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
@@ -461,7 +461,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 	}
 
 	testFn := func(ranges []testFileRange, needMerge bool, nFilesInRange, nVfAfterMerge, dirtyFilesAfterMerge int) {
-		dataCount, _, _, _ := populateFiles2(t, dirs, name, repo, dirs.SnapDomain, ranges)
+		dataCount, _, _, _ := populateFiles2(t, dirs, repo, ranges)
 		require.Positive(t, dataCount)
 		require.NoError(t, repo.OpenFolder())
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
@@ -475,7 +475,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		}
 
 		// add mergeFile
-		_, _, _, _ = populateFiles2(t, dirs, name, repo, dirs.SnapDomain, []testFileRange{{mr.from / stepSize, mr.to / stepSize}})
+		populateFiles2(t, dirs, repo, []testFileRange{{mr.from / stepSize, mr.to / stepSize}})
 
 		items := repo.FilesInRange(mr, vf) // vf passed should ideally from rotx, but doesn't matter here
 		require.Len(t, items, nFilesInRange)
@@ -574,7 +574,10 @@ type dhiiFiles struct {
 	historyFiles  []string
 	accessorFiles []string
 	idxFiles      []string
-	fullPath      bool
+}
+
+func (d dhiiFiles) all() []string {
+	return append(append(append(d.domainFiles, d.historyFiles...), d.accessorFiles...), d.idxFiles...)
 }
 
 type testFileRange struct {
@@ -588,72 +591,50 @@ func populateFilesFull(t *testing.T, dirs datadir.Dirs, name string, extensions 
 		historyFiles:  []string{"v1.0-accounts.0-64.v", "v1.0-accounts.0-64.v.torrent", "v1.0-accounts.128-192.v", "v1.0-accounts.128-192.v.torrent", "v1.0-accounts.192-256.v", "v1.0-accounts.192-256.v.torrent", "v1.0-accounts.256-288.v", "v1.0-accounts.256-288.v.torrent", "v1.0-accounts.288-296.v", "v1.0-accounts.288-296.v.torrent", "v1.0-accounts.296-298.v", "v1.0-accounts.296-298.v.torrent", "v1.0-accounts.64-128.v", "v1.0-accounts.64-128.v.torrent", "v1.0-code.0-64.v", "v1.0-code.0-64.v.torrent", "v1.0-code.128-192.v", "v1.0-code.128-192.v.torrent", "v1.0-code.192-256.v", "v1.0-code.192-256.v.torrent", "v1.0-code.256-288.v", "v1.0-code.256-288.v.torrent", "v1.0-code.288-296.v", "v1.0-code.288-296.v.torrent", "v1.0-code.296-298.v", "v1.0-code.296-298.v.torrent", "v1.0-code.64-128.v", "v1.0-code.64-128.v.torrent", "v1.0-receipt.0-64.v", "v1.0-receipt.0-64.v.torrent", "v1.0-receipt.128-192.v", "v1.0-receipt.128-192.v.torrent", "v1.0-receipt.192-256.v", "v1.0-receipt.192-256.v.torrent", "v1.0-receipt.256-288.v", "v1.0-receipt.256-288.v.torrent", "v1.0-receipt.288-296.v", "v1.0-receipt.288-296.v.torrent", "v1.0-receipt.296-298.v", "v1.0-receipt.296-298.v.torrent", "v1.0-receipt.64-128.v", "v1.0-receipt.64-128.v.torrent", "v1.0-storage.0-64.v", "v1.0-storage.0-64.v.torrent", "v1.0-storage.128-192.v", "v1.0-storage.128-192.v.torrent", "v1.0-storage.192-256.v", "v1.0-storage.192-256.v.torrent", "v1.0-storage.256-288.v", "v1.0-storage.256-288.v.torrent", "v1.0-storage.288-296.v", "v1.0-storage.288-296.v.torrent", "v1.0-storage.296-298.v", "v1.0-storage.296-298.v.torrent", "v1.0-storage.64-128.v", "v1.0-storage.64-128.v.torrent"},
 		accessorFiles: []string{"v1.0-accounts.0-64.efi", "v1.0-accounts.0-64.efi.torrent", "v1.0-accounts.0-64.vi", "v1.0-accounts.0-64.vi.torrent", "v1.0-accounts.128-192.efi", "v1.0-accounts.128-192.efi.torrent", "v1.0-accounts.128-192.vi", "v1.0-accounts.128-192.vi.torrent", "v1.0-accounts.192-256.efi", "v1.0-accounts.192-256.efi.torrent", "v1.0-accounts.192-256.vi", "v1.0-accounts.192-256.vi.torrent", "v1.0-accounts.256-288.efi", "v1.0-accounts.256-288.efi.torrent", "v1.0-accounts.256-288.vi", "v1.0-accounts.256-288.vi.torrent", "v1.0-accounts.288-296.efi", "v1.0-accounts.288-296.efi.torrent", "v1.0-accounts.288-296.vi", "v1.0-accounts.288-296.vi.torrent", "v1.0-accounts.296-298.efi", "v1.0-accounts.296-298.efi.torrent", "v1.0-accounts.296-298.vi", "v1.0-accounts.296-298.vi.torrent", "v1.0-accounts.64-128.efi", "v1.0-accounts.64-128.efi.torrent", "v1.0-accounts.64-128.vi", "v1.0-accounts.64-128.vi.torrent", "v1.0-code.0-64.efi", "v1.0-code.0-64.efi.torrent", "v1.0-code.0-64.vi", "v1.0-code.0-64.vi.torrent", "v1.0-code.128-192.efi", "v1.0-code.128-192.efi.torrent", "v1.0-code.128-192.vi", "v1.0-code.128-192.vi.torrent", "v1.0-code.192-256.efi", "v1.0-code.192-256.efi.torrent", "v1.0-code.192-256.vi", "v1.0-code.192-256.vi.torrent", "v1.0-code.256-288.efi", "v1.0-code.256-288.efi.torrent", "v1.0-code.256-288.vi", "v1.0-code.256-288.vi.torrent", "v1.0-code.288-296.efi", "v1.0-code.288-296.efi.torrent", "v1.0-code.288-296.vi", "v1.0-code.288-296.vi.torrent", "v1.0-code.296-298.efi", "v1.0-code.296-298.efi.torrent", "v1.0-code.296-298.vi", "v1.0-code.296-298.vi.torrent", "v1.0-code.64-128.efi", "v1.0-code.64-128.efi.torrent", "v1.0-code.64-128.vi", "v1.0-code.64-128.vi.torrent", "v1.0-logaddrs.0-64.efi", "v1.0-logaddrs.0-64.efi.torrent", "v1.0-logaddrs.128-192.efi", "v1.0-logaddrs.128-192.efi.torrent", "v1.0-logaddrs.192-256.efi", "v1.0-logaddrs.192-256.efi.torrent", "v1.0-logaddrs.256-288.efi", "v1.0-logaddrs.256-288.efi.torrent", "v1.0-logaddrs.288-296.efi", "v1.0-logaddrs.288-296.efi.torrent", "v1.0-logaddrs.296-298.efi", "v1.0-logaddrs.296-298.efi.torrent", "v1.0-logaddrs.64-128.efi", "v1.0-logaddrs.64-128.efi.torrent", "v1.0-logtopics.0-64.efi", "v1.0-logtopics.0-64.efi.torrent", "v1.0-logtopics.128-192.efi", "v1.0-logtopics.128-192.efi.torrent", "v1.0-logtopics.192-256.efi", "v1.0-logtopics.192-256.efi.torrent", "v1.0-logtopics.256-288.efi", "v1.0-logtopics.256-288.efi.torrent", "v1.0-logtopics.288-296.efi", "v1.0-logtopics.288-296.efi.torrent", "v1.0-logtopics.296-298.efi", "v1.0-logtopics.296-298.efi.torrent", "v1.0-logtopics.64-128.efi", "v1.0-logtopics.64-128.efi.torrent", "v1.0-receipt.0-64.efi", "v1.0-receipt.0-64.efi.torrent", "v1.0-receipt.0-64.vi", "v1.0-receipt.0-64.vi.torrent", "v1.0-receipt.128-192.efi", "v1.0-receipt.128-192.efi.torrent", "v1.0-receipt.128-192.vi", "v1.0-receipt.128-192.vi.torrent", "v1.0-receipt.192-256.efi", "v1.0-receipt.192-256.efi.torrent", "v1.0-receipt.192-256.vi", "v1.0-receipt.192-256.vi.torrent", "v1.0-receipt.256-288.efi", "v1.0-receipt.256-288.efi.torrent", "v1.0-receipt.256-288.vi", "v1.0-receipt.256-288.vi.torrent", "v1.0-receipt.288-296.efi", "v1.0-receipt.288-296.efi.torrent", "v1.0-receipt.288-296.vi", "v1.0-receipt.288-296.vi.torrent", "v1.0-receipt.296-298.efi", "v1.0-receipt.296-298.efi.torrent", "v1.0-receipt.296-298.vi", "v1.0-receipt.296-298.vi.torrent", "v1.0-receipt.64-128.efi", "v1.0-receipt.64-128.efi.torrent", "v1.0-receipt.64-128.vi", "v1.0-receipt.64-128.vi.torrent", "v1.0-storage.0-64.efi", "v1.0-storage.0-64.efi.torrent", "v1.0-storage.0-64.vi", "v1.0-storage.0-64.vi.torrent", "v1.0-storage.128-192.efi", "v1.0-storage.128-192.efi.torrent", "v1.0-storage.128-192.vi", "v1.0-storage.128-192.vi.torrent", "v1.0-storage.192-256.efi", "v1.0-storage.192-256.efi.torrent", "v1.0-storage.192-256.vi", "v1.0-storage.192-256.vi.torrent", "v1.0-storage.256-288.efi", "v1.0-storage.256-288.efi.torrent", "v1.0-storage.256-288.vi", "v1.0-storage.256-288.vi.torrent", "v1.0-storage.288-296.efi", "v1.0-storage.288-296.efi.torrent", "v1.0-storage.288-296.vi", "v1.0-storage.288-296.vi.torrent", "v1.0-storage.296-298.efi", "v1.0-storage.296-298.efi.torrent", "v1.0-storage.296-298.vi", "v1.0-storage.296-298.vi.torrent", "v1.0-storage.64-128.efi", "v1.0-storage.64-128.efi.torrent", "v1.0-storage.64-128.vi", "v1.0-storage.64-128.vi.torrent", "v1.0-tracesfrom.0-64.efi", "v1.0-tracesfrom.0-64.efi.torrent", "v1.0-tracesfrom.128-192.efi", "v1.0-tracesfrom.128-192.efi.torrent", "v1.0-tracesfrom.192-256.efi", "v1.0-tracesfrom.192-256.efi.torrent", "v1.0-tracesfrom.256-288.efi", "v1.0-tracesfrom.256-288.efi.torrent", "v1.0-tracesfrom.288-296.efi", "v1.0-tracesfrom.288-296.efi.torrent", "v1.0-tracesfrom.296-298.efi", "v1.0-tracesfrom.296-298.efi.torrent", "v1.0-tracesfrom.64-128.efi", "v1.0-tracesfrom.64-128.efi.torrent", "v1.0-tracesto.0-64.efi", "v1.0-tracesto.0-64.efi.torrent", "v1.0-tracesto.128-192.efi", "v1.0-tracesto.128-192.efi.torrent", "v1.0-tracesto.192-256.efi", "v1.0-tracesto.192-256.efi.torrent", "v1.0-tracesto.256-288.efi", "v1.0-tracesto.256-288.efi.torrent", "v1.0-tracesto.288-296.efi", "v1.0-tracesto.288-296.efi.torrent", "v1.0-tracesto.296-298.efi", "v1.0-tracesto.296-298.efi.torrent", "v1.0-tracesto.64-128.efi", "v1.0-tracesto.64-128.efi.torrent"},
 		idxFiles:      []string{"v1.0-accounts.0-64.ef", "v1.0-accounts.0-64.ef.torrent", "v1.0-accounts.128-192.ef", "v1.0-accounts.128-192.ef.torrent", "v1.0-accounts.192-256.ef", "v1.0-accounts.192-256.ef.torrent", "v1.0-accounts.256-288.ef", "v1.0-accounts.256-288.ef.torrent", "v1.0-accounts.288-296.ef", "v1.0-accounts.288-296.ef.torrent", "v1.0-accounts.296-298.ef", "v1.0-accounts.296-298.ef.torrent", "v1.0-accounts.64-128.ef", "v1.0-accounts.64-128.ef.torrent", "v1.0-code.0-64.ef", "v1.0-code.0-64.ef.torrent", "v1.0-code.128-192.ef", "v1.0-code.128-192.ef.torrent", "v1.0-code.192-256.ef", "v1.0-code.192-256.ef.torrent", "v1.0-code.256-288.ef", "v1.0-code.256-288.ef.torrent", "v1.0-code.288-296.ef", "v1.0-code.288-296.ef.torrent", "v1.0-code.296-298.ef", "v1.0-code.296-298.ef.torrent", "v1.0-code.64-128.ef", "v1.0-code.64-128.ef.torrent", "v1.0-logaddrs.0-64.ef", "v1.0-logaddrs.0-64.ef.torrent", "v1.0-logaddrs.128-192.ef", "v1.0-logaddrs.128-192.ef.torrent", "v1.0-logaddrs.192-256.ef", "v1.0-logaddrs.192-256.ef.torrent", "v1.0-logaddrs.256-288.ef", "v1.0-logaddrs.256-288.ef.torrent", "v1.0-logaddrs.288-296.ef", "v1.0-logaddrs.288-296.ef.torrent", "v1.0-logaddrs.296-298.ef", "v1.0-logaddrs.296-298.ef.torrent", "v1.0-logaddrs.64-128.ef", "v1.0-logaddrs.64-128.ef.torrent", "v1.0-logtopics.0-64.ef", "v1.0-logtopics.0-64.ef.torrent", "v1.0-logtopics.128-192.ef", "v1.0-logtopics.128-192.ef.torrent", "v1.0-logtopics.192-256.ef", "v1.0-logtopics.192-256.ef.torrent", "v1.0-logtopics.256-288.ef", "v1.0-logtopics.256-288.ef.torrent", "v1.0-logtopics.288-296.ef", "v1.0-logtopics.288-296.ef.torrent", "v1.0-logtopics.296-298.ef", "v1.0-logtopics.296-298.ef.torrent", "v1.0-logtopics.64-128.ef", "v1.0-logtopics.64-128.ef.torrent", "v1.0-receipt.0-64.ef", "v1.0-receipt.0-64.ef.torrent", "v1.0-receipt.128-192.ef", "v1.0-receipt.128-192.ef.torrent", "v1.0-receipt.192-256.ef", "v1.0-receipt.192-256.ef.torrent", "v1.0-receipt.256-288.ef", "v1.0-receipt.256-288.ef.torrent", "v1.0-receipt.288-296.ef", "v1.0-receipt.288-296.ef.torrent", "v1.0-receipt.296-298.ef", "v1.0-receipt.296-298.ef.torrent", "v1.0-receipt.64-128.ef", "v1.0-receipt.64-128.ef.torrent", "v1.0-storage.0-64.ef", "v1.0-storage.0-64.ef.torrent", "v1.0-storage.128-192.ef", "v1.0-storage.128-192.ef.torrent", "v1.0-storage.192-256.ef", "v1.0-storage.192-256.ef.torrent", "v1.0-storage.256-288.ef", "v1.0-storage.256-288.ef.torrent", "v1.0-storage.288-296.ef", "v1.0-storage.288-296.ef.torrent", "v1.0-storage.296-298.ef", "v1.0-storage.296-298.ef.torrent", "v1.0-storage.64-128.ef", "v1.0-storage.64-128.ef.torrent", "v1.0-tracesfrom.0-64.ef", "v1.0-tracesfrom.0-64.ef.torrent", "v1.0-tracesfrom.128-192.ef", "v1.0-tracesfrom.128-192.ef.torrent", "v1.0-tracesfrom.192-256.ef", "v1.0-tracesfrom.192-256.ef.torrent", "v1.0-tracesfrom.256-288.ef", "v1.0-tracesfrom.256-288.ef.torrent", "v1.0-tracesfrom.288-296.ef", "v1.0-tracesfrom.288-296.ef.torrent", "v1.0-tracesfrom.296-298.ef", "v1.0-tracesfrom.296-298.ef.torrent", "v1.0-tracesfrom.64-128.ef", "v1.0-tracesfrom.64-128.ef.torrent", "v1.0-tracesto.0-64.ef", "v1.0-tracesto.0-64.ef.torrent", "v1.0-tracesto.128-192.ef", "v1.0-tracesto.128-192.ef.torrent", "v1.0-tracesto.192-256.ef", "v1.0-tracesto.192-256.ef.torrent", "v1.0-tracesto.256-288.ef", "v1.0-tracesto.256-288.ef.torrent", "v1.0-tracesto.288-296.ef", "v1.0-tracesto.288-296.ef.torrent", "v1.0-tracesto.296-298.ef", "v1.0-tracesto.296-298.ef.torrent", "v1.0-tracesto.64-128.ef", "v1.0-tracesto.64-128.ef.torrent"},
-		fullPath:      false,
 	}
-	return populateFiles(t, dirs, name, extensions, dataFolder, allFiles)
+	setFullPathFn := func(fullpaths []string, folder string) {
+		for i, f := range fullpaths {
+			fullpaths[i] = filepath.Join(folder, f)
+		}
+	}
+	setFullPathFn(allFiles.domainFiles, dirs.SnapDomain)
+	setFullPathFn(allFiles.historyFiles, dirs.SnapHistory)
+	setFullPathFn(allFiles.idxFiles, dirs.SnapIdx)
+	setFullPathFn(allFiles.accessorFiles, dirs.SnapAccessors)
+	return populateFiles(t, dirs, name, extensions, dataFolder, allFiles.all())
 }
 
-func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *SnapshotRepo, dataFolder string, ranges []testFileRange) (dataFileCount, btCount, existenceCount, accessorCount int) {
+func populateFiles2(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo, ranges []testFileRange) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
-	allFiles := dhiiFiles{fullPath: true}
+	var allFiles []string
 	extensions := repo.cfg.Schema.(*E3SnapSchema).FileExtensions()
 	v := version.V1_0
 	acc := repo.schema.AccessorList()
 
-	isHistory := strings.HasSuffix(repo.schema.DataFile(v, 0, 1), ".v")
-	isII := strings.HasSuffix(repo.schema.DataFile(v, 0, 1), ".ef")
-
-	var appendFn func(file string)
-	if !isHistory && !isII {
-		appendFn = func(file string) {
-			allFiles.domainFiles = append(allFiles.domainFiles, file)
-		}
-	} else if isHistory {
-		appendFn = func(file string) {
-			allFiles.historyFiles = append(allFiles.historyFiles, file)
-		}
-	} else if isII {
-		// idx
-		appendFn = func(file string) {
-			allFiles.idxFiles = append(allFiles.idxFiles, file)
-		}
-	}
-
 	for _, r := range ranges {
 		from, to := RootNum(r.fromStep*repo.stepSize), RootNum(r.toStep*repo.stepSize)
-		appendFn(repo.schema.DataFile(v, from, to))
+		allFiles = append(allFiles, repo.schema.DataFile(v, from, to))
 		if acc.Has(AccessorBTree) {
-			f := repo.schema.BtIdxFile(v, from, to)
-			appendFn(f)
+			allFiles = append(allFiles, repo.schema.BtIdxFile(v, from, to))
 		}
 		if acc.Has(AccessorExistence) {
-			appendFn(repo.schema.ExistenceFile(v, from, to))
+			allFiles = append(allFiles, repo.schema.ExistenceFile(v, from, to))
 		}
 		if acc.Has(AccessorHashMap) {
-			if containsSubstring(t, AccessorExtensionKvi.String(), extensions) {
-				appendFn(repo.schema.AccessorIdxFile(v, from, to, 0))
-			} else {
-				allFiles.accessorFiles = append(allFiles.accessorFiles, repo.schema.AccessorIdxFile(v, from, to, 0))
-			}
+			allFiles = append(allFiles, repo.schema.AccessorIdxFile(v, from, to, 0))
 		}
 	}
 
-	return populateFiles(t, dirs, name, extensions, dataFolder, &allFiles)
+	return populateFiles(t, dirs, repo.schema.DataTag(), extensions, repo.schema.DataDirectory(), allFiles)
 }
 
 // this function creates mock files (.kvi, .v, .ef, .efi etc.) for the files specified in `allFiles`
-func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []string, dataFolder string, allFiles *dhiiFiles) (dataFileCount, btCount, existenceCount, accessorCount int) {
+func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []string, dataFolder string, allFiles []string) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
 
 	// populate data files
 
 	// 1. account domain, history and ii
-
-	domainFolder := dirs.SnapDomain
-	historyFolder := dirs.SnapHistory
-	accessorFolder := dirs.SnapAccessors
-	idxFolder := dirs.SnapIdx
-
 	fileGen := func(filename string) {
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
 			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
@@ -744,28 +725,18 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 
 			return
 		}
-
 	}
 
-	touch(t, domainFolder, allFiles.domainFiles, fileGen, allFiles.fullPath)
-	touch(t, historyFolder, allFiles.historyFiles, fileGen, allFiles.fullPath)
-	touch(t, accessorFolder, allFiles.accessorFiles, fileGen, allFiles.fullPath)
-	touch(t, idxFolder, allFiles.idxFiles, fileGen, allFiles.fullPath)
+	for _, f := range allFiles {
+		fileGen(f)
+	}
 
 	return dataFileCount, btCount, existenceCount, accessorCount
 }
 
-func touch(t *testing.T, folder string, files []string, fileGen func(filename string), fullPath bool) {
+func generateFiles(t *testing.T, files []string, fileGen func(filename string)) {
 	t.Helper()
-	for _, f := range files {
-		filename := f
-		if !fullPath {
-			filename = filepath.Join(folder, f)
-		}
 
-		// touchFile(t, filename)
-		fileGen(filename)
-	}
 }
 
 func containsSubstring(t *testing.T, str string, list []string) bool {
