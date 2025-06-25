@@ -2131,8 +2131,7 @@ func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
 	}
-	protocol := "all"
-	if url := chainspec.KnownDNSNetwork(genesis, protocol); url != "" {
+	if url := chainspec.KnownDNSNetwork(genesis); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
 }

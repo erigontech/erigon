@@ -1003,7 +1003,7 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
 		if len(ss.p2p.DiscoveryDNS) == 0 {
-			if url := chainspec.KnownDNSNetwork(genesisHash, "all"); url != "" {
+			if url := chainspec.KnownDNSNetwork(genesisHash); url != "" {
 				ss.p2p.DiscoveryDNS = []string{url}
 			}
 
