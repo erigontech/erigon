@@ -133,17 +133,19 @@ func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemor
 	}
 }
 
-var genesisHashByChainName = make(map[string]*common.Hash)
 var chainConfigByName = make(map[string]*chain.Config)
-var chainConfigByGenesisHash = make(map[common.Hash]*chain.Config)
 
 func ChainConfigByChainName(chainName string) *chain.Config {
 	return chainConfigByName[chainName]
 }
 
+var genesisHashByChainName = make(map[string]*common.Hash)
+
 func GenesisHashByChainName(chain string) *common.Hash {
 	return genesisHashByChainName[chain]
 }
+
+var chainConfigByGenesisHash = make(map[common.Hash]*chain.Config)
 
 func ChainConfigByGenesisHash(genesisHash common.Hash) *chain.Config {
 	return chainConfigByGenesisHash[genesisHash]

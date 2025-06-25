@@ -133,11 +133,12 @@ func KnownDNSNetwork(genesis common.Hash) string {
 }
 
 var bootNodeURLsByGenesisHash = make(map[common.Hash][]string)
-var bootNodeURLsByChainName = make(map[string][]string)
 
 func BootnodeURLsByGenesisHash(genesis common.Hash) []string {
 	return bootNodeURLsByGenesisHash[genesis]
 }
+
+var bootNodeURLsByChainName = make(map[string][]string)
 
 func BootnodeURLsOfChain(chain string) []string {
 	return bootNodeURLsByChainName[chain]
