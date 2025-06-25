@@ -193,6 +193,7 @@ func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func(
 }
 
 func RegisterChain(name string, config *chain.Config, genesis *types.Genesis, genesisHash common.Hash, bootNodes []string) {
+	NetworkNameByID[config.ChainID.Uint64()] = name
 	chainConfigByName[name] = config
 	chainConfigByGenesisHash[genesisHash] = config
 	genesisHashByChainName[name] = &genesisHash
