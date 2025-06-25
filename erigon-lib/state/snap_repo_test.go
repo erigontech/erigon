@@ -602,7 +602,7 @@ func populateFilesFull(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo) (dat
 
 func populateFiles2(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo, ranges []testFileRange) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
-	var allFiles []string
+	var allFiles []string //nolint:prealloc
 	v := version.V1_0
 	acc := repo.schema.AccessorList()
 
