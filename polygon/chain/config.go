@@ -54,15 +54,7 @@ var (
 )
 
 func init() {
-	chainspec.RegisterGenesisHashByChainName(networkname.Amoy, &AmoyGenesisHash)
-	chainspec.RegisterGenesisHashByChainName(networkname.BorMainnet, &BorMainnetGenesisHash)
-	chainspec.RegisterGenesisHashByChainName(networkname.BorDevnet, &BorDevnetGenesisHash)
-
-	chainspec.RegisterChainConfigByName(networkname.Amoy, AmoyChainConfig)
-	chainspec.RegisterChainConfigByName(networkname.BorMainnet, BorMainnetChainConfig)
-	chainspec.RegisterChainConfigByName(networkname.BorDevnet, BorDevnetChainConfig)
-
-	chainspec.RegisterChainConfigByGenesisHash(AmoyGenesisHash, AmoyChainConfig)
-	chainspec.RegisterChainConfigByGenesisHash(BorMainnetGenesisHash, BorMainnetChainConfig)
-	chainspec.RegisterChainConfigByGenesisHash(BorDevnetGenesisHash, BorDevnetChainConfig)
+	chainspec.RegisterChain(networkname.Amoy, AmoyChainConfig, AmoyGenesisBlock(), AmoyGenesisHash, AmoyBootnodes)
+	chainspec.RegisterChain(networkname.BorMainnet, BorMainnetChainConfig, BorMainnetGenesisBlock(), BorMainnetGenesisHash, BorMainnetBootnodes)
+	chainspec.RegisterChain(networkname.BorDevnet, BorDevnetChainConfig, BorDevnetGenesisBlock(), BorDevnetGenesisHash, nil)
 }

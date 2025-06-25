@@ -146,40 +146,15 @@ func KnownDNSNetwork(genesis common.Hash, protocol string) string {
 	return dnsPrefix + protocol + "." + net + ".ethdisco.net"
 }
 
-var bootnodeURLsByGenesisHash = make(map[common.Hash][]string)
-var bootnodeURLsByChainName = make(map[string][]string)
-
-func init() {
-	bootnodeURLsByGenesisHash[MainnetGenesisHash] = MainnetBootnodes
-	bootnodeURLsByGenesisHash[HoleskyGenesisHash] = HoleskyBootnodes
-	bootnodeURLsByGenesisHash[HoodiGenesisHash] = HoodiBootnodes
-	bootnodeURLsByGenesisHash[SepoliaGenesisHash] = SepoliaBootnodes
-	bootnodeURLsByGenesisHash[GnosisGenesisHash] = GnosisBootnodes
-	bootnodeURLsByGenesisHash[ChiadoGenesisHash] = ChiadoBootnodes
-
-	bootnodeURLsByChainName[networkname.Mainnet] = MainnetBootnodes
-	bootnodeURLsByChainName[networkname.Holesky] = HoleskyBootnodes
-	bootnodeURLsByChainName[networkname.Hoodi] = HoodiBootnodes
-	bootnodeURLsByChainName[networkname.Sepolia] = SepoliaBootnodes
-	bootnodeURLsByChainName[networkname.Gnosis] = GnosisBootnodes
-	bootnodeURLsByChainName[networkname.Chiado] = ChiadoBootnodes
-
-}
+var bootNodeURLsByGenesisHash = make(map[common.Hash][]string)
+var bootNodeURLsByChainName = make(map[string][]string)
 
 func BootnodeURLsByGenesisHash(genesis common.Hash) []string {
-	return bootnodeURLsByGenesisHash[genesis]
-}
-
-func RegisterBootnodeURLsByGenesisHash(genesisHash common.Hash, bootnodes []string) {
-	bootnodeURLsByGenesisHash[genesisHash] = bootnodes
+	return bootNodeURLsByGenesisHash[genesis]
 }
 
 func BootnodeURLsOfChain(chain string) []string {
-	return bootnodeURLsByChainName[chain]
-}
-
-func RegisterBootnodeURLsByChainName(chain string, bootnodes []string) {
-	bootnodeURLsByChainName[chain] = bootnodes
+	return bootNodeURLsByChainName[chain]
 }
 
 func StaticPeerURLsOfChain(chain string) []string {

@@ -29,7 +29,6 @@ import (
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -149,20 +148,6 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis 
 
 var genesisBlockByChainName = make(map[string]*types.Genesis)
 
-func init() {
-	genesisBlockByChainName[networkname.Mainnet] = MainnetGenesisBlock()
-	genesisBlockByChainName[networkname.Holesky] = HoleskyGenesisBlock()
-	genesisBlockByChainName[networkname.Sepolia] = SepoliaGenesisBlock()
-	genesisBlockByChainName[networkname.Hoodi] = HoodiGenesisBlock()
-	genesisBlockByChainName[networkname.Gnosis] = GnosisGenesisBlock()
-	genesisBlockByChainName[networkname.Chiado] = ChiadoGenesisBlock()
-	genesisBlockByChainName[networkname.Test] = TestGenesisBlock()
-}
-
 func GenesisBlockByChainName(chain string) *types.Genesis {
 	return genesisBlockByChainName[chain]
-}
-
-func RegisterGenesisBlock(chain string, genesis *types.Genesis) {
-	genesisBlockByChainName[chain] = genesis
 }

@@ -20,7 +20,6 @@ import (
 	"embed"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/chainspec"
@@ -68,10 +67,4 @@ func BorDevnetGenesisBlock() *types.Genesis {
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_devnet.json"),
 	}
-}
-
-func init() {
-	chainspec.RegisterGenesisBlock(networkname.Amoy, AmoyGenesisBlock())
-	chainspec.RegisterGenesisBlock(networkname.BorDevnet, BorDevnetGenesisBlock())
-	chainspec.RegisterGenesisBlock(networkname.BorMainnet, BorMainnetGenesisBlock())
 }

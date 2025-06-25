@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/paths"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 //go:embed chainspecs
@@ -136,55 +137,16 @@ var genesisHashByChainName = make(map[string]*common.Hash)
 var chainConfigByName = make(map[string]*chain.Config)
 var chainConfigByGenesisHash = make(map[common.Hash]*chain.Config)
 
-func init() {
-	genesisHashByChainName[networkname.Mainnet] = &MainnetGenesisHash
-	genesisHashByChainName[networkname.Holesky] = &HoleskyGenesisHash
-	genesisHashByChainName[networkname.Sepolia] = &SepoliaGenesisHash
-	genesisHashByChainName[networkname.Hoodi] = &HoodiGenesisHash
-	genesisHashByChainName[networkname.Gnosis] = &GnosisGenesisHash
-	genesisHashByChainName[networkname.Chiado] = &ChiadoGenesisHash
-	genesisHashByChainName[networkname.Test] = &TestGenesisHash
-
-	chainConfigByName[networkname.Mainnet] = MainnetChainConfig
-	chainConfigByName[networkname.Holesky] = HoleskyChainConfig
-	chainConfigByName[networkname.Sepolia] = SepoliaChainConfig
-	chainConfigByName[networkname.Hoodi] = HoodiChainConfig
-	chainConfigByName[networkname.Gnosis] = GnosisChainConfig
-	chainConfigByName[networkname.Chiado] = ChiadoChainConfig
-	chainConfigByName[networkname.Test] = chain.TestChainConfig
-	chainConfigByName[networkname.Dev] = AllCliqueProtocolChanges
-
-	chainConfigByGenesisHash[MainnetGenesisHash] = MainnetChainConfig
-	chainConfigByGenesisHash[HoleskyGenesisHash] = HoleskyChainConfig
-	chainConfigByGenesisHash[SepoliaGenesisHash] = SepoliaChainConfig
-	chainConfigByGenesisHash[HoodiGenesisHash] = HoodiChainConfig
-	chainConfigByGenesisHash[GnosisGenesisHash] = GnosisChainConfig
-	chainConfigByGenesisHash[ChiadoGenesisHash] = ChiadoChainConfig
-	chainConfigByGenesisHash[TestGenesisHash] = chain.TestChainConfig
-}
-
 func ChainConfigByChainName(chainName string) *chain.Config {
 	return chainConfigByName[chainName]
-}
-
-func RegisterChainConfigByName(chainName string, config *chain.Config) {
-	chainConfigByName[chainName] = config
 }
 
 func GenesisHashByChainName(chain string) *common.Hash {
 	return genesisHashByChainName[chain]
 }
 
-func RegisterGenesisHashByChainName(chain string, hash *common.Hash) {
-	genesisHashByChainName[chain] = hash
-}
-
 func ChainConfigByGenesisHash(genesisHash common.Hash) *chain.Config {
 	return chainConfigByGenesisHash[genesisHash]
-}
-
-func RegisterChainConfigByGenesisHash(genesisHash common.Hash, config *chain.Config) {
-	chainConfigByGenesisHash[genesisHash] = config
 }
 
 func NetworkIDByChainName(chain string) uint64 {
@@ -228,4 +190,25 @@ func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func(
 
 	currentTD := currentTDProvider()
 	return (currentTD != nil) && (terminalTD.Cmp(currentTD) <= 0)
+}
+
+func RegisterChain(name string, config *chain.Config, genesis *types.Genesis, genesisHash common.Hash, bootNodes []string) {
+	chainConfigByName[name] = config
+	chainConfigByGenesisHash[genesisHash] = config
+	genesisHashByChainName[name] = &genesisHash
+	genesisBlockByChainName[name] = genesis
+	bootNodeURLsByChainName[name] = bootNodes
+	bootNodeURLsByGenesisHash[genesisHash] = bootNodes
+}
+
+func init() {
+	chainConfigByName[networkname.Dev] = AllCliqueProtocolChanges
+
+	RegisterChain(networkname.Mainnet, MainnetChainConfig, MainnetGenesisBlock(), MainnetGenesisHash, MainnetBootnodes)
+	RegisterChain(networkname.Sepolia, SepoliaChainConfig, SepoliaGenesisBlock(), SepoliaGenesisHash, SepoliaBootnodes)
+	RegisterChain(networkname.Holesky, HoleskyChainConfig, HoleskyGenesisBlock(), HoleskyGenesisHash, HoleskyBootnodes)
+	RegisterChain(networkname.Hoodi, HoodiChainConfig, HoodiGenesisBlock(), HoodiGenesisHash, HoodiBootnodes)
+	RegisterChain(networkname.Gnosis, GnosisChainConfig, GnosisGenesisBlock(), GnosisGenesisHash, GnosisBootnodes)
+	RegisterChain(networkname.Chiado, ChiadoChainConfig, ChiadoGenesisBlock(), ChiadoGenesisHash, ChiadoBootnodes)
+	RegisterChain(networkname.Test, chain.TestChainConfig, TestGenesisBlock(), TestGenesisHash, nil)
 }
