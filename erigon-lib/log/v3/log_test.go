@@ -36,7 +36,7 @@ func (h lastRecordCaptureTestHandler) LogLvl() Lvl {
 func testLogger() (Logger, Handler, *Record) {
 	l := New()
 	h, r := newLastRecordCaptureTestHandler()
-	l.SetHandler(NewLazyHandler(h))
+	l.SetHandler(LazyHandler(h))
 	return l, h, r
 }
 
@@ -98,7 +98,7 @@ func TestCtx(t *testing.T) {
 func testFormatter(f Format) (Logger, *bytes.Buffer) {
 	l := New()
 	var buf bytes.Buffer
-	l.SetHandler(NewStreamHandler(&buf, f))
+	l.SetHandler(StreamHandler(&buf, f))
 	return l, &buf
 }
 
@@ -185,7 +185,7 @@ func TestMultiHandler(t *testing.T) {
 	h1, r1 := newLastRecordCaptureTestHandler()
 	h2, r2 := newLastRecordCaptureTestHandler()
 	l := New()
-	l.SetHandler(NewMultiHandler(h1, h2))
+	l.SetHandler(MultiHandler(h1, h2))
 	l.Debug("clone")
 
 	if r1.Msg != "clone" {
@@ -216,7 +216,7 @@ func TestBufferedHandler(t *testing.T) {
 
 	ch := make(chan Record)
 	l := New()
-	l.SetHandler(NewBufferedHandler(0, &waitHandler{ch}))
+	l.SetHandler(BufferedHandler(0, &waitHandler{ch}))
 
 	l.Debug("buffer")
 	if r := <-ch; r.Msg != "buffer" {
@@ -268,7 +268,7 @@ func TestLvlFilterHandler(t *testing.T) {
 
 	l := New()
 	h, r := newLastRecordCaptureTestHandler()
-	l.SetHandler(NewLvlFilterHandler(LvlWarn, h))
+	l.SetHandler(LvlFilterHandler(LvlWarn, h))
 	l.Info("info'd")
 
 	if r.Msg != "" {
@@ -320,7 +320,7 @@ func TestNetHandler(t *testing.T) {
 	}()
 
 	lg := New()
-	h, err := NewNetHandler("tcp", l.Addr().String(), LogfmtFormat())
+	h, err := NetHandler("tcp", l.Addr().String(), LogfmtFormat())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestMatchFilterHandler(t *testing.T) {
 	t.Parallel()
 
 	l, h, r := testLogger()
-	l.SetHandler(NewMatchFilterHandler("err", nil, h))
+	l.SetHandler(MatchFilterHandler("err", nil, h))
 
 	l.Crit("test", "foo", "bar")
 	if r.Msg != "" {
@@ -363,7 +363,7 @@ func TestMatchFilterBuiltin(t *testing.T) {
 	t.Parallel()
 
 	l, h, r := testLogger()
-	l.SetHandler(NewMatchFilterHandler("lvl", LvlError, h))
+	l.SetHandler(MatchFilterHandler("lvl", LvlError, h))
 	l.Info("does not pass")
 
 	if r.Msg != "" {
@@ -376,7 +376,7 @@ func TestMatchFilterBuiltin(t *testing.T) {
 	}
 
 	r.Msg = ""
-	l.SetHandler(NewMatchFilterHandler("msg", "matching message", h))
+	l.SetHandler(MatchFilterHandler("msg", "matching message", h))
 	l.Info("doesn't match")
 	if r.Msg != "" {
 		t.Fatalf("got record with wrong message matched")
@@ -406,8 +406,8 @@ func TestFailoverHandler(t *testing.T) {
 	h, r := newLastRecordCaptureTestHandler()
 	w := &failingWriter{false}
 
-	l.SetHandler(NewFailoverHandler(
-		NewStreamHandler(w, JsonFormat()),
+	l.SetHandler(FailoverHandler(
+		StreamHandler(w, JsonFormat()),
 		h))
 
 	l.Debug("test ok")
@@ -438,7 +438,7 @@ func TestIndependentSetHandler(t *testing.T) {
 
 	parent, _, r := testLogger()
 	child := parent.New()
-	child.SetHandler(NewDiscardHandler())
+	child.SetHandler(DiscardHandler())
 	parent.Info("test")
 	if r.Msg != "test" {
 		t.Fatalf("parent handler affected by child")
@@ -451,7 +451,7 @@ func TestInheritHandler(t *testing.T) {
 
 	parent, _, r := testLogger()
 	child := parent.New()
-	parent.SetHandler(NewDiscardHandler())
+	parent.SetHandler(DiscardHandler())
 	child.Info("test")
 	if r.Msg == "test" {
 		t.Fatalf("child handler affected not affected by parent")
@@ -463,7 +463,7 @@ func TestCallerFileHandler(t *testing.T) {
 
 	l := New()
 	h, r := newLastRecordCaptureTestHandler()
-	l.SetHandler(NewCallerFileHandler(h))
+	l.SetHandler(CallerFileHandler(h))
 
 	l.Info("baz")
 	_, _, line, _ := runtime.Caller(0)
@@ -494,7 +494,7 @@ func TestCallerFuncHandler(t *testing.T) {
 
 	l := New()
 	h, r := newLastRecordCaptureTestHandler()
-	l.SetHandler(NewCallerFuncHandler(h))
+	l.SetHandler(CallerFuncHandler(h))
 
 	l.Info("baz")
 
@@ -532,7 +532,7 @@ func TestCallerStackHandler(t *testing.T) {
 
 	l := New()
 	h, r := newLastRecordCaptureTestHandler()
-	l.SetHandler(NewCallerStackHandler("%#v", h))
+	l.SetHandler(CallerStackHandler("%#v", h))
 
 	lines := []int{}
 
@@ -592,7 +592,7 @@ func TestConcurrent(t *testing.T) {
 	l := root.New(make([]interface{}, ctxLen)...)
 	const goroutines = 8
 	var res [goroutines]int
-	l.SetHandler(NewSyncHandler(concurrentCaptureTestHandler{res: res[:], ctxLen: ctxLen}))
+	l.SetHandler(SyncHandler(concurrentCaptureTestHandler{res: res[:], ctxLen: ctxLen}))
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 	for i := 0; i < goroutines; i++ {
@@ -632,9 +632,9 @@ func TestCallStack(t *testing.T) {
 	scenarios := map[string]struct {
 		handler Handler
 	}{
-		//"NewCallerStackHandler": {NewCallerStackHandler("%+v", h)}, // -trimpath flag will cause this to fail
-		"NewCallerFuncHandler": {NewCallerFuncHandler(h)},
-		"NewCallerFileHandler": {NewCallerFileHandler(h)},
+		//"CallerStackHandler": {CallerStackHandler("%+v", h)}, // -trimpath flag will cause this to fail
+		"CallerFuncHandler": {CallerFuncHandler(h)},
+		"CallerFileHandler": {CallerFileHandler(h)},
 	}
 
 	for name, scenario := range scenarios {

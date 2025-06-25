@@ -268,7 +268,7 @@ func dot2png(dotFileName string) string {
 
 func initialState1() error {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	fmt.Printf("Initial state 1\n")
 	// Configure and generate a sample block chain
 	var (

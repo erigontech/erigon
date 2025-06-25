@@ -50,7 +50,7 @@ func testingHeaderBody(t *testing.T) (h *types.Header, b *types.RawBody) {
 
 func TestBodiesCanonical(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlError, log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)

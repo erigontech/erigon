@@ -69,7 +69,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	logger := log.New()
-	logger.SetHandler(log.NewLvlFilterHandler(log.LvlTrace, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
 	err := sendTxns(ctx, logger, *fromPkFile, *from, *to, *amount, *rpcUrl, *numTxn, *chain)
 	if err != nil {
 		logger.Error("failed to send transactions", "err", err)

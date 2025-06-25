@@ -12,7 +12,7 @@ func BenchmarkStreamNoCtx(b *testing.B) {
 	lg := New()
 
 	buf := bytes.Buffer{}
-	lg.SetHandler(NewStreamHandler(&buf, LogfmtFormat()))
+	lg.SetHandler(StreamHandler(&buf, LogfmtFormat()))
 
 	for i := 0; i < b.N; i++ {
 		lg.Info("test message")
@@ -22,7 +22,7 @@ func BenchmarkStreamNoCtx(b *testing.B) {
 
 func BenchmarkDiscard(b *testing.B) {
 	lg := New()
-	lg.SetHandler(NewDiscardHandler())
+	lg.SetHandler(DiscardHandler())
 
 	for i := 0; i < b.N; i++ {
 		lg.Info("test message")
@@ -31,7 +31,7 @@ func BenchmarkDiscard(b *testing.B) {
 
 func BenchmarkCallerFileHandler(b *testing.B) {
 	lg := New()
-	lg.SetHandler(NewCallerFileHandler(NewDiscardHandler()))
+	lg.SetHandler(CallerFileHandler(DiscardHandler()))
 
 	for i := 0; i < b.N; i++ {
 		lg.Info("test message")
@@ -40,7 +40,7 @@ func BenchmarkCallerFileHandler(b *testing.B) {
 
 func BenchmarkCallerFuncHandler(b *testing.B) {
 	lg := New()
-	lg.SetHandler(NewCallerFuncHandler(NewDiscardHandler()))
+	lg.SetHandler(CallerFuncHandler(DiscardHandler()))
 
 	for i := 0; i < b.N; i++ {
 		lg.Info("test message")
@@ -76,9 +76,9 @@ func BenchmarkJsonNoCtx(b *testing.B) {
 }
 
 func BenchmarkMultiLevelFilter(b *testing.B) {
-	handler := NewMultiHandler(
-		NewLvlFilterHandler(LvlDebug, NewDiscardHandler()),
-		NewLvlFilterHandler(LvlError, NewDiscardHandler()),
+	handler := MultiHandler(
+		LvlFilterHandler(LvlDebug, DiscardHandler()),
+		LvlFilterHandler(LvlError, DiscardHandler()),
 	)
 
 	lg := New()
@@ -90,7 +90,7 @@ func BenchmarkMultiLevelFilter(b *testing.B) {
 
 func BenchmarkDescendant1(b *testing.B) {
 	lg := New()
-	lg.SetHandler(NewDiscardHandler())
+	lg.SetHandler(DiscardHandler())
 	lg = lg.New()
 	for i := 0; i < b.N; i++ {
 		lg.Info("test message")
@@ -99,7 +99,7 @@ func BenchmarkDescendant1(b *testing.B) {
 
 func BenchmarkDescendant2(b *testing.B) {
 	lg := New()
-	lg.SetHandler(NewDiscardHandler())
+	lg.SetHandler(DiscardHandler())
 	for i := 0; i < 2; i++ {
 		lg = lg.New()
 	}
@@ -110,7 +110,7 @@ func BenchmarkDescendant2(b *testing.B) {
 
 func BenchmarkDescendant4(b *testing.B) {
 	lg := New()
-	lg.SetHandler(NewDiscardHandler())
+	lg.SetHandler(DiscardHandler())
 	for i := 0; i < 4; i++ {
 		lg = lg.New()
 	}
@@ -121,7 +121,7 @@ func BenchmarkDescendant4(b *testing.B) {
 
 func BenchmarkDescendant8(b *testing.B) {
 	lg := New()
-	lg.SetHandler(NewDiscardHandler())
+	lg.SetHandler(DiscardHandler())
 	for i := 0; i < 8; i++ {
 		lg = lg.New()
 	}
@@ -134,7 +134,7 @@ func BenchmarkDescendant8(b *testing.B) {
 // (MIT License)
 func newLog15() Logger {
 	logger := New()
-	logger.SetHandler(NewStreamHandler(io.Discard, JsonFormat()))
+	logger.SetHandler(StreamHandler(io.Discard, JsonFormat()))
 	return logger
 }
 

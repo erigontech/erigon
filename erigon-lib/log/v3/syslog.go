@@ -72,7 +72,7 @@ func (h syslogInnerHandler) LogLvl() Lvl {
 
 func sharedSyslog(fmtr Format, sysWr *syslog.Writer) SyslogHandler {
 	h := syslogInnerHandler{fmtr: fmtr, sysWr: sysWr}
-	return SyslogHandler{h: NewLazyHandler(&closingHandler{sysWr, h})}
+	return SyslogHandler{h: LazyHandler(&closingHandler{sysWr, h})}
 }
 
 func (m muster) SyslogHandler(priority syslog.Priority, tag string, fmtr Format) Handler {

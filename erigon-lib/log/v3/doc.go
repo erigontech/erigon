@@ -74,25 +74,25 @@ easily composed to create flexible, custom logging structures.
 
 Here's an example handler that prints logfmt output to Stdout:
 
-	handler := log.NewStreamHandler(os.Stdout, log.LogfmtFormat())
+	handler := log.StreamHandler(os.Stdout, log.LogfmtFormat())
 
 Here's an example handler that defers to two other handlers. One handler only prints records
 from the rpc package in logfmt to standard out. The other prints records at Error level
 or above in JSON formatted output to the file /var/log/service.json
 
-	handler := log.NewMultiHandler(
-	    log.NewLvlFilterHandler(log.LvlError, log.Must.NewFileHandler("/var/log/service.json", log.JsonFormat())),
-	    log.NewMatchFilterHandler("pkg", "app/rpc" log.StdoutHandler())
+	handler := log.MultiHandler(
+	    log.LvlFilterHandler(log.LvlError, log.Must.FileHandler("/var/log/service.json", log.JsonFormat())),
+	    log.MatchFilterHandler("pkg", "app/rpc" log.StdoutHandler())
 	)
 
 # Logging File Names and Line Numbers
 
 This package implements three Handlers that add debugging information to the
-context, NewCallerFileHandler, NewCallerFuncHandler and NewCallerStackHandler. Here's
+context, CallerFileHandler, CallerFuncHandler and CallerStackHandler. Here's
 an example that adds the source file and line number of each logging call to
 the context.
 
-	h := log.NewCallerFileHandler(log.StdoutHandler)
+	h := log.CallerFileHandler(log.StdoutHandler)
 	log.Root().SetHandler(h)
 	...
 	log.Error("open file", "err", err)
@@ -103,7 +103,7 @@ This will output a line that looks like:
 
 Here's an example that logs the call stack rather than just the call site.
 
-	h := log.NewCallerStackHandler("%+v", log.StdoutHandler)
+	h := log.CallerStackHandler("%+v", log.StdoutHandler)
 	log.Root().SetHandler(h)
 	...
 	log.Error("open file", "err", err)
@@ -139,7 +139,7 @@ fails you want to log those records to a file on disk.
 	}
 
 This pattern is so useful that a generic version that handles an arbitrary number of Handlers
-is included as part of this library called NewFailoverHandler.
+is included as part of this library called FailoverHandler.
 
 # Logging Expensive Operations
 
@@ -209,7 +209,7 @@ to return errors. Instead, log15 handles errors by making these guarantees to yo
 Understanding this, you might wonder why the Handler interface can return an error value in its Log method. Handlers
 are encouraged to return errors only if they fail to write their log records out to an external source like if the
 syslog daemon is not responding. This allows the construction of useful handlers which cope with those failures
-like the NewFailoverHandler.
+like the FailoverHandler.
 
 # Library Use
 
@@ -224,7 +224,7 @@ by default and to provide a public Logger instance that consumers of your librar
 	var Log = log.New()
 
 	func init() {
-	    Log.SetHandler(log.NewDiscardHandler())
+	    Log.SetHandler(log.DiscardHandler())
 	}
 
 Users of your library may then enable it if they like:
@@ -299,8 +299,8 @@ For all Handler functions which can return an error, there is a version of that
 function which will return no error but panics on failure. They are all available
 on the Must object. For example:
 
-	log.Must.NewFileHandler("/path", log.JsonFormat)
-	log.Must.NewNetHandler("tcp", ":1234", log.JsonFormat)
+	log.Must.FileHandler("/path", log.JsonFormat)
+	log.Must.NetHandler("tcp", ":1234", log.JsonFormat)
 
 # Inspiration and Credit
 

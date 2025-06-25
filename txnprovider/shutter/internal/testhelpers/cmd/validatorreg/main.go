@@ -45,7 +45,7 @@ func main() {
 	}
 
 	logger := log.New()
-	logger.SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	cb := contracts.NewJsonRpcBackend(*elUrlFlag, logger)
 	valRegAddr := common.HexToAddress(*valRegAddrFlag)
 	valReg, err := shuttercontracts.NewValidatorRegistry(valRegAddr, cb)

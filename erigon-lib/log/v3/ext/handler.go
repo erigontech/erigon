@@ -19,23 +19,23 @@ import (
 // log line. As an example, the following the log record will be written
 // out only if there was an error writing a value to redis:
 //
-//	logger := logext.NewEscalateErrHandler(
-//	    log.NewLvlFilterHandler(log.LvlInfo, log.StdoutHandler))
+//	logger := logext.EscalateErrHandler(
+//	    log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler))
 //
 //	reply, err := redisConn.Do("SET", "foo", "bar")
 //	logger.Debug("Wrote value to redis", "reply", reply, "err", err)
 //	if err != nil {
 //	    return err
 //	}
-type EscalateErrHandler struct {
+func EscalateErrHandler(h log.Handler) log.Handler {
+	return escalateErrHandler{h: h}
+}
+
+type escalateErrHandler struct {
 	h log.Handler
 }
 
-func NewEscalateErrHandler(h log.Handler) EscalateErrHandler {
-	return EscalateErrHandler{h: h}
-}
-
-func (h EscalateErrHandler) Log(r *log.Record) error {
+func (h escalateErrHandler) Log(r *log.Record) error {
 	if r.Lvl > log.LvlError {
 		for i := 1; i < len(r.Ctx); i++ {
 			if v, ok := r.Ctx[i].(error); ok && v != nil {
@@ -47,7 +47,7 @@ func (h EscalateErrHandler) Log(r *log.Record) error {
 	return h.h.Log(r)
 }
 
-func (h EscalateErrHandler) LogLvl() log.Lvl {
+func (h escalateErrHandler) LogLvl() log.Lvl {
 	return h.h.LogLvl()
 }
 
@@ -142,15 +142,15 @@ func (h *HotSwap) Swap(newHandler log.Handler) {
 // FatalHandler makes critical errors exit the program
 // immediately, much like the log.Fatal* methods from the
 // standard log package
-type FatalHandler struct {
+func FatalHandler(h log.Handler) log.Handler {
+	return fatalHandler{h: h}
+}
+
+type fatalHandler struct {
 	h log.Handler
 }
 
-func NewFatalHandler(h log.Handler) FatalHandler {
-	return FatalHandler{h: h}
-}
-
-func (h FatalHandler) Log(r *log.Record) error {
+func (h fatalHandler) Log(r *log.Record) error {
 	err := h.h.Log(r)
 	if r.Lvl == log.LvlCrit {
 		os.Exit(1)
@@ -158,6 +158,6 @@ func (h FatalHandler) Log(r *log.Record) error {
 	return err
 }
 
-func (h FatalHandler) LogLvl() log.Lvl {
+func (h fatalHandler) LogLvl() log.Lvl {
 	return h.h.LogLvl()
 }

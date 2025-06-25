@@ -75,7 +75,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	if err := rcfg.UnwrapEndpointsList(cfg.AllowedEndpoints); err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.NewLvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(utils.ChainFlag.Name))
 	log.Info("[Phase1] Running Caplin")
 

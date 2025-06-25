@@ -56,7 +56,7 @@ func TestSpeculativeHandler(t *testing.T) {
 	for _, count := range []int{10000, 50, 432} {
 		recs := make(chan *log.Record)
 		done := make(chan int)
-		spec := SpeculativeHandler(100, log.NewChannelHandler(recs))
+		spec := SpeculativeHandler(100, log.ChannelHandler(recs))
 
 		go func() {
 			defer close(done)
@@ -101,8 +101,8 @@ func TestErrorHandler(t *testing.T) {
 
 	h, r := newLastRecordCaptureTestHandler()
 	lg := log.New()
-	lg.SetHandler(NewEscalateErrHandler(
-		log.NewLvlFilterHandler(log.LvlError, h)))
+	lg.SetHandler(EscalateErrHandler(
+		log.LvlFilterHandler(log.LvlError, h)))
 
 	lg.Debug("some function result", "err", nil)
 	if r.Msg != "" {

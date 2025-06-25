@@ -31,7 +31,7 @@ import (
 )
 
 func main() {
-	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	logger := logging.SetupLogger("rpctest")
 
 	var (

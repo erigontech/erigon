@@ -24,7 +24,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	t.Cleanup(cancel)
 
 	logger := log.New()
-	logger.SetHandler(log.NewLvlFilterHandler(log.LvlCrit, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlCrit, log.StderrHandler))
 
 	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
 	dirs := datadir.New(t.TempDir())
@@ -228,7 +228,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	t.Cleanup(cancel)
 
 	logger := log.New()
-	logger.SetHandler(log.NewLvlFilterHandler(log.LvlCrit, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlCrit, log.StderrHandler))
 
 	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
 	dirs := datadir.New(t.TempDir())

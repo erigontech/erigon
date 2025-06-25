@@ -55,7 +55,7 @@ func TestGenerateChain(t *testing.T) {
 	defer func() {
 		log.Root().SetHandler(h)
 	}()
-	log.Root().SetHandler(log.NewDiscardHandler())
+	log.Root().SetHandler(log.DiscardHandler())
 
 	// Ensure that key1 has some funds in the genesis block.
 	gspec := &types.Genesis{

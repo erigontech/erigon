@@ -30,7 +30,7 @@ import (
 // Handler returns a log handler which logs to the unit test log of t.
 func Handler(t *testing.T, level log.Lvl) log.Handler {
 	t.Helper()
-	return log.NewLvlFilterHandler(level, &handler{t, log.TerminalFormat()})
+	return log.LvlFilterHandler(level, &handler{t, log.TerminalFormat()})
 }
 
 type handler struct {
@@ -82,7 +82,7 @@ func Logger(t *testing.T, level log.Lvl) log.Logger {
 		mu:  new(sync.Mutex),
 		h:   &bufHandler{fmt: log.TerminalFormat()},
 	}
-	l.log.SetHandler(log.NewLvlFilterHandler(level, l.h))
+	l.log.SetHandler(log.LvlFilterHandler(level, l.h))
 	return l
 }
 
