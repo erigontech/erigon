@@ -1,4 +1,4 @@
-## A custom Docker image can be built using some of the following commands:
+## A custom Docker image can be built using one of the following commands:
 ##
 ##   1. docker build -t ${my-local-image-name}:${my-tag} .
 ## 
@@ -8,9 +8,13 @@
 ##        --progress plain \
 ##        -t ${my-local-image-name}:${my-tag} .
 ##
-##   3. make docker
+##   For all binaries:
+##   3. docker build --build-arg BINARIES="all" -t ${my-local-image-name}:${my-tag} .
 ##
-##   4. make docker DOCKER_BINARIES='erigon downloader evm'
+##   Using "make" (see Makefile for defaults)
+##   4. make docker
+##
+##   5. make docker DOCKER_BINARIES='erigon downloader evm'
 
 ARG BUILDER_IMAGE="golang:1.24-bookworm" \
     TARGET_BASE_IMAGE="debian:12-slim" \
