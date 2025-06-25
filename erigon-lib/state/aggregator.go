@@ -248,13 +248,12 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
 	}
 
-	ue := FromDomain(dependent)
-	a.checker.AddDependency(ue, &DependentInfo{
-		entity:      ue,
+	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
+		entity:      FromDomain(dependent),
 		filesGetter: func() *btree.BTreeG[*FilesItem] { return dd.dirtyFiles },
 		accessors:   dd.Accessors,
 	})
-	dd.SetChecker(a.checker)
+	a.d[dependency].SetChecker(a.checker)
 }
 
 func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {

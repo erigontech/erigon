@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/state"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/stretchr/testify/require"
 )
@@ -25,16 +24,16 @@ func (r *BorSpanRootRelation) RootNum2Num(from state.RootNum, tx kv.Tx) (state.N
 func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (ForkableId, *state.Forkable[UnmarkedTxI]) {
 	stepSize := uint64(10)
 	name := "borspans"
-	borspanId := registerEntityWithSnapshotConfig(dirs, name, ee.NewSnapshotConfig(
-		&ee.SnapshotCreationConfig{
+	borspanId := registerEntityWithSnapshotConfig(dirs, name, state.NewSnapshotConfig(
+		&state.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
 			MergeStages:    []uint64{200, 400},
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
-		ee.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
+		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
 	))
-	require.Equal(t, ee.ForkableId(0), borspanId)
+	require.Equal(t, state.ForkableId(0), borspanId)
 
 	indexb := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, false), borspanId, log)
 	indexb.SetFirstEntityNumFetcher(func(from, to RootNum, seg *seg.Decompressor) Num {
@@ -56,11 +55,11 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 
 func TestUnmarkedForkableRegistration(t *testing.T) {
 	t.Cleanup(func() {
-		ee.Cleanup()
+		state.Cleanup()
 	})
 	dirs := datadir.New(t.TempDir())
 	blockId := registerEntity(dirs, "borspans")
-	require.Equal(t, ee.ForkableId(0), blockId)
+	require.Equal(t, state.ForkableId(0), blockId)
 }
 
 func TestUnmarked_PutToDb(t *testing.T) {
@@ -96,7 +95,7 @@ func TestUnmarkedPrune(t *testing.T) {
 			borSpanId, uma := setupBorSpans(t, log, dir, db)
 
 			ctx := context.Background()
-			cfg := ee.Registry.SnapshotConfig(borSpanId)
+			cfg := state.Registry.SnapshotConfig(borSpanId)
 			extras_count := uint64(5) // db
 			entries_count = cfg.MinimumSize + cfg.SafetyMargin + extras_count
 
@@ -185,7 +184,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
 	require.NoError(t, err)
-	cfg := ee.Registry.SnapshotConfig(borSpanId)
+	cfg := state.Registry.SnapshotConfig(borSpanId)
 	num_files := uint64(5)
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 

@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -78,7 +77,7 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64) *FilesItem {
 	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize, config3.StepsInFrozenFile)
 }
 
-func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *ee.SnapshotConfig) *FilesItem {
+func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
 	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
 }
 
