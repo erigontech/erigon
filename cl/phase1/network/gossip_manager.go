@@ -67,6 +67,7 @@ type GossipManager struct {
 	blsToExecutionChangeService  services.BLSToExecutionChangeService
 	proposerSlashingService      services.ProposerSlashingService
 	attestationsLimiter          *timeBasedRateLimiter
+	aggregateAndProofLimiter     *timeBasedRateLimiter
 }
 
 func NewGossipReceiver(
@@ -107,6 +108,7 @@ func NewGossipReceiver(
 		blsToExecutionChangeService:  blsToExecutionChangeService,
 		proposerSlashingService:      proposerSlashingService,
 		attestationsLimiter:          newTimeBasedRateLimiter(6*time.Second, 250),
+		aggregateAndProofLimiter:     newTimeBasedRateLimiter(6*time.Second, 250),
 	}
 }
 
@@ -228,6 +230,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		if err := obj.SignedAggregateAndProof.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 			return err
+		}
+		if !g.aggregateAndProofLimiter.tryAcquire() {
+			return services.ErrIgnore
 		}
 		return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
 	default:
