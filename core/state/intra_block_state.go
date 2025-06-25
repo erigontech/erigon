@@ -211,19 +211,6 @@ func (sdb *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	sdb.versionMap = versionMap
 }
 
-// Arbitrum
-func (sdb *IntraBlockState) SetWasmDB(wasmDB wasmdb.WasmIface) {
-	sdb.wasmDB = wasmDB
-}
-func (sdb *IntraBlockState) ExpectBalanceBurn(amount *uint256.Int) {
-	if amount.Sign() < 0 {
-		panic(fmt.Sprintf("ExpectBalanceBurn called with negative amount %v", amount))
-	}
-	sdb.arbExtraData.unexpectedBalanceDelta.Add(sdb.arbExtraData.unexpectedBalanceDelta, amount)
-}
-
-// Arbitrum
-
 func (sdb *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
 	sdb.tracingHooks = hooks
 }
