@@ -55,16 +55,13 @@ func ReadChainSpec(fileSys fs.FS, filename string) *chain.Config {
 
 // Genesis hashes to enforce below configs on.
 var (
-	MainnetGenesisHash    = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
-	HoleskyGenesisHash    = common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
-	SepoliaGenesisHash    = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	HoodiGenesisHash      = common.HexToHash("0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b")
-	AmoyGenesisHash       = common.HexToHash("0x7202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697")
-	BorMainnetGenesisHash = common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
-	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
-	GnosisGenesisHash     = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
-	ChiadoGenesisHash     = common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
-	TestGenesisHash       = common.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc")
+	MainnetGenesisHash = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+	HoleskyGenesisHash = common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
+	SepoliaGenesisHash = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
+	HoodiGenesisHash   = common.HexToHash("0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b")
+	GnosisGenesisHash  = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
+	ChiadoGenesisHash  = common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
+	TestGenesisHash    = common.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc")
 )
 
 var (
@@ -135,10 +132,19 @@ func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemor
 	}
 }
 
+var genesisHashByChainName = make(map[string]*common.Hash)
 var chainConfigByName = make(map[string]*chain.Config)
 var chainConfigByGenesisHash = make(map[common.Hash]*chain.Config)
 
 func init() {
+	genesisHashByChainName[networkname.Mainnet] = &MainnetGenesisHash
+	genesisHashByChainName[networkname.Holesky] = &HoleskyGenesisHash
+	genesisHashByChainName[networkname.Sepolia] = &SepoliaGenesisHash
+	genesisHashByChainName[networkname.Hoodi] = &HoodiGenesisHash
+	genesisHashByChainName[networkname.Gnosis] = &GnosisGenesisHash
+	genesisHashByChainName[networkname.Chiado] = &ChiadoGenesisHash
+	genesisHashByChainName[networkname.Test] = &TestGenesisHash
+
 	chainConfigByName[networkname.Mainnet] = MainnetChainConfig
 	chainConfigByName[networkname.Holesky] = HoleskyChainConfig
 	chainConfigByName[networkname.Sepolia] = SepoliaChainConfig
@@ -166,30 +172,11 @@ func RegisterChainConfigByName(chainName string, config *chain.Config) {
 }
 
 func GenesisHashByChainName(chain string) *common.Hash {
-	switch chain {
-	case networkname.Mainnet:
-		return &MainnetGenesisHash
-	case networkname.Holesky:
-		return &HoleskyGenesisHash
-	case networkname.Sepolia:
-		return &SepoliaGenesisHash
-	case networkname.Hoodi:
-		return &HoodiGenesisHash
-	case networkname.Amoy:
-		return &AmoyGenesisHash
-	case networkname.BorMainnet:
-		return &BorMainnetGenesisHash
-	case networkname.BorDevnet:
-		return &BorDevnetGenesisHash
-	case networkname.Gnosis:
-		return &GnosisGenesisHash
-	case networkname.Chiado:
-		return &ChiadoGenesisHash
-	case networkname.Test:
-		return &TestGenesisHash
-	default:
-		return nil
-	}
+	return genesisHashByChainName[chain]
+}
+
+func RegisterGenesisHashByChainName(chain string, hash *common.Hash) {
+	genesisHashByChainName[chain] = hash
 }
 
 func ChainConfigByGenesisHash(genesisHash common.Hash) *chain.Config {

@@ -115,8 +115,8 @@ func TestSetupGenesis(t *testing.T) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return core.CommitGenesisBlock(db, polychain.BorMainnetGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: chainspec.BorMainnetGenesisHash},
-			wantHash:   chainspec.BorMainnetGenesisHash,
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: polychain.BorMainnetGenesisHash},
+			wantHash:   polychain.BorMainnetGenesisHash,
 			wantConfig: polychain.BorMainnetChainConfig,
 		},
 		{
@@ -125,8 +125,8 @@ func TestSetupGenesis(t *testing.T) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return core.CommitGenesisBlock(db, polychain.AmoyGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: chainspec.AmoyGenesisHash},
-			wantHash:   chainspec.AmoyGenesisHash,
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: polychain.AmoyGenesisHash},
+			wantHash:   polychain.AmoyGenesisHash,
 			wantConfig: polychain.AmoyChainConfig,
 		},
 		{

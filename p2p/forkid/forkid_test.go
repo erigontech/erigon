@@ -175,7 +175,7 @@ func TestCreation(t *testing.T) {
 		// Amoy test cases
 		{
 			polychain.AmoyChainConfig,
-			chainspec.AmoyGenesisHash,
+			polychain.AmoyGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0xbe06a477), Next: 73100}},
 				{73100, 0, ID{Hash: ChecksumToBytes(0x135d2cd5), Next: 5423600}}, // First London, Jaipur, Delhi, Indore, Agra
@@ -184,7 +184,7 @@ func TestCreation(t *testing.T) {
 		// Bor mainnet test cases
 		{
 			polychain.BorMainnetChainConfig,
-			chainspec.BorMainnetGenesisHash,
+			polychain.BorMainnetGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0x0e07e722), Next: 3395000}},
 				{3395000, 0, ID{Hash: ChecksumToBytes(0x27806576), Next: 14750000}},  // First Istanbul block

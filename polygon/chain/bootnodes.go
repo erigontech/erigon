@@ -115,8 +115,8 @@ var AmoyBootnodes = []string{
 }
 
 func init() {
-	chainspec.RegisterBootnodeURLsByGenesisHash(chainspec.BorMainnetGenesisHash, BorMainnetBootnodes)
-	chainspec.RegisterBootnodeURLsByGenesisHash(chainspec.AmoyGenesisHash, AmoyBootnodes)
+	chainspec.RegisterBootnodeURLsByGenesisHash(BorMainnetGenesisHash, BorMainnetBootnodes)
+	chainspec.RegisterBootnodeURLsByGenesisHash(AmoyGenesisHash, AmoyBootnodes)
 
 	chainspec.RegisterBootnodeURLsByChainName(networkname.BorMainnet, BorMainnetBootnodes)
 	chainspec.RegisterBootnodeURLsByChainName(networkname.Amoy, AmoyBootnodes)
