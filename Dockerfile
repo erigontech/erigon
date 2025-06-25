@@ -135,8 +135,8 @@ RUN --mount=type=bind,from=builder,source=/build,target=/tmp/build \
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
     echo "Installing all binaries:" && \
     shopt -s extglob && \
-    for binary in !(*.so); do \
-        install -v -o root -g root /tmp/build/$binary /usr/local/bin/ ; \
+    for binary in '/tmp/build/!(*.so)'; do \
+        install -v -o root -g root $binary /usr/local/bin/ ; \
     done
 
 VOLUME [ "/home/${USER}" ]
