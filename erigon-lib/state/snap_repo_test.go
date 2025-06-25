@@ -734,11 +734,6 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 	return dataFileCount, btCount, existenceCount, accessorCount
 }
 
-func generateFiles(t *testing.T, files []string, fileGen func(filename string)) {
-	t.Helper()
-
-}
-
 func containsSubstring(t *testing.T, str string, list []string) bool {
 	t.Helper()
 	for _, s := range list {
