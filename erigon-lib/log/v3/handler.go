@@ -263,7 +263,7 @@ func MatchFilterHandler(key string, value interface{}, h Handler) Handler {
 	}, h)
 }
 
-// LvlFilterHandler is a Handler that only writes
+// LvlFilterHandler returns a Handler that only writes
 // records which are less than the given verbosity
 // level to the wrapped Handler. For example, to only
 // log Error/Crit records:
