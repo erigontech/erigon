@@ -30,10 +30,10 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -565,12 +565,17 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v1-accounts.24-28.ef":   &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef": &fstest.MapFile{},
 		"salt-blocks.txt":        &fstest.MapFile{},
-		"v1.0-022695-022696-transactions-to-block.idx": &fstest.MapFile{},
-		"v1-022695-022696-transactions-to-block.idx":   &fstest.MapFile{},
-		"preverified.toml":                             &fstest.MapFile{},
-		"idx/v1-tracesto.40-44.ef":                     &fstest.MapFile{},
-		"v1.0-021700-021800-bodies.seg.torrent":        &fstest.MapFile{},
-		"caplin/v1.0-021150-021200-BlockRoot.seg":      &fstest.MapFile{},
+		"v1.0-022695-022696-transactions-to-block.idx":                     &fstest.MapFile{},
+		"v1-022695-022696-transactions-to-block.idx":                       &fstest.MapFile{},
+		"preverified.toml":                                                 &fstest.MapFile{},
+		"idx/v1-tracesto.40-44.ef":                                         &fstest.MapFile{},
+		"v1.0-021700-021800-bodies.seg.torrent":                            &fstest.MapFile{},
+		"caplin/v1.0-021150-021200-BlockRoot.seg":                          &fstest.MapFile{},
+		"v1.0-accounts.0-128.bt.torrent":                                   &fstest.MapFile{},
+		"v1.0-022695-022696-transactions-to-block.idx.torrent":             &fstest.MapFile{},
+		"v1.0-022695-022696-transactions-to-block.idx.tmp.tmp.torrent.tmp": &fstest.MapFile{},
+		"v1.0-accounts.24-28.ef.torrent":                                   &fstest.MapFile{},
+		"v1.0-accounts.24-28.ef.torrent.tmp.tmp.tmp":                       &fstest.MapFile{},
 	}
 	stat := func(name string) string {
 		s, err := fs.Stat(name)
@@ -613,6 +618,20 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(22695000, int(f.From))
 	require.Equal(22696000, int(f.To))
 
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx.torrent"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(f.TypeString, coresnaptype.Indexes.TxnHash2BlockNum.Name)
+	require.Equal(22695000, int(f.From))
+	require.Equal(22696000, int(f.To))
+
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx.tmp.tmp.torrent.tmp"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(f.TypeString, coresnaptype.Indexes.TxnHash2BlockNum.Name)
+	require.Equal(22695000, int(f.From))
+	require.Equal(22696000, int(f.To))
+
 	f, e3, ok = snaptype.ParseFileName("", stat("v1-022695-022696-transactions-to-block.idx"))
 	require.True(ok)
 	require.False(e3)
@@ -629,6 +648,20 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal("bodies", f.TypeString)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-accounts.24-28.ef"))
+	require.True(ok)
+	require.True(e3)
+	require.Equal(24, int(f.From))
+	require.Equal(28, int(f.To))
+	require.Equal("accounts", f.TypeString)
+
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-accounts.24-28.ef.torrent"))
+	require.True(ok)
+	require.True(e3)
+	require.Equal(24, int(f.From))
+	require.Equal(28, int(f.To))
+	require.Equal("accounts", f.TypeString)
+
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-accounts.24-28.ef.torrent.tmp.tmp.tmp"))
 	require.True(ok)
 	require.True(e3)
 	require.Equal(24, int(f.From))

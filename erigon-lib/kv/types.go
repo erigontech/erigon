@@ -5,8 +5,6 @@ import (
 	"math"
 )
 
-type ForkableId uint16
-
 func (a ForkableId) Id() uint64 {
 	return uint64(a)
 }

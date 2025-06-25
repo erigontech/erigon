@@ -56,19 +56,16 @@ func (api *DebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash,
 func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	defer tx.Rollback()
 
 	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	if block == nil {
@@ -80,7 +77,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	// to save any red herring errors
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, block.NumberU64())
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
@@ -95,14 +91,12 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	engine := api.engine()
 
 	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api._txNumReader, tx, 0)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
@@ -122,7 +116,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
 		}
 		if err != nil {
-			stream.WriteArrayEnd()
 			return err
 		}
 		if ok {
@@ -149,9 +142,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		select {
 		default:
 		case <-ctx.Done():
-			stream.WriteNil()
-			stream.WriteObjectEnd()
-			stream.WriteArrayEnd()
 			return ctx.Err()
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
@@ -235,20 +225,17 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	defer tx.Rollback()
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
 	var isBorStateSyncTxn bool
 	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	if !ok {
@@ -282,13 +269,11 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	// check pruning to ensure we have history at this block level
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
 	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	if block == nil {
@@ -318,7 +303,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 
 	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api._txNumReader, tx, txnIndex)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
@@ -347,7 +331,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, txnIndex)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
@@ -464,13 +447,11 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	overrideBlockHash = make(map[uint64]common.Hash)
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	defer tx.Rollback()
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	if len(bundles) == 0 {
@@ -493,7 +474,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
@@ -504,11 +484,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 	if block == nil {
-		stream.WriteNil()
 		return fmt.Errorf("block %d not found", blockNum)
 	}
 
@@ -526,7 +504,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), transactionIndex, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
@@ -560,7 +537,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	if config.StateOverrides != nil {
 		err = config.StateOverrides.Override(ibs)
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 	}
@@ -578,13 +554,10 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			}
 			msg, err := txn.ToMessage(api.GasCap, blockCtx.BaseFee)
 			if err != nil {
-				stream.WriteArrayEnd()
-				stream.WriteArrayEnd()
 				return err
 			}
 			transaction, err := txn.ToTransaction(api.GasCap, blockCtx.BaseFee)
 			if err != nil {
-				stream.WriteNil()
 				return err
 			}
 			txCtx = core.NewEVMTxContext(msg)
@@ -592,8 +565,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
 			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, block.Hash(), txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
-				stream.WriteArrayEnd()
-				stream.WriteArrayEnd()
 				return err
 			}
 

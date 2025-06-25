@@ -7,15 +7,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
-type RootNum = ee.RootNum
-type Num = ee.Num
-type Id = ee.Id
 type EncToBytesI = kv.EncToBytesI
-type ForkableId = ee.ForkableId
-type Bytes = ee.Bytes
 
 // Freezer takes hot data (e.g. from db) and transforms it
 // to snapshot cold data.

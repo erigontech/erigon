@@ -209,7 +209,7 @@ note that this is NOT geth-style IPC. for that, read the next section, IPC endpo
 
 Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
 
-To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `-https.cert="/path/to.cert"`
+To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `--https.cert="/path/to.cert"`
 and `--https.key=/path/to.key`
 
 By default, the HTTPS server will run on the HTTP port + 363. use flag `--https.port` to set the port
@@ -494,7 +494,7 @@ will be turned on again once we have updated the instruction above on how to pro
 Name".
 
 When running Erigon instance in the Google Cloud, for example, you need to specify the **Internal IP** in
-the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, to that connection
+the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, so that connection
 to the Erigon instances can be made.
 
 ### Ethstats
