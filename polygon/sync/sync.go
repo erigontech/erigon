@@ -306,7 +306,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 			}
 
 			blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, fetchHeaderHash, fetchAmount, event.PeerId, opts...)
-			if err != nil {
+			if err != nil || len(blocks.Data)==0 {
 				if s.ignoreFetchBlocksErrOnTipEvent(err) {
 					s.logger.Debug(
 						syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
@@ -322,8 +322,6 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 			}
 
 			blockChain = append(blocks.Data, blockChain...)
-
-			fmt.Println(len(blocks.Data))
 			fetchHeaderHash = blocks.Data[0].ParentHash()
 			amount -= uint64(len(blocks.Data))
 		}
