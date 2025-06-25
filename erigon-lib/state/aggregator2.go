@@ -9,13 +9,12 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
-
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 )
 
 // this is supposed to register domains/iis
