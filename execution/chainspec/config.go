@@ -192,7 +192,7 @@ func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func(
 	return (currentTD != nil) && (terminalTD.Cmp(currentTD) <= 0)
 }
 
-func RegisterChain(name string, config *chain.Config, genesis *types.Genesis, genesisHash common.Hash, bootNodes []string) {
+func RegisterChain(name string, config *chain.Config, genesis *types.Genesis, genesisHash common.Hash, bootNodes []string, dnsNetwork string) {
 	NetworkNameByID[config.ChainID.Uint64()] = name
 	chainConfigByName[name] = config
 	chainConfigByGenesisHash[genesisHash] = config
@@ -200,16 +200,17 @@ func RegisterChain(name string, config *chain.Config, genesis *types.Genesis, ge
 	genesisBlockByChainName[name] = genesis
 	bootNodeURLsByChainName[name] = bootNodes
 	bootNodeURLsByGenesisHash[genesisHash] = bootNodes
+	knownDNSNetwork[genesisHash] = dnsNetwork
 }
 
 func init() {
 	chainConfigByName[networkname.Dev] = AllCliqueProtocolChanges
 
-	RegisterChain(networkname.Mainnet, MainnetChainConfig, MainnetGenesisBlock(), MainnetGenesisHash, MainnetBootnodes)
-	RegisterChain(networkname.Sepolia, SepoliaChainConfig, SepoliaGenesisBlock(), SepoliaGenesisHash, SepoliaBootnodes)
-	RegisterChain(networkname.Holesky, HoleskyChainConfig, HoleskyGenesisBlock(), HoleskyGenesisHash, HoleskyBootnodes)
-	RegisterChain(networkname.Hoodi, HoodiChainConfig, HoodiGenesisBlock(), HoodiGenesisHash, HoodiBootnodes)
-	RegisterChain(networkname.Gnosis, GnosisChainConfig, GnosisGenesisBlock(), GnosisGenesisHash, GnosisBootnodes)
-	RegisterChain(networkname.Chiado, ChiadoChainConfig, ChiadoGenesisBlock(), ChiadoGenesisHash, ChiadoBootnodes)
-	RegisterChain(networkname.Test, chain.TestChainConfig, TestGenesisBlock(), TestGenesisHash, nil)
+	RegisterChain(networkname.Mainnet, MainnetChainConfig, MainnetGenesisBlock(), MainnetGenesisHash, MainnetBootnodes, dnsPrefix+"all.mainnet.ethdisco.net")
+	RegisterChain(networkname.Sepolia, SepoliaChainConfig, SepoliaGenesisBlock(), SepoliaGenesisHash, SepoliaBootnodes, dnsPrefix+"all.sepolia.ethdisco.net")
+	RegisterChain(networkname.Holesky, HoleskyChainConfig, HoleskyGenesisBlock(), HoleskyGenesisHash, HoleskyBootnodes, dnsPrefix+"all.holesky.ethdisco.net")
+	RegisterChain(networkname.Hoodi, HoodiChainConfig, HoodiGenesisBlock(), HoodiGenesisHash, HoodiBootnodes, dnsPrefix+"all.hoodi.ethdisco.net")
+	RegisterChain(networkname.Gnosis, GnosisChainConfig, GnosisGenesisBlock(), GnosisGenesisHash, GnosisBootnodes, "")
+	RegisterChain(networkname.Chiado, ChiadoChainConfig, ChiadoGenesisBlock(), ChiadoGenesisHash, ChiadoBootnodes, "")
+	RegisterChain(networkname.Test, chain.TestChainConfig, TestGenesisBlock(), TestGenesisHash, nil, "")
 }

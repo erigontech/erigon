@@ -124,26 +124,12 @@ var ChiadoBootnodes = []string{
 
 const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
 
+var knownDNSNetwork = make(map[common.Hash]string)
+
 // KnownDNSNetwork returns the address of a public DNS-based node list for the given
 // genesis hash. See https://github.com/ethereum/discv4-dns-lists for more information.
 func KnownDNSNetwork(genesis common.Hash) string {
-	var net string
-	switch genesis {
-	case MainnetGenesisHash:
-		net = "mainnet"
-	case SepoliaGenesisHash:
-		net = "sepolia"
-	case HoleskyGenesisHash:
-		net = "holesky"
-	case HoodiGenesisHash:
-		net = "hoodi"
-		//	case BorMainnetGenesisHash:
-		//		return "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
-	default:
-		return ""
-	}
-	protocol := "all"
-	return dnsPrefix + protocol + "." + net + ".ethdisco.net"
+	return knownDNSNetwork[genesis]
 }
 
 var bootNodeURLsByGenesisHash = make(map[common.Hash][]string)
