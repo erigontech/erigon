@@ -52,16 +52,21 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 	for _, block := range req.Blocks {
 		// Skip frozen blocks.
 		if block.Header.BlockNumber < frozenBlocks {
+			fmt.Println("skip")
 			continue
 		}
+
+		fmt.Println(time.Now(), "format header")
 		header, err := eth1_utils.HeaderRpcToHeader(block.Header)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
 		}
+		fmt.Println(time.Now(), "format body")
 		body, err := eth1_utils.ConvertRawBlockBodyFromRpc(block.Body)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
 		}
+		fmt.Println(time.Now(), "start td read")
 		var parentTd *big.Int
 		height := header.Number.Uint64()
 		if height > 0 {
@@ -70,24 +75,33 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 			if err != nil || parentTd == nil {
 				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
 			}
+			fmt.Println(time.Now(), "end td read")
 		} else {
 			parentTd = big.NewInt(0)
+			fmt.Println(time.Now(), "parentTd is zero")
 		}
 
+		fmt.Println(time.Now(), "delay collection 1")
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height, e.logger)
+		fmt.Println(time.Now(), "delay collection 2")
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
-
+		fmt.Println(time.Now(), "end delay collection")
 		// Sum TDs.
+
+		fmt.Println(time.Now(), "Inserting block", header.Hash(), "at height", height)
 		td := parentTd.Add(parentTd, header.Difficulty)
 		if err := rawdb.WriteHeader(tx, header); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeHeader: %s", err)
 		}
+		fmt.Println(time.Now(), "end write header")
 		if err := rawdb.WriteTd(tx, header.Hash(), height, td); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeTd: %s", err)
 		}
+		fmt.Println(time.Now(), "end write td")
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
+		fmt.Println(time.Now(), "end write body")
 		e.logger.Info("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
