@@ -103,8 +103,7 @@ ARG USER=erigon \
     TARGET_BASE_IMAGE \
     EXPOSED_PORTS \
     BUILD_DATE \
-    VCS_REF \
-    BINARIES
+    VCS_REF
 
 LABEL \
     "org.opencontainers.image.authors"="https://github.com/erigontech/erigon/graphs/contributors" \
@@ -135,8 +134,9 @@ RUN --mount=type=bind,from=builder,source=/build,target=/tmp/build \
     fi && \    
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
     echo "Installing all binaries:" && \
-    for binaries in ${BINARIES}; do \
-        install -v -o root -g root /tmp/build/$binaries /usr/local/bin/ ; \
+    shopt -s extglob && \
+    for binary in !(*.so); do \
+        install -v -o root -g root /tmp/build/$binary /usr/local/bin/ ; \
     done
 
 VOLUME [ "/home/${USER}" ]
