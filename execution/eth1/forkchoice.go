@@ -41,11 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
-// This is the range in which we sanity check and potentially fix the canonical chain if it is broken.
-// a broken canonical chain is very dangerous, as it can lead to a situation where the RPC and snapshots break down.
-// better to have an hack than to regenerate all chains.
-const fixCanonicalFailsafeRange = 16
-
 const startPruneFrom = 1024
 
 type forkchoiceOutcome struct {
@@ -83,34 +78,6 @@ func isDomainAheadOfBlocks(tx kv.TemporalRwTx, logger log.Logger) bool {
 	}
 	defer doms.Close()
 	return false
-}
-
-// fixCanonicalChainIfNecessary checks if the canonical chain is broken and fixes it if necessary.
-func (e *EthereumExecutionModule) fixCanonicalChainIfNecessary(ctx context.Context, tx kv.RwTx) error {
-	currHeader := rawdb.ReadCurrentHeader(tx)
-	if currHeader == nil {
-		return nil
-	}
-	if currHeader.Number.Uint64() <= fixCanonicalFailsafeRange {
-		return nil
-	}
-	// check if the canonical chain is broken and fix it if necessary
-	for i := currHeader.Number.Uint64() - 1; i > currHeader.Number.Uint64()-fixCanonicalFailsafeRange; i-- {
-		parentHeader := rawdb.ReadHeaderByNumber(tx, i)
-		if parentHeader == nil {
-			return nil // no need to fix the chain if the header is not found
-		}
-		if currHeader.ParentHash != parentHeader.Hash() {
-			e.logger.Info("fixCanonicalChainIfNecessary: fixing broken canonical chain.", "currHeader.ParentHash", currHeader.ParentHash, "parentHeader.Hash", parentHeader.Hash(), "number", i)
-			// canonical chain is broken, fix it
-			if err := rawdb.WriteCanonicalHash(tx, currHeader.ParentHash, i); err != nil {
-				return fmt.Errorf("failed to write canonical hash: %w", err)
-			}
-			parentHeader = rawdb.ReadHeaderByNumber(tx, i)
-		}
-		currHeader = parentHeader
-	}
-	return nil
 }
 
 // verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
@@ -618,17 +585,14 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 			return
 		}
 		defer e.semaphore.Release(1)
-		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
+		if err := e.db.UpdateNosync(e.bacgroundCtx, func(tx kv.RwTx) error {
 			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
 				return err
 			}
 			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
 				timings = append(timings, pruneTimings...)
 			}
-			// failsafe which is kind of necessary to avoid a situation where the canonical chain is broken.
-			if err := e.fixCanonicalChainIfNecessary(e.bacgroundCtx, tx); err != nil {
-				return err
-			}
+
 			return nil
 		}); err != nil {
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
