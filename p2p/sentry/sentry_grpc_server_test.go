@@ -184,15 +184,6 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	}
 }
 
-func emptyBootnodeURL(genesis common.Hash) []string {
-	return []string{}
-
-}
-
-func mainnetDNSNetwork(genesis common.Hash, protocol string) string {
-	return "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@" + protocol + ".mainnet.ethdisco.net"
-}
-
 func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
