@@ -42,8 +42,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 		return name, schema
 	})
 	defer repo.Close()
-	extensions := repo.cfg.Schema.(*E3SnapSchema).FileExtensions()
-	dataCount, btCount, existenceCount, accessorCount := populateFilesFull(t, dirs, name, extensions, dirs.SnapDomain)
+	dataCount, btCount, existenceCount, accessorCount := populateFilesFull(t, dirs, repo)
 	require.Positive(t, dataCount)
 
 	err := repo.OpenFolder()
@@ -95,8 +94,7 @@ func TestOpenFolder_CodeII(t *testing.T) {
 	})
 	defer repo.Close()
 
-	extensions := repo.cfg.Schema.(*E3SnapSchema).FileExtensions()
-	dataCount, btCount, existenceCount, accessorCount := populateFilesFull(t, dirs, name, extensions, dirs.SnapIdx)
+	dataCount, btCount, existenceCount, accessorCount := populateFilesFull(t, dirs, repo)
 
 	require.Positive(t, dataCount)
 
@@ -142,7 +140,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	// add a dirty file
 	// check presence of dirty file
 	dirs := datadir.New(t.TempDir())
-	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence
 		name = "accounts"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
@@ -155,8 +153,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	})
 	defer repo.Close()
 
-	extensions := repo.cfg.Schema.(*E3SnapSchema).FileExtensions()
-	dataCount, _, _, _ := populateFilesFull(t, dirs, name, extensions, dirs.SnapDomain)
+	dataCount, _, _, _ := populateFilesFull(t, dirs, repo)
 	require.Positive(t, dataCount)
 
 	err := repo.OpenFolder()
@@ -189,7 +186,7 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 	// setup account
 	// set various root numbers and check if the right files are closed
 	dirs := datadir.New(t.TempDir())
-	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence
 		name = "accounts"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
@@ -201,8 +198,7 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 	})
 	defer repo.Close()
 
-	extensions := repo.cfg.Schema.(*E3SnapSchema).FileExtensions()
-	dataCount, _, _, _ := populateFilesFull(t, dirs, name, extensions, dirs.SnapDomain)
+	dataCount, _, _, _ := populateFilesFull(t, dirs, repo)
 	require.Positive(t, dataCount)
 
 	// 0-256, 256-288, 288-296, 296-298
@@ -584,7 +580,7 @@ type testFileRange struct {
 	fromStep, toStep uint64
 }
 
-func populateFilesFull(t *testing.T, dirs datadir.Dirs, name string, extensions []string, dataFolder string) (dataFileCount, btCount, existenceCount, accessorCount int) {
+func populateFilesFull(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
 	allFiles := &dhiiFiles{
 		domainFiles:   []string{"v1.0-accounts.0-256.bt", "v1.0-accounts.0-256.bt.torrent", "v1.0-accounts.0-256.kv", "v1.0-accounts.0-256.kv.torrent", "v1.0-accounts.0-256.kvei", "v1.0-accounts.0-256.kvei.torrent", "v1.0-accounts.256-288.bt", "v1.0-accounts.256-288.bt.torrent", "v1.0-accounts.256-288.kv", "v1.0-accounts.256-288.kv.torrent", "v1.0-accounts.256-288.kvei", "v1.0-accounts.256-288.kvei.torrent", "v1.0-accounts.288-296.bt", "v1.0-accounts.288-296.bt.torrent", "v1.0-accounts.288-296.kv", "v1.0-accounts.288-296.kv.torrent", "v1.0-accounts.288-296.kvei", "v1.0-accounts.288-296.kvei.torrent", "v1.0-accounts.296-298.bt", "v1.0-accounts.296-298.bt.torrent", "v1.0-accounts.296-298.kv", "v1.0-accounts.296-298.kv.torrent", "v1.0-accounts.296-298.kvei", "v1.0-accounts.296-298.kvei.torrent", "v1.0-code.0-256.bt", "v1.0-code.0-256.bt.torrent", "v1.0-code.0-256.kv", "v1.0-code.0-256.kv.torrent", "v1.0-code.0-256.kvei", "v1.0-code.0-256.kvei.torrent", "v1.0-code.256-288.bt", "v1.0-code.256-288.bt.torrent", "v1.0-code.256-288.kv", "v1.0-code.256-288.kv.torrent", "v1.0-code.256-288.kvei", "v1.0-code.256-288.kvei.torrent", "v1.0-code.288-296.bt", "v1.0-code.288-296.bt.torrent", "v1.0-code.288-296.kv", "v1.0-code.288-296.kv.torrent", "v1.0-code.288-296.kvei", "v1.0-code.288-296.kvei.torrent", "v1.0-code.296-298.bt", "v1.0-code.296-298.bt.torrent", "v1.0-code.296-298.kv", "v1.0-code.296-298.kv.torrent", "v1.0-code.296-298.kvei", "v1.0-code.296-298.kvei.torrent", "v1.0-commitment.0-256.kv", "v1.0-commitment.0-256.kv.torrent", "v1.0-commitment.0-256.kvi", "v1.0-commitment.0-256.kvi.torrent", "v1.0-commitment.256-288.kv", "v1.0-commitment.256-288.kv.torrent", "v1.0-commitment.256-288.kvi", "v1.0-commitment.256-288.kvi.torrent", "v1.0-commitment.288-296.kv", "v1.0-commitment.288-296.kv.torrent", "v1.0-commitment.288-296.kvi", "v1.0-commitment.288-296.kvi.torrent", "v1.0-commitment.296-298.kv", "v1.0-commitment.296-298.kv.torrent", "v1.0-commitment.296-298.kvi", "v1.0-commitment.296-298.kvi.torrent", "v1.0-receipt.0-256.bt", "v1.0-receipt.0-256.bt.torrent", "v1.0-receipt.0-256.kv", "v1.0-receipt.0-256.kv.torrent", "v1.0-receipt.0-256.kvei", "v1.0-receipt.0-256.kvei.torrent", "v1.0-receipt.256-288.bt", "v1.0-receipt.256-288.bt.torrent", "v1.0-receipt.256-288.kv", "v1.0-receipt.256-288.kv.torrent", "v1.0-receipt.256-288.kvei", "v1.0-receipt.256-288.kvei.torrent", "v1.0-receipt.288-296.bt", "v1.0-receipt.288-296.bt.torrent", "v1.0-receipt.288-296.kv", "v1.0-receipt.288-296.kv.torrent", "v1.0-receipt.288-296.kvei", "v1.0-receipt.288-296.kvei.torrent", "v1.0-receipt.296-298.bt", "v1.0-receipt.296-298.bt.torrent", "v1.0-receipt.296-298.kv", "v1.0-receipt.296-298.kv.torrent", "v1.0-receipt.296-298.kvei", "v1.0-receipt.296-298.kvei.torrent", "v1.0-storage.0-256.bt", "v1.0-storage.0-256.bt.torrent", "v1.0-storage.0-256.kv", "v1.0-storage.0-256.kv.torrent", "v1.0-storage.0-256.kvei", "v1.0-storage.0-256.kvei.torrent", "v1.0-storage.256-288.bt", "v1.0-storage.256-288.bt.torrent", "v1.0-storage.256-288.kv", "v1.0-storage.256-288.kv.torrent", "v1.0-storage.256-288.kvei", "v1.0-storage.256-288.kvei.torrent", "v1.0-storage.288-296.bt", "v1.0-storage.288-296.bt.torrent", "v1.0-storage.288-296.kv", "v1.0-storage.288-296.kv.torrent", "v1.0-storage.288-296.kvei", "v1.0-storage.288-296.kvei.torrent", "v1.0-storage.296-298.bt", "v1.0-storage.296-298.bt.torrent", "v1.0-storage.296-298.kv", "v1.0-storage.296-298.kv.torrent", "v1.0-storage.296-298.kvei", "v1.0-storage.296-298.kvei.torrent"},
@@ -601,13 +597,12 @@ func populateFilesFull(t *testing.T, dirs datadir.Dirs, name string, extensions 
 	setFullPathFn(allFiles.historyFiles, dirs.SnapHistory)
 	setFullPathFn(allFiles.idxFiles, dirs.SnapIdx)
 	setFullPathFn(allFiles.accessorFiles, dirs.SnapAccessors)
-	return populateFiles(t, dirs, name, extensions, dataFolder, allFiles.all())
+	return populateFiles(t, dirs, repo.schema, allFiles.all())
 }
 
 func populateFiles2(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo, ranges []testFileRange) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
 	var allFiles []string
-	extensions := repo.cfg.Schema.(*E3SnapSchema).FileExtensions()
 	v := version.V1_0
 	acc := repo.schema.AccessorList()
 
@@ -625,12 +620,16 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo, ranges 
 		}
 	}
 
-	return populateFiles(t, dirs, repo.schema.DataTag(), extensions, repo.schema.DataDirectory(), allFiles)
+	return populateFiles(t, dirs, repo.schema, allFiles)
 }
 
 // this function creates mock files (.kvi, .v, .ef, .efi etc.) for the files specified in `allFiles`
-func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []string, dataFolder string, allFiles []string) (dataFileCount, btCount, existenceCount, accessorCount int) {
+func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFiles []string) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
+
+	name := schema.DataTag()
+	extensions := schema.(*E3SnapSchema).FileExtensions()
+	dataFolder := schema.DataDirectory()
 
 	// populate data files
 
