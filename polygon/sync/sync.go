@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -287,36 +288,45 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 			"amount", amount,
 		)
 
-		if amount > 1024 {
-			// should not ever need to request more than 1024 blocks here in order to backward connect
-			// - if we do then we are missing milestones and need to investigate why
-			// - additionally 1024 blocks should be enough to connect a new block at tip even without milestones
-			// since we do not expect to see such large re-organisations
-			// - if we ever do get a block from a peer for which 1024 blocks back is not enough to connect it
-			// then we shall drop it as the canonical chain builder will fail to connect it and move on
-			// useful read: https://forum.polygon.technology/t/proposal-improved-ux-with-milestones-for-polygon-pos/11534
-			s.logger.Warn(syncLogPrefix("canonical chain builder root is too far"), "amount", amount)
-			amount = 1024
-		}
-
 		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(5 * time.Second)}
-		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, newBlockHeaderHash, amount, event.PeerId, opts...)
-		if err != nil {
-			if s.ignoreFetchBlocksErrOnTipEvent(err) {
-				s.logger.Debug(
-					syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
-					"err", err,
-					"peerId", event.PeerId,
-					"lastBlockNum", newBlockHeaderNum,
-				)
 
-				return nil
+		// This used to be limited to 1024 blocks (eth.MaxHeadersServe) however for the heimdall v1-v2 migration
+		// this limit on backward downloading does not holde so it has been adjusted to recieve several pages
+		// of 1024 blocks until the gap is filled.  For this one off case the gap was ~15,000 blocks.  If this
+		// ever grows substantially this will need to be revisited:
+		// 1. If we need to page we should requests from may peers
+		// 2. We need to do something about memory at the moment this is unconstrained
+
+		fetchHeaderHash := newBlockHeaderHash
+		for amount > 0 {
+			fetchAmount := amount
+
+			if fetchAmount > eth.MaxHeadersServe {
+				fetchAmount = eth.MaxHeadersServe
 			}
 
-			return err
-		}
+			blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, fetchHeaderHash, fetchAmount, event.PeerId, opts...)
+			if err != nil {
+				if s.ignoreFetchBlocksErrOnTipEvent(err) {
+					s.logger.Debug(
+						syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
+						"err", err,
+						"peerId", event.PeerId,
+						"lastBlockNum", newBlockHeaderNum,
+					)
 
-		blockChain = blocks.Data
+					return nil
+				}
+
+				return err
+			}
+
+			blockChain = append(blocks.Data, blockChain...)
+
+			fmt.Println(len(blocks.Data))
+			fetchHeaderHash = blocks.Data[0].ParentHash()
+			amount -= uint64(len(blocks.Data))
+		}
 	}
 
 	if err := s.blocksVerifier(blockChain); err != nil {
@@ -686,6 +696,11 @@ func (s *Sync) Run(ctx context.Context) error {
 
 	s.logger.Info(syncLogPrefix("running sync component"))
 
+	// This is set to disable heimdall checks casuing a pause during transition
+	// it can be removed post July 2025 where behavior can revert to previous 
+	// behavior of waitiing for heimdall to sync
+	const HiemdalV1V2Transition = true
+
 	for {
 		// we have to check if the heimdall we are connected to is synchonised with the chain
 		// to prevent getting empty list of checkpoints/milestones during the sync
@@ -700,6 +715,10 @@ func (s *Sync) Run(ctx context.Context) error {
 		}
 
 		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
+
+		if HiemdalV1V2Transition {
+			break
+		}
 
 		if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
 			return err
