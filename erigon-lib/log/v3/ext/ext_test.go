@@ -8,18 +8,28 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func testHandler() (log.Handler, *log.Record) {
+type lastRecordCaptureTestHandler struct {
+	rec *log.Record
+}
+
+func newLastRecordCaptureTestHandler() (lastRecordCaptureTestHandler, *log.Record) {
 	rec := new(log.Record)
-	return log.FuncHandler(func(r *log.Record) error {
-		*rec = *r
-		return nil
-	}), rec
+	return lastRecordCaptureTestHandler{rec: rec}, rec
+}
+
+func (h lastRecordCaptureTestHandler) Log(r *log.Record) error {
+	*h.rec = *r
+	return nil
+}
+
+func (h lastRecordCaptureTestHandler) LogLvl() log.Lvl {
+	return log.LvlTrace
 }
 
 func TestHotSwapHandler(t *testing.T) {
 	t.Parallel()
 
-	h1, r1 := testHandler()
+	h1, r1 := newLastRecordCaptureTestHandler()
 
 	l := log.New()
 	h := HotSwapHandler(h1)
@@ -30,7 +40,7 @@ func TestHotSwapHandler(t *testing.T) {
 		t.Fatalf("didn't get expected message to h1")
 	}
 
-	h2, r2 := testHandler()
+	h2, r2 := newLastRecordCaptureTestHandler()
 	h.Swap(h2)
 	l.Info("to h2")
 	if r2.Msg != "to h2" {
@@ -46,7 +56,7 @@ func TestSpeculativeHandler(t *testing.T) {
 	for _, count := range []int{10000, 50, 432} {
 		recs := make(chan *log.Record)
 		done := make(chan int)
-		spec := SpeculativeHandler(100, log.ChannelHandler(recs))
+		spec := SpeculativeHandler(100, log.NewChannelHandler(recs))
 
 		go func() {
 			defer close(done)
@@ -89,10 +99,10 @@ func TestSpeculativeHandler(t *testing.T) {
 func TestErrorHandler(t *testing.T) {
 	t.Parallel()
 
-	h, r := testHandler()
+	h, r := newLastRecordCaptureTestHandler()
 	lg := log.New()
-	lg.SetHandler(EscalateErrHandler(
-		log.LvlFilterHandler(log.LvlError, h)))
+	lg.SetHandler(NewEscalateErrHandler(
+		log.NewLvlFilterHandler(log.LvlError, h)))
 
 	lg.Debug("some function result", "err", nil)
 	if r.Msg != "" {

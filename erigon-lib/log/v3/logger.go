@@ -103,6 +103,9 @@ type Logger interface {
 	// SetHandler updates the logger to write records to the specified handler.
 	SetHandler(h Handler)
 
+	// LogLvl gets the max log lvl of its handler
+	LogLvl() Lvl
+
 	// Log a message at the given level with context key/value pairs
 	Trace(msg string, ctx ...interface{})
 	Debug(msg string, ctx ...interface{})
@@ -173,6 +176,10 @@ func (l *logger) Crit(msg string, ctx ...interface{}) {
 // Log method to route configurable log level
 func (l *logger) Log(level Lvl, msg string, ctx ...interface{}) {
 	l.write(msg, level, ctx)
+}
+
+func (l *logger) LogLvl() Lvl {
+	return l.GetHandler().LogLvl()
 }
 
 func (l *logger) GetHandler() Handler {

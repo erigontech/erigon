@@ -30,7 +30,7 @@ import (
 // Handler returns a log handler which logs to the unit test log of t.
 func Handler(t *testing.T, level log.Lvl) log.Handler {
 	t.Helper()
-	return log.LvlFilterHandler(level, &handler{t, log.TerminalFormat()})
+	return log.NewLvlFilterHandler(level, &handler{t, log.TerminalFormat()})
 }
 
 type handler struct {
@@ -41,6 +41,10 @@ type handler struct {
 func (h *handler) Log(r *log.Record) error {
 	h.t.Logf("%s", h.fmt.Format(r))
 	return nil
+}
+
+func (h *handler) LogLvl() log.Lvl {
+	return log.LvlTrace
 }
 
 // logger implements log.Logger such that all output goes to the unit test log via
@@ -64,6 +68,10 @@ func (h *bufHandler) Log(r *log.Record) error {
 	return nil
 }
 
+func (h *bufHandler) LogLvl() log.Lvl {
+	return log.LvlTrace
+}
+
 // Logger returns a logger which logs to the unit test log of t.
 func Logger(t *testing.T, level log.Lvl) log.Logger {
 	t.Helper()
@@ -74,7 +82,7 @@ func Logger(t *testing.T, level log.Lvl) log.Logger {
 		mu:  new(sync.Mutex),
 		h:   &bufHandler{fmt: log.TerminalFormat()},
 	}
-	l.log.SetHandler(log.LvlFilterHandler(level, l.h))
+	l.log.SetHandler(log.NewLvlFilterHandler(level, l.h))
 	return l
 }
 
@@ -132,6 +140,10 @@ func (l *logger) Log(level log.Lvl, msg string, ctx ...interface{}) {
 	defer l.mu.Unlock()
 	l.log.Log(level, msg, ctx...)
 	l.flush()
+}
+
+func (l *logger) LogLvl() log.Lvl {
+	return l.log.LogLvl()
 }
 
 func (l *logger) New(ctx ...interface{}) log.Logger {

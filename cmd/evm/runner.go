@@ -129,9 +129,9 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 func runCmd(ctx *cli.Context) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
-		log.Root().SetHandler(log.DiscardHandler())
+		log.Root().SetHandler(log.NewDiscardHandler())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
+		log.Root().SetHandler(log.NewLvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	}
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),

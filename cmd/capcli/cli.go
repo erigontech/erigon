@@ -141,7 +141,7 @@ func (c *Chain) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
@@ -247,7 +247,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	// Get latest state
 	checkPointSyncer := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, ntype)
 	bs, err := checkPointSyncer.GetLatestBeaconState(ctx)
@@ -372,11 +372,11 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -413,9 +413,9 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	c.withProfile()
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started the checking process", "chain", c.Chain, "datadir", c.Datadir)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	dirs := datadir.New(c.Datadir)
 
@@ -500,11 +500,11 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started the checking process", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -561,7 +561,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -808,7 +808,7 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
 	headSlot, err := getHead(a.BeaconApiURL)
@@ -865,7 +865,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
 	headSlot, err := getHead(b.BaseURL)
@@ -944,7 +944,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	log.Info("Started archive node checking", "chain", b.Chain)
 
 	dirs := datadir.New(b.Datadir)
@@ -1015,11 +1015,11 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -1057,10 +1057,10 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	c.withProfile()
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started the checking process", "chain", c.Chain)
 	dirs := datadir.New(c.Datadir)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -1120,10 +1120,10 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 		return err
 	}
 	c.withProfile()
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started the checking process", "chain", c.Chain)
 	dirs := datadir.New(c.Datadir)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -1189,10 +1189,10 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 		return err
 	}
 	c.withProfile()
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started the dumping process", "chain", c.Chain)
 	dirs := datadir.New(c.Datadir)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	db, blobStore, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -1247,11 +1247,11 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {

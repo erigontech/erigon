@@ -10,21 +10,21 @@ import (
 // Predefined handlers
 var (
 	root          *logger
-	StdoutHandler = StreamHandler(os.Stdout, TerminalFormatNoColor()) //LogfmtFormat())
-	StderrHandler = StreamHandler(os.Stderr, TerminalFormatNoColor()) //LogfmtFormat())
+	StdoutHandler = NewStreamHandler(os.Stdout, TerminalFormatNoColor()) //LogfmtFormat())
+	StderrHandler = NewStreamHandler(os.Stderr, TerminalFormatNoColor()) //LogfmtFormat())
 )
 
 func init() {
 	if isatty.IsTerminal(os.Stdout.Fd()) {
-		StdoutHandler = StreamHandler(colorable.NewColorableStdout(), TerminalFormat())
+		StdoutHandler = NewStreamHandler(colorable.NewColorableStdout(), TerminalFormat())
 	}
 
 	if isatty.IsTerminal(os.Stderr.Fd()) {
-		StderrHandler = StreamHandler(colorable.NewColorableStderr(), TerminalFormat())
+		StderrHandler = NewStreamHandler(colorable.NewColorableStderr(), TerminalFormat())
 	}
 
 	root = &logger{[]interface{}{}, new(swapHandler)}
-	root.SetHandler(LvlFilterHandler(LvlWarn, StdoutHandler))
+	root.SetHandler(NewLvlFilterHandler(LvlWarn, StdoutHandler))
 }
 
 // New returns a new logger with the given context.
@@ -81,5 +81,5 @@ func Log(level Lvl, msg string, ctx ...interface{}) {
 func SetRootHandler(h Handler) {
 	oldHandler := root.GetHandler()
 	root = &logger{[]interface{}{}, new(swapHandler)}
-	root.SetHandler(MultiHandler(oldHandler, h))
+	root.SetHandler(NewMultiHandler(oldHandler, h))
 }

@@ -99,7 +99,7 @@ type input struct {
 }
 
 func Main(ctx *cli.Context) error {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	var (
 		err     error
 		baseDir = ""

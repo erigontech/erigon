@@ -19,26 +19,36 @@ import (
 // log line. As an example, the following the log record will be written
 // out only if there was an error writing a value to redis:
 //
-//	logger := logext.EscalateErrHandler(
-//	    log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler))
+//	logger := logext.NewEscalateErrHandler(
+//	    log.NewLvlFilterHandler(log.LvlInfo, log.StdoutHandler))
 //
 //	reply, err := redisConn.Do("SET", "foo", "bar")
 //	logger.Debug("Wrote value to redis", "reply", reply, "err", err)
 //	if err != nil {
 //	    return err
 //	}
-func EscalateErrHandler(h log.Handler) log.Handler {
-	return log.FuncHandler(func(r *log.Record) error {
-		if r.Lvl > log.LvlError {
-			for i := 1; i < len(r.Ctx); i++ {
-				if v, ok := r.Ctx[i].(error); ok && v != nil {
-					r.Lvl = log.LvlError
-					break
-				}
+type EscalateErrHandler struct {
+	h log.Handler
+}
+
+func NewEscalateErrHandler(h log.Handler) EscalateErrHandler {
+	return EscalateErrHandler{h: h}
+}
+
+func (h EscalateErrHandler) Log(r *log.Record) error {
+	if r.Lvl > log.LvlError {
+		for i := 1; i < len(r.Ctx); i++ {
+			if v, ok := r.Ctx[i].(error); ok && v != nil {
+				r.Lvl = log.LvlError
+				break
 			}
 		}
-		return h.Log(r)
-	})
+	}
+	return h.h.Log(r)
+}
+
+func (h EscalateErrHandler) LogLvl() log.Lvl {
+	return h.h.LogLvl()
 }
 
 // SpeculativeHandler is a handler for speculative logging. It
@@ -71,6 +81,10 @@ func (h *Speculative) Log(r *log.Record) error {
 	h.idx = (h.idx + 1) % len(h.recs)
 	h.full = h.full || h.idx == 0
 	return nil
+}
+
+func (h *Speculative) LogLvl() log.Lvl {
+	return h.handler.LogLvl()
 }
 
 // Flush logs all records on the handler.
@@ -116,6 +130,10 @@ func (h *HotSwap) Log(r *log.Record) error {
 	return (*(*log.Handler)(atomic.LoadPointer(&h.handler))).Log(r)
 }
 
+func (h *HotSwap) LogLvl() log.Lvl {
+	return (*(*log.Handler)(atomic.LoadPointer(&h.handler))).LogLvl()
+}
+
 // Swap atomically the logger handler.
 func (h *HotSwap) Swap(newHandler log.Handler) {
 	atomic.StorePointer(&h.handler, unsafe.Pointer(&newHandler))
@@ -124,12 +142,22 @@ func (h *HotSwap) Swap(newHandler log.Handler) {
 // FatalHandler makes critical errors exit the program
 // immediately, much like the log.Fatal* methods from the
 // standard log package
-func FatalHandler(h log.Handler) log.Handler {
-	return log.FuncHandler(func(r *log.Record) error {
-		err := h.Log(r)
-		if r.Lvl == log.LvlCrit {
-			os.Exit(1)
-		}
-		return err
-	})
+type FatalHandler struct {
+	h log.Handler
+}
+
+func NewFatalHandler(h log.Handler) FatalHandler {
+	return FatalHandler{h: h}
+}
+
+func (h FatalHandler) Log(r *log.Record) error {
+	err := h.h.Log(r)
+	if r.Lvl == log.LvlCrit {
+		os.Exit(1)
+	}
+	return err
+}
+
+func (h FatalHandler) LogLvl() log.Lvl {
+	return h.h.LogLvl()
 }

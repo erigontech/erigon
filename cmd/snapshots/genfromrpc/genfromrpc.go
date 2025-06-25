@@ -392,7 +392,7 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 func genFromRPc(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	jsonRpcAddr := cliCtx.String(RpcAddr.Name)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	// Connect to RPC.
 	client, err := rpc.Dial(jsonRpcAddr, log.Root())

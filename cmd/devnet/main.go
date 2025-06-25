@@ -167,6 +167,10 @@ func (ph PanicHandler) Log(r *log.Record) error {
 	return nil
 }
 
+func (ph PanicHandler) LogLvl() log.Lvl {
+	return log.LvlTrace
+}
+
 func main() {
 	app := cli.NewApp()
 	app.Version = params.VersionWithCommit(params.GitCommit)

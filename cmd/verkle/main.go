@@ -448,7 +448,7 @@ func main() {
 	disableLookups := flag.Bool("disable-lookups", false, "disable lookups generation (more compact database)")
 
 	flag.Parse()
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(3), log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.Lvl(3), log.StderrHandler))
 	logger := log.Root()
 
 	opt := optionsCfg{

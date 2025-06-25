@@ -219,9 +219,9 @@ func initSeparatedLogging(
 	var consoleHandler log.Handler
 
 	if consoleJson {
-		consoleHandler = log.LvlFilterHandler(consoleLevel, log.StreamHandler(os.Stderr, log.JsonFormat()))
+		consoleHandler = log.NewLvlFilterHandler(consoleLevel, log.NewStreamHandler(os.Stderr, log.JsonFormat()))
 	} else {
-		consoleHandler = log.LvlFilterHandler(consoleLevel, log.StderrHandler)
+		consoleHandler = log.NewLvlFilterHandler(consoleLevel, log.StderrHandler)
 	}
 	logger.SetHandler(consoleHandler)
 
@@ -247,9 +247,9 @@ func initSeparatedLogging(
 		MaxBackups: 3,
 		MaxAge:     28, //days
 	}
-	userLog := log.StreamHandler(lumberjack, dirFormat)
+	userLog := log.NewStreamHandler(lumberjack, dirFormat)
 
-	mux := log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog))
+	mux := log.NewMultiHandler(consoleHandler, log.NewLvlFilterHandler(dirLevel, userLog))
 	logger.SetHandler(mux)
 	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
 }

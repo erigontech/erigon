@@ -68,9 +68,9 @@ type StatetestResult struct {
 func stateTestCmd(ctx *cli.Context) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
-		log.Root().SetHandler(log.DiscardHandler())
+		log.Root().SetHandler(log.NewDiscardHandler())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
+		log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlWarn, log.StderrHandler))
 	}
 
 	// Configure the EVM logger

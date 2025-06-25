@@ -55,7 +55,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
 
 	chainName := cliCtx.String(utils.ChainFlag.Name)

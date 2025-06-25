@@ -399,7 +399,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	t.Parallel()
 
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
+	log.Root().SetHandler(log.NewLvlFilterHandler(log.LvlWarn, log.StderrHandler))
 
 	stepSize := uint64(4)
 	_db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -544,7 +544,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	t.Cleanup(cancel)
 
 	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
+	logger.SetHandler(log.NewLvlFilterHandler(log.LvlTrace, log.StderrHandler))
 
 	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
 	dirs := datadir.New(t.TempDir())

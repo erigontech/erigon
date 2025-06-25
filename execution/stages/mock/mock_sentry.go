@@ -287,7 +287,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 
 	logger := log.Root()
-	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
+	logger.SetHandler(log.NewLvlFilterHandler(logLvl, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db := temporaltest.NewTestDB(tb, dirs)
@@ -379,7 +379,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		terseLogger := log.New()
-		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
+		terseLogger.SetHandler(log.NewLvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stages2.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
 			dirs, notifications, mock.BlockReader, blockWriter, nil, terseLogger)
@@ -707,7 +707,7 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 }
 
 func (ms *MockSentry) EnableLogs() {
-	ms.Log.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	ms.Log.SetHandler(log.NewLvlFilterHandler(log.LvlInfo, log.StderrHandler))
 }
 
 func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {

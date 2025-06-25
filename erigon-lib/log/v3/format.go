@@ -18,7 +18,7 @@ const (
 	termMsgJust    = 40
 )
 
-// Format  is the interface implemented by StreamHandler formatters.
+// Format  is the interface implemented by NewStreamHandler formatters.
 type Format interface {
 	Format(r *Record) []byte
 }
