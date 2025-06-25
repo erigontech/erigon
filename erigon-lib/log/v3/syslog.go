@@ -8,44 +8,32 @@ import (
 	"strings"
 )
 
-// NewSyslogHandler opens a connection to the system syslog daemon by calling
+// SyslogHandler opens a connection to the system syslog daemon by calling
 // syslog.New and writes all records to it.
-func NewSyslogHandler(priority syslog.Priority, tag string, fmtr Format) (SyslogHandler, error) {
+func SyslogHandler(priority syslog.Priority, tag string, fmtr Format) (Handler, error) {
 	wr, err := syslog.New(priority, tag)
 	if err != nil {
-		return SyslogHandler{}, err
+		return nil, err
 	}
 	return sharedSyslog(fmtr, wr), nil
 }
 
-// NewSyslogNetHandler opens a connection to a log daemon over the network and writes
+// SyslogNetHandler opens a connection to a log daemon over the network and writes
 // all log records to it.
-func NewSyslogNetHandler(net, addr string, priority syslog.Priority, tag string, fmtr Format) (SyslogHandler, error) {
+func SyslogNetHandler(net, addr string, priority syslog.Priority, tag string, fmtr Format) (Handler, error) {
 	wr, err := syslog.Dial(net, addr, priority, tag)
 	if err != nil {
-		return SyslogHandler{}, err
+		return nil, err
 	}
 	return sharedSyslog(fmtr, wr), nil
 }
 
-type SyslogHandler struct {
-	h Handler
-}
-
-func (h SyslogHandler) Log(r *Record) error {
-	return h.h.Log(r)
-}
-
-func (h SyslogHandler) LogLvl() Lvl {
-	return h.h.LogLvl()
-}
-
-type syslogInnerHandler struct {
+type syslogHandler struct {
 	fmtr  Format
 	sysWr *syslog.Writer
 }
 
-func (h syslogInnerHandler) Log(r *Record) error {
+func (h syslogHandler) Log(r *Record) error {
 	var syslogFn func(string) error
 	switch r.Lvl {
 	case LvlCrit:
@@ -66,19 +54,19 @@ func (h syslogInnerHandler) Log(r *Record) error {
 	return syslogFn(s)
 }
 
-func (h syslogInnerHandler) LogLvl() Lvl {
+func (h syslogHandler) LogLvl() Lvl {
 	return LvlTrace
 }
 
-func sharedSyslog(fmtr Format, sysWr *syslog.Writer) SyslogHandler {
-	h := syslogInnerHandler{fmtr: fmtr, sysWr: sysWr}
-	return SyslogHandler{h: LazyHandler(&closingHandler{sysWr, h})}
+func sharedSyslog(fmtr Format, sysWr *syslog.Writer) Handler {
+	h := syslogHandler{fmtr: fmtr, sysWr: sysWr}
+	return LazyHandler(&closingHandler{sysWr, h})
 }
 
 func (m muster) SyslogHandler(priority syslog.Priority, tag string, fmtr Format) Handler {
-	return must(NewSyslogHandler(priority, tag, fmtr))
+	return must(SyslogHandler(priority, tag, fmtr))
 }
 
 func (m muster) SyslogNetHandler(net, addr string, priority syslog.Priority, tag string, fmtr Format) Handler {
-	return must(NewSyslogNetHandler(net, addr, priority, tag, fmtr))
+	return must(SyslogNetHandler(net, addr, priority, tag, fmtr))
 }

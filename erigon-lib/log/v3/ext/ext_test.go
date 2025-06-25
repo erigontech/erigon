@@ -8,13 +8,13 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-type lastRecordCaptureTestHandler struct {
-	rec *log.Record
-}
-
 func newLastRecordCaptureTestHandler() (lastRecordCaptureTestHandler, *log.Record) {
 	rec := new(log.Record)
 	return lastRecordCaptureTestHandler{rec: rec}, rec
+}
+
+type lastRecordCaptureTestHandler struct {
+	rec *log.Record
 }
 
 func (h lastRecordCaptureTestHandler) Log(r *log.Record) error {

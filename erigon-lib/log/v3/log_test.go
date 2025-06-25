@@ -15,13 +15,13 @@ import (
 	"time"
 )
 
-type lastRecordCaptureTestHandler struct {
-	rec *Record
-}
-
 func newLastRecordCaptureTestHandler() (lastRecordCaptureTestHandler, *Record) {
 	rec := new(Record)
 	return lastRecordCaptureTestHandler{rec: rec}, rec
+}
+
+type lastRecordCaptureTestHandler struct {
+	rec *Record
 }
 
 func (h lastRecordCaptureTestHandler) Log(r *Record) error {

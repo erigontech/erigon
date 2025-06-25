@@ -71,7 +71,7 @@ func (h syncHandler) LogLvl() Lvl {
 
 const DefaultLogMaxSize = 1 << 27 // 128 Mb
 
-// FileHandler returns a FileHandler which writes log records to the given file
+// FileHandler returns a handler which writes log records to the give file
 // using the given format. If the path
 // already exists, FileHandler will append to the given file. If it does not,
 // FileHandler will create the file with mode 0644.
@@ -244,7 +244,7 @@ func (h filterHandler) LogLvl() Lvl {
 //
 //	log.MatchFilterHandler("pkg", "app/ui", log.StdoutHandler)
 func MatchFilterHandler(key string, value interface{}, h Handler) Handler {
-	filter := func(r *Record) (pass bool) {
+	return FilterHandler(func(r *Record) (pass bool) {
 		switch key {
 		case r.KeyNames.Lvl:
 			return r.Lvl == value
@@ -260,9 +260,7 @@ func MatchFilterHandler(key string, value interface{}, h Handler) Handler {
 			}
 		}
 		return false
-	}
-
-	return FilterHandler(filter, h)
+	}, h)
 }
 
 // LvlFilterHandler is a Handler that only writes
@@ -434,7 +432,7 @@ func (h bufferedHandler) LogLvl() Lvl {
 
 // LazyHandler writes all values to the wrapped handler after evaluating
 // any lazy functions in the record's context. It is already wrapped
-// around StreamHandler and NewSyslogHandler in this library, you'll only need
+// around StreamHandler and SyslogHandler in this library, you'll only need
 // it if you write your own Handler.
 func LazyHandler(h Handler) Handler {
 	return lazyHandler{h: h}
@@ -521,7 +519,7 @@ func (h discardHandler) LogLvl() Lvl {
 
 // Must object provides the following Handler creation functions
 // which instead of returning an error parameter only return a Handler
-// and panic on failure: FileHandler, NetHandler, NewSyslogHandler, NewSyslogNetHandler
+// and panic on failure: FileHandler, NetHandler, SyslogHandler, SyslogNetHandler
 var Must muster
 
 func must(h Handler, err error) Handler {
