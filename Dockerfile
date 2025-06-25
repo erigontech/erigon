@@ -127,7 +127,7 @@ RUN --mount=type=bind,from=builder,source=/build,target=/tmp/build \
     apt install -y --no-install-recommends ca-certificates && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* && \
-    if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${BUILD_SILKWORM}" != "xtrue" ]; then \
+    if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${BUILD_SILKWORM}" != "xfalse" ]; then \
         echo "Installing libsilkworm_capi.so library to /lib/x86_64-linux-gnu/ in case amd64 architecture:"; \
         find /tmp/build -name libsilkworm_capi.so -type f | xargs -I % install -m a=r -v % /lib/x86_64-linux-gnu/; \
         echo "Done." ; \
