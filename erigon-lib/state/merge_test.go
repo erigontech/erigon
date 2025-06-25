@@ -653,8 +653,8 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		}
 		checker.AddDependency(FromDomain(account.name), info)
 		checker.AddDependency(FromDomain(storage.name), info)
-		account.SetDependency(checker)
-		storage.SetDependency(checker)
+		account.SetChecker(checker)
+		storage.SetChecker(checker)
 		return
 	}
 

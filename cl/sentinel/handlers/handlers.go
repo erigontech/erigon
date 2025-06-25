@@ -41,6 +41,10 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
+var (
+	ErrResourceUnavailable = errors.New("resource unavailable")
+)
+
 type RateLimits struct {
 	pingLimit                int
 	goodbyeLimit             int
@@ -68,8 +72,8 @@ type ConsensusHandlers struct {
 	me                 *enode.LocalNode
 	netCfg             *clparams.NetworkConfig
 	blobsStorage       blob_storage.BlobStorage
-
-	enableBlocks bool
+	dataColumnStorage  blob_storage.DataColumnStorage
+	enableBlocks       bool
 }
 
 const (
@@ -78,8 +82,21 @@ const (
 	ResourceUnavailablePrefix = 0x02
 )
 
-func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotReader, indiciesDB kv.RoDB, host host.Host,
-	peers *peers.Pool, netCfg *clparams.NetworkConfig, me *enode.LocalNode, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, hs *handshake.HandShaker, forkChoiceReader forkchoice.ForkChoiceStorageReader, blobsStorage blob_storage.BlobStorage, enabledBlocks bool) *ConsensusHandlers {
+func NewConsensusHandlers(
+	ctx context.Context,
+	db freezeblocks.BeaconSnapshotReader,
+	indiciesDB kv.RoDB,
+	host host.Host,
+	peers *peers.Pool,
+	netCfg *clparams.NetworkConfig,
+	me *enode.LocalNode,
+	beaconConfig *clparams.BeaconChainConfig,
+	ethClock eth_clock.EthereumClock,
+	hs *handshake.HandShaker,
+	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	blobsStorage blob_storage.BlobStorage,
+	dataColumnStorage blob_storage.DataColumnStorage,
+	enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		hs:                 hs,
@@ -94,6 +111,7 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 		me:                 me,
 		netCfg:             netCfg,
 		blobsStorage:       blobsStorage,
+		dataColumnStorage:  dataColumnStorage,
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -102,6 +120,7 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 		communication.StatusProtocolV1:                      c.statusHandler,
 		communication.MetadataProtocolV1:                    c.metadataV1Handler,
 		communication.MetadataProtocolV2:                    c.metadataV2Handler,
+		communication.MetadataProtocolV3:                    c.metadataV3Handler,
 		communication.LightClientOptimisticUpdateProtocolV1: c.optimisticLightClientUpdateHandler,
 		communication.LightClientFinalityUpdateProtocolV1:   c.finalityLightClientUpdateHandler,
 		communication.LightClientBootstrapProtocolV1:        c.lightClientBootstrapHandler,
@@ -111,8 +130,12 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 	if c.enableBlocks {
 		hm[communication.BeaconBlocksByRangeProtocolV2] = c.beaconBlocksByRangeHandler
 		hm[communication.BeaconBlocksByRootProtocolV2] = c.beaconBlocksByRootHandler
+		// blobs
 		hm[communication.BlobSidecarByRangeProtocolV1] = c.blobsSidecarsByRangeHandlerDeneb
 		hm[communication.BlobSidecarByRootProtocolV1] = c.blobsSidecarsByIdsHandlerDeneb
+		// data column sidecars
+		hm[communication.DataColumnSidecarsByRangeProtocolV1] = c.dataColumnSidecarsByRangeHandler
+		hm[communication.DataColumnSidecarsByRootProtocolV1] = c.dataColumnSidecarsByRootHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
@@ -145,7 +168,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 	return func(s network.Stream) {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Error("[pubsubhandler] panic in stream handler", "err", r)
+				log.Error("[pubsubhandler] panic in stream handler", "err", r, "name", name)
 				_ = s.Reset()
 				_ = s.Close()
 			}
@@ -159,16 +182,19 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 				l["agent"] = str
 			}
 		}
-		err = fn(s)
-		if err != nil {
-			l["err"] = err
+		if err := fn(s); err != nil {
+			if errors.Is(err, ErrResourceUnavailable) {
+				// write resource unavailable prefix
+				if _, err := s.Write([]byte{ResourceUnavailablePrefix}); err != nil {
+					log.Debug("failed to write resource unavailable prefix", "err", err)
+				}
+			}
 			log.Debug("[pubsubhandler] stream handler returned error", "protocol", name, "peer", s.Conn().RemotePeer().String(), "err", err)
 			_ = s.Reset()
 			_ = s.Close()
 			return
 		}
-		err = s.Close()
-		if err != nil {
+		if err := s.Close(); err != nil {
 			l["err"] = err
 			if !(strings.Contains(name, "goodbye") &&
 				(strings.Contains(err.Error(), "session shut down") ||
