@@ -53,47 +53,13 @@ var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 
 var (
 	DefaultMinerGasLimitEthMainnet uint64 = 45_000_000
-	BorDefaultMinerGasLimit        uint64 = 45_000_000
-	DefaultMinerGasLimitSepolia    uint64 = 60_000_000
-	DefaultMinerGasLimitHolesky    uint64 = 60_000_000
-	DefaultMinerGasLimitHoodi      uint64 = 60_000_000
-	DefaultMinerGasLimitBorMainnet uint64 = 45_000_000
-	DefaultMinerGasLimitAmoy       uint64 = 45_000_000
-	DefaultMinerGasLimitGnosis     uint64 = 17_000_000
-	DefaultMinerGasLimitChiado     uint64 = 17_000_000
 )
 
 func DefaultMinerGasLimitByChain(config *Config) uint64 {
-	if config.Genesis == nil {
+	if config.Genesis == nil || config.Genesis.Config == nil || config.Genesis.Config.DefaultBlockGasLimit == nil {
 		return DefaultMinerGasLimitEthMainnet
 	}
-
-	switch config.NetworkID {
-	case chainspec.MainnetChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitEthMainnet
-	case chainspec.SepoliaChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitSepolia
-	case chainspec.HoleskyChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitHolesky
-	case chainspec.HoodiChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitHoodi
-	case 137:
-		return BorDefaultMinerGasLimit
-	case 80002:
-		return DefaultMinerGasLimitAmoy
-	case chainspec.GnosisChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitGnosis
-	case chainspec.ChiadoChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitChiado
-	default:
-		if config.Genesis.Config == nil {
-			return DefaultMinerGasLimitEthMainnet
-		}
-		if config.Genesis.Config.Bor != nil {
-			return BorDefaultMinerGasLimit
-		}
-	}
-	return DefaultMinerGasLimitEthMainnet
+	return *config.Genesis.Config.DefaultBlockGasLimit
 }
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
