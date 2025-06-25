@@ -687,11 +687,16 @@ Loop:
 				t1 = time.Since(tt) + ts
 
 				tt = time.Now()
-				if err = aggregatorRo.GreedyPruneHistory(ctx, kv.CommitmentDomain, executor.tx()); err != nil {
-					return err
+				pruneTimeout := 250 * time.Millisecond
+				if initialCycle {
+					pruneTimeout = 10 * time.Hour
+
+					if err = aggregatorRo.GreedyPruneHistory(ctx, kv.CommitmentDomain, executor.tx()); err != nil {
+						return err
+					}
 				}
 
-				if _, err := aggregatorRo.PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
+				if _, err := aggregatorRo.PruneSmallBatches(ctx, pruneTimeout, executor.tx()); err != nil {
 					return err
 				}
 				t3 = time.Since(tt)
@@ -702,7 +707,7 @@ Loop:
 				}
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
-				if !execStage.CurrentSyncCycle.IsInitialCycle {
+				if !initialCycle {
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
