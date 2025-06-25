@@ -35,28 +35,14 @@ var (
 	StylusDiscriminant = []byte{stylusEOFMagic, stylusEOFMagicSuffix, stylusEOFVersion}
 )
 
-type ActivatedWasm map[wasmdb.WasmTarget][]byte
-
-// checks if a valid Stylus prefix is present
-func IsStylusProgram(b []byte) bool {
-	if len(b) < len(StylusDiscriminant)+1 {
-		return false
+func NewArbitrum(ibs *IntraBlockState) IntraBlockStateArbitrum {
+	ibs.arbExtraData = &ArbitrumExtraData{
+		unexpectedBalanceDelta: new(uint256.Int),
+		userWasms:              map[common.Hash]ActivatedWasm{},
+		activatedWasms:         map[common.Hash]ActivatedWasm{},
+		recentWasms:            NewRecentWasms(),
 	}
-	return bytes.Equal(b[:3], StylusDiscriminant)
-}
-
-// strips the Stylus header from a contract, returning the dictionary used
-func StripStylusPrefix(b []byte) ([]byte, byte, error) {
-	if !IsStylusProgram(b) {
-		return nil, 0, errors.New("specified bytecode is not a Stylus program")
-	}
-	return b[4:], b[3], nil
-}
-
-// creates a new Stylus prefix from the given dictionary byte
-func NewStylusPrefix(dictionary byte) []byte {
-	prefix := bytes.Clone(StylusDiscriminant)
-	return append(prefix, dictionary)
+	return ibs // TODO
 }
 
 type IntraBlockStateArbitrum interface {
@@ -340,6 +326,120 @@ func (s *IntraBlockState) GetRecentWasms() RecentWasms {
 	return s.arbExtraData.recentWasms
 }
 
+func (s *IntraBlockState) HasSelfDestructed(addr common.Address) bool {
+	stateObject, err := s.getStateObject(addr)
+	if err != nil {
+		panic(err)
+	}
+	if stateObject != nil {
+		return stateObject.selfdestructed
+	}
+	return false
+}
+
+func (s *IntraBlockState) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
+	_, fn, ln, _ := runtime.Caller(1)
+	log.Warn("need shared domains and writer to calculate intermediate root", "caller", fmt.Sprintf("%s:%d", fn, ln))
+	return common.Hash{}
+}
+
+// GetStorageRoot retrieves the storage root from the given address or empty
+// if object not found.
+func (s *IntraBlockState) GetStorageRoot(addr common.Address) common.Hash {
+	stateObject, err := s.getStateObject(addr)
+	if err == nil && stateObject != nil {
+		return stateObject.data.Root
+	}
+	return common.Hash{}
+}
+
+func (sdb *IntraBlockState) SetWasmDB(wasmDB wasmdb.WasmIface) {
+	sdb.wasmDB = wasmDB
+}
+func (sdb *IntraBlockState) ExpectBalanceBurn(amount *uint256.Int) {
+	if amount.Sign() < 0 {
+		panic(fmt.Sprintf("ExpectBalanceBurn called with negative amount %v", amount))
+	}
+	sdb.arbExtraData.unexpectedBalanceDelta.Add(sdb.arbExtraData.unexpectedBalanceDelta, amount)
+}
+
+type ActivatedWasm map[wasmdb.WasmTarget][]byte
+
+// checks if a valid Stylus prefix is present
+func IsStylusProgram(b []byte) bool {
+	if len(b) < len(StylusDiscriminant)+1 {
+		return false
+	}
+	return bytes.Equal(b[:3], StylusDiscriminant)
+}
+
+// strips the Stylus header from a contract, returning the dictionary used
+func StripStylusPrefix(b []byte) ([]byte, byte, error) {
+	if !IsStylusProgram(b) {
+		return nil, 0, errors.New("specified bytecode is not a Stylus program")
+	}
+	return b[4:], b[3], nil
+}
+
+// creates a new Stylus prefix from the given dictionary byte
+func NewStylusPrefix(dictionary byte) []byte {
+	prefix := bytes.Clone(StylusDiscriminant)
+	return append(prefix, dictionary)
+}
+
+type wasmActivation struct {
+	moduleHash common.Hash
+}
+
+func (ch wasmActivation) revert(s *IntraBlockState) error {
+	delete(s.arbExtraData.activatedWasms, ch.moduleHash)
+	return nil
+}
+
+func (ch wasmActivation) dirtied() *common.Address {
+	return nil
+}
+
+// Updates the Rust-side recent program cache
+var CacheWasmRust func(asm []byte, moduleHash common.Hash, version uint16, tag uint32, debug bool) = func([]byte, common.Hash, uint16, uint32, bool) {}
+var EvictWasmRust func(moduleHash common.Hash, version uint16, tag uint32, debug bool) = func(common.Hash, uint16, uint32, bool) {}
+
+type CacheWasm struct {
+	ModuleHash common.Hash
+	Version    uint16
+	Tag        uint32
+	Debug      bool
+}
+
+func (ch CacheWasm) revert(*IntraBlockState) error {
+	EvictWasmRust(ch.ModuleHash, ch.Version, ch.Tag, ch.Debug)
+	return nil
+}
+
+func (ch CacheWasm) dirtied() *common.Address {
+	return nil
+}
+
+type EvictWasm struct {
+	ModuleHash common.Hash
+	Version    uint16
+	Tag        uint32
+	Debug      bool
+}
+
+func (ch EvictWasm) revert(s *IntraBlockState) error {
+	asm, err := s.TryGetActivatedAsm(wasmdb.LocalTarget(), ch.ModuleHash) // only happens in native mode
+	if err == nil && len(asm) != 0 {
+		//if we failed to get it - it's not in the current rust cache
+		CacheWasmRust(asm, ch.ModuleHash, ch.Version, ch.Tag, ch.Debug)
+	}
+	return err
+}
+
+func (ch EvictWasm) dirtied() *common.Address {
+	return nil
+}
+
 // Type for managing recent program access.
 // The cache contained is discarded at the end of each block.
 type RecentWasms struct {
@@ -374,31 +474,4 @@ func (p RecentWasms) Copy() RecentWasms {
 		cache.Add(item, struct{}{})
 	}
 	return RecentWasms{cache: &cache}
-}
-
-func (s *IntraBlockState) HasSelfDestructed(addr common.Address) bool {
-	stateObject, err := s.getStateObject(addr)
-	if err != nil {
-		panic(err)
-	}
-	if stateObject != nil {
-		return stateObject.selfdestructed
-	}
-	return false
-}
-
-func (s *IntraBlockState) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
-	_, fn, ln, _ := runtime.Caller(1)
-	log.Warn("need shared domains and writer to calculate intermediate root", "caller", fmt.Sprintf("%s:%d", fn, ln))
-	return common.Hash{}
-}
-
-// GetStorageRoot retrieves the storage root from the given address or empty
-// if object not found.
-func (s *IntraBlockState) GetStorageRoot(addr common.Address) common.Hash {
-	stateObject, err := s.getStateObject(addr)
-	if err == nil && stateObject != nil {
-		return stateObject.data.Root
-	}
-	return common.Hash{}
 }
