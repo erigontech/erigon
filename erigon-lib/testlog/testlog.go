@@ -146,6 +146,30 @@ func (l *logger) LogLvl() log.Lvl {
 	return l.log.LogLvl()
 }
 
+func (l *logger) LvlTrace() bool {
+	return l.LogLvl() == log.LvlTrace
+}
+
+func (l *logger) LvlDebug() bool {
+	return l.LogLvl() == log.LvlDebug
+}
+
+func (l *logger) LvlInfo() bool {
+	return l.LogLvl() == log.LvlInfo
+}
+
+func (l *logger) LvlWarn() bool {
+	return l.LogLvl() == log.LvlWarn
+}
+
+func (l *logger) LvlError() bool {
+	return l.LogLvl() == log.LvlError
+}
+
+func (l *logger) LvlCrit() bool {
+	return l.LogLvl() == log.LvlCrit
+}
+
 func (l *logger) New(ctx ...interface{}) log.Logger {
 	return &logger{l.t, l.log.New(ctx...), l.mu, l.h}
 }

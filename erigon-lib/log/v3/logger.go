@@ -105,6 +105,12 @@ type Logger interface {
 
 	// LogLvl gets the max log lvl of its handler
 	LogLvl() Lvl
+	LvlTrace() bool
+	LvlDebug() bool
+	LvlInfo() bool
+	LvlWarn() bool
+	LvlError() bool
+	LvlCrit() bool
 
 	// Log a message at the given level with context key/value pairs
 	Trace(msg string, ctx ...interface{})
@@ -180,6 +186,30 @@ func (l *logger) Log(level Lvl, msg string, ctx ...interface{}) {
 
 func (l *logger) LogLvl() Lvl {
 	return l.GetHandler().LogLvl()
+}
+
+func (l *logger) LvlTrace() bool {
+	return l.LogLvl() == LvlTrace
+}
+
+func (l *logger) LvlDebug() bool {
+	return l.LogLvl() == LvlDebug
+}
+
+func (l *logger) LvlInfo() bool {
+	return l.LogLvl() == LvlInfo
+}
+
+func (l *logger) LvlWarn() bool {
+	return l.LogLvl() == LvlWarn
+}
+
+func (l *logger) LvlError() bool {
+	return l.LogLvl() == LvlError
+}
+
+func (l *logger) LvlCrit() bool {
+	return l.LogLvl() == LvlCrit
 }
 
 func (l *logger) GetHandler() Handler {
