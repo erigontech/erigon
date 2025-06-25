@@ -194,7 +194,7 @@ type callerStackHandler struct {
 }
 
 func (h callerStackHandler) Log(r *Record) error {
-	s := stack.Trace().TrimBelow(r.Call(6)).TrimRuntime()
+	s := stack.Trace().TrimBelow(r.Call(5)).TrimRuntime()
 	if len(s) > 0 {
 		r.Ctx = append(r.Ctx, "stack", fmt.Sprintf(h.format, s))
 	}
@@ -455,7 +455,7 @@ func (h lazyHandler) Log(r *Record) error {
 				r.Ctx[i] = err
 			} else {
 				if cs, ok := v.(stack.CallStack); ok {
-					v = cs.TrimBelow(r.Call(6)).TrimRuntime()
+					v = cs.TrimBelow(r.Call(5)).TrimRuntime()
 				}
 				r.Ctx[i] = v
 			}

@@ -525,9 +525,7 @@ func TestCallerFuncHandler(t *testing.T) {
 	}
 }
 
-// https://github.com/inconshreveable/log15/issues/27
 func TestCallerStackHandler(t *testing.T) {
-	t.Skip("fix me")
 	t.Parallel()
 
 	l := New()
