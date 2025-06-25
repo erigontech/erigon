@@ -152,7 +152,7 @@ type callerFileHandler struct {
 }
 
 func (h callerFileHandler) Log(r *Record) error {
-	r.Ctx = append(r.Ctx, "caller", fmt.Sprint(r.Call(6)))
+	r.Ctx = append(r.Ctx, "caller", fmt.Sprint(r.Call(5)))
 	return h.h.Log(r)
 }
 
@@ -171,7 +171,7 @@ type callerFuncHandler struct {
 }
 
 func (h callerFuncHandler) Log(r *Record) error {
-	r.Ctx = append(r.Ctx, "fn", fmt.Sprintf("%+n", r.Call(6)))
+	r.Ctx = append(r.Ctx, "fn", fmt.Sprintf("%+n", r.Call(5)))
 	return h.h.Log(r)
 }
 
