@@ -36,9 +36,12 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	// 	fmt.Println(i/32, common.BytesToHash(b.leaves[i:i+32]))
 	// }
 	// Pad to 32 of length
-	endIndex := StateLeafSize * 32
-	if b.Version() <= clparams.DenebVersion {
-		endIndex = StateLeafSizeDeneb * 32
+	endIndex := StateLeafSizeDeneb * 32
+	if b.Version() >= clparams.ElectraVersion {
+		endIndex = StateLeafSizeElectra * 32
+	}
+	if b.Version() >= clparams.FuluVersion {
+		endIndex = StateLeafSizeFulu * 32
 	}
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:endIndex], out[:])
 	return
@@ -59,7 +62,11 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 	leafSize := StateLeafSizeDeneb
 	if b.Version() >= clparams.ElectraVersion {
 		depth = 6
-		leafSize = StateLeafSize
+		leafSize = StateLeafSizeElectra
+	}
+	if b.Version() >= clparams.FuluVersion {
+		depth = 7
+		leafSize = StateLeafSizeFulu
 	}
 
 	schema := []interface{}{}
@@ -78,7 +85,11 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 	leafSize := StateLeafSizeDeneb
 	if b.Version() >= clparams.ElectraVersion {
 		depth = 6
-		leafSize = StateLeafSize
+		leafSize = StateLeafSizeElectra
+	}
+	if b.Version() >= clparams.FuluVersion {
+		depth = 7
+		leafSize = StateLeafSizeFulu
 	}
 
 	schema := []interface{}{}
@@ -96,7 +107,11 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 	leafSize := StateLeafSizeDeneb
 	if b.Version() >= clparams.ElectraVersion {
 		depth = 6
-		leafSize = StateLeafSize
+		leafSize = StateLeafSizeElectra
+	}
+	if b.Version() >= clparams.FuluVersion {
+		depth = 7
+		leafSize = StateLeafSizeFulu
 	}
 
 	schema := []interface{}{}
@@ -221,6 +236,10 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.add(PendingDepositsLeafIndex, b.pendingDeposits)
 		beaconStateHasher.add(PendingPartialWithdrawalsLeafIndex, b.pendingPartialWithdrawals)
 		beaconStateHasher.add(PendingConsolidationsLeafIndex, b.pendingConsolidations)
+	}
+
+	if b.version >= clparams.FuluVersion {
+		beaconStateHasher.add(ProposerLookaheadLeafIndex, b.proposerLookahead)
 	}
 
 	beaconStateHasher.run()

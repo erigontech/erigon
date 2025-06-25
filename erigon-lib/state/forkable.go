@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 const MaxUint64 = ^uint64(0)
@@ -272,7 +271,7 @@ func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (fs For
 		return
 	}
 	fromKey := a.encTs(efrom)
-	delCnt, err := ee.DeleteRangeFromTbl(ctx, a.canonicalTbl, fromKey, nil, MaxUint64, nil, a.logger, tx)
+	delCnt, err := DeleteRangeFromTbl(ctx, a.canonicalTbl, fromKey, nil, MaxUint64, nil, a.logger, tx)
 	fs.Set(efrom, Num(MaxUint64), delCnt)
 	return
 }
@@ -286,12 +285,12 @@ func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, logEvery
 		return fs, err
 	}
 	toKeyPrefix := a.encTs(eto)
-	del, err := ee.DeleteRangeFromTbl(ctx, a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, logEvery, a.logger, tx)
+	del, err := DeleteRangeFromTbl(ctx, a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, logEvery, a.logger, tx)
 	fs.Set(a.pruneFrom, eto, del)
 	if err != nil {
 		return
 	}
-	_, err = ee.DeleteRangeFromTbl(ctx, a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, logEvery, a.logger, tx)
+	_, err = DeleteRangeFromTbl(ctx, a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, logEvery, a.logger, tx)
 	return
 }
 
@@ -351,7 +350,7 @@ func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (fs F
 	if err != nil {
 		return fs, err
 	}
-	delCnt, err := ee.DeleteRangeFromTbl(ctx, ap.valsTbl, ap.encTs(fromN), nil, 0, nil, ap.logger, tx)
+	delCnt, err := DeleteRangeFromTbl(ctx, ap.valsTbl, ap.encTs(fromN), nil, 0, nil, ap.logger, tx)
 	fs.Set(fromN, Num(MaxUint64), delCnt)
 	return
 }
@@ -366,7 +365,7 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, logEve
 
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)
-	delCnt, err := ee.DeleteRangeFromTbl(ctx, ap.valsTbl, eFrom, eTo, limit, logEvery, ap.logger, tx)
+	delCnt, err := DeleteRangeFromTbl(ctx, ap.valsTbl, eFrom, eTo, limit, logEvery, ap.logger, tx)
 	fs.Set(ap.pruneFrom, toNum, delCnt)
 	return
 }
@@ -422,8 +421,8 @@ func (m *BufferedTx) GetDb(entityNum Num, tx kv.Tx) (data Bytes, err error) {
 
 func (m *BufferedTx) Put(entityNum Num, value Bytes) error {
 	if m.values == nil {
-		m.values = etl.NewCollector(ee.Registry.Name(m.id)+".forkable.flush",
-			ee.Registry.Dirs(m.id).Tmp, m.factory.New(), m.a.logger).LogLvl(log.LvlTrace)
+		m.values = etl.NewCollector(Registry.Name(m.id)+".forkable.flush",
+			Registry.Dirs(m.id).Tmp, m.factory.New(), m.a.logger).LogLvl(log.LvlTrace)
 	}
 
 	key := m.ap.encTs(entityNum)
@@ -449,7 +448,7 @@ func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, logEve
 
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)
-	delCnt, err := ee.DeleteRangeFromTbl(ctx, ap.valsTbl, eFrom, eTo, limit, logEvery, ap.logger, tx)
+	delCnt, err := DeleteRangeFromTbl(ctx, ap.valsTbl, eFrom, eTo, limit, logEvery, ap.logger, tx)
 	fs.Set(ap.pruneFrom, toNum, delCnt)
 	return
 }

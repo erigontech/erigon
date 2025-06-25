@@ -39,6 +39,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-db/downloader"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
@@ -49,8 +50,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -59,6 +58,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/version"
@@ -70,8 +70,8 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -862,7 +862,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
-			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
+			return fmt.Errorf("failed to parse filename %s", info.Name())
 		}
 		from, to := res.From, res.To
 		maxStep = max(maxStep, to)
