@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -554,7 +554,7 @@ func TestGetBadBlocks(t *testing.T) {
 
 	putBlock := func(number uint64) common.Hash {
 		// prepare db so it works with our test
-		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		signer1 := types.MakeSigner(chainspec.MainnetChainConfig, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
 				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),

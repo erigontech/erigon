@@ -22,13 +22,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func TestMainnet(t *testing.T) {
-	state, err := initial_state.GetGenesisState(networkid.MainnetChainID)
+	state, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
 	require.NoError(t, err)
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
@@ -36,7 +36,7 @@ func TestMainnet(t *testing.T) {
 }
 
 func TestSepolia(t *testing.T) {
-	state, err := initial_state.GetGenesisState(networkid.SepoliaChainID)
+	state, err := initial_state.GetGenesisState(chainspec.SepoliaChainID)
 	require.NoError(t, err)
 	root, err := state.HashSSZ()
 	require.NoError(t, err)

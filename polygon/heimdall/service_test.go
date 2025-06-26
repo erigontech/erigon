@@ -39,8 +39,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 )
 
 func TestServiceWithAmoyData(t *testing.T) {
@@ -50,7 +50,7 @@ func TestServiceWithAmoyData(t *testing.T) {
 
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/amoy",
-		chainConfig:                    params.AmoyChainConfig,
+		chainConfig:                    polychain.AmoyChainConfig,
 		expectedLastSpan:               1280,
 		expectedFirstCheckpoint:        1,
 		expectedLastCheckpoint:         150,
@@ -92,7 +92,7 @@ func TestServiceWithMainnetData(t *testing.T) {
 
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/mainnet",
-		chainConfig:                    params.BorMainnetChainConfig,
+		chainConfig:                    polychain.BorMainnetChainConfig,
 		expectedLastSpan:               2344,
 		expectedFirstCheckpoint:        1,
 		expectedLastCheckpoint:         1,

@@ -27,7 +27,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -203,7 +203,7 @@ func TestMetadataV2(t *testing.T) {
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
-	nc := clparams.NetworkConfigs[networkid.MainnetChainID]
+	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
@@ -261,7 +261,7 @@ func TestMetadataV1(t *testing.T) {
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 
-	nc := clparams.NetworkConfigs[networkid.MainnetChainID]
+	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
@@ -327,7 +327,7 @@ func TestStatus(t *testing.T) {
 		HeadSlot:       1,
 	}
 	hs.SetStatus(s)
-	nc := clparams.NetworkConfigs[networkid.MainnetChainID]
+	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,

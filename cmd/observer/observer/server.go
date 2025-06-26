@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -35,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/params"
 )
 
 type Server struct {
@@ -117,8 +117,8 @@ func makeLocalNode(ctx context.Context, nodeDBPath string, privateKey *ecdsa.Pri
 }
 
 func makeForksENREntry(chain string) (enr.Entry, error) {
-	chainConfig := params.ChainConfigByChainName(chain)
-	genesisHash := params.GenesisHashByChainName(chain)
+	chainConfig := chainspec.ChainConfigByChainName(chain)
+	genesisHash := chainspec.GenesisHashByChainName(chain)
 	if (chainConfig == nil) || (genesisHash == nil) {
 		return nil, fmt.Errorf("unknown chain %s", chain)
 	}

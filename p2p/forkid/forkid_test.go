@@ -27,7 +27,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 )
 
 // TestCreation tests that different genesis and fork rule combinations result in
@@ -48,8 +49,8 @@ func TestCreation(t *testing.T) {
 	}{
 		// Mainnet test cases
 		{
-			params.MainnetChainConfig,
-			params.MainnetGenesisHash,
+			chainspec.MainnetChainConfig,
+			chainspec.MainnetGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0xfc64ec04), Next: 1150000}},                    // Unsynced
 				{1149999, 1457981342, ID{Hash: ChecksumToBytes(0xfc64ec04), Next: 1150000}},     // Last Frontier block
@@ -87,8 +88,8 @@ func TestCreation(t *testing.T) {
 		},
 		// Sepolia test cases
 		{
-			params.SepoliaChainConfig,
-			params.SepoliaGenesisHash,
+			chainspec.SepoliaChainConfig,
+			chainspec.SepoliaGenesisHash,
 			[]testcase{
 				{0, 1633267481, ID{Hash: ChecksumToBytes(0xfe3366e7), Next: 1735371}},          // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople, Petersburg, Istanbul, Berlin and first London block
 				{1735370, 1661130096, ID{Hash: ChecksumToBytes(0xfe3366e7), Next: 1735371}},    // Last pre-MergeNetsplit block
@@ -105,8 +106,8 @@ func TestCreation(t *testing.T) {
 
 		// Holesky test cases
 		{
-			params.HoleskyChainConfig,
-			params.HoleskyGenesisHash,
+			chainspec.HoleskyChainConfig,
+			chainspec.HoleskyGenesisHash,
 			[]testcase{
 				{0, 1696000704, ID{Hash: ChecksumToBytes(0xfd4f016b), Next: 1707305664}},       // First Shanghai block
 				{0, 1707305652, ID{Hash: ChecksumToBytes(0xfd4f016b), Next: 1707305664}},       // Last Shanghai block
@@ -119,8 +120,8 @@ func TestCreation(t *testing.T) {
 
 		// Hoodi test cases
 		{
-			params.HoodiChainConfig,
-			params.HoodiGenesisHash,
+			chainspec.HoodiChainConfig,
+			chainspec.HoodiGenesisHash,
 			[]testcase{
 				{0, 174221200, ID{Hash: ChecksumToBytes(0xbef71d30), Next: 1742999832}},      // First Cancun block
 				{50000, 1742999820, ID{Hash: ChecksumToBytes(0xbef71d30), Next: 1742999832}}, // Last Cancun block (approx)
@@ -130,8 +131,8 @@ func TestCreation(t *testing.T) {
 		},
 		// Gnosis test cases
 		{
-			params.GnosisChainConfig,
-			params.GnosisGenesisHash,
+			chainspec.GnosisChainConfig,
+			chainspec.GnosisGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0xf64909b1), Next: 1604400}},                    // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium
 				{1604399, 1547205885, ID{Hash: ChecksumToBytes(0xf64909b1), Next: 1604400}},     // Last Byzantium block
@@ -158,8 +159,8 @@ func TestCreation(t *testing.T) {
 		},
 		// Chiado test cases
 		{
-			params.ChiadoChainConfig,
-			params.ChiadoGenesisHash,
+			chainspec.ChiadoChainConfig,
+			chainspec.ChiadoGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0x50d39d7b), Next: 1684934220}},
 				{4100418, 1684934215, ID{Hash: ChecksumToBytes(0x50d39d7b), Next: 1684934220}},  // Last pre-Shanghai block
@@ -173,8 +174,8 @@ func TestCreation(t *testing.T) {
 		},
 		// Amoy test cases
 		{
-			params.AmoyChainConfig,
-			params.AmoyGenesisHash,
+			polychain.AmoyChainConfig,
+			polychain.AmoyGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0xbe06a477), Next: 73100}},
 				{73100, 0, ID{Hash: ChecksumToBytes(0x135d2cd5), Next: 5423600}}, // First London, Jaipur, Delhi, Indore, Agra
@@ -182,8 +183,8 @@ func TestCreation(t *testing.T) {
 		},
 		// Bor mainnet test cases
 		{
-			params.BorMainnetChainConfig,
-			params.BorMainnetGenesisHash,
+			polychain.BorMainnetChainConfig,
+			polychain.BorMainnetGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0x0e07e722), Next: 3395000}},
 				{3395000, 0, ID{Hash: ChecksumToBytes(0x27806576), Next: 14750000}},  // First Istanbul block
@@ -275,9 +276,9 @@ func TestValidation(t *testing.T) {
 		// fork) at block 7279999, before Petersburg. Local is incompatible.
 		{7279999, ID{Hash: ChecksumToBytes(0xa00bc324), Next: 7279999}, ErrLocalIncompatibleOrStale},
 	}
-	heightForks, timeForks := GatherForks(params.MainnetChainConfig, 0 /* genesisTime */)
+	heightForks, timeForks := GatherForks(chainspec.MainnetChainConfig, 0 /* genesisTime */)
 	for i, tt := range tests {
-		filter := newFilter(heightForks, timeForks, params.MainnetGenesisHash, tt.head, 0)
+		filter := newFilter(heightForks, timeForks, chainspec.MainnetGenesisHash, tt.head, 0)
 		if err := filter(tt.id); err != tt.err {
 			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}

@@ -28,10 +28,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 var (
@@ -83,9 +84,9 @@ func genesisFromFile(genesisPath string) *types.Genesis {
 
 func getChainGenesisAndConfig() (genesis *types.Genesis, chainConfig *chain2.Config) {
 	if chain == "" {
-		genesis, chainConfig = core.MainnetGenesisBlock(), params.MainnetChainConfig
+		genesis, chainConfig = chainspec.MainnetGenesisBlock(), chainspec.MainnetChainConfig
 	} else {
-		genesis, chainConfig = core.GenesisBlockByChainName(chain), params.ChainConfigByChainName(chain)
+		genesis, chainConfig = chainspec.GenesisBlockByChainName(chain), chainspec.ChainConfigByChainName(chain)
 	}
 	return genesis, chainConfig
 }
