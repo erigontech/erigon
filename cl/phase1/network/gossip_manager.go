@@ -222,7 +222,6 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameBeaconAggregateAndProof:
 		if !g.aggregateAndProofLimiter.tryAcquire() {
-			log.Debug("Received aggregate and proof via gossip, but rate limit exceeded", "index", *data.SubnetId, "size", datasize.ByteSize(len(data.Data)))
 			return services.ErrIgnore
 		}
 		obj := &services.SignedAggregateAndProofForGossip{
