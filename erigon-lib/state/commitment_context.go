@@ -180,6 +180,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
+	start := time.Now()
+	defer func() {
+		log.Debug("[commitment] ComputeCommitment finished", "spent", time.Since(start), "blockNum", blockNum, "txNum", txNum)
+	}()
 
 	// data accessing functions should be set when domain is opened/shared context updated
 	sdc.patriciaTrie.SetTrace(sdc.trace)
