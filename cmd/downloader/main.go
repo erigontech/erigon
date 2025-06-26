@@ -566,17 +566,11 @@ func manifest(ctx context.Context, logger log.Logger) error {
 	l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "history/"+fName)
 	}
 	l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "idx/"+fName)
 	}
 
@@ -620,13 +614,6 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	}
 
 	for _, t := range torrents {
-		// we don't release commitment history in this time. let's skip it here.
-		if strings.Contains(t.DisplayName, "history") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
-		if strings.Contains(t.DisplayName, "idx") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
 		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)

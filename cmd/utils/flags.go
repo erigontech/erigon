@@ -1141,7 +1141,7 @@ var (
 		Value: false,
 	}
 	KeepExecutionProofsFlag = cli.BoolFlag{
-		Name:  "experimental.commitment-history",
+		Name:  "prune.experimental.include-commitment-history",
 		Usage: "Enables blazing fast eth_getProof for executed block",
 	}
 )
