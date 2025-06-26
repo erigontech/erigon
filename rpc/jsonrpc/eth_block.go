@@ -133,6 +133,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		return nil, err
 	}
 
+	blockCtx := transactions.NewEVMBlockContext(ctx, engine, header, tx, api._blockReader, chainConfig)
 	txCtx := core.NewEVMTxContext(firstMsg)
 	// Get a new instance of the EVM
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
