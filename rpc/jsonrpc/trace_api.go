@@ -53,7 +53,7 @@ type TraceAPIImpl struct {
 	kv            kv.TemporalRoDB
 	maxTraces     uint64
 	gasCap        uint64
-	compatibility bool // Bug for bug compatiblity with OpenEthereum
+	compatibility bool // Bug for bug compatibility with OpenEthereum
 }
 
 // NewTraceAPI returns NewTraceAPI instance
