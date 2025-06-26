@@ -25,9 +25,9 @@ require (
 )
 
 require (
-	github.com/FastFilter/xorfilter v0.2.1 // indirect
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.66
+	github.com/FastFilter/xorfilter v0.2.1 // indirect
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.5.0
 	github.com/alecthomas/kong v0.8.1
