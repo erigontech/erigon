@@ -213,7 +213,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if !gasBailout {
 		balanceCheck := gasVal
 
-		if st.feeCap != nil {
+		if st.feeCap != nil && !st.feeCap.IsZero() {
 			balanceCheck = (&uint256.Int{}).SetUint64(st.msg.Gas())
 			balanceCheck, overflow = balanceCheck.MulOverflow(balanceCheck, st.feeCap)
 			if overflow {
