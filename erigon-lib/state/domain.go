@@ -156,7 +156,7 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 
 	return d, nil
 }
-func (d *Domain) SetDependency(checker *DependencyIntegrityChecker) {
+func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
 }
 

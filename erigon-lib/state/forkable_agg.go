@@ -16,7 +16,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 type ForkableAgg struct {
@@ -579,7 +578,7 @@ func (r *ForkableAggTemporalTx) IsForkablePresent(id ForkableId) bool {
 func (r *ForkableAggTemporalTx) Marked(id ForkableId) MarkedTxI {
 	index, ok := r.mp[id]
 	if !ok {
-		panic(fmt.Errorf("forkable %s not found", ee.Registry.Name(id)))
+		panic(fmt.Errorf("forkable %s not found", Registry.Name(id)))
 	}
 
 	return r.marked[index>>2]
@@ -588,7 +587,7 @@ func (r *ForkableAggTemporalTx) Marked(id ForkableId) MarkedTxI {
 func (r *ForkableAggTemporalTx) Unmarked(id ForkableId) UnmarkedTxI {
 	index, ok := r.mp[id]
 	if !ok {
-		panic(fmt.Errorf("forkable %s not found", ee.Registry.Name(id)))
+		panic(fmt.Errorf("forkable %s not found", Registry.Name(id)))
 	}
 	return r.unmarked[index>>2]
 }
@@ -596,7 +595,7 @@ func (r *ForkableAggTemporalTx) Unmarked(id ForkableId) UnmarkedTxI {
 func (r *ForkableAggTemporalTx) Buffered(id ForkableId) BufferedTxI {
 	index, ok := r.mp[id]
 	if !ok {
-		panic(fmt.Errorf("forkable %s not found", ee.Registry.Name(id)))
+		panic(fmt.Errorf("forkable %s not found", Registry.Name(id)))
 	}
 	return r.buffered[index>>2]
 }
@@ -766,7 +765,7 @@ func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func
 		}
 	}
 
-	panic(fmt.Sprintf("no forkable with id %s", ee.Registry.String(forId)))
+	panic(fmt.Sprintf("no forkable with id %s", Registry.String(forId)))
 }
 
 func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipUnaligned bool, fn func(ForkableFilesTxI) R) R {
@@ -800,5 +799,5 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 		}
 	}
 
-	panic(fmt.Sprintf("no forkable with id %s", ee.Registry.Name(forId)))
+	panic(fmt.Sprintf("no forkable with id %s", Registry.Name(forId)))
 }

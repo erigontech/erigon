@@ -44,29 +44,29 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
+	"github.com/erigontech/erigon-db/downloader"
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
+	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/paths"
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
-	_ "github.com/erigontech/erigon-db/snaptype" //hack
+	_ "github.com/erigontech/erigon-db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
 func main() {
@@ -321,7 +321,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	d.MainLoopInBackground(false)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
-		for _, it := range snapcfg.KnownCfg(chain).Preverified {
+		for _, it := range snapcfg.KnownCfg(chain).Preverified.Items {
 			downloadItems = append(downloadItems, &proto_downloader.AddItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
@@ -566,17 +566,11 @@ func manifest(ctx context.Context, logger log.Logger) error {
 	l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "history/"+fName)
 	}
 	l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "idx/"+fName)
 	}
 
@@ -620,13 +614,6 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	}
 
 	for _, t := range torrents {
-		// we don't release commitment history in this time. let's skip it here.
-		if strings.Contains(t.DisplayName, "history") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
-		if strings.Contains(t.DisplayName, "idx") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
 		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)

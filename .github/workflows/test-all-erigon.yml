@@ -44,13 +44,16 @@ jobs:
   tests-mac-linux:
     needs: source-of-changes
     concurrency:
-      group: tests-mac-linux-${{ matrix.os }}-${{ github.ref }}
-      cancel-in-progress: >-
+      # concurrency group: there can be at most one running and one pending job in a 
+      # concurrency group at any time. So for commits on main/release, we use different 
+      # concurrency group per commit; for other branches, we use a branch-level CG.
+      group: >-
         ${{
-          needs.source-of-changes.outputs.changed_files != 'true' &&
-          !startsWith(github.ref, 'refs/heads/release/') &&
-          github.ref != 'refs/heads/main'
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('tests-all-erigon-{0}-{1}', matrix.os, github.run_id) ||
+          format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
         }}
+      cancel-in-progress: true
     strategy:
       matrix:
         os:
@@ -105,13 +108,13 @@ jobs:
   tests-windows:
     needs: source-of-changes
     concurrency:
-      group: tests-windows-${{ matrix.os }}-${{ github.ref }}
-      cancel-in-progress: >-
+      group: >-
         ${{
-          needs.source-of-changes.outputs.changed_files != 'true' &&
-          !startsWith(github.ref, 'refs/heads/release/') &&
-          github.ref != 'refs/heads/main'
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('tests-all-erigon-{0}-{1}-{2}', matrix.os, github.run_id) ||
+          format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
         }}
+      cancel-in-progress: true
     strategy:
       matrix:
         os: [ windows-2025 ]

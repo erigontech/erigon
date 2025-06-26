@@ -39,14 +39,14 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/stages"
 )
 
 const maxBlocksLookBehind = 32
@@ -282,7 +282,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 
-	tx, err := e.db.BeginRw(ctx)
+	tx, err := e.db.BeginRwNosync(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +294,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
 	tx.Rollback()
-	tx, err = e.db.BeginRw(ctx)
+	tx, err = e.db.BeginRwNosync(ctx)
 	if err != nil {
 		return nil, err
 	}

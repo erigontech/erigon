@@ -43,6 +43,8 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&HistoryExpiryEnabledFlag,
 	&PruneModeFlag,
+	&utils.KeepExecutionProofsFlag,
+
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,
@@ -88,7 +90,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
-	&utils.KeepExecutionProofsFlag,
 
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,

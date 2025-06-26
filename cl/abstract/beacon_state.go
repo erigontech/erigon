@@ -37,6 +37,7 @@ type BeaconStateUpgradable interface {
 	UpgradeToCapella() error
 	UpgradeToDeneb() error
 	UpgradeToElectra() error
+	UpgradeToFulu() error
 }
 
 type BeaconStateExtension interface {
@@ -46,6 +47,7 @@ type BeaconStateExtension interface {
 	GetTotalActiveBalance() uint64
 	ComputeCommittee(indicies []uint64, slot uint64, index, count uint64) ([]uint64, error)
 	GetBeaconProposerIndex() (uint64, error)
+	GetBeaconProposerIndices(epoch uint64) ([]uint64, error)
 	BaseRewardPerIncrement() uint64
 	BaseReward(index uint64) (uint64, error)
 	SyncRewards() (proposerReward, participantReward uint64, err error)
@@ -67,6 +69,7 @@ type BeaconStateExtension interface {
 	GetEarlistConsolidationEpoch() uint64
 	ComputeExitEpochAndUpdateChurn(exitBalance uint64) uint64
 	GetConsolidationBalanceToConsume() uint64
+	GetProposerLookahead() solid.Uint64VectorSSZ
 }
 
 type BeaconStateBasic interface {
@@ -139,6 +142,7 @@ type BeaconStateMutator interface {
 	SetDepositRequestsStartIndex(uint64)
 	SetConsolidationBalanceToConsume(uint64)
 	SetEarlistConsolidationEpoch(uint64)
+	SetProposerLookahead(proposerLookahead solid.Uint64VectorSSZ)
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)

@@ -28,19 +28,19 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
@@ -175,7 +175,11 @@ func canSnapshotBePruned(name string) bool {
 	return isStateHistory(name) || strings.Contains(name, "transactions")
 }
 
-func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
+func buildBlackListForPruning(
+	pruneMode bool,
+	stepPrune, minBlockToDownload, blockPrune uint64,
+	preverified snapcfg.Preverified,
+) (map[string]struct{}, error) {
 
 	blackList := make(map[string]struct{})
 	if !pruneMode {
@@ -183,7 +187,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 	}
 	stepPrune = adjustStepPrune(stepPrune)
 	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
-	for _, p := range preverified {
+	for _, p := range preverified.Items {
 		name := p.Name
 		// Don't prune unprunable files
 		if !canSnapshotBePruned(name) {
@@ -263,7 +267,7 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint6
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
 	maxTo := uint64(0)
-	for _, p := range preverified {
+	for _, p := range preverified.Items {
 		// take the "to" from "domain" snapshot
 		if !strings.HasPrefix(p.Name, "domain") {
 			continue
@@ -346,7 +350,7 @@ func WaitForDownloader(
 	// send all hashes to the Downloader service
 	snapCfg := snapcfg.KnownCfg(cc.ChainName)
 	preverifiedBlockSnapshots := snapCfg.Preverified
-	downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots))
+	downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
 
 	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 	blackListForPruning := make(map[string]struct{})
@@ -368,7 +372,7 @@ func WaitForDownloader(
 	}
 
 	// build all download requests
-	for _, p := range preverifiedBlockSnapshots {
+	for _, p := range preverifiedBlockSnapshots.Items {
 		if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
 			continue
 		}
@@ -409,36 +413,39 @@ func WaitForDownloader(
 		})
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
-			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		break
-	}
-
-	// Check for completion immediately, then growing intervals.
-	interval := time.Second
-	for {
-		completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
-		if err != nil {
-			return fmt.Errorf("waiting for snapshot download: %w", err)
-		}
-		if completedResp.GetCompleted() {
+	// Only add the preverified hashes until the initial sync completed for the first time.
+	if !snapCfg.Local {
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
+				log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
+				time.Sleep(10 * time.Second)
+				continue
+			}
 			break
 		}
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-time.After(interval):
+
+		// Check for completion immediately, then growing intervals.
+		interval := time.Second
+		for {
+			completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+			if err != nil {
+				return fmt.Errorf("waiting for snapshot download: %w", err)
+			}
+			if completedResp.GetCompleted() {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			case <-time.After(interval):
+			}
+			interval = min(interval*2, 20*time.Second)
 		}
-		interval = min(interval*2, 20*time.Second)
 	}
 
 	if !headerchain {
