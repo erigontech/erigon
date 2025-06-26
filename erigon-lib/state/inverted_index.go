@@ -95,6 +95,8 @@ type iiCfg struct {
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
 	Accessors Accessors
+	config    SnapshotConfig
+	schema    SnapNameSchema
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
@@ -119,8 +121,12 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.CompressorCfg = seg.DefaultCfg
 	if cfg.Accessors == 0 {
-		cfg.Accessors = AccessorHashMap
+		panic("assert: empty `Accessors`")
 	}
+
+	config := E3SnapshotConfigII(cfg)
+	cfg.config = config
+	cfg.schema = config.Schema
 
 	ii := InvertedIndex{
 		iiCfg:      cfg,
