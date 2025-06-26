@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/kv"

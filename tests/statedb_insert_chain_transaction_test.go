@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/tests/contracts"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {

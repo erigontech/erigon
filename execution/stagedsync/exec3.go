@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -970,7 +971,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 
 }
 
-func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader interfaces.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	if tx == nil {
 		tx, err = db.BeginRo(ctx)
 		if err != nil {

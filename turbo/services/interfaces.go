@@ -35,6 +35,26 @@ type All struct {
 	BlockReader FullBlockReader
 }
 
+type BlockReader interface {
+	BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error)
+	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
+	CurrentBlock(db kv.Tx) (*types.Block, error)
+	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
+	IterateFrozenBodies(f func(blockNum, baseTxNum, txCount uint64) error) error
+}
+
+type HeaderReader interface {
+	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error)
+	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
+	HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error)
+	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
+	ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64)
+
+	// HeadersRange - TODO: change it to `stream`
+	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
+	Integrity(ctx context.Context) error
+}
+
 type BorEventReader interface {
 	LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error)
@@ -83,12 +103,12 @@ type TxnReader interface {
 }
 
 type HeaderAndCanonicalReader interface {
-	interfaces.HeaderReader
+	HeaderReader
 	CanonicalReader
 }
 
 type BlockAndTxnReader interface {
-	interfaces.BlockReader
+	BlockReader
 	TxnReader
 }
 
@@ -99,9 +119,9 @@ type HeaderAndBodyReader interface {
 }
 
 type FullBlockReader interface {
-	interfaces.BlockReader
-	interfaces.BodyReader
-	interfaces.HeaderReader
+	BlockReader
+	BodyReader
+	HeaderReader
 	BorEventReader
 	BorSpanReader
 	BorMilestoneReader

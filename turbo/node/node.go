@@ -25,6 +25,8 @@ import "C"
 import (
 	"context"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -37,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
-	"github.com/urfave/cli/v2"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.

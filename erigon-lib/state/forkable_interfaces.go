@@ -9,7 +9,10 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 )
 
+type EncToBytesI = kv.EncToBytesI
+
 // Freezer takes hot data (e.g. from db) and transforms it
+// to snapshot cold data.
 type Freezer interface {
 	// baseNumFrom/To represent num which the snapshot should range
 	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller

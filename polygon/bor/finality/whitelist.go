@@ -27,13 +27,14 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/flags"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type config struct {
 	heimdall    heimdall.Client
 	borDB       kv.RwDB
 	chainDB     kv.RwDB
-	blockReader interfaces.BlockReader
+	blockReader services.BlockReader
 	logger      log.Logger
 	borAPI      BorAPI
 	closeCh     chan struct{}
@@ -43,7 +44,7 @@ type BorAPI interface {
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 
-func Whitelist(heimdall heimdall.Client, borDB kv.RwDB, chainDB kv.RwDB, blockReader interfaces.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
+func Whitelist(heimdall heimdall.Client, borDB kv.RwDB, chainDB kv.RwDB, blockReader services.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
 	if !flags.Milestone {
 		return
 	}

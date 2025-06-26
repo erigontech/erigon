@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
@@ -154,7 +155,7 @@ type Harness struct {
 	borConsensusDB             kv.RwDB
 	chainConfig                *chain.Config
 	borConfig                  *borcfg.BorConfig
-	blockReader                interfaces.BlockReader
+	blockReader                services.BlockReader
 	stateSyncStages            []*stagedsync.Stage
 	stateSync                  *stagedsync.Sync
 	miningSyncStages           []*stagedsync.Stage

@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"reflect"
 	"slices"
 	"strconv"
@@ -117,17 +116,6 @@ func HandleError(err error, stream jsonstream.Stream) {
 		}
 		stream.WriteObjectEnd()
 	}
-}
-
-const JsonStreamAutoCloseOnError = false
-const JsonStreamInitialBufferSize = 4096
-
-func newJsonStream(out io.Writer) jsonstream.Stream {
-	stream := jsoniter.NewStream(jsoniter.ConfigDefault, out, JsonStreamInitialBufferSize)
-	if JsonStreamAutoCloseOnError {
-		return jsonstream.NewStackStream(stream)
-	}
-	return jsonstream.NewJsoniterStream(stream)
 }
 
 func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *handler {

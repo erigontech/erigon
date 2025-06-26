@@ -26,7 +26,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -648,7 +647,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	return nil
 }
 
-func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader interfaces.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
