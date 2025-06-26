@@ -291,7 +291,7 @@ jobs:
     name: Debian packages
     needs: [ build-release, test-release ]
     if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
-    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@feature/lystopad/issue-7893
+    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
     with:
       application: ${{ needs.build-release.outputs.application }}
       version: ${{ needs.build-release.outputs.parsed-version }}
@@ -346,7 +346,7 @@ jobs:
         skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}
         if [ "x${{ inputs.publish_latest_tag }}" == "xtrue" ]; then
           echo Publishing latest tag:
-          skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest-test
+          skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest
         fi
         echo -n Deleting temporary image:
         skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} && echo " ...done"
