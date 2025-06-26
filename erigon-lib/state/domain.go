@@ -1364,7 +1364,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.PagedReader, idxPath strin
 		g.Reset(0)
 		for g.HasNext() {
 			//k, buf, nextPos = g.NextKey(nil)
-			k, _, buf, _, nextPos = g.Next2(nil, nil)
+			k, _, _, _, nextPos = g.Next2(nil, nil)
 			if err = rs.AddKey(k, pos); err != nil {
 				return fmt.Errorf("add idx key [%x]: %w", word, err)
 			}

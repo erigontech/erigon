@@ -354,6 +354,7 @@ func TestBpsTree_Seek(t *testing.T) {
 
 			ssk := keys[len(keys)-1]
 			c, err := bp.Seek(g, ssk[:len(ssk)/2])
+			require.NoError(t, err)
 			require.Equal(t, fmt.Sprintf("%x", ssk), fmt.Sprintf("%x", c.Key()))
 
 			for i := 0; i < len(keys); i++ {

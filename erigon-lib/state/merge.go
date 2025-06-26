@@ -532,7 +532,6 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, err
 	}
 	_kvFile.Close()
-	kvWriter = nil
 	ps.Delete(p)
 
 	valuesIn = newFilesItem(r.values.from, r.values.to, dt.aggStep)

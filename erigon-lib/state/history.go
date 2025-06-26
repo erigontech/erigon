@@ -1016,8 +1016,7 @@ type HistoryRoTx struct {
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs           []byte
-	snappyReadBuffer []byte
+	_bufTs []byte
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {

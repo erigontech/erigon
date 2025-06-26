@@ -101,7 +101,7 @@ func TestPage(t *testing.T) {
 	require.Equal(t, "k 0", string(k))
 	require.Equal(t, "v 0", string(v))
 
-	k, v = p1.Next()
+	k, _ = p1.Next()
 	require.Equal(t, "k 1", string(k))
 	require.False(t, p1.HasNext())
 }
