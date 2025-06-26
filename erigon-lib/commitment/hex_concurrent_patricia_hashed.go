@@ -42,8 +42,6 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) bool 
 			hph.grid[row][nib] = root.grid[row][nib]
 			if nib == nibble && hph.grid[row][nib].IsEmpty() {
 				shouldSequential = true
-				fmt.Printf("mountTo: TOP branch nibble %d is empty, skipping\n", nib)
-				// should set non-concurrent commitmetn?
 			}
 		}
 	}
