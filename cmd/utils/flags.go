@@ -1727,8 +1727,8 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 
 	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync)
 
-	chainConfig := params2.ChainConfigByChainName(ctx.String(ChainFlag.Name))
-	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
+	spec := params2.ChainSpecByName(ctx.String(ChainFlag.Name))
+	if !spec.IsEmpty() && spec.Config.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
 		// override default max devp2p peers for polygon as per
 		// https://forum.polygon.technology/t/introducing-our-new-dns-discovery-for-polygon-pos-faster-smarter-more-connected/19871
 		// which encourages high peer count
@@ -2032,13 +2032,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	switch chain {
 	default:
 		genesis := core.GenesisBlockByChainName(chain)
-		genesisHash := params2.GenesisHashByChainName(chain)
-		if (genesis == nil) || (genesisHash == nil) {
+		spec := params2.ChainSpecByName(chain)
+		if (genesis == nil) || (spec.IsEmpty()) {
 			Fatalf("ChainDB name is not recognized: %s", chain)
 			return
 		}
 		cfg.Genesis = genesis
-		SetDNSDiscoveryDefaults(cfg, *genesisHash)
+		SetDNSDiscoveryDefaults(cfg, spec.GenesisHash)
 	case "":
 		if cfg.NetworkID == 1 {
 			SetDNSDiscoveryDefaults(cfg, params2.MainnetGenesisHash)

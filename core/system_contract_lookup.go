@@ -38,8 +38,8 @@ func init() {
 		genesisBlock := GenesisBlockByChainName(chainName)
 		allocToCodeRecords(genesisBlock.Alloc, byChain, 0)
 		// Process upgrades
-		chainConfig := params.ChainConfigByChainName(chainName)
-		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+		spec := params.ChainSpecByName(chainName)
+		borConfig := spec.Config.Bor.(*borcfg.BorConfig)
 		for blockNumStr, genesisAlloc := range borConfig.BlockAlloc {
 			blockNum, err := strconv.ParseUint(blockNumStr, 10, 64)
 			if err != nil {

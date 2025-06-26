@@ -730,11 +730,11 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	defer db.Close()
 
 	if cc := tool.ChainConfigFromDB(db); cc != nil {
-		chainConfig := params.ChainConfigByChainName(chainName)
-		if chainConfig == nil {
+		spec := params.ChainSpecByName(chainName)
+		if spec.IsEmpty() {
 			return fmt.Errorf("unknown chain: %s", chainName)
 		}
-		if chainConfig.ChainID.Uint64() != cc.ChainID.Uint64() {
+		if spec.Config.ChainID.Uint64() != cc.ChainID.Uint64() {
 			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
 		}
 	}

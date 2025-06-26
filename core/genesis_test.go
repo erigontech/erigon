@@ -61,9 +61,9 @@ func TestGenesisBlockHashes(t *testing.T) {
 		defer tx.Rollback()
 		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, datadir.New(t.TempDir()), logger)
 		require.NoError(t, err)
-		expect := params.GenesisHashByChainName(network)
+		expect := params.ChainSpecByName(network).GenesisHash
 		require.NotNil(t, expect, network)
-		require.Equal(t, block.Hash(), *expect, network)
+		require.Equal(t, block.Hash(), expect, network)
 	}
 	for _, network := range networkname.All {
 		check(network)
@@ -80,31 +80,24 @@ func TestGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), datadir.New(t.TempDir()), log.Root())
-	require.NoError(err)
-	if block.Root() != params.GnosisGenesisStateRoot {
-		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
-	}
-	if block.Hash() != params.GnosisGenesisHash {
-		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
-	}
+	for _, netw := range []string{
+		networkname.Gnosis,
+		networkname.Chiado,
+		networkname.Test,
+	} {
 
-	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), datadir.New(t.TempDir()), log.Root())
-	require.NoError(err)
-	if block.Root() != params.ChiadoGenesisStateRoot {
-		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
-	}
-	if block.Hash() != params.ChiadoGenesisHash {
-		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
-	}
+		spec := params.ChainSpecByName(netw)
+		require.False(spec.IsEmpty())
 
-	block, _, err = core.GenesisToBlock(core.TestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
-	require.NoError(err)
-	if block.Root() != params.TestGenesisStateRoot {
-		t.Errorf("wrong test genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
-	}
-	if block.Hash() != params.TestGenesisHash {
-		t.Errorf("wrong test genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
+		block, _, err = core.GenesisToBlock(&spec.Genesis, datadir.New(t.TempDir()), log.Root())
+		require.NoError(err)
+
+		if block.Root() != spec.GenesisStateRoot {
+			t.Errorf("wrong %s Chain genesis state root, got %v, want %v", netw, block.Root(), spec.GenesisStateRoot)
+		}
+		if block.Hash() != spec.GenesisHash {
+			t.Errorf("wrong %s Chain genesis hash, got %v, want %v", netw, block.Hash(), spec.GenesisHash)
+		}
 	}
 }
 
