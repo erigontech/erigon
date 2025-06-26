@@ -1263,6 +1263,7 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 	if err != nil {
 		return err
 	}
+
 	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
 		filesToRemove := make([]string, 0, len(toRemove))
 
