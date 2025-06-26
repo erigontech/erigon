@@ -233,7 +233,17 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	logger.Info("[snapshots] cli flags", "chain", chain, "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String(), "webseed", webseeds)
+	logger.Info(
+		"[snapshots] cli flags",
+		"chain", chain,
+		"addr", downloaderApiAddr,
+		"datadir", dirs.DataDir,
+		"ipv6-enabled", !disableIPV6,
+		"ipv4-enabled", !disableIPV4,
+		"download.rate", downloadRate.String(),
+		"upload.rate", uploadRate.String(),
+		"webseed", webseeds,
+	)
 	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
