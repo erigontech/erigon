@@ -20,6 +20,7 @@ func TestBasicFunctionality(t *testing.T) {
 	// Create and build the filter
 	writer, err := NewWriter(filePath)
 	require.NoError(err, "Failed to create writer")
+	defer writer.Close()
 
 	// Add keys
 	for _, key := range testKeys {
@@ -38,6 +39,7 @@ func TestBasicFunctionality(t *testing.T) {
 	// Read the filter
 	reader, err := NewReader(filePath)
 	require.NoError(err, "Failed to create reader")
+	defer reader.Close()
 
 	// Verify all keys exist
 	for _, key := range testKeys {
@@ -58,6 +60,7 @@ func TestLargeDataSet(t *testing.T) {
 	// Create writer
 	writer, err := NewWriter(filePath)
 	require.NoError(err, "Failed to create writer")
+	defer writer.Close()
 
 	// Add 10,000 keys (exceeding page size)
 	keyCount := 10000
@@ -72,6 +75,7 @@ func TestLargeDataSet(t *testing.T) {
 	// Read the filter
 	reader, err := NewReader(filePath)
 	require.NoError(err, "Failed to create reader")
+	defer reader.Close()
 
 	// Verify all keys exist
 	for i := 0; i < keyCount; i++ {
@@ -106,6 +110,7 @@ func TestPartialPage(t *testing.T) {
 	// Create writer
 	writer, err := NewWriter(filePath)
 	require.NoError(err, "Failed to create writer")
+	defer writer.Close()
 
 	// Add keys to partially fill the last page (not a multiple of 512)
 	keyCount := 600
@@ -122,6 +127,7 @@ func TestPartialPage(t *testing.T) {
 	// Read the filter
 	reader, err := NewReader(filePath)
 	require.NoError(err, "Failed to create reader")
+	defer reader.Close()
 
 	// Verify all keys exist
 	for _, key := range keys {
@@ -165,6 +171,7 @@ func TestEmptyBuild(t *testing.T) {
 	// Create writer
 	writer, err := NewWriter(filePath)
 	require.NoError(err, "Failed to create writer")
+	defer writer.Close()
 
 	// We need at least one key for the filter to build
 	require.NoError(writer.AddHash(123), "Failed to add hash")
@@ -176,6 +183,7 @@ func TestEmptyBuild(t *testing.T) {
 	// Read the filter
 	reader, err := NewReader(filePath)
 	require.NoError(err, "Failed to create reader")
+	defer reader.Close()
 
 	// Verify the key exists
 	require.True(reader.ContainsHash(123), "Key 123 not found in filter")
@@ -190,6 +198,7 @@ func TestWriterClose(t *testing.T) {
 	// Create writer
 	writer, err := NewWriter(filePath)
 	require.NoError(err, "Failed to create writer")
+	defer writer.Close()
 
 	// Close without building
 	writer.Close()
@@ -210,6 +219,7 @@ func TestMultipleFilters(t *testing.T) {
 
 		writer, err := NewWriter(filePath)
 		require.NoError(err, "Failed to create writer %d", i)
+		defer writer.Close()
 
 		// Add some keys
 		for j := 0; j < 100; j++ {
@@ -223,10 +233,11 @@ func TestMultipleFilters(t *testing.T) {
 		// Read back and verify
 		reader, err := NewReader(filePath)
 		require.NoError(err, "Failed to create reader for filter %d", i)
-
+		defer reader.Close()
 		for j := 0; j < 100; j++ {
 			key := baseKey + uint64(j)
 			require.True(reader.ContainsHash(key), "Key %d not found in filter %d", key, i)
 		}
+		reader.Close()
 	}
 }
