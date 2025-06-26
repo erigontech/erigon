@@ -242,7 +242,8 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 		if err != nil {
 			return err
 		}
-		firstRun := sdc.justRestored.Load()
+		// firstRun := sdc.justRestored.Load()
+		firstRun := false
 		fmt.Printf("enableConcurrentCommitmentIfPossible[%t]: can concurrent %t, firstRun %t\n", trieCanConcurrent && !firstRun, trieCanConcurrent, firstRun)
 		sdc.updates.SetConcurrentCommitment(trieCanConcurrent && !firstRun)
 	}
