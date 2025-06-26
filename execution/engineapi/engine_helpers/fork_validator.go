@@ -148,14 +148,14 @@ func (fv *ForkValidator) FlushExtendingFork(db kv.TemporalRwDB, tx kv.RwTx, accu
 	start := time.Now()
 	// Flush changes to db.
 	if fv.sharedDom != nil {
-		// for i := 0; i < 16; i++ {
-		// 	ttx, err := db.BeginTemporalRo(fv.ctx)
-		// 	if err != nil {
-		// 		return fmt.Errorf("ForkValidator.FlushExtendingFork: failed to begin temporal read-only transaction: %w", err)
-		// 	}
-		// 	defer ttx.Rollback()
-		// 	fv.sharedDom.SetTxn(ttx, uint(i))
-		// }
+		for i := 0; i < 16; i++ {
+			ttx, err := db.BeginTemporalRo(fv.ctx)
+			if err != nil {
+				return fmt.Errorf("ForkValidator.FlushExtendingFork: failed to begin temporal read-only transaction: %w", err)
+			}
+			defer ttx.Rollback()
+			fv.sharedDom.SetTxn(ttx, uint(i))
+		}
 		_, err := fv.sharedDom.ComputeCommitment(context.Background(), true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment")
 		if err != nil {
 			return err
