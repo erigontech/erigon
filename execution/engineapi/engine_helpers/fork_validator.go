@@ -285,7 +285,7 @@ func (fv *ForkValidator) ValidatePayload(db kv.TemporalRwDB, tx kv.RwTx, header 
 	txc := wrap.NewTxContainer(tx, fv.sharedDom)
 
 	for i := 0; i < 16; i++ {
-		ttx, err := db.BeginTemporalRo(fv.ctx)
+		ttx, err := db.BeginTemporalRo(fv.ctx) //nolint:ruleguard
 		if err != nil {
 			criticalError = fmt.Errorf("ForkValidator.ValidatePayload: failed to begin temporal read-only transaction: %w", err)
 			return
