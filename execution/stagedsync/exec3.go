@@ -420,7 +420,7 @@ func ExecV3(ctx context.Context,
 
 	blockComplete.Store(true)
 
-	ts := time.Duration(0)
+	computeCommitmentDuration := time.Duration(0)
 	blockNum = executor.domains().BlockNum()
 	outputTxNum.Store(executor.domains().TxNum())
 	//for i := 0; i < 16; i++ {
@@ -483,7 +483,7 @@ Loop:
 			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
-			ts += time.Since(start)
+			computeCommitmentDuration += time.Since(start)
 			shouldGenerateChangesets = true // now we can generate changesets for the safety net
 		}
 		changeset := &state2.StateChangeSet{}
@@ -710,7 +710,7 @@ Loop:
 				return errors.New("wrong trie root")
 			}
 
-			ts += time.Since(start)
+			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {
 				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 				if !inMemExec {
@@ -759,20 +759,20 @@ Loop:
 
 				var (
 					commitStart = time.Now()
-					tt          = time.Now()
 
-					t1, t3 time.Duration
+					pruneDuration time.Duration
 				)
-
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
+				ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+				if err != nil {
 					return err
 				} else if !ok {
 					break Loop
 				}
 
-				t1 = time.Since(tt) + ts
+				computeCommitmentDuration += times.ComputeCommitment
+				flushDuration := times.Flush
 
-				tt = time.Now()
+				timeStart := time.Now()
 
 				// allow greedy prune on non-chain-tip
 				if err = executor.tx().(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
@@ -782,9 +782,9 @@ Loop:
 				if _, err := executor.tx().(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 					return err
 				}
-				t3 = time.Since(tt)
+				pruneDuration = time.Since(timeStart)
 
-				t2, err := executor.(*serialExecutor).commit(ctx, inputTxNum, outputBlockNum.GetValueUint64(), useExternalTx)
+				commitDuration, err := executor.(*serialExecutor).commit(ctx, inputTxNum, outputBlockNum.GetValueUint64(), useExternalTx)
 				if err != nil {
 					return err
 				}
@@ -810,7 +810,7 @@ Loop:
 				logger.Info("Committed", "time", time.Since(commitStart),
 					"block", outputBlockNum.GetValueUint64(), "txNum", inputTxNum,
 					"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
-					"flush+commitment", t1, "tx.commit", t2, "prune", t3)
+					"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
 			default:
 			}
 		}
@@ -842,7 +842,7 @@ Loop:
 
 				executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
 			}
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+			_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -969,48 +969,59 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 	return false, nil
 }
 
-// flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+type FlushAndComputeCommitmentTimes struct {
+	Flush             time.Duration
+	ComputeCommitment time.Duration
+}
 
+// flushAndCheckCommitmentV3 - does write state to db and then check commitment
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
 		if err := e.Update(applyTx, maxBlockNum); err != nil {
-			return false, err
+			return false, times, err
 		}
 		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
-			return false, fmt.Errorf("writing plain state version: %w", err)
+			return false, times, fmt.Errorf("writing plain state version: %w", err)
 		}
 	}
 
 	if header == nil {
-		return false, errors.New("header is nil")
+		return false, times, errors.New("header is nil")
 	}
 
 	if dbg.DiscardCommitment() {
-		return true, nil
+		return true, times, nil
 	}
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix())
+	times.ComputeCommitment = time.Since(start)
 	if err != nil {
-		return false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
+		return false, times, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}
+
 	if cfg.blockProduction {
 		header.Root = common.BytesToHash(computedRootHash)
-		return true, nil
+		return true, times, nil
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		return handleIncorrectRootHashError(header, applyTx.(kv.TemporalRwTx), cfg, e, maxBlockNum, logger, u)
+		ok, err = handleIncorrectRootHashError(header, applyTx.(kv.TemporalRwTx), cfg, e, maxBlockNum, logger, u)
+		return ok, times, err
 	}
 	if !inMemExec {
-		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
+		start = time.Now()
+		err := doms.Flush(ctx, applyTx)
+		times.Flush = time.Since(start)
+		if err != nil {
+			return false, times, err
 		}
 	}
-	return true, nil
+	return true, times, nil
 
 }
 
