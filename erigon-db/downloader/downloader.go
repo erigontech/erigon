@@ -294,7 +294,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	// to achieve this.
 	requestHandler := requestHandler{
 		Transport: http.Transport{
-			//ReadBufferSize: 64 << 10,
+			ReadBufferSize: 64 << 10,
 			// Note this does nothing in go1.24.
 			HTTP2: &http.HTTP2Config{
 				MaxConcurrentStreams: 1,
