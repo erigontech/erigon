@@ -130,7 +130,7 @@ func TestSpawnSequencingStage(t *testing.T) {
 	cacheMock := cMocks.NewMockCache(mockCtrl)
 	cacheMock.EXPECT().View(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
-	txPool, err := txpool.New(nil, txPoolDb, txpoolcfg.Config{}, cacheMock, chainID, nil, nil, nil, nil, nil, nil, &ethconfig.Config{}, nil)
+	txPool, err := txpool.New(nil, txPoolDb, txpoolcfg.Config{}, cacheMock, chainID, nil, nil, nil, nil, nil, nil, &ethconfig.Config{}, nil, nil)
 	require.NoError(t, err)
 
 	engineMock.EXPECT().

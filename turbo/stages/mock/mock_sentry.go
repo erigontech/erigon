@@ -331,7 +331,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		pragueTime := mock.ChainConfig.PragueTime
 		blobSchedule := mock.ChainConfig.BlobSchedule
 
-		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime, blobSchedule, londonBlock, &ethconfig.Defaults, mock.DB)
+		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime, blobSchedule, londonBlock, &ethconfig.Defaults, mock.DB, nil)
 		if err != nil {
 			tb.Fatal(err)
 		}

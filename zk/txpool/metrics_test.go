@@ -99,7 +99,7 @@ func TestCalculateMetrics(t *testing.T) {
 			require.NotNil(t, txPoolDB)
 			require.NotNil(t, aclsDB)
 
-			pool, err := New(ch, coreDB, txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), uint256.Int(*u256.N1), nil, nil, nil, nil, nil, nil, &ethconfig.Defaults, aclsDB)
+			pool, err := New(ch, coreDB, txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), uint256.Int(*u256.N1), nil, nil, nil, nil, nil, nil, &ethconfig.Defaults, aclsDB, nil)
 			assert.NoError(err)
 			require.True(pool != nil)
 

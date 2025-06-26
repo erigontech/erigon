@@ -149,7 +149,15 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, ethCfg *ethconfig.
 		shanghaiTime = cfg.OverrideShanghaiTime
 	}
 
-	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime, chainConfig.BlobSchedule, chainConfig.LondonBlock, ethCfg, aclDB)
+	var priorityList *txpool.PriorityList
+	if len(ethCfg.Zk.PrioritySendersJsonLocation) > 0 {
+		priorityList, err = txpool.UnmarshalDynamicPriorityList(ethCfg.Zk.PrioritySendersJsonLocation)
+		if err != nil {
+			return nil, nil, nil, nil, nil, fmt.Errorf("failed to unmarshal dynamic priority list: %w", err)
+		}
+	}
+
+	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime, chainConfig.BlobSchedule, chainConfig.LondonBlock, ethCfg, aclDB, priorityList)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

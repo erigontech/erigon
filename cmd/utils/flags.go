@@ -943,6 +943,11 @@ var (
 		Usage: "Location of the ACL JSON file",
 		Value: "",
 	}
+	PrioritySendersJsonLocation = cli.StringFlag{
+		Name:  "txpool.priority-senders-json-location",
+		Usage: "Location of the Priority Senders JSON file",
+		Value: "",
+	}
 	DebugTimers = cli.BoolFlag{
 		Name:  "debug.timers",
 		Usage: "Enable debug timers",

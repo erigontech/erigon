@@ -44,7 +44,7 @@ func store(t *testing.T, dbPath string) *TxPool {
 	ethCfg := &ethconfig.Defaults
 	ethCfg.Zk.Limbo = true
 
-	pSource, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), ethCfg, aclDb)
+	pSource, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), ethCfg, aclDb, nil)
 	assert.NilError(t, err)
 
 	parseCtx := types.NewTxParseContext(pSource.chainID)
@@ -147,7 +147,7 @@ func store(t *testing.T, dbPath string) *TxPool {
 	assert.NilError(t, err)
 
 	// restore
-	pTarget, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), ethCfg, aclDb)
+	pTarget, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), ethCfg, aclDb, nil)
 	assert.NilError(t, err)
 
 	cacheView, err := pTarget._stateCache.View(context.Background(), tx)
@@ -184,7 +184,7 @@ func restoreRo(t *testing.T, dbPath string, pSource *TxPool) {
 	newTxs := make(chan types.Announcements, 1024)
 	defer close(newTxs)
 
-	pTarget, err := New(newTxs, db, txpoolcfg.DefaultConfig, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), &ethconfig.Defaults, aclDb)
+	pTarget, err := New(newTxs, db, txpoolcfg.DefaultConfig, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), &ethconfig.Defaults, aclDb, nil)
 	assert.NilError(t, err)
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {
