@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ethereum/go-ethereum/p2p"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -72,6 +71,9 @@ import (
 	stages2 "github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/node/migrations"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -888,11 +890,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 			if execProgress == 0 {
-				temporalTx, ok := tx.(kv.TemporalTx)
-				if !ok {
-					return errors.New("tx is not a temporal tx")
-				}
-				doms, err := libstate.NewSharedDomains(temporalTx, log.New())
+				doms, err := libstate.NewSharedDomains(tx, log.New())
 				if err != nil {
 					panic(err)
 				}
@@ -1224,19 +1222,6 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	services.BlockRetire, consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState,
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-
-	//if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
-	//	syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	return nil
-	//}); err != nil {
-	//	panic(err)
-	//}
-	//if syncCfg.KeepExecutionProofs {
-	//	libstate.EnableHistoricalCommitment()
-	//}
 
 	ethdb.InitialiazeLocalWasmTarget()
 	vmConfig := &vm.Config{}

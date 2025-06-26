@@ -1,19 +1,19 @@
 - [Introduction](#introduction)
 - [Getting Started](#getting-started)
-  - [Running locally](#running-locally)
-  - [Running remotely](#running-remotely)
-  - [Healthcheck](#healthcheck)
-  - [Testing](#testing)
+    - [Running locally](#running-locally)
+    - [Running remotely](#running-remotely)
+    - [Healthcheck](#healthcheck)
+    - [Testing](#testing)
 - [FAQ](#faq)
-  - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-methods)
-  - [RPC Implementation Status](#rpc-implementation-status)
-  - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
-  - [Ethstats](#ethstats)
-  - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods-allowlist)
-  - [Server load too high](#server-load-too-high)
-  - [Faster Batch requests](#faster-batch-requests)
+    - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-methods)
+    - [RPC Implementation Status](#rpc-implementation-status)
+    - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
+    - [Ethstats](#ethstats)
+    - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods-allowlist)
+    - [Server load too high](#server-load-too-high)
+    - [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)
-  - [Code generation](#code-generation)
+    - [Code generation](#code-generation)
 
 ## Introduction
 
@@ -395,7 +395,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 ### GraphQL
 
 | Command         | Avail | Notes |
-| --------------- | ----- | ----- |
+|-----------------|-------|-------|
 | GetBlockDetails | Yes   |       |
 | GetChainID      | Yes   |       |
 

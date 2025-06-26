@@ -183,13 +183,6 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 
 	var blockRoot common.Hash
 	newHighestBlockProcessed = highestBlockProcessed
-	if shouldProcessBlobs(blocks, cfg) {
-		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, blocks)
-		if err != nil {
-			logger.Trace("[Caplin] Failed to process blobs", "err", err)
-			return highestBlockProcessed, nil
-		}
-	}
 	// Iterate over each block in the sorted list
 	for _, block := range blocks {
 		// Compute the hash of the current block

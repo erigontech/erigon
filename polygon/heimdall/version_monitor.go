@@ -17,7 +17,11 @@ const (
 
 type heimdallClient interface {
 	FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error)
+}
+
+type versionMonitor struct {
 	ctx            context.Context
+	currentVersion HeimdallVersion
 
 	heimdall heimdallClient
 	logger   log.Logger

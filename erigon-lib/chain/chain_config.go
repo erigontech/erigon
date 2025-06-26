@@ -989,11 +989,6 @@ var ArbitrumSupportedChainConfigs = []*Config{
 	ArbitrumAnytrustGoerliTestnetChainConfig(),
 }
 
-// IsEIP158 returns whether num is either equal to the EIP158 fork block or greater.
-func (c *Config) IsEIP158(num *big.Int) bool {
-	return isBlockForked(c.EIP158Block, num)
-}
-
 // DefaultCacheConfigWithScheme returns a deep copied default cache config with
 // a provided trie node scheme.
 func DefaultCacheConfigWithScheme(scheme string) *CacheConfig {

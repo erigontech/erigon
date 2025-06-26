@@ -31,8 +31,6 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
@@ -51,6 +49,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -278,28 +277,7 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	if err := config.CheckConfigForkOrder(); err != nil {
 		return err
 	}
-	err = rawdb.WriteGenesisBesideState(block, tx, g)
-	return block, statedb, err
-}
 
-// Writes custom genesis block to db. Allows to write genesis with block number > 0.
-func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block, difficulty *big.Int, genesisBlockNum uint64, cfg *chain.Config) error {
-	// This part already happens in InitializeArbosInDatabase
-	//var stateWriter state.StateWriter
-	//if block.Number().Sign() != 0 {
-	//	return nil, statedb, errors.New("can't commit genesis block with number > 0")
-	//}
-	//if err := statedb.CommitBlock(rules, stateWriter); err != nil {
-	//	return nil, statedb, fmt.Errorf("cannot write state: %w", err)
-	//}
-	//newCfg := gen.ConfigOrDefault(block.Root())
-	//if err := newCfg.CheckConfigForkOrder(); err != nil {
-	//	return err
-	//}
-
-	if err := WriteGenesisIfNotExist(tx, gen); err != nil {
-		return err
-	}
 	if err := rawdb.WriteBlock(tx, block); err != nil {
 		return err
 	}
@@ -309,9 +287,11 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
 		return err
 	}
+
 	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
 		return err
 	}
+
 	rawdb.WriteHeadBlockHash(tx, block.Hash())
 	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return err
@@ -503,7 +483,6 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-	//head, withdrawals := rawdb.GenesisWithoutStateToBlock(g)
 	_ = g.Alloc //nil-check
 
 	head, withdrawals := GenesisWithoutStateToBlock(g)
