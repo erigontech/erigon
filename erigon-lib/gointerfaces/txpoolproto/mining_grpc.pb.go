@@ -8,7 +8,6 @@ package txpoolproto
 
 import (
 	context "context"
-
 	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"

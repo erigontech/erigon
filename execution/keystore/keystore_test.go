@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	dirs "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-p2p/event"
+	"github.com/erigontech/erigon/p2p/event"
 	"golang.org/x/exp/slices"
 )
 

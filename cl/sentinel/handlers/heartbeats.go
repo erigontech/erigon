@@ -22,10 +22,10 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/enr"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // Type safe handlers which all have access to the original stream & decompressed data.

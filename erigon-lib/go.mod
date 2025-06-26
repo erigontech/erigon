@@ -50,7 +50,6 @@ require (
 	github.com/prometheus/client_model v0.6.1
 	github.com/protolambda/ztyp v0.2.2
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
-	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/shirou/gopsutil/v4 v4.24.8
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
