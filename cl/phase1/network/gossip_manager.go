@@ -67,6 +67,11 @@ type GossipManager struct {
 	proposerSlashingService      services.ProposerSlashingService
 	attestationsLimiter          *timeBasedRateLimiter
 	aggregateAndProofLimiter     *timeBasedRateLimiter
+	voluntaryExitLimiter         *timeBasedRateLimiter
+	blsToExecutionChangeLimiter  *timeBasedRateLimiter
+	proposerSlashingLimiter      *timeBasedRateLimiter
+	syncCommitteeMessagesLimiter *timeBasedRateLimiter
+	syncContributionLimiter      *timeBasedRateLimiter
 }
 
 func NewGossipReceiver(
@@ -104,8 +109,13 @@ func NewGossipReceiver(
 		voluntaryExitService:         voluntaryExitService,
 		blsToExecutionChangeService:  blsToExecutionChangeService,
 		proposerSlashingService:      proposerSlashingService,
-		attestationsLimiter:          newTimeBasedRateLimiter(6*time.Second, 250),
-		aggregateAndProofLimiter:     newTimeBasedRateLimiter(6*time.Second, 250),
+		attestationsLimiter:          newTimeBasedRateLimiter(6*time.Second, 1),
+		aggregateAndProofLimiter:     newTimeBasedRateLimiter(6*time.Second, 1),
+		voluntaryExitLimiter:         newTimeBasedRateLimiter(6*time.Second, 1),
+		blsToExecutionChangeLimiter:  newTimeBasedRateLimiter(6*time.Second, 1),
+		proposerSlashingLimiter:      newTimeBasedRateLimiter(6*time.Second, 1),
+		syncCommitteeMessagesLimiter: newTimeBasedRateLimiter(6*time.Second, 1),
+		syncContributionLimiter:      newTimeBasedRateLimiter(6*time.Second, 1),
 	}
 }
 
@@ -176,6 +186,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
 		return g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
+		if !g.syncContributionLimiter.tryAcquire() {
+			return services.ErrIgnore
+		}
 		obj := &services.SignedContributionAndProofForGossip{
 			Receiver:                   copyOfPeerData(data),
 			SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
@@ -185,6 +198,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
+		if !g.voluntaryExitLimiter.tryAcquire() {
+			return services.ErrIgnore
+		}
 		obj := &services.SignedVoluntaryExitForGossip{
 			Receiver:            copyOfPeerData(data),
 			SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
@@ -195,12 +211,16 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		return g.voluntaryExitService.ProcessMessage(ctx, data.SubnetId, obj)
 
 	case gossip.TopicNameProposerSlashing:
+		if !g.proposerSlashingLimiter.tryAcquire() {
+			return services.ErrIgnore
+		}
 		obj := &cltypes.ProposerSlashing{}
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.proposerSlashingService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameAttesterSlashing:
+		// opzionale: aggiungere un limiter anche qui se desiderato
 		attesterSlashing := cltypes.NewAttesterSlashing(version)
 		if err := attesterSlashing.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
@@ -212,6 +232,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 
 		return nil
 	case gossip.TopicNameBlsToExecutionChange:
+		if !g.blsToExecutionChangeLimiter.tryAcquire() {
+			return services.ErrIgnore
+		}
 		obj := &services.SignedBLSToExecutionChangeForGossip{
 			Receiver:                   copyOfPeerData(data),
 			SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{},
@@ -245,6 +268,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			// The background checks above are enough for now.
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
+			if !g.syncCommitteeMessagesLimiter.tryAcquire() {
+				return services.ErrIgnore
+			}
 			obj := &services.SyncCommitteeMessageForGossip{
 				Receiver:             copyOfPeerData(data),
 				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
@@ -254,6 +280,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			}
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, obj)
 		case gossip.IsTopicBeaconAttestation(data.Name):
+			if !g.attestationsLimiter.tryAcquire() {
+				// If we are not ready to process attestations, we ignore them.
+				return services.ErrIgnore
+			}
 			obj := &services.AttestationForGossip{
 				Receiver: copyOfPeerData(data),
 				//Attestation:       &solid.Attestation{},
@@ -265,7 +295,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 				if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 					return err
 				}
-				if g.committeeSub.NeedToAggregate(obj.Attestation) || g.attestationsLimiter.tryAcquire() {
+				if g.committeeSub.NeedToAggregate(obj.Attestation) {
 					return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
 				}
 			} else {
@@ -274,9 +304,8 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 				if err := obj.SingleAttestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 					return err
 				}
-				if g.attestationsLimiter.tryAcquire() {
-					return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
-				}
+
+				return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
 			}
 			return services.ErrIgnore
 		default:
