@@ -27,15 +27,27 @@ import (
 // NOTE: not thread safe; synchronization done on the caller side
 // specially when accessing dirtyFiles or current.
 type SnapshotRepo struct {
+	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
+	//
+	// _visible derivative from field `file`, but without garbage:
+	//  - no files with `canDelete=true`
+	//  - no overlaps
+	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
+	//
+	// BeginRo() using _visible in zero-copy way
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	// latest version of visible files (derived from dirtyFiles)
 	// when repo is used in the context of rotx, one might want to think
-	// about which visibleFiles needs to be used - repo.current or
+	// about which visibleFiles needs to be used - repo._visible or
 	// rotx.visibleFiles
-	current visibleFiles
-	entity  UniversalEntity
-	name    string
+
+	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
+	// underlying array is immutable - means it's ready for zero-copy use
+	_visible visibleFiles
+
+	entity UniversalEntity
 
 	cfg       *SnapshotConfig
 	schema    SnapNameSchema
@@ -45,14 +57,13 @@ type SnapshotRepo struct {
 	logger log.Logger
 }
 
-func NewSnapshotRepoForForkable(id ForkableId, logger log.Logger) *SnapshotRepo {
-	return NewSnapshotRepo(Registry.Name(id), FromForkable(id), Registry.SnapshotConfig(id), logger)
+func NewSnapshotRepoForForkable(id ForkableId, logger log.Logger) SnapshotRepo {
+	return NewSnapshotRepo(FromForkable(id), Registry.SnapshotConfig(id), logger)
 }
 
-func NewSnapshotRepo(name string, entity UniversalEntity, cfg *SnapshotConfig, logger log.Logger) *SnapshotRepo {
-	return &SnapshotRepo{
+func NewSnapshotRepo(entity UniversalEntity, cfg *SnapshotConfig, logger log.Logger) SnapshotRepo {
+	return SnapshotRepo{
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		name:       name,
 		entity:     entity,
 		cfg:        cfg,
 		schema:     cfg.Schema,
@@ -142,19 +153,19 @@ func (f *SnapshotRepo) DirtyFilesMaxRootNum() RootNum {
 }
 
 func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) (maxRootNum RootNum) {
-	f.current = f.calcVisibleFiles(to)
-	return RootNum(f.current.EndTxNum())
+	f._visible = f.calcVisibleFiles(to)
+	return RootNum(f._visible.EndTxNum())
 }
 
 // type VisibleFile = kv.VisibleFile
 // type VisibleFiles = kv.VisibleFiles
 
 func (f *SnapshotRepo) visibleFiles() visibleFiles {
-	return f.current
+	return f._visible
 }
 
 func (f *SnapshotRepo) VisibleFiles() (files kv.VisibleFiles) {
-	for _, file := range f.current {
+	for _, file := range f._visible {
 		files = append(files, file)
 	}
 	return
@@ -198,7 +209,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
 }
 
 func (f *SnapshotRepo) EndRootNum() RootNum {
-	return RootNum(f.current.EndTxNum())
+	return RootNum(f._visible.EndTxNum())
 }
 
 func (f *SnapshotRepo) Close() {
@@ -230,12 +241,12 @@ func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
 
 func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
 	var i int
-	for i = len(f.current) - 1; i >= 0; i-- {
-		if f.current[i].endTxNum <= uint64(after) {
+	for i = len(f._visible) - 1; i >= 0; i-- {
+		if f._visible[i].endTxNum <= uint64(after) {
 			break
 		}
 	}
-	f.current = f.current[:i+1]
+	f._visible = f._visible[:i+1]
 }
 
 func (f *SnapshotRepo) Garbage(vfs visibleFiles, merged *FilesItem) (outs []*FilesItem) {

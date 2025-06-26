@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/spaolacci/murmur3"
-	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -58,25 +57,11 @@ type InvertedIndex struct {
 	iiCfg
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
+	repo SnapshotRepo
+
 	aggregationStep uint64 // amount of transactions inside single aggregation step
 
-	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
-	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
-	//
-	// _visible derivative from field `file`, but without garbage:
-	//  - no files with `canDelete=true`
-	//  - no overlaps
-	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
-	//
-	// BeginRo() using _visible in zero-copy way
-	dirtyFiles *btree2.BTreeG[*FilesItem]
-
-	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
-	// underlying array is immutable - means it's ready for zero-copy use
-	_visible *iiVisible
-	logger   log.Logger
-
-	checker *DependencyIntegrityChecker
+	logger log.Logger
 }
 
 type iiCfg struct {
@@ -95,8 +80,6 @@ type iiCfg struct {
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
 	Accessors Accessors
-	config    SnapshotConfig
-	schema    SnapNameSchema
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
@@ -125,14 +108,12 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 	}
 
 	config := E3SnapshotConfigII(cfg)
-	cfg.config = config
-	cfg.schema = config.Schema
+	repo := NewSnapshotRepo(FromII(cfg.name), &config, logger)
 
 	ii := InvertedIndex{
-		iiCfg:      cfg,
-		dirtyFiles: btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newIIVisible(cfg.filenameBase, []visibleFile{}),
-		logger:     logger,
+		iiCfg:  cfg,
+		repo:   repo,
+		logger: logger,
 
 		aggregationStep: aggStep,
 	}
@@ -232,12 +213,12 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 }
 
 func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
-	ii.checker = checker
+	ii.repo.cfg.SetIntegrity(checker)
 }
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	var checker func(startTxNum, endTxNum uint64) bool
-	c := ii.checker
+	c := ii.repo.cfg.Integrity
 	if c != nil {
 		ue := FromII(ii.name)
 		checker = func(startTxNum, endTxNum uint64) bool {
