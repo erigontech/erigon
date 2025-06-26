@@ -52,5 +52,9 @@ disabled_tests=(
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
 python3 ./run_tests.py --port 8545 --engine-port 8545 --continue -f --json-diff -x "$disabled_test_list"
-
+if $manual; then
+  echo "deactivating…"
+  deactivate 2>/dev/null || echo "No active virtualenv"
+  echo "deactivating complete."
+fi
 exit $?
