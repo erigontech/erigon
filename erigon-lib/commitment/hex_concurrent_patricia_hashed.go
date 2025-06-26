@@ -40,9 +40,9 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) bool 
 	for row := 0; row <= hph.activeRows; row++ {
 		for nib := 0; nib < len(hph.grid[row]); nib++ {
 			hph.grid[row][nib] = root.grid[row][nib]
-			if nib == nibble && hph.grid[row][nib].IsEmpty() {
-				shouldSequential = true
-			}
+			// if nib == nibble && hph.grid[row][nib].IsEmpty() {
+			// 	shouldSequential = true
+			// }
 		}
 	}
 	return shouldSequential

@@ -189,9 +189,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.patriciaTrie.SetTrace(sdc.trace)
 	sdc.Reset()
 
-	if !sdc.justRestored.Load() {
-		sdc.CheckSubTx()
-	}
+	sdc.CheckSubTx()
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
 	if err != nil {
