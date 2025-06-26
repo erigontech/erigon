@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/execution/stages/mock"
 )
 
 type TxFn func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool)

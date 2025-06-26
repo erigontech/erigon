@@ -35,10 +35,11 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {
@@ -256,10 +257,10 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 func TestUseBridgeReader(t *testing.T) {
 	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
 	var br *mockBridgeReader
-	api := NewBaseApi(nil, nil, nil, false, time.Duration(0), nil, datadir.Dirs{}, br)
+	api := NewBaseApi(nil, nil, (*freezeblocks.BlockReader)(nil), false, time.Duration(0), nil, datadir.Dirs{}, br)
 	require.False(t, api.useBridgeReader)
 	br = &mockBridgeReader{}
-	api = NewBaseApi(nil, nil, nil, false, time.Duration(0), nil, datadir.Dirs{}, br)
+	api = NewBaseApi(nil, nil, (*freezeblocks.BlockReader)(nil), false, time.Duration(0), nil, datadir.Dirs{}, br)
 	require.True(t, api.useBridgeReader)
 }
 

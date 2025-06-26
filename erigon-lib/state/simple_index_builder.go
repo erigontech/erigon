@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -65,7 +64,7 @@ type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
 	id       ForkableId
-	parser   ee.SnapNameSchema
+	parser   SnapNameSchema
 	kf       IndexKeyFactory
 	fetcher  FirstEntityNumFetcher
 	logger   log.Logger
@@ -79,7 +78,7 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logg
 	b := &SimpleAccessorBuilder{
 		args:   args,
 		id:     id,
-		parser: id.SnapshotConfig().Schema,
+		parser: Registry.SnapshotConfig(id).Schema,
 		logger: logger,
 	}
 
@@ -106,7 +105,7 @@ type AccessorBuilderOptions func(*SimpleAccessorBuilder)
 
 func WithIndexPos(indexPos uint64) AccessorBuilderOptions {
 	return func(s *SimpleAccessorBuilder) {
-		if int(s.indexPos) >= len(s.id.IndexFileTag()) {
+		if int(s.indexPos) >= len(Registry.IndexFileTag(s.id)) {
 			panic("indexPos greater than indexFileTag length")
 		}
 		s.indexPos = indexPos
@@ -145,7 +144,7 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.id.IndexFileTag()[s.indexPos], from, to, rec, dbg.Stack())
+			err = fmt.Errorf("%s: at=%d-%d, %v, %s", Registry.IndexFileTag(s.id)[s.indexPos], from, to, rec, dbg.Stack())
 		}
 	}()
 	iidq := s.GetInputDataQuery(from, to)
@@ -157,7 +156,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		p.Name.Store(&idxFile)
 		p.Total.Store(keyCount)
 	}
-	salt, err := s.id.Salt()
+	salt, err := Registry.Salt(s.id)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +169,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		IndexFile:          idxFile,
 		Salt:               &salt,
 		NoFsync:            s.args.Nofsync,
-		TmpDir:             s.id.Dirs().Tmp,
+		TmpDir:             Registry.Dirs(s.id).Tmp,
 		LessFalsePositives: s.args.LessFalsePositives,
 		BaseDataID:         iidq.GetBaseDataId(),
 	}, s.logger)

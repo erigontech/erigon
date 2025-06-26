@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 func DoCall(
@@ -127,7 +128,7 @@ func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, req
 	return core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 }
 
-func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader interfaces.HeaderReader) func(uint64) (common.Hash, error) {
+func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) func(uint64) (common.Hash, error) {
 	return func(n uint64) (common.Hash, error) {
 		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
 		if err != nil {

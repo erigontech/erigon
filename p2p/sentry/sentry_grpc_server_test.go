@@ -34,9 +34,11 @@ import (
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/forkid"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/forkid"
 )
 
 func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.Hash) *GrpcServer {
@@ -201,7 +203,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
-	genesisNoFork := rawdb.MustCommitGenesisWithoutState(gspecNoFork, dbNoFork)
+	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
 	ss := &GrpcServer{p2p: &p2p.Config{LookupBootnodeURLs: emptyBootnodeURL, LookupDNSNetwork: mainnetDNSNetwork}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{

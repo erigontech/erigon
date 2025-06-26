@@ -58,7 +58,6 @@ type Aggregator struct {
 	d               [kv.DomainLen]*Domain
 	iis             []*InvertedIndex
 	dirs            datadir.Dirs
-	tmpdir          string
 	aggregationStep uint64
 
 	dirtyFilesLock           sync.Mutex
@@ -105,7 +104,6 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 		ctxCancel:              ctxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -240,7 +238,7 @@ func (a *Aggregator) ReloadSalt() error {
 func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
 	dd := a.d[dependent]
 	if dd.disable || a.d[dependency].disable {
-		a.logger.Info("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
+		a.logger.Debug("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
 		return
 	}
 	// "hard alignment":
@@ -250,13 +248,12 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
 	}
 
-	ue := FromDomain(dependent)
-	a.checker.AddDependency(ue, &DependentInfo{
-		entity:      ue,
-		filesGetter: func() *btree.BTreeG[*filesItem] { return dd.dirtyFiles },
+	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
+		entity:      FromDomain(dependent),
+		filesGetter: func() *btree.BTreeG[*FilesItem] { return dd.dirtyFiles },
 		accessors:   dd.Accessors,
 	})
-	dd.SetChecker(a.checker)
+	a.d[dependency].SetChecker(a.checker)
 }
 
 func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
@@ -275,7 +272,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	ue := FromII(dd.InvertedIndex.iiCfg.name)
 	a.checker.AddDependency(ue, &DependentInfo{
 		entity: ue,
-		filesGetter: func() *btree.BTreeG[*filesItem] {
+		filesGetter: func() *btree.BTreeG[*FilesItem] {
 			return h.dirtyFiles
 		},
 		accessors: h.Accessors,
@@ -354,7 +351,17 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	return a.OpenFolder()
 }
 
+func (a *Aggregator) WaitForFiles() {
+	for {
+		select {
+		case <-a.WaitForBuildAndMerge(a.ctx):
+			return
+		}
+	}
+}
+
 func (a *Aggregator) Close() {
+	a.WaitForFiles()
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
@@ -410,6 +417,9 @@ func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
 
+type VisibleFile = kv.VisibleFile
+type VisibleFiles = kv.VisibleFiles
+
 func (at *AggregatorRoTx) AllFiles() VisibleFiles {
 	var res VisibleFiles
 	if at == nil {
@@ -432,8 +442,8 @@ func (a *Aggregator) Files() []string {
 	return ac.AllFiles().Fullpaths()
 }
 func (a *Aggregator) LS() {
-	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {
-		dirtyFiles.Walk(func(items []*filesItem) bool {
+	doLS := func(dirtyFiles *btree.BTreeG[*FilesItem]) {
+		dirtyFiles.Walk(func(items []*FilesItem) bool {
 			for _, item := range items {
 				if item.decompressor == nil {
 					continue
@@ -467,7 +477,10 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 			select {
 			case <-ctx.Done():
 				return
-			case <-chkEvery.C: //TODO: more reliable notification
+			case <-chkEvery.C:
+				a.logger.Trace("[agg] waiting for files",
+					"building files", a.buildingFiles.Load(),
+					"merging files", a.mergingFiles.Load())
 			}
 		}
 	}()
@@ -512,7 +525,23 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
 	}
 
-	if err := g.Wait(); err != nil {
+	err := func() error {
+		defer func() {
+			r := recover()
+			if err, ok := r.(error); ok {
+				var pe errgroup.PanicError
+				if errors.As(err, &pe) {
+					a.logger.Crit("panic error in Aggregator errgroup", "err", pe, "stack", string(pe.Stack))
+					os.Stderr.Write(pe.Stack)
+				}
+			}
+			if r != nil {
+				panic(r)
+			}
+		}()
+		return g.Wait()
+	}()
+	if err != nil {
 		return err
 	}
 
@@ -661,7 +690,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
 		if ii.disable {
-			log.Warn("[dbg] here1?", "n", ii.name)
 			continue
 		}
 
@@ -740,30 +768,27 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
+	defer a.buildingFiles.Store(false)
+	if toStep > fromStep {
+		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+	}
+	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+		if err := a.buildFiles(ctx, step); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+				panic(err)
+			}
+			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+			panic(err)
+		}
+		a.onFilesChange(nil)
+	}
+
 	go func() {
-		defer a.buildingFiles.Store(false)
-		if toStep > fromStep {
-			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+		if err := a.MergeLoop(ctx); err != nil {
+			panic(err)
 		}
-		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, step); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-					panic(err)
-				}
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-				panic(err)
-			}
-			a.onFilesChange(nil)
-		}
-
-		go func() {
-			if err := a.MergeLoop(ctx); err != nil {
-				panic(err)
-			}
-			a.onFilesChange(nil)
-		}()
+		a.onFilesChange(nil)
 	}()
-
 	return nil
 }
 
@@ -1363,7 +1388,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 }
 
 func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {
-	mf = &MergedFilesV3{iis: make([]*filesItem, len(at.a.iis))}
+	mf = &MergedFilesV3{iis: make([]*FilesItem, len(at.a.iis))}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(at.a.mergeWorkers)
 	closeFiles := true
@@ -1547,7 +1572,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 
 		if a.snapshotBuildSema != nil {
 			//we are inside own goroutine - it's fine to block here
-			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
+			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil { //TODO: not sure if this ctx is correct
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				close(fin)
 				return //nolint
@@ -1658,7 +1683,7 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 		}
 	}
 	if fi < 0 {
-		return nil, fmt.Errorf("file not found")
+		return nil, fmt.Errorf("FileStream: file not found: %s, %d-%d", name, fromTxNum/at.StepSize(), toTxNum/at.StepSize())
 	}
 	r := dt.dataReader(dt.files[fi].src.decompressor)
 	return NewSegStreamReader(r, -1), nil
@@ -1699,10 +1724,21 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-func (at *AggregatorRoTx) HistoryProgress(name kv.Domain, tx kv.Tx) uint64 {
+// func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
+// 	return at.d[name].d.maxTxNumInDB(tx)
+// }
+
+func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
+	d := at.d[name]
+	if d.d.historyDisabled {
+		// this is not accurate, okay for reporting...
+		// if historyDisabled, there's no way to get progress in
+		// terms of exact txNum
+		return at.d[name].d.maxStepInDBNoHistory(tx) * at.a.aggregationStep
+	}
 	return at.d[name].HistoryProgress(tx)
 }
-func (at *AggregatorRoTx) ProgressII(name kv.InvertedIdx, tx kv.Tx) uint64 {
+func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)
 }
 
@@ -1786,10 +1822,10 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 		}
 	}
 }
-func (at *Aggregator) MadvNormal() *Aggregator {
-	at.dirtyFilesLock.Lock()
-	defer at.dirtyFilesLock.Unlock()
-	for _, d := range at.d {
+func (a *Aggregator) MadvNormal() *Aggregator {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
 		for _, f := range d.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
@@ -1800,17 +1836,17 @@ func (at *Aggregator) MadvNormal() *Aggregator {
 			f.MadvNormal()
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range a.iis {
 		for _, f := range ii.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
 	}
-	return at
+	return a
 }
-func (at *Aggregator) DisableReadAhead() {
-	at.dirtyFilesLock.Lock()
-	defer at.dirtyFilesLock.Unlock()
-	for _, d := range at.d {
+func (a *Aggregator) DisableReadAhead() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
 		for _, f := range d.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}
@@ -1821,7 +1857,7 @@ func (at *Aggregator) DisableReadAhead() {
 			f.DisableReadAhead()
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range a.iis {
 		for _, f := range ii.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}

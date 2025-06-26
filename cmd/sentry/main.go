@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-p2p/sentry"
 	"github.com/erigontech/erigon/cmd/utils"

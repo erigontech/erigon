@@ -21,7 +21,6 @@ package core
 
 import (
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types"
@@ -29,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 // applyTransaction attempts to apply a transaction to the given state database
@@ -50,16 +50,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		return nil, nil, err
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
-
-	//if msg.FeeCap().IsZero() && engine != nil {
-	//	// Only zero-gas transactions may be service ones
-	//	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-	//		b, logs, err := SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */, evm.Config().Tracer)
-	//		_ = logs
-	//		return b, err
-	//	}
-	//	msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-	//}
 
 	if cfg.Tracer != nil {
 		if cfg.Tracer.OnTxStart != nil {

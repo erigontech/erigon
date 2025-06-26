@@ -106,11 +106,6 @@ type Config struct {
 	AllowAA bool
 
 	ArbitrumChainParams ArbitrumChainParams `json:"arbitrum,omitempty"`
-
-	DAOForkSupport bool `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
-
-	// arbitrum state clearing? (https://github.com/ethereum/EIPs/issues/158)
-	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block - nitro related stuff
 }
 
 var (
@@ -170,57 +165,6 @@ var (
 		Ethash:                        new(EthashConfig),
 	}
 )
-
-type BlobConfig struct {
-	Target                *uint64 `json:"target,omitempty"`
-	Max                   *uint64 `json:"max,omitempty"`
-	BaseFeeUpdateFraction *uint64 `json:"baseFeeUpdateFraction,omitempty"`
-}
-
-// See EIP-7840: Add blob schedule to EL config files
-type BlobSchedule struct {
-	Cancun *BlobConfig `json:"cancun,omitempty"`
-	Prague *BlobConfig `json:"prague,omitempty"`
-}
-
-func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.Target != nil {
-			return *b.Prague.Target
-		}
-		return 6 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.Target != nil {
-		return *b.Cancun.Target
-	}
-	return 3 // EIP-4844
-}
-
-func (b *BlobSchedule) MaxBlobsPerBlock(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.Max != nil {
-			return *b.Prague.Max
-		}
-		return 9 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.Max != nil {
-		return *b.Cancun.Max
-	}
-	return 6 // EIP-4844
-}
-
-func (b *BlobSchedule) BaseFeeUpdateFraction(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.BaseFeeUpdateFraction != nil {
-			return *b.Prague.BaseFeeUpdateFraction
-		}
-		return 5007716 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.BaseFeeUpdateFraction != nil {
-		return *b.Cancun.BaseFeeUpdateFraction
-	}
-	return 3338477 // EIP-4844
-}
 
 type BorConfig interface {
 	fmt.Stringer

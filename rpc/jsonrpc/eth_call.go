@@ -28,7 +28,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -46,9 +45,9 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -408,7 +407,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err != nil {
 			return nil, err
 		}
-		commitmentStartingTxNum := tx.HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if lastTxnInBlock < commitmentStartingTxNum {
 			return nil, state.PrunedError
 		}
@@ -425,7 +424,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, _, err := sdCtx.Witness(ctx, header.Root[:], "eth_getProof")
+	proofTrie, _, err := sdCtx.Witness(ctx, nil, header.Root[:], "eth_getProof")
 	if err != nil {
 		return nil, err
 	}
@@ -473,7 +472,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-		proofTrie, _, err = sdCtx.Witness(ctx, header.Root[:], "eth_getProof")
+		proofTrie, _, err = sdCtx.Witness(ctx, nil, header.Root[:], "eth_getProof")
 		if err != nil {
 			return nil, err
 		}
@@ -666,11 +665,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 	sdCtx := domains.GetCommitmentContext()
-	patricieTrie := sdCtx.Trie()
-	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
-	if !ok {
-		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
-	}
 
 	// execute block #blockNr ephemerally. This will use TrieStateWriter to record touches of accounts and storage keys.
 	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
@@ -682,21 +676,17 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
 	codeReads := store.Tds.BuildCodeTouches()
 
-	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
-	// so this is just to satisfy the current hex patricia trie api.
-	updates := commitment.NewUpdates(commitment.ModeDirect, api.dirs.Tmp, commitment.KeyToHexNibbleHash)
+	// marking keys we want to get witness for
 	for _, key := range touchedPlainKeys {
-		updates.TouchPlainKey(string(key), nil, updates.TouchAccount)
+		sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
 	}
 
-	hph.SetTrace(false) // disable tracing to avoid mixing with trace from witness computation
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
-	witnessTrie, witnessRootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
+	witnessTrie, witnessRootHash, err := sdCtx.Witness(ctx, codeReads, prevHeader.Root[:], "computeWitness")
 	if err != nil {
 		return nil, err
 	}
 
-	//
 	if !bytes.Equal(witnessRootHash, prevHeader.Root[:]) {
 		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRootHash, prevHeader.Root[:])
 	}

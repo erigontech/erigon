@@ -33,7 +33,8 @@ make rpcdaemon
 
 ### Running locally
 
-Run `rpcdaemon` on the same computer with Erigon. This is the default option because it uses Shared Memory access to Erigon's db -
+Run `rpcdaemon` on the same computer with Erigon. This is the default option because it uses Shared Memory access to
+Erigon's db -
 it's much faster than TCP access. Provide both `--datadir` and `--private.api.addr` flags:
 
 ```[bash]
@@ -208,7 +209,7 @@ note that this is NOT geth-style IPC. for that, read the next section, IPC endpo
 
 Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
 
-To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `-https.cert="/path/to.cert"`
+To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `--https.cert="/path/to.cert"`
 and `--https.key=/path/to.key`
 
 By default, the HTTPS server will run on the HTTP port + 363. use flag `--https.port` to set the port
@@ -235,7 +236,7 @@ Label "remote" means: `--private.api.addr` flag is required.
 The following table shows the current implementation status of Erigon's RPC daemon.
 
 | Command                                    | Avail   | Notes                                                 |
-| ------------------------------------------ | ------- | ----------------------------------------------------- |
+|--------------------------------------------|---------|-------------------------------------------------------|
 | admin_nodeInfo                             | Yes     |                                                       |
 | admin_peers                                | Yes     |                                                       |
 | admin_addPeer                              | Yes     |                                                       |
@@ -341,6 +342,11 @@ The following table shows the current implementation status of Erigon's RPC daem
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)                   |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)                   |
 | debug_traceCallMany                        | Yes     | Erigon Method PR#4567.                                |
+| debug_setMemoryLimit                       | Yes     |                                                       |
+| debug_setGCPercent                         | Yes     |                                                       |
+| debug_freeOSMemory                         | Yes     |                                                       |
+| debug_gcStats                              | Yes     |                                                       |
+| debug_memStats                             | Yes     |                                                       |
 |                                            |         |                                                       |
 | trace_call                                 | Yes     |                                                       |
 | trace_callMany                             | Yes     |                                                       |
@@ -488,7 +494,7 @@ will be turned on again once we have updated the instruction above on how to pro
 Name".
 
 When running Erigon instance in the Google Cloud, for example, you need to specify the **Internal IP** in
-the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, to that connection
+the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, so that connection
 to the Erigon instances can be made.
 
 ### Ethstats

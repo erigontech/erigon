@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/tests/contracts"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )

@@ -130,6 +130,7 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 
 	return nodeConfig, nil
 }
+
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
 	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
 	utils.SetEthConfig(ctx, nodeConfig, &ethConfig, logger)

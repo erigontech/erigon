@@ -20,25 +20,41 @@ import (
 type UniversalEntity uint32
 
 func FromDomain(d kv.Domain) UniversalEntity {
-	return UniversalEntity(uint32(d) << 16)
+	return UniversalEntity(uint32(d)<<16 | domainCategory)
 }
 
 func FromII(ii kv.InvertedIdx) UniversalEntity {
-	return UniversalEntity(uint32(ii)<<16 | 0x02)
+	return UniversalEntity(uint32(ii)<<16 | iiCategory)
+}
+
+func FromForkable(f kv.ForkableId) UniversalEntity {
+	return UniversalEntity(uint32(f)<<16 | forkableCategory)
 }
 
 func (ue UniversalEntity) String() string {
-	category := ue & 0xFFFF
-	if category == 0x0 {
+	switch ue.category() {
+	case domainCategory:
 		return fmt.Sprintf("domain:%s", kv.Domain(ue>>16))
-	}
-	if category == 0x1 {
+	case historyCategory:
 		return fmt.Sprintf("history:%s", kv.InvertedIdx(ue>>16))
-	}
-	if category == 0x2 {
+	case iiCategory:
 		return fmt.Sprintf("ii:%s", kv.InvertedIdx(ue>>16))
+	case forkableCategory:
+		return fmt.Sprintf("forkable:%s", Registry.Name(kv.ForkableId(ue>>16)))
+	default:
+		return fmt.Sprintf("unknown:%d", ue)
 	}
-	return fmt.Sprintf("unknown:%d", ue)
+}
+
+const (
+	domainCategory   = 0x0
+	historyCategory  = 0x1
+	iiCategory       = 0x2
+	forkableCategory = 0x3
+)
+
+func (ue UniversalEntity) category() uint16 {
+	return uint16(ue & 0xFFFF)
 }
 
 var (
@@ -47,9 +63,9 @@ var (
 	CommitmentDomainUniversal = FromDomain(kv.CommitmentDomain)
 )
 
-type DirtyFilesGetter func() *btree2.BTreeG[*filesItem]
+type DirtyFilesGetter func() *btree2.BTreeG[*FilesItem]
 
-// an DependencyIntegrityChecker used when a dependent domain has
+// DependencyIntegrityChecker: used when a dependent domain has
 // references to a dependency domain. e.g. commitment.kv has
 // references to accounts.kv.
 // instance should be held by dependency domain
@@ -121,7 +137,7 @@ func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalE
 
 	for _, dependent := range arr {
 		dependentFiles := dependent.filesGetter()
-		file, found := dependentFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
+		file, found := dependentFiles.Get(&FilesItem{startTxNum: startTxNum, endTxNum: endTxNum})
 
 		if allOrAny.All() {
 			// ALL: used for visibleFilesCalc

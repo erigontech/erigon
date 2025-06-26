@@ -32,8 +32,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 const reorgTooDeepDepth = 3
@@ -113,8 +113,8 @@ func (cc *ExecutionClientDirect) NewPayload(
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
-func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized common.Hash, head common.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
-	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, head, finalized)
+func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
+	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}

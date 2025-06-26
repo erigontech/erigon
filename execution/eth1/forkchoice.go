@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/eth/consensuschain"
-	"github.com/erigontech/erigon/eth/stagedsync"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 // This is the range in which we sanity check and potentially fix the canonical chain if it is broken.
@@ -202,8 +202,8 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 	rawdb.WriteForkchoiceHead(tx, blockHash)
 }
 
-func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
-	return state.AggTx(tx).CanUnwindToBlockNum(tx)
+func minUnwindableBlock(tx kv.TemporalTx, number uint64) (uint64, error) {
+	return tx.Debug().CanUnwindToBlockNum()
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
@@ -277,12 +277,15 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 
-	limitedBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit-2)
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
-	if limitedBigJump {
-		isSynced = false
-		log.Info("[sync] limited big jump", "from", finishProgressBefore, "amount", uint64(e.syncCfg.LoopBlockLimit))
+	var limitedBigJump bool
+	if e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore {
+		// note fcuHeader.Number.Uint64() may be < finishProgressBefore - protect from underflow by checking it is >
+		extraPadding := uint64(2)
+		limitedBigJump = (fcuHeader.Number.Uint64()-finishProgressBefore)+extraPadding > uint64(e.syncCfg.LoopBlockLimit)
+		e.logger.Info("[sync] limited big jump", "from", finishProgressBefore, "to", fcuHeader.Number.Uint64(), "amount", uint64(e.syncCfg.LoopBlockLimit), "padding", extraPadding)
 	}
+
+	isSynced := !limitedBigJump && finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 
 	canonicalHash, err := e.canonicalHash(ctx, tx, fcuHeader.Number.Uint64())
 	if err != nil {
@@ -615,16 +618,12 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 			return
 		}
 		defer e.semaphore.Release(1)
-		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
+		if err := e.db.UpdateNosync(e.bacgroundCtx, func(tx kv.RwTx) error {
 			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
 				return err
 			}
 			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
 				timings = append(timings, pruneTimings...)
-			}
-			// failsafe which is kind of necessary to avoid a situation where the canonical chain is broken.
-			if err := e.fixCanonicalChainIfNecessary(e.bacgroundCtx, tx); err != nil {
-				return err
 			}
 			return nil
 		}); err != nil {
