@@ -1266,7 +1266,7 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 		}
 	}
 
-	beneficiary := scope.Stack.Pop()
+	beneficiary := scope.Stack.pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := common.Address(beneficiary.Bytes20())
 	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)

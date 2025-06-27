@@ -636,12 +636,14 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
+	arbosVersion := types.GetArbOSVersion(head, g.Config)
+
 	withdrawals = nil
-	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
+	if g.Config != nil && g.Config.IsShanghai(g.Timestamp, arbosVersion) {
 		withdrawals = []*types.Withdrawal{}
 	}
 
-	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
+	if g.Config != nil && g.Config.IsCancun(g.Timestamp, arbosVersion) {
 		if g.BlobGasUsed != nil {
 			head.BlobGasUsed = g.BlobGasUsed
 		} else {
@@ -659,7 +661,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
-	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
+	if g.Config != nil && g.Config.IsPrague(g.Timestamp, arbosVersion) {
 		if g.RequestsHash != nil {
 			head.RequestsHash = g.RequestsHash
 		} else {

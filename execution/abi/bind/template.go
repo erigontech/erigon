@@ -19,7 +19,11 @@
 
 package bind
 
-import "github.com/erigontech/erigon-lib/abi"
+import (
+	_ "embed"
+
+	"github.com/erigontech/erigon-lib/abi"
+)
 
 // tmplData is the data structure required to fill the binding template.
 type tmplData struct {
