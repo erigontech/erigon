@@ -26,6 +26,7 @@ require (
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-quicktest/qt v1.101.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
+	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0

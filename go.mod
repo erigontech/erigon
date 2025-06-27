@@ -115,6 +115,8 @@ require (
 	sigs.k8s.io/yaml v1.4.0
 )
 
+require github.com/puzpuzpuz/xsync/v4 v4.1.0 // indirect
+
 require (
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.2.0 // indirect
