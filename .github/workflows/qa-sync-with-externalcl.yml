@@ -8,16 +8,12 @@ on:
     - cron: "0 8 * * 0" # Run on Sunday at 08:00 AM UTC
   workflow_dispatch: # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sync-with-externalcl:
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
-        }}
-      cancel-in-progress: true
     runs-on: [self-hosted, qa, linux, X64, long-running]
     timeout-minutes: 1440 # 24 hours
     strategy:

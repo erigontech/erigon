@@ -8,16 +8,12 @@ on:
   schedule:
     - cron: '0 20 * * *'  # Run every night at 20:00 (08:00 PM) UTC
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   mainnet-rpc-perf-tests:
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
-        }}
-      cancel-in-progress: true
     strategy:
       matrix:
         include:
