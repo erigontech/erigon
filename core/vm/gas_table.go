@@ -321,7 +321,7 @@ func gasCreateEip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > uint64(MaxInitCodeSize(evm.chainRules)) {
+	if size > uint64(params.MaxInitCodeSize) {
 		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
 	}
 	numWords := ToWordSize(size)
