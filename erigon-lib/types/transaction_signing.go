@@ -64,7 +64,7 @@ func MakeSignerArb(config *chain.Config, blockNumber, blockTime, arbosVersion ui
 		signer.setCode = true
 		signer.chainID.Set(&chainId)
 		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case config.IsCancun(blockTime):
+	case config.IsCancun(blockTime, arbosVersion):
 		// All transaction types are still supported
 		signer.protected = true
 		signer.accessList = true
