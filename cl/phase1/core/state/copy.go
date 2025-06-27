@@ -17,6 +17,9 @@
 package state
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -28,11 +31,15 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	if bs.BeaconState == nil {
 		bs.BeaconState = raw.New(b.BeaconConfig())
 	}
+
+	if bs.reinitPublicKeysRegistry(b) != nil {
+		return fmt.Errorf("failed to reinitialize public key registry: %w", err)
+	}
 	err = b.BeaconState.CopyInto(bs.BeaconState)
 	if err != nil {
 		return err
 	}
-	err = bs.reinitCaches(bs)
+	err = bs.reinitCaches(bs, false)
 	if err != nil {
 		return err
 	}
@@ -41,15 +48,16 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 
 func (bs *CachingBeaconState) reinitPublicKeysRegistry(other *CachingBeaconState) error {
 	if other != nil {
+		fmt.Println("triggered")
+		start := time.Now()
 		blockRoot, err := bs.BlockRoot()
 		if err != nil {
 			return err
 		}
 		haveBlockRoot, err := other.GetBlockRootAtSlot(bs.Slot())
-		if err != nil {
-			return err
-		}
-		if haveBlockRoot == blockRoot {
+
+		if haveBlockRoot == blockRoot && err == nil {
+
 			// if it is an ancestor, you can update the registry until you find a matching public key.
 			for i := other.ValidatorLength() - 1; i >= 0; i-- {
 				pk, err := other.ValidatorPublicKey(int(i))
@@ -57,13 +65,14 @@ func (bs *CachingBeaconState) reinitPublicKeysRegistry(other *CachingBeaconState
 					return err
 				}
 				if bs.publicKeyIndicies[pk] == uint64(i) {
+					fmt.Println("reinitialized public key registry in", time.Since(start))
 					// found a matching public key, no need to reinitialize the registry.
 					return nil
 				}
 				// otherwise, remove the public key from the registry.
 				bs.publicKeyIndicies[pk] = uint64(i)
 			}
-
+			return nil
 		}
 	}
 
@@ -81,13 +90,15 @@ func (bs *CachingBeaconState) reinitPublicKeysRegistry(other *CachingBeaconState
 	return nil
 }
 
-func (bs *CachingBeaconState) reinitCaches(other *CachingBeaconState) error {
+func (bs *CachingBeaconState) reinitCaches(other *CachingBeaconState, initPublickKeysCache bool) error {
 	if bs.Version() == clparams.Phase0Version {
 		return bs.InitBeaconState()
 	}
 
-	if err := bs.reinitPublicKeysRegistry(other); err != nil {
-		return err
+	if initPublickKeysCache {
+		if err := bs.reinitPublicKeysRegistry(nil); err != nil {
+			return fmt.Errorf("failed to reinitialize public key registry: %w", err)
+		}
 	}
 
 	bs.totalActiveBalanceCache = nil
@@ -97,6 +108,7 @@ func (bs *CachingBeaconState) reinitCaches(other *CachingBeaconState) error {
 	if err := bs._updateProposerIndex(); err != nil {
 		return err
 	}
+
 	if bs.Version() >= clparams.Phase0Version {
 		return bs._initializeValidatorsPhase0()
 	}
