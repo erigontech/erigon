@@ -5,7 +5,8 @@ participants:
     - "--txpool.globalqueue 1000000"
     - "--txpool.globalslots 1000000"
     - "--txpool.globalbasefeeslots 1000000"
-  count: 2
+  cl_type: lighthouse
+  count: 1
 - el_type: erigon
   el_image: test/erigon:current
   el_extra_params:
@@ -13,6 +14,14 @@ participants:
     - "--txpool.globalslots 1000000"
     - "--txpool.globalbasefeeslots 1000000"
   cl_type: lodestar
+  count: 1
+- el_type: erigon
+  el_image: test/erigon:current
+  el_extra_params:
+    - "--txpool.globalqueue 1000000"
+    - "--txpool.globalslots 1000000"
+    - "--txpool.globalbasefeeslots 1000000"
+  cl_type: prysm
   count: 1
 network_params:
   #electra_fork_epoch: 1
