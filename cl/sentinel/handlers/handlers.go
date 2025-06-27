@@ -118,6 +118,7 @@ func NewConsensusHandlers(
 		communication.PingProtocolV1:                        c.pingHandler,
 		communication.GoodbyeProtocolV1:                     c.goodbyeHandler,
 		communication.StatusProtocolV1:                      c.statusHandler,
+		communication.StatusProtocolV2:                      c.statusHandler,
 		communication.MetadataProtocolV1:                    c.metadataV1Handler,
 		communication.MetadataProtocolV2:                    c.metadataV2Handler,
 		communication.MetadataProtocolV3:                    c.metadataV3Handler,
