@@ -1,8 +1,9 @@
-package vm
+package costs
 
 import (
 	"fmt"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -108,7 +109,7 @@ func WasmCallCost(db evmtypes.IntraBlockState, contract common.Address, value *u
 
 	// EIP 2929: the static cost
 	if apply(params.WarmStorageReadCostEIP2929) {
-		return total, ErrOutOfGas
+		return total, vm.ErrOutOfGas
 	}
 
 	// EIP 2929: first dynamic cost if cold (makeCallVariantGasCallEIP2929)
@@ -118,7 +119,7 @@ func WasmCallCost(db evmtypes.IntraBlockState, contract common.Address, value *u
 		db.AddAddressToAccessList(contract)
 
 		if apply(coldCost) {
-			return total, ErrOutOfGas
+			return total, vm.ErrOutOfGas
 		}
 	}
 
@@ -127,11 +128,11 @@ func WasmCallCost(db evmtypes.IntraBlockState, contract common.Address, value *u
 	if transfersValue {
 		if empty, _ := db.Empty(contract); empty {
 			if apply(params.CallNewAccountGas) {
-				return total, ErrOutOfGas
+				return total, vm.ErrOutOfGas
 			}
 		}
 		if apply(params.CallValueTransferGas) {
-			return total, ErrOutOfGas
+			return total, vm.ErrOutOfGas
 		}
 	}
 	return total, nil
