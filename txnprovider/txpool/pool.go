@@ -55,7 +55,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -979,8 +978,16 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isPrague := p.isPrague() || p.isBhilai()
 	isEIP7825 := p.isOsaka()
-	if isEIP3860 && txn.Creation && txn.DataLen > vm.MaxInitCodeSize(&chain.Rules{IsOsaka: p.isOsaka()}) {
-		return txpoolcfg.InitCodeTooLarge // EIP-3860
+	isEIP7907 := p.isOsaka()
+
+	if isEIP7907 {
+		if txn.Creation && txn.DataLen > params.MaxInitCodeSizeEip7907 {
+			return txpoolcfg.InitCodeTooLarge
+		}
+	} else if isEIP3860 {
+		if txn.Creation && txn.DataLen > params.MaxInitCodeSize {
+			return txpoolcfg.InitCodeTooLarge
+		}
 	}
 
 	if txn.Type == types.AccountAbstractionTxType {

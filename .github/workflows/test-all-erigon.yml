@@ -50,8 +50,8 @@ jobs:
       group: >-
         ${{
           (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('tests-all-erigon-{0}-{1}', matrix.os, github.run_id) ||
-          format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
         }}
       cancel-in-progress: true
     strategy:
@@ -111,8 +111,8 @@ jobs:
       group: >-
         ${{
           (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('tests-all-erigon-{0}-{1}-{2}', matrix.os, github.run_id) ||
-          format('tests-all-erigon-{0}-{1}', matrix.os, github.ref)
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
         }}
       cancel-in-progress: true
     strategy:

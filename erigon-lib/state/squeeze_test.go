@@ -22,6 +22,17 @@ type testAggConfig struct {
 
 func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
 	tb.Helper()
+	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
+	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
+
+	// build files out of db
+	err := agg.BuildFiles(uint64(txCount))
+	require.NoError(tb, err)
+	return db, agg
+}
+
+func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
+	tb.Helper()
 	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	db := wrapDbWithCtx(_db, agg)
 
@@ -41,8 +52,6 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
-
-	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
 
 	keys, vals := generateInputData(tb, length.Addr, 5, txCount)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
@@ -79,9 +88,6 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 
 	require.NoError(tb, rwTx.Commit())
 
-	// build files out of db
-	err = agg.BuildFiles(uint64(txCount))
-	require.NoError(tb, err)
 	return db, agg
 }
 

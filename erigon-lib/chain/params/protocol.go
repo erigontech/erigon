@@ -140,10 +140,10 @@ const (
 	MaxInitCodeSize          = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
 
 	// EIP-7907: Meter Contract Code Size And Increase Limit
-	MaxCodeSizeEip7907        = 262144                 // Maximum bytecode to permit for a contract post EIP-7907
-	MaxInitCodeSizeEip7907    = 2 * MaxCodeSizeEip7907 // Maximum initcode to permit in a creation transaction and create instructions post EIP 7907
-	LargeCodeThresholdEip7907 = 24576                  // We charge extra gas if the code size exceeds this threshold
-	LargeCodeWordGasEip7907   = 2                      // How much extra we charge per word above large code threshold
+	MaxCodeSizeEip7907             = 262144                 // Maximum bytecode to permit for a contract post EIP-7907
+	MaxInitCodeSizeEip7907         = 2 * MaxCodeSizeEip7907 // Maximum initcode to permit in a creation transaction and create instructions post EIP 7907
+	LargeCodeThresholdEip7907      = 24576                  // We charge extra gas if the code size exceeds this threshold
+	LargeCodeAccessWordCostEip7907 = 2                      // How much extra we charge per word above large code threshold
 
 	// Precompiled contract gas prices
 

@@ -317,7 +317,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 			continue
 		}
 
-		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + s.borConfig.CalculateSprintLength(blockNum)
+		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + s.borConfig.CalculateSprintLength(lastProcessedBlockInfo.BlockNum)
 		if blockNum != expectedNextBlockNum {
 			return fmt.Errorf("nonsequential block in bridge processing: %d != %d", blockNum, expectedNextBlockNum)
 		}
@@ -340,6 +340,42 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 
 		if s.borConfig.OverrideStateSyncRecords != nil {
 			if eventLimit, ok := s.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+				if eventLimit == 0 {
+					endId = 0
+				} else {
+					endId = startId + uint64(eventLimit) - 1
+				}
+			}
+
+			for k, eventLimit := range s.borConfig.OverrideStateSyncRecords {
+				if len(k) == 0 {
+					continue
+				}
+
+				if k[0] != 'r' {
+					continue
+				}
+
+				var from uint64
+				var to uint64
+
+				n, err := fmt.Sscanf(k, "r.%d-%d", &from, &to)
+				if err != nil {
+					return err
+				}
+
+				if n != 2 {
+					return errors.New("failed to decode override state sync records")
+				}
+
+				if blockNum < from {
+					continue
+				}
+
+				if blockNum > to {
+					continue
+				}
+
 				if eventLimit == 0 {
 					endId = 0
 				} else {

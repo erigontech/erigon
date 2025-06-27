@@ -295,8 +295,6 @@ const (
 	GasChangeCallFailedExecution GasChangeReason = 14
 	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
 	GasChangeDelegatedDesignation GasChangeReason = 15
-	// GasChangeCodeColdAccess is the amount of gas that will be charged for a cold code access as controlled by EIP7907 rules.
-	GasChangeCodeColdAccess GasChangeReason = 16
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.
