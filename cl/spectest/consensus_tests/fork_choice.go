@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -206,7 +207,8 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
 	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp", kv.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 	columnStorage := blob_storage.NewDataColumnStore(memdb.New("/tmp", kv.ChainDB), afero.NewMemMapFs(), 1000, &clparams.MainnetBeaconConfig, ethClock)
-	peerDas, _ := das.NewPeerDas(context.TODO(), nil, &clparams.MainnetBeaconConfig, columnStorage, blobStorage, nil, enode.ID{}, ethClock)
+	peerDasState := peerdasstate.NewPeerDasState(&clparams.MainnetBeaconConfig)
+	peerDas := das.NewPeerDas(context.TODO(), nil, &clparams.MainnetBeaconConfig, columnStorage, blobStorage, nil, enode.ID{}, ethClock, peerDasState)
 	localValidators := validator_params.NewValidatorParams()
 
 	forkStore, err := forkchoice.NewForkChoiceStore(
