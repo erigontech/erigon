@@ -53,6 +53,7 @@ var (
 	MetadataProtocolV3 = ProtocolPrefix + MetadataTopic + Schema3 + EncodingProtocol
 
 	StatusProtocolV1 = ProtocolPrefix + StatusTopic + Schema1 + EncodingProtocol
+	StatusProtocolV2 = ProtocolPrefix + StatusTopic + Schema2 + EncodingProtocol
 
 	BeaconBlocksByRangeProtocolV1 = ProtocolPrefix + BeaconBlocksByRangeTopic + Schema1 + EncodingProtocol
 	BeaconBlocksByRangeProtocolV2 = ProtocolPrefix + BeaconBlocksByRangeTopic + Schema2 + EncodingProtocol
