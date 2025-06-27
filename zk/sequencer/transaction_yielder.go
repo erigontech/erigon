@@ -35,7 +35,7 @@ type PoolTransactionYielder struct {
 	// way to handle this lag so we don't keep yielding the same transaction over and over.
 	toSkip map[common.Hash]struct{}
 
-	pool      *txpool.TxPool
+	pool      txpool.Pool
 	yieldSize uint16
 
 	// the pool db which sits separate from the usual erigon db
@@ -50,12 +50,13 @@ type PoolTransactionYielder struct {
 
 	startedYielding    bool
 	startedYieldingMtx sync.Mutex
+	lastYieldIndex     int // used to track the last yielded transaction index
 }
 
 func NewPoolTransactionYielder(
 	ctx context.Context,
 	cfg ethconfig.Zk,
-	pool *txpool.TxPool,
+	pool txpool.Pool,
 	yieldSize uint16,
 	db kv.RwDB,
 	decodedTxCache *expirable.LRU[common.Hash, *types.Transaction],
@@ -87,7 +88,8 @@ func (y *PoolTransactionYielder) YieldNextTransaction() (types.Transaction, uint
 	y.readyMtx.Lock()
 	defer y.readyMtx.Unlock()
 
-	for _, hash := range y.readyTransactions {
+	for idx, hash := range y.readyTransactions {
+		y.lastYieldIndex = idx
 		if _, found := y.toSkip[hash]; found {
 			continue
 		}
@@ -137,17 +139,25 @@ func (y *PoolTransactionYielder) AddMined(hash common.Hash) {
 	// for a transaction to execute.  we still maintain the hash in the toSkip map to avoid yielding it again
 	// when we refresh the pool best list into the readyTransactions slice. there is a window where we have
 	// executed something, but the pool hasn't removed it yet, so we could yield it again before this has happened
+
+	// Search from y.lastYieldIndex backwards
 	foundIdx := -1
-	for idx, readyHash := range y.readyTransactions {
-		if readyHash == hash {
-			foundIdx = idx
+	for i := y.lastYieldIndex; i >= 0; i-- {
+		if y.readyTransactions[i] == hash {
+			foundIdx = i
 			break
 		}
 	}
+
 	if foundIdx != -1 {
-		y.readyTransactions = append(y.readyTransactions[:foundIdx], y.readyTransactions[foundIdx+1:]...)
+		y.readyTransactions = y.readyTransactions[foundIdx+1:]
+		delete(y.readyTransactionBytes, hash)
+	} else {
+		log.Warn("Tried to remove mined transaction that was not found in readyTransactions",
+			"hash", hash.String(),
+			"lastYieldIndex", y.lastYieldIndex,
+			"readyTransactionsCount", len(y.readyTransactions))
 	}
-	delete(y.readyTransactionBytes, hash)
 }
 
 func (y *PoolTransactionYielder) SetExecutionDetails(executionAt, forkId uint64) {
@@ -215,6 +225,8 @@ func (y *PoolTransactionYielder) performNextRefresh() {
 	for idx, hash := range txHashes {
 		y.readyTransactionBytes[hash] = txBytes[idx]
 	}
+
+	y.lastYieldIndex = -1 // reset the last yielded index as we have new transactions
 }
 
 func (y *PoolTransactionYielder) refreshPoolTransactions(executionAt, forkId uint64) ([]common.Hash, [][]byte, error) {
@@ -323,12 +335,11 @@ func (d *RecoveryTransactionYielder) YieldNextTransaction() (types.Transaction, 
 	}
 
 	tx := d.transactions[0]
-	effectiveGas := d.effectivePercentages[0]
+	var effectiveGas uint8
 
-	if len(d.transactions) > 0 {
-		d.transactions = d.transactions[1:] // Remove the transaction after yielding it
-	}
+	d.transactions = d.transactions[1:] // Remove the transaction after yielding it
 	if len(d.effectivePercentages) > 0 {
+		effectiveGas = d.effectivePercentages[0]
 		d.effectivePercentages = d.effectivePercentages[1:]
 	}
 

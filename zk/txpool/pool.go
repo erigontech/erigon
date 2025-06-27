@@ -86,7 +86,7 @@ type PolicyValidator interface {
 // This interface exists for the convenience of testing, and not yet because
 // there are multiple implementations
 //
-//go:generate mockgen -typed=true -destination=./pool_mock.go -package=txpool . Pool
+//go:generate go run go.uber.org/mock/mockgen -source=pool.go -destination=pool_mock.go -package=txpool -imports gomock=go.uber.org/mock/gomock
 type Pool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
@@ -100,6 +100,10 @@ type Pool interface {
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 
 	AddNewGoodPeer(peerID types.PeerID)
+	MarkForDiscardFromPendingBest(hash common.Hash)
+	YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, int, error)
+	PreYield()
+	PostYield()
 }
 
 var _ Pool = (*TxPool)(nil) // compile-time interface check

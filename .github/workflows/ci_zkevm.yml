@@ -117,8 +117,15 @@ jobs:
           echo "ETH_RPC_URL=$(kurtosis port print cdk-v1 el-1-geth-lighthouse rpc)" >> $GITHUB_ENV
           echo "BRIDGE_API_URL=$(kurtosis port print cdk-v1 zkevm-bridge-service-001 rpc)" >> $GITHUB_ENV
           echo "L2_RPC_URL=$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" >> $GITHUB_ENV
-      - name: Clone bridge repository
-        run:  git clone --recurse-submodules -j8 https://github.com/0xPolygonHermez/zkevm-bridge-service.git -b develop  bridge
+
+      - name: Check out bridge at specific commit
+        uses: actions/checkout@v4
+        with:
+          repository: 0xPolygonHermez/zkevm-bridge-service
+          ref: aad1026d7e119f13da322af8ec7f1d420025574b
+          submodules: recursive
+          fetch-depth: 0       # fetch full history, so the SHA is available
+          path: bridge
 
       - name: Build docker image
         run: |
