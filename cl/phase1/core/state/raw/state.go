@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -33,6 +34,10 @@ const (
 	StateRootsLength = 8192
 	RandoMixesLength = 65536
 	SlashingsLength  = 8192
+
+	// slot offset in the state = genesis time + genesis validators root
+	SlotOffsetSSZ       = 8 + length.Hash
+	BeaconForkOffsetSSZ = SlotOffsetSSZ + 8
 )
 
 type BeaconState struct {
