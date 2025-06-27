@@ -32,18 +32,41 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	if err != nil {
 		return err
 	}
-	err = bs.reinitCaches()
+	err = bs.reinitCaches(bs)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (bs *CachingBeaconState) reinitCaches() error {
-	if bs.Version() == clparams.Phase0Version {
-		return bs.InitBeaconState()
+func (bs *CachingBeaconState) reinitPublicKeysRegistry(other *CachingBeaconState) error {
+	if other != nil {
+		blockRoot, err := bs.BlockRoot()
+		if err != nil {
+			return err
+		}
+		haveBlockRoot, err := other.GetBlockRootAtSlot(bs.Slot())
+		if err != nil {
+			return err
+		}
+		if haveBlockRoot == blockRoot {
+			// if it is an ancestor, you can update the registry until you find a matching public key.
+			for i := other.ValidatorLength() - 1; i >= 0; i-- {
+				pk, err := other.ValidatorPublicKey(int(i))
+				if err != nil {
+					return err
+				}
+				if bs.publicKeyIndicies[pk] == uint64(i) {
+					// found a matching public key, no need to reinitialize the registry.
+					return nil
+				}
+				// otherwise, remove the public key from the registry.
+				bs.publicKeyIndicies[pk] = uint64(i)
+			}
+
+		}
 	}
-	// Reuse the existing map if it exists, otherwise create a new one
+
 	if bs.publicKeyIndicies == nil {
 		bs.publicKeyIndicies = make(map[[48]byte]uint64)
 	} else {
@@ -54,6 +77,18 @@ func (bs *CachingBeaconState) reinitCaches() error {
 		bs.publicKeyIndicies[v.PublicKey()] = uint64(idx)
 		return true
 	})
+
+	return nil
+}
+
+func (bs *CachingBeaconState) reinitCaches(other *CachingBeaconState) error {
+	if bs.Version() == clparams.Phase0Version {
+		return bs.InitBeaconState()
+	}
+
+	if err := bs.reinitPublicKeysRegistry(other); err != nil {
+		return err
+	}
 
 	bs.totalActiveBalanceCache = nil
 	bs._refreshActiveBalancesIfNeeded()
