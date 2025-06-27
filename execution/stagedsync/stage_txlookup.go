@@ -40,6 +40,7 @@ import (
 
 type TxLookupCfg struct {
 	db          kv.RwDB
+	prune       prune.Mode
 	tmpdir      string
 	borConfig   *borcfg.BorConfig
 	blockReader services.FullBlockReader

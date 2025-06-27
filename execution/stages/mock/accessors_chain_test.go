@@ -27,7 +27,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 

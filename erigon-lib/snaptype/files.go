@@ -494,6 +494,7 @@ func ParseDir(name string) (res []FileInfo, err error) {
 		case i.Type.Enum() != j.Type.Enum():
 
 			return cmp.Compare(i.Type.Enum(), j.Type.Enum())
+
 		case i.TypeString != j.TypeString:
 			return cmp.Compare(i.TypeString, j.TypeString)
 		}

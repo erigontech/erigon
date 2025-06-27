@@ -286,14 +286,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		}
 	}
 
-	logLvl := log.LvlError
-	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
-		logLvl, err = log.LvlFromString(lvl)
-		if err != nil {
-			panic(err)
-		}
-	}
-
 	logger := log.Root()
 	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
 

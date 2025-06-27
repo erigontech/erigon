@@ -774,7 +774,3 @@ func (m *MemoryMutation) AggForkablesTx(id kv.ForkableId) any {
 func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	return m.db.(kv.TemporalTx).Unmarked(id)
 }
-func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
-	panic("not supported")
-}
-func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.(kv.TemporalTx).Debug() }
