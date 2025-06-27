@@ -17,13 +17,15 @@
 package handlers
 
 import (
+	"strings"
+
 	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/enr"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // Type safe handlers which all have access to the original stream & decompressed data.
@@ -38,7 +40,13 @@ func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
 func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
 	gid := &cltypes.Ping{}
+	if s.Conn().IsClosed() {
+		return nil
+	}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); err != nil {
+		if strings.Contains(err.Error(), "stream reset") {
+			return nil
+		}
 		return err
 	}
 
@@ -84,6 +92,35 @@ func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 		SeqNumber: c.me.Seq(),
 		Attnets:   subnetField,
 		Syncnets:  &syncnetField,
+	}, SuccessfulResponsePrefix)
+}
+
+func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
+	if c.ethClock.GetCurrentEpoch() < c.beaconConfig.FuluForkEpoch {
+		return nil
+	}
+	subnetField := [8]byte{}
+	syncnetField := [1]byte{}
+	attSubEnr := enr.WithEntry(c.netCfg.AttSubnetKey, &subnetField)
+	syncNetEnr := enr.WithEntry(c.netCfg.SyncCommsSubnetKey, &syncnetField)
+	if err := c.me.Node().Load(attSubEnr); err != nil {
+		return err
+	}
+	if err := c.me.Node().Load(syncNetEnr); err != nil {
+		return err
+	}
+
+	cgc := uint64(0)
+	if c.forkChoiceReader.GetPeerDas() == nil {
+		log.Warn("metadata v3: peer das is nil")
+	} else {
+		cgc = c.forkChoiceReader.GetPeerDas().CustodyGroupCount()
+	}
+	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
+		SeqNumber:         c.me.Seq(),
+		Attnets:           subnetField,
+		Syncnets:          &syncnetField,
+		CustodyGroupCount: &cgc,
 	}, SuccessfulResponsePrefix)
 }
 

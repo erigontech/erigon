@@ -20,10 +20,11 @@ import (
 	"context"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"golang.org/x/sync/errgroup"
 )
 
 func E3EfFiles(ctx context.Context, db kv.TemporalRwDB, failFast bool, fromStep uint64) error {

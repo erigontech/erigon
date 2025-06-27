@@ -16,12 +16,12 @@ func TestVersioMonitorHeimdallV2(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockClient(ctrl)
 
-	status := &heimdall.Status{}
-	status.NodeInfo.Version = "0.38"
+	status := &heimdall.ChainManagerStatus{}
+	status.Params.ChainParams.PolTokenAddress = new(string)
 
 	heimdallClient.
 		EXPECT().
-		FetchStatus(gomock.Any()).
+		FetchChainManagerStatus(gomock.Any()).
 		Return(status, nil)
 
 	monitor := heimdall.NewVersionMonitor(context.TODO(), heimdallClient, log.New(), time.Minute)
@@ -34,12 +34,11 @@ func TestVersioMonitorHeimdallV1(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockClient(ctrl)
 
-	status := &heimdall.Status{}
-	status.NodeInfo.Version = "0.37"
+	status := &heimdall.ChainManagerStatus{}
 
 	heimdallClient.
 		EXPECT().
-		FetchStatus(gomock.Any()).
+		FetchChainManagerStatus(gomock.Any()).
 		Return(status, nil)
 
 	monitor := heimdall.NewVersionMonitor(context.TODO(), heimdallClient, log.New(), time.Minute)
@@ -60,13 +59,12 @@ func TestVersioMonitorHeimdallUpgrade(t *testing.T) {
 
 	heimdallClient.
 		EXPECT().
-		FetchStatus(gomock.Any()).
-		DoAndReturn(func(ctx context.Context) (*heimdall.Status, error) {
-			status := &heimdall.Status{}
-			status.NodeInfo.Version = "0.37"
+		FetchChainManagerStatus(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
+			status := &heimdall.ChainManagerStatus{}
 
 			if time.Since(timeNow) > time.Second {
-				status.NodeInfo.Version = "0.38"
+				status.Params.ChainParams.PolTokenAddress = new(string)
 				upgradeMonitoredTimes.Add(1)
 			}
 
@@ -105,13 +103,13 @@ func TestVersioMonitorHeimdallDowngrade(t *testing.T) {
 
 	heimdallClient.
 		EXPECT().
-		FetchStatus(gomock.Any()).
-		DoAndReturn(func(ctx context.Context) (*heimdall.Status, error) {
-			status := &heimdall.Status{}
-			status.NodeInfo.Version = "0.38"
+		FetchChainManagerStatus(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
+			status := &heimdall.ChainManagerStatus{}
+			status.Params.ChainParams.PolTokenAddress = new(string)
 
 			if time.Since(timeNow) > time.Second {
-				status.NodeInfo.Version = "0.37"
+				status.Params.ChainParams.PolTokenAddress = nil
 				downgradeMonitoredTimes.Add(1)
 			}
 

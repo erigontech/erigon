@@ -48,6 +48,23 @@ func NewTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
 	}, nil
 }
 
+func NewUnboundedTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
+	path, err := os.MkdirTemp(tempdir, "mdbx-temp")
+	if err != nil {
+		return &TemporaryMdbx{}, err
+	}
+
+	db, err := New(kv.ChainDB, log.Root()).InMem(path).MapSize(32 * datasize.TB).PageSize(16 * datasize.KB).Open(ctx)
+	if err != nil {
+		return &TemporaryMdbx{}, err
+	}
+
+	return &TemporaryMdbx{
+		db:   db,
+		path: path,
+	}, nil
+}
+
 func (t *TemporaryMdbx) ReadOnly() bool { return t.db.ReadOnly() }
 func (t *TemporaryMdbx) Update(ctx context.Context, f func(kv.RwTx) error) error {
 	return t.db.Update(ctx, f)

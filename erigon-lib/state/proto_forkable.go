@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -23,23 +22,23 @@ Can be embedded in other marker/relational/appending entities.
 type ProtoForkable struct {
 	freezer Freezer
 
-	a        ee.ForkableId
-	cfg      *ee.SnapshotConfig
-	parser   ee.SnapNameSchema
+	a        ForkableId
+	cfg      *SnapshotConfig
+	parser   SnapNameSchema
 	builders []AccessorIndexBuilder
 	snaps    *SnapshotRepo
 
-	strategy  CanonicityStrategy
+	strategy  kv.CanonicityStrategy
 	unaligned bool
 
 	logger log.Logger
 }
 
-func NewProto(a ee.ForkableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoForkable {
+func NewProto(a ForkableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoForkable {
 	return &ProtoForkable{
 		a:        a,
-		cfg:      a.SnapshotConfig(),
-		parser:   a.SnapshotConfig().Schema,
+		cfg:      Registry.SnapshotConfig(a),
+		parser:   Registry.SnapshotConfig(a).Schema,
 		builders: builders,
 		freezer:  freezer,
 		snaps:    NewSnapshotRepoForForkable(a, logger),
@@ -51,41 +50,41 @@ func (a *ProtoForkable) RecalcVisibleFiles(toRootNum RootNum) {
 	a.snaps.RecalcVisibleFiles(toRootNum)
 }
 
-func (a *ProtoForkable) IntegrateDirtyFile(file *filesItem) {
+func (a *ProtoForkable) IntegrateDirtyFile(file *FilesItem) {
 	a.snaps.IntegrateDirtyFile(file)
 }
 
-func (a *ProtoForkable) IntegrateDirtyFiles(files []*filesItem) {
+func (a *ProtoForkable) IntegrateDirtyFiles(files []*FilesItem) {
 	a.snaps.IntegrateDirtyFiles(files)
 }
 
-func (a *ProtoForkable) IntegrateDirtyFiles2(files []FilesItem) {
-	cfiles := make([]*filesItem, len(files))
-	for i := range files {
-		cfiles[i] = files[i].(*filesItem)
-	}
-	a.snaps.IntegrateDirtyFiles(cfiles)
-}
+// func (a *ProtoForkable) IntegrateDirtyFiles2(files []FilesItem) {
+// 	cfiles := make([]*FilesItem, len(files))
+// 	for i := range files {
+// 		cfiles[i] = files[i].(*filesItem)
+// 	}
+// 	a.snaps.IntegrateDirtyFiles(cfiles)
+// }
 
 // BuildFile builds a single file for the given range, respecting the snapshot config.
 //  1. typically this would be used to built a single step or "minimum sized snapshot", but can
 //     be used to build bigger files too.
 //  2. The caller is responsible for ensuring that data is available in db to freeze.
-func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.RoDB, compressionWorkers int, ps *background.ProgressSet) (builtFile *filesItem, built bool, err error) {
-	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
+func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.RoDB, compressionWorkers int, ps *background.ProgressSet) (builtFile *FilesItem, built bool, err error) {
+	log.Debug("freezing %s from %d to %d", Registry.Name(a.a), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
-	cfg := a.a.SnapshotConfig()
+	cfg := Registry.SnapshotConfig(a.a)
 	calcFrom, calcTo, canFreeze = a.snaps.GetFreezingRange(calcFrom, calcTo)
 	if !canFreeze {
 		return nil, false, nil
 	}
 
-	log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
+	log.Debug("freezing %s from %d to %d", Registry.Name(a.a), calcFrom, calcTo)
 	path := a.parser.DataFile(version.V1_0, calcFrom, calcTo)
 	segCfg := seg.DefaultCfg
 	segCfg.Workers = compressionWorkers
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, segCfg, log.LvlTrace, a.logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.a), path, Registry.Dirs(a.a).Tmp, segCfg, log.LvlTrace, a.logger)
 	if err != nil {
 		return nil, false, err
 	}
@@ -252,11 +251,11 @@ func (a *ProtoForkableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (a *ProtoForkableTx) Type() CanonicityStrategy {
+func (a *ProtoForkableTx) Type() kv.CanonicityStrategy {
 	return a.a.strategy
 }
 
-func (a *ProtoForkableTx) Garbage(merged *filesItem) (outs []*filesItem) {
+func (a *ProtoForkableTx) Garbage(merged *FilesItem) (outs []*FilesItem) {
 	return a.a.snaps.Garbage(a.files, merged)
 }
 
@@ -287,7 +286,7 @@ func (a *ProtoForkableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, file
 			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
 		})
 		if index == len(a.files) {
-			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", ap.a.Name(), entityNum)
+			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", Registry.Name(ap.a), entityNum)
 		}
 
 		v, f, err := a.GetFromFile(entityNum, index)
@@ -346,7 +345,7 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 		return word, true, nil
 	}
 
-	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, a.files[idx].src.decompressor.FileName())
+	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", Registry.Name(ap.a), entityNum, a.files[idx].src.decompressor.FileName())
 }
 
 func (a *ProtoForkableTx) NoFilesCheck() {

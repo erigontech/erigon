@@ -71,10 +71,10 @@ var DefaultConfig = Config{
 	QueuedSubPoolLimit:  30_000,
 
 	MinFeeCap:          1,
-	AccountSlots:       16,  // TODO: to choose right value (16 to be compatible with Geth)
-	BlobSlots:          48,  // Default for a total of 8 txns for 6 blobs each - for hive tests
-	TotalBlobPoolLimit: 480, // Default for a total of 10 different accounts hitting the above limit
-	PriceBump:          10,  // Price bump percentage to replace an already existing transaction
+	AccountSlots:       16,   // TODO: to choose right value (16 to be compatible with Geth)
+	BlobSlots:          540,  // Default for a total of 30 txns for 18 blobs each - for hive tests
+	TotalBlobPoolLimit: 5400, // Default for a total of 10 different accounts hitting the above limit
+	PriceBump:          10,   // Price bump percentage to replace an already existing transaction
 	BlobPriceBump:      100,
 
 	NoGossip:     false,

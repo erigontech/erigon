@@ -723,6 +723,31 @@ func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
 // Supposed that txAmount includes 2 system txns.
 func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
 
+type BodyOnlyTxn struct {
+	// 50% of BodyForStorage spent on withdrawal
+	// this structure does rlp decode only for
+	// "tx related" data
+	BaseTxnID BaseTxnID
+	TxCount   uint32
+}
+
+func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
+	// discard rlp.Stream after this...
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode BaseTxId
+	if err = s.Decode(&b.BaseTxnID); err != nil {
+		return err
+	}
+	// decode TxCount
+	if err = s.Decode(&b.TxCount); err != nil {
+		return err
+	}
+	return nil
+}
+
 type BodyForStorage struct {
 	BaseTxnID   BaseTxnID
 	TxCount     uint32
@@ -1328,7 +1353,7 @@ func (b *Block) Body() *Body {
 	return bd
 }
 func (b *Block) SendersToTxs(senders []common.Address) {
-	return// TODO Arbitrum!!!
+	return // TODO Arbitrum!!!
 	if len(senders) == 0 {
 		return
 	}

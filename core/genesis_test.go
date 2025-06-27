@@ -39,9 +39,9 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestGenesisBlockHashes(t *testing.T) {

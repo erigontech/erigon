@@ -33,7 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -57,8 +56,9 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 type BlockPublishingValidation string
@@ -573,6 +573,10 @@ func (a *ApiHandler) produceBeaconBody(
 	if finalizedHash == (common.Hash{}) {
 		finalizedHash = head // probably fuck up fcu for EL but not a big deal.
 	}
+	safeHash := a.forkchoiceStore.GetEth1Hash(baseState.CurrentJustifiedCheckpoint().Root)
+	if safeHash == (common.Hash{}) {
+		safeHash = head
+	}
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, 0, err
@@ -616,6 +620,7 @@ func (a *ApiHandler) produceBeaconBody(
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
 			finalizedHash,
+			safeHash,
 			head,
 			&engine_types.PayloadAttributes{
 				Timestamp:             hexutil.Uint64(latestExecutionPayload.Time + secsDiff),
@@ -1207,8 +1212,9 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, true, false); err != nil {
 		return err
 	}
-	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().Root
-	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
+	finalizedHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.FinalizedCheckpoint().Root)
+	safeHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.JustifiedCheckpoint().Root)
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
 		return err
 	}
 	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)

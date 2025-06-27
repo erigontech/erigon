@@ -15,7 +15,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/types"
 )
 
@@ -30,7 +29,7 @@ func NewHeaderFreezer(canonicalTbl, valsTbl string, logger log.Logger) *HeaderFr
 	return &HeaderFreezer{canonicalTbl, valsTbl, logger}
 }
 
-func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo ee.RootNum, coll state.Collector, db kv.RoDB) error {
+func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo state.RootNum, coll state.Collector, db kv.RoDB) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 

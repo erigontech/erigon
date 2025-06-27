@@ -936,7 +936,7 @@ func (s *Sync) sync(
 		}
 
 		if err := s.commitExecution(ctx, newTip, newTip); err != nil {
-			if errors.Is(err, ErrUfcTooFarBehind) {
+			if errors.Is(err, ErrForkChoiceUpdateTooFarBehind) {
 				s.logger.Warn(
 					syncLogPrefix("ufc skipped during sync to tip - likely due to domain ahead of blocks"),
 					"err", err,

@@ -220,6 +220,10 @@ func (h *Heimdall) getSpanOverrideHeight() uint64 {
 	//MainChain: 8664000
 }
 
+func (h *Heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
+	return nil, errors.New("TODO")
+}
+
 func (h *Heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {
 	return nil, errors.New("TODO")
 }
@@ -261,10 +265,6 @@ func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) err
 }
 
 func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	return nil, errors.New("TODO")
-}
-
-func (h *Heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
 	return nil, errors.New("TODO")
 }
 

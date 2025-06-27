@@ -57,26 +57,3 @@ func NewKeyedTransactorWithChainID(key *ecdsa.PrivateKey, chainID *big.Int) (*Tr
 		},
 	}, nil
 }
-
-// NewKeyStoreTransactorWithChainID is a utility method to easily create a transaction signer from
-// a decrypted key from a keystore.
-// func NewKeyStoreTransactorWithChainID(keystore *keystore.KeyStore, account keystore.Account, chainID *big.Int) (*TransactOpts, error) {
-// 	if chainID == nil {
-// 		return nil, ErrNoChainID
-// 	}
-// 	signer := types.LatestSignerForChainID(chainID)
-// 	return &TransactOpts{
-// 		From: account.Address,
-// 		Signer: func(address common.Address, tx *types.Transaction) (*types.Transaction, error) {
-// 			if address != account.Address {
-// 				return nil, ErrNotAuthorized
-// 			}
-// 			signature, err := keystore.SignHash(account, signer.Hash(tx).Bytes())
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			return tx.WithSignature(signer, signature)
-// 		},
-// 		Context: context.Background(),
-// 	}, nil
-// }

@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 func PeerIdFromH512(h512 *typesproto.H512) *PeerId {

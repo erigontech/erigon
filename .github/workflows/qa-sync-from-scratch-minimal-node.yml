@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chain: [ mainnet, bor-mainnet ]  # Chain name as specified on the erigon command line
+        chain: [ mainnet ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -69,6 +69,13 @@ jobs:
             echo "Error detected during tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Upload Downloader Torrent Client Status
+        if: steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: torrent-client-status-${{ env.CHAIN }}
+          path: torrent-client-status.txt
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'

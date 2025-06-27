@@ -44,7 +44,7 @@ func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, bo
 type RangeIndexer interface {
 	RangeIndex
 	Put(ctx context.Context, r ClosedRange, id uint64) error
-	GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, error)
+	GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, bool, error)
 }
 
 type dbRangeIndex struct {
@@ -150,29 +150,31 @@ func (i *txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, boo
 	return id, true, err
 }
 
-// Lookup ids for the given range [blockFrom, blockTo)
-func (i *dbRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, error) {
+// Lookup ids for the given range [blockFrom, blockTo). Return boolean which checks if the result is reliable to use, because
+// heimdall data can be not published yet for [blockFrom, blockTo), in that case boolean OK will be false
+func (i *dbRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, bool, error) {
 	var ids []uint64
+	var ok bool
 
 	err := i.db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		ids, err = i.WithTx(tx).GetIDsBetween(ctx, blockFrom, blockTo)
+		ids, ok, err = i.WithTx(tx).GetIDsBetween(ctx, blockFrom, blockTo)
 		return err
 	})
-	return ids, err
+	return ids, ok, err
 }
 
-func (i *txRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, error) {
+func (i *txRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, bool, error) {
 	cursor, err := i.tx.Cursor(i.table)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer cursor.Close()
 
 	key := rangeIndexKey(blockFrom)
 	k, value, err := cursor.Seek(key[:])
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	var ids []uint64
@@ -180,16 +182,16 @@ func (i *txRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uin
 	for k != nil {
 		intervalBlock := rangeIndexKeyParse(k)
 		if intervalBlock >= blockTo {
-			break
+			return ids, true, nil
 		}
 
 		ids = append(ids, rangeIndexValueParse(value))
 
 		k, value, err = cursor.Next()
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 
-	return ids, err
+	return ids, false, nil
 }

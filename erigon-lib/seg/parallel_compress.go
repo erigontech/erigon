@@ -533,7 +533,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
-	cw := bufio.NewWriterSize(cf, 2*etl.BufIOSize)
+	cw := bufio.NewWriterSize(cf, 4*etl.BufIOSize)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -721,12 +721,14 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 		}
 		wc++
-		select {
-		case <-logEvery.C:
-			if lvl < log.LvlTrace {
-				logger.Log(lvl, fmt.Sprintf("[%s] Compressed", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(wc)/float64(totalWords)))
+		if wc%1024 == 0 {
+			select {
+			case <-logEvery.C:
+				if lvl < log.LvlTrace {
+					logger.Log(lvl, fmt.Sprintf("[%s] Compressed", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(wc)/float64(totalWords)))
+				}
+			default:
 			}
-		default:
 		}
 	}
 	if !errors.Is(e, io.EOF) {

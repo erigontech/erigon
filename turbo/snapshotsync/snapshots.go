@@ -40,10 +40,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
@@ -1263,6 +1263,7 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 	if err != nil {
 		return err
 	}
+
 	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
 		filesToRemove := make([]string, 0, len(toRemove))
 

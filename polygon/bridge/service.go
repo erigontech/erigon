@@ -346,6 +346,42 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 					endId = startId + uint64(eventLimit) - 1
 				}
 			}
+
+			for k, eventLimit := range s.borConfig.OverrideStateSyncRecords {
+				if len(k) == 0 {
+					continue
+				}
+
+				if k[0] != 'r' {
+					continue
+				}
+
+				var from uint64
+				var to uint64
+
+				n, err := fmt.Sscanf(k, "r.%d-%d", &from, &to)
+				if err != nil {
+					return err
+				}
+
+				if n != 2 {
+					return errors.New("failed to decode override state sync records")
+				}
+
+				if blockNum < from {
+					continue
+				}
+
+				if blockNum > to {
+					continue
+				}
+
+				if eventLimit == 0 {
+					endId = 0
+				} else {
+					endId = startId + uint64(eventLimit) - 1
+				}
+			}
 		}
 
 		if endId > 0 {

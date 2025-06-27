@@ -139,6 +139,22 @@ func DecodeBytes(b []byte, val interface{}) error {
 	return nil
 }
 
+func DecodeBytesPartial(b []byte, val interface{}) error {
+	r := (*sliceReader)(&b)
+
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to type convert to Stream pointer")
+	}
+	defer streamPool.Put(stream)
+
+	stream.Reset(r, uint64(len(b)))
+	if err := stream.Decode(val); err != nil {
+		return err
+	}
+	return nil
+}
+
 type decodeError struct {
 	msg string
 	typ reflect.Type
@@ -686,6 +702,17 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 	s.kind = List
 	s.size = len
 	return s
+}
+
+func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done func()) {
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to get stream from pool")
+	}
+	stream.Reset(r, inputLimit)
+	return stream, func() {
+		streamPool.Put(stream)
+	}
 }
 
 // Remaining returns number of bytes remaining to be read

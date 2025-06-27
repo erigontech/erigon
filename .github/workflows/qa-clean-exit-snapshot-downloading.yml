@@ -13,13 +13,17 @@ on:
       - ready_for_review
   workflow_dispatch:     # Run manually
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   clean-exit-sd-test:
-    runs-on: [self-hosted, qa]
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}', github.workflow, github.run_id) ||
+          format('{0}-{1}', github.workflow, github.ref)
+        }}
+      cancel-in-progress: true
+    runs-on: [self-hosted, qa, long-running]
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa

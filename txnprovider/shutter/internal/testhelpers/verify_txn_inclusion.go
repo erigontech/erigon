@@ -25,8 +25,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc/requests"
-	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 type TxnInclusionVerifier struct {

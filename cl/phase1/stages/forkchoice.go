@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
@@ -61,12 +61,14 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	// Perform fork choice update if the engine is available
 	if cfg.forkChoice.Engine() != nil {
 		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
+		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
 		logger.Debug("Caplin is sending forkchoice")
 
 		// Run fork choice update with finalized checkpoint and head
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
 			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
+			cfg.forkChoice.GetEth1Hash(justifiedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil,
 		); err != nil {
 			err = fmt.Errorf("failed to run forkchoice: %w", err)

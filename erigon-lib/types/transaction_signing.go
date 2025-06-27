@@ -55,7 +55,15 @@ func MakeSignerArb(config *chain.Config, blockNumber, blockTime, arbosVersion ui
 		signer.blob = true
 		signer.setCode = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
+	case config.IsBhilai(blockNumber):
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.blob = false
+		signer.setCode = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsCancun(blockTime, arbosVersion):
 		// All transaction types are still supported
 		signer.protected = true
@@ -63,22 +71,22 @@ func MakeSignerArb(config *chain.Config, blockNumber, blockTime, arbosVersion ui
 		signer.dynamicFee = true
 		signer.blob = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsLondon(blockNumber):
 		signer.protected = true
 		signer.accessList = true
 		signer.dynamicFee = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsBerlin(blockNumber):
 		signer.protected = true
 		signer.accessList = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsSpuriousDragon(blockNumber):
 		signer.protected = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsHomestead(blockNumber):
 	default:
 		// Only allow malleable transactions in Frontier
@@ -212,6 +220,9 @@ func LatestSigner(config *chain.Config) *Signer {
 			signer.protected = true
 		}
 		if config.PragueTime != nil {
+			signer.setCode = true
+		}
+		if config.Bor != nil && config.Bor.GetBhilaiBlock() != nil {
 			signer.setCode = true
 		}
 	}

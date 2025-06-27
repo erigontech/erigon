@@ -28,8 +28,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-p2p/discover/v4wire"
-	"github.com/erigontech/erigon-p2p/enr"
+	"github.com/erigontech/erigon/p2p/discover/v4wire"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // List of known secure identity schemes.

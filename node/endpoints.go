@@ -91,8 +91,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 }
 
 func isIgnoredHttpServerError(serveErr error) bool {
-	return (errors.Is(serveErr, context.Canceled) || errors.Is(serveErr, common.ErrStopped) || errors.Is(serveErr, http.ErrServerClosed))
-
+	return errors.Is(serveErr, context.Canceled) || errors.Is(serveErr, common.ErrStopped) || errors.Is(serveErr, http.ErrServerClosed)
 }
 
 // StartHTTPSEndpoint starts the HTTPS RPC endpoint.

@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-db/downloader"
 )
 
 func CheckRemote(rcCli *downloader.RCloneClient, src string) error {

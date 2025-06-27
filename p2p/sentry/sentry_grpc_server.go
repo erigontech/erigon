@@ -52,11 +52,11 @@ import (
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/dnsdisc"
-	"github.com/erigontech/erigon-p2p/enode"
-	"github.com/erigontech/erigon-p2p/forkid"
-	"github.com/erigontech/erigon-p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/dnsdisc"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/forkid"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 const (

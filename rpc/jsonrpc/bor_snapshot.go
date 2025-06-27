@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 type Snapshot struct {
@@ -116,13 +117,14 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 
 	//nolint:nestif
 	if blockNrOrHash == nil {
-		header = rawdb.ReadCurrentHeader(tx)
+		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(tx)
+		if err2 != nil {
+			return nil, err2
+		}
+		header, err = api._blockReader.HeaderByNumber(ctx, tx, latestBlockNum)
 	} else {
 		if blockNr, ok := blockNrOrHash.Number(); ok {
-			header = rawdb.ReadHeaderByNumber(tx, uint64(blockNr))
-			if blockNr == rpc.LatestBlockNumber {
-				header = rawdb.ReadCurrentHeader(tx)
-			}
+			header, err = api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNr))
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
 				header, err = rawdb.ReadHeaderByHash(tx, blockHash)

@@ -3,10 +3,7 @@ run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images bas
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.24-alpine"
-  TARGET_BASE_IMAGE: "alpine:3.21"
   APP_REPO: "erigontech/erigon"
-  CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
@@ -28,12 +25,17 @@ on:
 jobs:
 
   Build:
-    runs-on: ubuntu-22.04 ## revert it to "ubuntu-latest" once https://github.com/actions/runner-images/issues/11471 fixed
+    # runs-on: ubuntu-latest
+    runs-on: [devops-01-self-hosted]
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
 
     steps:
+      - name: Cleanup workspace
+        run: |
+          rm -drf $(pwd)/*
+
       - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
@@ -41,14 +43,6 @@ jobs:
           fetch-depth: 1
           ref: ${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}
           path: 'erigon'
-
-      - name: Setup go env and cache
-        uses: actions/setup-go@v5
-        with:
-          go-version: '>=1.23'
-          cache: ${{ contains(fromJSON('["refs/heads/main","refs/heads/docker_pectra"]'), github.ref) }}
-          cache-dependency-path: |
-            erigon/go.sum
 
       - name: Define variables
         id: def_docker_vars
@@ -99,36 +93,11 @@ jobs:
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf ## v3.2.0
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
-
-      - name: Build arm64
-        env:
-          BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
-        run: |
-          docker run --platform linux/arm64 \
-          --rm -v $(pwd)/erigon:/erigon:ro \
-          -v $(pwd)/build-arm64:/erigon-build \
-          -v ${HOME}/.cache/go-build:/root/.cache/go-build \
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
-          -w /erigon --entrypoint /bin/sh \
-          ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
-
-      - name: Build amd64
-        env:
-          BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
-        run: |
-          docker run --platform linux/amd64 \
-          --rm -v $(pwd)/erigon:/erigon:ro \
-          -v $(pwd)/build-amd64:/erigon-build \
-          -v ${HOME}/.cache/go-build:/root/.cache/go-build \
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
-          -w /erigon --entrypoint /bin/sh \
-          ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
+        id: docker-buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
         id: built_tag_export
@@ -137,34 +106,32 @@ jobs:
           BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
           DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
-          DOCKERFILE_PATH: Dockerfile.release
+          DOCKERFILE_PATH: Dockerfile
         run: |
+          echo "Create build cache directories in case it is not yet extracted from existing cache"
           echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
-          cp -vr build-amd64 erigon/
-          cp -vr build-arm64 erigon/
           cd erigon
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
-          --target ci-cd-main-branch \
+          --build-arg BINARIES='${{ steps.def_docker_vars.outputs.binaries }}' \
           --attest type=provenance,mode=max \
+          --no-cache \
           --sbom=true \
-          --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
-          --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
           ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION_LATEST }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
-          --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+          --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}/Dockerfile" \
+          --label org.opencontainers.image.documentation="https://docs.erigon.tech/" \
+          --label org.opencontainers.image.source="https://github.com/erigontech/erigon" \
           --label org.opencontainers.image.version=${{ steps.getCommitId.outputs.id }} \
           --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.id }} \
           --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short_commit_id }} \
           --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
           --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
-          --label org.opencontainers.image.base.name="${{ env.TARGET_BASE_IMAGE }}" \
           --push \
           --platform linux/amd64,linux/arm64 .
+          echo "Docker build and push done"
 
       - name: export and print docker build tag, cleanup old docker images
         env:
