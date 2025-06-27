@@ -198,6 +198,192 @@ jobs:
             --outcome $TEST_RESULT \
             --result_file ${{ github.workspace }}/outputs_kurtosis.json
 
+      - name: Report results in run summary
+        if: always()
+        run: |
+          output_json="${{ github.workspace }}/outputs_kurtosis.json"
+
+          # Start building the summary
+          echo "# TxPool Performance Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check if JSON file exists
+          if [ ! -f "$output_json" ]; then
+            echo "❌ **No test results found** - JSON output file is missing" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Extract test result status
+          test_result="${{ steps.erigon_kurtosis_test.outputs.test_result || 'failure' }}"
+          if [ "$test_result" = "success" ]; then
+            echo "✅ **Overall Test Status:** PASSED" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Overall Test Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Report throughput analysis
+          echo "## 📊 Throughput Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if jq -e '.tx_pool_throughput_analysis' "$output_json" > /dev/null 2>&1; then
+            echo "| TX Count | Mean TPS | Missed Events | Duplicated Events | Omission Events |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|----------|---------------|-------------------|-----------------|" >> $GITHUB_STEP_SUMMARY
+            
+            throughput_length=$(jq '.tx_pool_throughput_analysis | length' "$output_json")
+            for ((i=0; i<throughput_length; i++)); do
+              tx_count=$(jq -r ".tx_pool_throughput_analysis[$i].tx_count" "$output_json")
+              mean_tps=$(jq -r ".tx_pool_throughput_analysis[$i].mean_tps_throughput" "$output_json")
+              missed=$(jq -r ".tx_pool_throughput_analysis[$i].missed_p2p_event_count" "$output_json")
+              duplicated=$(jq -r ".tx_pool_throughput_analysis[$i].duplicated_p2p_event_count" "$output_json")
+              omission=$(jq -r ".tx_pool_throughput_analysis[$i].coordinated_omission_events_count" "$output_json")
+              
+              # Format TPS to 2 decimal places
+              mean_tps_formatted=$(printf "%.2f" "$mean_tps")
+              
+              echo "| $tx_count | $mean_tps_formatted | $missed | $duplicated | $omission |" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "⚠️ No throughput analysis data available" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Report latency analysis
+          echo "## 🕐 Latency Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if jq -e '.tx_pool_latency_analysis' "$output_json" > /dev/null 2>&1; then
+            echo "| TX Count | Min (μs) | P50 (ms) | P75 (ms) | P99 (ms) | Max (ms) | Missed Events | Duplicated Events |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|----------|----------|----------|----------|----------|---------------|-------------------|" >> $GITHUB_STEP_SUMMARY
+            
+            latency_length=$(jq '.tx_pool_latency_analysis | length' "$output_json")
+            for ((i=0; i<latency_length; i++)); do
+              tx_count=$(jq -r ".tx_pool_latency_analysis[$i].tx_count" "$output_json")
+              min_us=$(jq -r ".tx_pool_latency_analysis[$i].min_latency_mus" "$output_json")
+              max_us=$(jq -r ".tx_pool_latency_analysis[$i].max_latency_mus" "$output_json")
+              missed=$(jq -r ".tx_pool_latency_analysis[$i].missed_p2p_event_count" "$output_json")
+              duplicated=$(jq -r ".tx_pool_latency_analysis[$i].duplicated_p2p_event_count" "$output_json")
+              
+              # Convert max from microseconds to milliseconds
+              max_ms=$(echo "scale=2; $max_us / 1000" | bc -l)
+              
+              # Extract percentiles from HDR plot data
+              hdr_data=$(jq -r ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json")
+              
+              # Extract P50, P75, P99 values (convert from microseconds to milliseconds)
+              p50_us=$(echo "$hdr_data" | grep "0.500000" | awk '{print $1}' || echo "0")
+              p75_us=$(echo "$hdr_data" | grep "0.750000" | awk '{print $1}' || echo "0")
+              p99_us=$(echo "$hdr_data" | grep "0.990000\|0.99" | tail -1 | awk '{print $1}' || echo "0")
+              
+              # Convert to milliseconds and format
+              p50_ms=$(echo "scale=2; $p50_us / 1000" | bc -l 2>/dev/null || echo "N/A")
+              p75_ms=$(echo "scale=2; $p75_us / 1000" | bc -l 2>/dev/null || echo "N/A")
+              p99_ms=$(echo "scale=2; $p99_us / 1000" | bc -l 2>/dev/null || echo "N/A")
+              
+              echo "| $tx_count | $min_us | $p50_ms | $p75_ms | $p99_ms | $max_ms | $missed | $duplicated |" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "⚠️ No latency analysis data available" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Add artifact links
+          echo "## 📈 Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- [Raw JSON Results](../actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Latency Distribution Plots](../actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Report erigon failure
+        if: always()
+        run: |
+          output_json="${{ github.workspace }}/outputs_kurtosis.json"
+          test_result="${{ steps.erigon_kurtosis_test.outputs.test_result || 'failure' }}"
+
+          # Initialize failure reasons array
+          failure_reasons=()
+
+          # Check overall test result
+          if [ "$test_result" != "success" ]; then
+            failure_reasons+=("Overall test execution failed")
+          fi
+
+          # Check if JSON output exists
+          if [ ! -f "$output_json" ]; then
+            failure_reasons+=("No test results generated - possible Erigon crash or startup failure")
+          else
+            # Analyze JSON for performance issues and anomalies
+            
+            # Check throughput analysis for concerning metrics
+            if jq -e '.tx_pool_throughput_analysis' "$output_json" > /dev/null 2>&1; then
+              throughput_length=$(jq '.tx_pool_throughput_analysis | length' "$output_json")
+              for ((i=0; i<throughput_length; i++)); do
+                tx_count=$(jq -r ".tx_pool_throughput_analysis[$i].tx_count" "$output_json")
+                mean_tps=$(jq -r ".tx_pool_throughput_analysis[$i].mean_tps_throughput" "$output_json")
+                missed=$(jq -r ".tx_pool_throughput_analysis[$i].missed_p2p_event_count" "$output_json")
+                omission=$(jq -r ".tx_pool_throughput_analysis[$i].coordinated_omission_events_count" "$output_json")
+                
+                # Check for very low throughput (less than 100 TPS)
+                if (( $(echo "$mean_tps < 100" | bc -l) )); then
+                  failure_reasons+=("Very low throughput detected: ${mean_tps} TPS for ${tx_count} transactions")
+                fi
+                
+                # Check for high missed events (more than 5% of tx_count)
+                missed_threshold=$(echo "$tx_count * 0.05" | bc -l)
+                if (( $(echo "$missed > $missed_threshold" | bc -l) )); then
+                  failure_reasons+=("High missed P2P events: ${missed} (>${missed_threshold} threshold) for ${tx_count} transactions")
+                fi
+                
+                # Check for coordinated omission events
+                if [ "$omission" != "0" ] && [ "$omission" != "null" ]; then
+                  failure_reasons+=("Coordinated omission events detected: ${omission} for ${tx_count} transactions")
+                fi
+              done
+            fi
+            
+            # Check latency analysis for concerning metrics
+            if jq -e '.tx_pool_latency_analysis' "$output_json" > /dev/null 2>&1; then
+              latency_length=$(jq '.tx_pool_latency_analysis | length' "$output_json")
+              for ((i=0; i<latency_length; i++)); do
+                tx_count=$(jq -r ".tx_pool_latency_analysis[$i].tx_count" "$output_json")
+                max_us=$(jq -r ".tx_pool_latency_analysis[$i].max_latency_mus" "$output_json")
+                missed=$(jq -r ".tx_pool_latency_analysis[$i].missed_p2p_event_count" "$output_json")
+                
+                # Check for very high max latency (more than 5 seconds)
+                if [ "$max_us" != "null" ] && (( $(echo "$max_us > 5000000" | bc -l) )); then
+                  max_sec=$(echo "scale=2; $max_us / 1000000" | bc -l)
+                  failure_reasons+=("Very high maximum latency detected: ${max_sec}s for ${tx_count} transactions")
+                fi
+                
+                # Check for high missed events in latency analysis
+                missed_threshold=$(echo "$tx_count * 0.05" | bc -l)
+                if (( $(echo "$missed > $missed_threshold" | bc -l) )); then
+                  failure_reasons+=("High missed P2P events in latency analysis: ${missed} for ${tx_count} transactions")
+                fi
+              done
+            fi
+          fi
+
+          # Report failures if any
+          if [ ${#failure_reasons[@]} -gt 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Erigon Performance Issues Detected" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The following issues were identified:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            for reason in "${failure_reasons[@]}"; do
+              echo "- ⚠️ $reason" >> $GITHUB_STEP_SUMMARY
+            done
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Recommendation:** Review Erigon logs, system resources, and network conditions." >> $GITHUB_STEP_SUMMARY
+            
+            # Set job as failed if critical issues detected
+            echo "::error::Erigon performance issues detected: ${failure_reasons[0]}"
+            exit 1
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## ✅ No Critical Issues Detected" >> $GITHUB_STEP_SUMMARY
+            echo "Erigon performance appears to be within acceptable ranges." >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Clean test results
         uses: gacts/run-and-post-run@v1.4.2
         if: always()
