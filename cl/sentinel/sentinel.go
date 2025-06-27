@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -204,6 +205,7 @@ func New(
 	logger log.Logger,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx:               ctx,
@@ -262,7 +264,7 @@ func New(
 	mux.Get("/", httpreqresp.NewRequestHandler(host))
 	s.httpApi = mux
 
-	s.handshaker = handshake.New(ctx, s.ethClock, cfg.BeaconConfig, s.httpApi, forkChoiceReader.GetPeerDas().StateReader())
+	s.handshaker = handshake.New(ctx, s.ethClock, cfg.BeaconConfig, s.httpApi, peerDasStateReader)
 
 	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)

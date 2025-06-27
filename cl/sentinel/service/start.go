@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -89,6 +90,7 @@ func createSentinel(
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
 	dataColumnStorage blob_storage.DataColumnStorage,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		context.Background(),
@@ -100,6 +102,7 @@ func createSentinel(
 		logger,
 		forkChoiceReader,
 		dataColumnStorage,
+		peerDasStateReader,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -186,6 +189,7 @@ func StartSentinelService(
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
+	PeerDasStateReader peerdasstate.PeerDasStateReader,
 	logger log.Logger) (sentinelrpc.SentinelClient, *enode.LocalNode, error) {
 	ctx := context.Background()
 	sent, localNode, err := createSentinel(
@@ -196,6 +200,7 @@ func StartSentinelService(
 		forkChoiceReader,
 		ethClock,
 		dataColumnStorage,
+		PeerDasStateReader,
 		logger,
 	)
 	if err != nil {
