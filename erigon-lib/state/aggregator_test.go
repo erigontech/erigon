@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
@@ -1524,4 +1525,201 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
 
 	require.Equal(t, roots[len(roots)-1][:], finalRoot[:])
+}
+
+func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
+	stepSize := uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	generateAccountsFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCodeFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateStorageFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCommitmentFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}})
+
+	require.NoError(t, agg.OpenFolder())
+
+	tdb := wrapDbWithCtx(db, agg)
+	defer tdb.Close()
+	tx, err := tdb.BeginTemporalRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	aggTx := AggTx(tx)
+
+	checkFn := func(files visibleFiles, merged bool) {
+		if merged {
+			require.Equal(t, 1, len(files))
+			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
+			require.Equal(t, uint64(2), files[0].endTxNum/stepSize)
+		} else {
+			require.Equal(t, 2, len(files))
+			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
+			require.Equal(t, uint64(1), files[0].endTxNum/stepSize)
+			require.Equal(t, uint64(1), files[1].startTxNum/stepSize)
+			require.Equal(t, uint64(2), files[1].endTxNum/stepSize)
+		}
+	}
+
+	checkFn(aggTx.d[kv.AccountsDomain].ht.files, true)
+	checkFn(aggTx.d[kv.CodeDomain].ht.files, true)
+	checkFn(aggTx.d[kv.StorageDomain].ht.files, true)
+	checkFn(aggTx.d[kv.AccountsDomain].ht.iit.files, true)
+	checkFn(aggTx.d[kv.CodeDomain].ht.iit.files, true)
+	checkFn(aggTx.d[kv.StorageDomain].ht.iit.files, true)
+
+	tx.Rollback()
+
+	// delete merged code history file
+	codeMergedFile := filepath.Join(agg.dirs.SnapHistory, "v1.0-code.0-2.v")
+	exist, err := dir.FileExist(codeMergedFile)
+	require.NoError(t, err)
+	require.True(t, exist)
+	agg.closeDirtyFiles() // because windows
+
+	require.NoError(t, os.Remove(codeMergedFile))
+
+	require.NoError(t, agg.OpenFolder())
+	tx, err = tdb.BeginTemporalRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	aggTx = AggTx(tx)
+
+	checkFn(aggTx.d[kv.AccountsDomain].ht.files, true)
+	checkFn(aggTx.d[kv.CodeDomain].ht.files, false)
+	checkFn(aggTx.d[kv.StorageDomain].ht.files, true)
+	checkFn(aggTx.d[kv.AccountsDomain].ht.iit.files, true)
+	checkFn(aggTx.d[kv.CodeDomain].ht.iit.files, false)
+	checkFn(aggTx.d[kv.StorageDomain].ht.iit.files, true)
+}
+
+func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
+	stepSize := uint64(10)
+	// testDbAggregatorWithNoFiles(t,  stepSize * 32, &testAggConfig{
+	// 	stepSize:                         10,
+	// 	disableCommitmentBranchTransform: false,
+	// })
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	require.NotNil(t, agg.d[kv.AccountsDomain].checker)
+	require.NotNil(t, agg.d[kv.StorageDomain].checker)
+	require.NotNil(t, agg.checker)
+	require.Nil(t, agg.d[kv.CommitmentDomain].checker)
+
+	generateAccountsFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCodeFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateStorageFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCommitmentFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}})
+
+	require.NoError(t, agg.OpenFolder())
+
+	tdb := wrapDbWithCtx(db, agg)
+	defer tdb.Close()
+	tx, err := tdb.BeginTemporalRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	aggTx := AggTx(tx)
+	checkFn := func(files visibleFiles, merged bool) {
+		if merged {
+			require.Equal(t, 1, len(files))
+			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
+			require.Equal(t, uint64(2), files[0].endTxNum/stepSize)
+		} else {
+			require.Equal(t, 2, len(files))
+			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
+			require.Equal(t, uint64(1), files[0].endTxNum/stepSize)
+			require.Equal(t, uint64(1), files[1].startTxNum/stepSize)
+			require.Equal(t, uint64(2), files[1].endTxNum/stepSize)
+		}
+	}
+	checkFn(aggTx.d[kv.AccountsDomain].files, false)
+	checkFn(aggTx.d[kv.CodeDomain].files, true)
+	checkFn(aggTx.d[kv.StorageDomain].files, false)
+	checkFn(aggTx.d[kv.CommitmentDomain].files, false)
+}
+
+func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	domainR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
+		accessors := AccessorBTree | AccessorExistence
+		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
+			BtIndex().Existence().
+			Build()
+		return name, schema
+	})
+	defer domainR.Close()
+	populateFiles2(t, dirs, domainR, ranges)
+
+	domainHR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
+		accessors := AccessorHashMap
+		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone).
+			Accessor(dirs.SnapAccessors).
+			Build()
+		return name, schema
+	})
+	defer domainHR.Close()
+	populateFiles2(t, dirs, domainHR, ranges)
+
+	domainII := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
+		accessors := AccessorHashMap
+		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone).
+			Accessor(dirs.SnapAccessors).
+			Build()
+		return name, schema
+	})
+	defer domainII.Close()
+	populateFiles2(t, dirs, domainII, ranges)
+}
+
+func generateAccountsFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	generateDomainFiles(t, "accounts", dirs, ranges)
+}
+
+func generateCodeFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	generateDomainFiles(t, "code", dirs, ranges)
+}
+
+func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	generateDomainFiles(t, "storage", dirs, ranges)
+}
+
+func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	commitmentR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		accessors := AccessorHashMap
+		name = "commitment"
+		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
+			Accessor(dirs.SnapDomain).
+			Build()
+		return name, schema
+	})
+	defer commitmentR.Close()
+	populateFiles2(t, dirs, commitmentR, ranges)
+}
+
+func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {
+	t.Helper()
+	stepSize := uint64(10)
+	name, schema := genRepo(stepSize, dirs)
+
+	createConfig := SnapshotCreationConfig{
+		RootNumPerStep: stepSize,
+		MergeStages:    []uint64{20, 40, 80},
+		MinimumSize:    10,
+		SafetyMargin:   5,
+	}
+	d, err := kv.String2Domain(name)
+	require.NoError(t, err)
+	return NewSnapshotRepo(name, FromDomain(d), &SnapshotConfig{
+		SnapshotCreationConfig: &createConfig,
+		Schema:                 schema,
+	}, log.New())
 }

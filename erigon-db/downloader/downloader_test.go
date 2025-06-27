@@ -24,10 +24,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 )
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {
@@ -37,7 +37,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg2.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg2.NewCfgOpts{})
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
@@ -96,7 +96,7 @@ func TestVerifyData(t *testing.T) {
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg2.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg2.NewCfgOpts{})
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, 0, 0, nil, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
