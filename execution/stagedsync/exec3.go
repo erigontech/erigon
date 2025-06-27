@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	libstate "github.com/erigontech/erigon-lib/state"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -727,7 +729,7 @@ func ExecV3(ctx context.Context,
 					if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix()); err != nil {
 						return err
 					}
-					ts += time.Since(start)
+					computeCommitmentDuration += time.Since(start)
 					shouldGenerateChangesets = true // now we can generate changesets for the safety net
 				}
 				changeset := &libstate.StateChangeSet{}
@@ -830,7 +832,7 @@ func ExecV3(ctx context.Context,
 						return errors.New("wrong trie root")
 					}
 
-					ts += time.Since(start)
+					computeCommitmentDuration += time.Since(start)
 					executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 					if !inMemExec {
 						if err := libstate.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
@@ -877,37 +879,51 @@ func ExecV3(ctx context.Context,
 					}
 
 					var (
-						commitStart = time.Now()
-						tt          = time.Now()
-
-						t1 time.Duration
+						commitStart   = time.Now()
+						pruneDuration time.Duration
 					)
 
 					se := executor.(*serialExecutor)
 
-					if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, 10*time.Hour, logger, u, inMemExec); err != nil {
+					ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+					if err != nil {
 						return err
-					} else {
-						if !ok {
-							return nil
-						}
-
-						se.lastCommittedBlockNum = b.NumberU64()
-						se.lastCommittedTxNum = inputTxNum
-						se.committedGas += uncommittedGas
-						uncommittedGas = 0
+					} else if !ok {
+						return nil
 					}
 
-					t1 = time.Since(tt) + ts
+					computeCommitmentDuration += times.ComputeCommitment
+					flushDuration := times.Flush
 
-					var t2 time.Duration
-					applyTx, t2, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
+					se.lastCommittedBlockNum = b.NumberU64()
+					se.lastCommittedTxNum = inputTxNum
+					se.committedGas += uncommittedGas
+					uncommittedGas = 0
+
+					timeStart := time.Now()
+
+					pruneTimeout := 250 * time.Millisecond
+					if initialCycle {
+						pruneTimeout = 10 * time.Hour
+
+						if err = applyTx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+							return err
+						}
+					}
+
+					if _, err := applyTx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
+						return err
+					}
+
+					pruneDuration = time.Since(timeStart)
+
+					applyTx, commitDuration, err := executor.(*serialExecutor).commit(ctx, execStage, applyTx, nil, useExternalTx)
 					if err != nil {
 						return err
 					}
 
 					// on chain-tip: if batch is full then stop execution - to allow stages commit
-					if !execStage.CurrentSyncCycle.IsInitialCycle {
+					if !initialCycle {
 						return nil
 					}
 
@@ -918,7 +934,7 @@ func ExecV3(ctx context.Context,
 					logger.Info("Committed", "time", time.Since(commitStart),
 						"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
 						"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
-						"flush+commitment+prune", t1, "tx.commit", t2)
+						"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
 				default:
 				}
 
@@ -1144,7 +1160,7 @@ func ExecV3(ctx context.Context,
 
 	if !parallel && u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+			_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -1154,6 +1170,8 @@ func ExecV3(ctx context.Context,
 			se.lastCommittedTxNum = inputTxNum
 			se.committedGas += uncommittedGas
 			uncommittedGas = 0
+
+			commitStart := time.Now()
 
 			_, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
 			if err != nil {
@@ -1310,9 +1328,9 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	applyTx, ok := applyTx.(kv.TemporalRwTx)
+	applyTx, ok = applyTx.(kv.TemporalRwTx)
 	if !ok {
-		return false, errors.New("tx is not a temporal tx")
+		return false, times, errors.New("tx is not a temporal tx")
 	}
 
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix())
