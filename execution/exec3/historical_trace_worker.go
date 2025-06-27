@@ -62,7 +62,6 @@ type HistoricalTraceWorker struct {
 
 	execArgs *ExecArgs
 
-	callTracer  *CallTracer
 	taskGasPool *core.GasPool
 
 	// calculated by .changeBlock()
@@ -102,7 +101,6 @@ func NewHistoricalTraceWorker(
 		background:  background,
 		stateReader: state.NewHistoryReaderV3(),
 
-		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 		vmCfg:       &vm.Config{},
 	}
@@ -143,9 +141,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
-	rw.callTracer.Reset()
 	rw.vmCfg.Debug = true
-	rw.vmCfg.Tracer = rw.callTracer
+	tracer := NewCallTracer()
+	rw.vmCfg.Tracer = tracer
 
 	rw.ibs.Reset()
 	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
@@ -225,8 +223,8 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			ibs.SoftFinalise()
 
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
-			txTask.TraceFroms = rw.callTracer.Froms()
-			txTask.TraceTos = rw.callTracer.Tos()
+			txTask.TraceFroms = tracer.Froms()
+			txTask.TraceTos = tracer.Tos()
 		}
 	}
 }
