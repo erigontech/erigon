@@ -125,6 +125,10 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 		return true, nil
 	}
 	status := h.Status()
+	topic := communication2.StatusProtocolV1
+	if curEpoch := h.ethClock.GetCurrentEpoch(); curEpoch >= h.beaconConfig.FuluForkEpoch {
+		topic = communication2.StatusProtocolV2
+	}
 	// Encode our status
 	buf := new(bytes.Buffer)
 	if err := ssz_snappy.EncodeAndWrite(buf, status); err != nil {
@@ -135,7 +139,7 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 		return false, err
 	}
 	req.Header.Set("REQRESP-PEER-ID", id.String())
-	req.Header.Set("REQRESP-TOPIC", communication2.StatusProtocolV1)
+	req.Header.Set("REQRESP-TOPIC", topic)
 	resp, err := httpreqresp.Do(h.handler, req)
 	if err != nil {
 		return false, err
