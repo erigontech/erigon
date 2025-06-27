@@ -322,6 +322,8 @@ var (
 	gasStaticCallEIP7907   = makeGasFuncCodeAccessVariantEIP7907(gasStaticCallEIP7702, 1)
 	gasCallCodeEIP7907     = makeGasFuncCodeAccessVariantEIP7907(gasCallCodeEIP7702, 1)
 	gasExtCodeCopyEIP7907  = makeGasFuncCodeAccessVariantEIP7907(gasExtCodeCopyEIP2929, 0)
+	gasCreateEIP7907       = gasCreateEip7907
+	gasCreate2EIP7907      = gasCreate2Eip7907
 )
 
 func makeGasFuncCodeAccessVariantEIP7907(oldGasFunc gasFunc, addressStackIndex int) gasFunc {

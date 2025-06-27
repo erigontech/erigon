@@ -334,6 +334,28 @@ func gasCreateEip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 	return gas, nil
 }
 
+func gasCreateEip7907(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	gas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	size, overflow := stack.Back(2).Uint64WithOverflow()
+	if overflow {
+		return 0, ErrGasUintOverflow
+	}
+	if size > uint64(params.MaxInitCodeSizeEip7907) {
+		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	}
+	numWords := ToWordSize(size)
+	// Since size <= params.MaxInitCodeSizeEip7907, this multiplication cannot overflow
+	wordGas := params.InitCodeWordGas * numWords
+	gas, overflow = math.SafeAdd(gas, wordGas)
+	if overflow {
+		return 0, ErrGasUintOverflow
+	}
+	return gas, nil
+}
+
 func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
@@ -343,11 +365,33 @@ func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, 
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > uint64(MaxInitCodeSize(evm.chainRules)) {
+	if size > uint64(params.MaxInitCodeSize) {
 		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
 	}
 	numWords := ToWordSize(size)
 	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
+	gas, overflow = math.SafeAdd(gas, wordGas)
+	if overflow {
+		return 0, ErrGasUintOverflow
+	}
+	return gas, nil
+}
+
+func gasCreate2Eip7907(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	gas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	size, overflow := stack.Back(2).Uint64WithOverflow()
+	if overflow {
+		return 0, ErrGasUintOverflow
+	}
+	if size > uint64(params.MaxInitCodeSizeEip7907) {
+		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	}
+	numWords := ToWordSize(size)
+	// Since size <= params.MaxInitCodeSizeEip7907, this multiplication cannot overflow
 	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {
