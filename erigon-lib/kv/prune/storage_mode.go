@@ -164,7 +164,7 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 }
 
 // EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
-func EnsureNotChanged(tx kv.GetPut, pruneMode Mode, chaindata string) (Mode, error) {
+func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	if err := setIfNotExist(tx, pruneMode); err != nil {
 		return pruneMode, err
 	}

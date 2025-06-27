@@ -320,7 +320,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 
-		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune, dirs.Chaindata)
+		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
 		if err != nil {
 			return err
 		}
