@@ -26,10 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error) {
@@ -125,7 +122,6 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		}
 		return true
 	})
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 
 	if searchErr != nil {
 		return nil, searchErr
@@ -133,14 +129,14 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	if creationTxnID == 0 {
 		return nil, nil
 	}
-	bn, ok, err := txNumsReader.FindBlockNum(tx, creationTxnID)
+	bn, ok, err := api._txNumReader.FindBlockNum(tx, creationTxnID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("block not found by txnID=%d", creationTxnID)
 	}
-	minTxNum, err := txNumsReader.Min(tx, bn)
+	minTxNum, err := api._txNumReader.Min(tx, bn)
 	if err != nil {
 		return nil, err
 	}

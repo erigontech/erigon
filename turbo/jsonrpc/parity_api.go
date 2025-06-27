@@ -25,10 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/erigontech/erigon/rpc"
 )
@@ -74,10 +72,9 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 	} else if a == nil {
 		return nil, errors.New("acc not found")
 	}
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
 
 	bn := rawdb.ReadCurrentBlockNumber(tx)
-	minTxNum, err := txNumsReader.Min(tx, *bn)
+	minTxNum, err := api._txNumReader.Min(tx, *bn)
 	if err != nil {
 		return nil, err
 	}
