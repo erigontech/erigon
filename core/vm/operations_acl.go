@@ -326,17 +326,14 @@ var (
 
 func makeGasFuncCodeAccessVariantEIP7907(oldGasFunc gasFunc, addressStackIndex int) gasFunc {
 	return func(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-		cost, err := oldGasFunc(evm, contract, stack, mem, memorySize)
-		if err != nil {
-			return 0, err
-		}
-
 		extraCost, err := chargeLargeContractAccessCost(evm, contract, stack.Back(addressStackIndex).Bytes20())
 		if err != nil {
 			return 0, err
 		}
-		if extraCost == 0 {
-			return cost, nil
+
+		cost, err := oldGasFunc(evm, contract, stack, mem, memorySize)
+		if err != nil {
+			return 0, err
 		}
 
 		// add back the extra cost we've charged here since it will all be charged by the caller
