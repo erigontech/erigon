@@ -38,6 +38,7 @@ type Dirs struct {
 	DataDir          string
 	RelativeDataDir  string // like dataDir, but without filepath.Abs() resolution
 	Chaindata        string
+	ArbitrumWasm     string
 	Tmp              string
 	Snap             string
 	SnapIdx          string
