@@ -362,6 +362,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
+	isEIP7907 := rules.IsOsaka
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	// set code tx
@@ -372,9 +373,11 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	// Check whether the init code size has been exceeded.
-	maxInitCodeSize := vm.MaxInitCodeSize(rules)
-	if isEIP3860 && contractCreation && len(st.data) > maxInitCodeSize {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), maxInitCodeSize)
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+	}
+	if isEIP7907 && contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
 	}
 
 	// Execute the preparatory steps for state transition which includes:
@@ -470,6 +473,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
+	isEIP7907 := rules.IsOsaka
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
@@ -516,9 +520,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	// Check whether the init code size has been exceeded.
-	maxInitCodeSize := vm.MaxInitCodeSize(rules)
-	if isEIP3860 && contractCreation && len(st.data) > maxInitCodeSize {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), maxInitCodeSize)
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+	}
+	if isEIP7907 && contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
 	}
 
 	// Execute the preparatory steps for state transition which includes:
