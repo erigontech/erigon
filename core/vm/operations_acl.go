@@ -377,7 +377,7 @@ func chargeLargeContractAccessCost(evm *EVM, contract *Contract, addr common.Add
 		return 0, nil
 	}
 
-	if !contract.UseGas(cost, evm.Config().Tracer, tracing.GasChangeCodeColdAccess) {
+	if !contract.UseGas(cost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
 		return 0, ErrOutOfGas
 	}
 
