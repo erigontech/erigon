@@ -564,11 +564,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			if err != nil {
 				return err
 			}
-			transaction, err := txn.ToTransaction(api.GasCap, blockCtx.BaseFee)
-			if err != nil {
-				stream.WriteNil()
-				return err
-			}
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState()
 			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)

@@ -105,8 +105,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		gspecNoFork  = &types.Genesis{Config: configNoFork}
 		gspecProFork = &types.Genesis{Config: configProFork}
 
-		genesisNoFork  = rawdb.MustCommitGenesisWithoutState(gspecNoFork, dbNoFork)
-		genesisProFork = rawdb.MustCommitGenesisWithoutState(gspecProFork, dbProFork)
+		genesisNoFork  = core.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
+		genesisProFork = core.MustCommitGenesis(gspecProFork, dbProFork, datadir.New(t.TempDir()), log.Root())
 	)
 
 	var s1, s2 *GrpcServer
