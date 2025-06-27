@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -50,8 +51,10 @@ func (c *BlockTxNumLookupCache) ensureLookup(r snapshotsync.Range) []atomic.Uint
 	// Need to create - acquire write lock
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	log.Warn("[dbg]", "a", len(c.cache))
+	t := time.Now()
+	defer func() {
+		log.Warn("[dbg]", "a", len(c.cache), "took", time.Since(t))
+	}()
 
 	// Double-check after acquiring write lock
 	if lookup, ok := c.cache[r]; ok {
