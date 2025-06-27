@@ -171,7 +171,6 @@ func (v *StateSyncEventsResponseV2) GetEventRecords() ([]*EventRecordWithTime, e
 
 		decoded, err := base64.StdEncoding.DecodeString(v.EventRecords[i].Data)
 		if err != nil {
-			fmt.Println("LAL decoded err", err)
 			return nil, err
 		}
 

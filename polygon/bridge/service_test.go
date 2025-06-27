@@ -347,8 +347,26 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 		// post-indore: block8Time=400,block10Time=500 => event4 falls in block10 (toTime=currentSprintBlockTime-delay=500-1=499)
 		Time: time.Unix(498, 0),
 	}
+	event5 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      5,
+			ChainID: "80002",
+			Data:    hexutil.MustDecode("0x04"),
+		},
+		// post-indore: block10Time=500,block12Time=600 => event4 falls in block12 (toTime=currentSprintBlockTime-delay=600-1=599)
+		Time: time.Unix(598, 0),
+	}
+	event6 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      6,
+			ChainID: "80002",
+			Data:    hexutil.MustDecode("0x04"),
+		},
+		// post-indore: block12Time=600,block14Time=700 => event4 falls in block14 (toTime=currentSprintBlockTime-delay=700-1=699)
+		Time: time.Unix(698, 0),
+	}
 
-	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4}
+	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4, event5, event6}
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
@@ -379,7 +397,7 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 
-	blocks := getBlocks(t, 10)
+	blocks := getBlocks(t, 20)
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
@@ -392,7 +410,10 @@ func TestService_ProcessNewBlocksWithOverride(t *testing.T) {
 
 	var wg sync.WaitGroup
 	borCfg := defaultBorConfig
-	borCfg.OverrideStateSyncRecords = map[string]int{"4": 1}
+	borCfg.OverrideStateSyncRecords = map[string]int{
+		"4":       1,
+		"r.12-14": 0,
+	}
 	b, blocks := setupOverrideTest(t, ctx, borCfg, &wg)
 
 	res, err := b.Events(ctx, blocks[3].Hash(), 4) // should only have event1 as event2 is skipped and is present in block 6
@@ -406,6 +427,18 @@ func TestService_ProcessNewBlocksWithOverride(t *testing.T) {
 	res, err = b.Events(ctx, blocks[9].Hash(), 10)
 	require.NoError(t, err)
 	require.Len(t, res, 1)
+
+	res, err = b.Events(ctx, blocks[11].Hash(), 12)
+	require.NoError(t, err)
+	require.Len(t, res, 0) // because we skip it for r.12-14 interval
+
+	res, err = b.Events(ctx, blocks[13].Hash(), 14)
+	require.NoError(t, err)
+	require.Len(t, res, 0) // because we skip it for r.12-14 interval
+
+	res, err = b.Events(ctx, blocks[15].Hash(), 16)
+	require.NoError(t, err)
+	require.Len(t, res, 2)
 
 	cancel()
 	wg.Wait()
