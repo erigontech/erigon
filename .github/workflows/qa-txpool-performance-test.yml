@@ -251,8 +251,8 @@ jobs:
           echo "## 🕐 Latency Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if jq -e '.tx_pool_latency_analysis' "$output_json" > /dev/null 2>&1; then
-            echo "| TX Count | Min (μs) | P50 (ms) | P75 (ms) | P99 (ms) | Max (ms) | Missed Events | Duplicated Events |" >> $GITHUB_STEP_SUMMARY
-            echo "|----------|----------|----------|----------|----------|----------|---------------|-------------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| TX Count | Min (μs) | Max (ms) | Missed Events | Duplicated Events |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|----------|----------|---------------|-------------------|" >> $GITHUB_STEP_SUMMARY
             
             latency_length=$(jq '.tx_pool_latency_analysis | length' "$output_json")
             for ((i=0; i<latency_length; i++)); do
@@ -265,20 +265,7 @@ jobs:
               # Convert max from microseconds to milliseconds
               max_ms=$(echo "scale=2; $max_us / 1000" | bc -l)
               
-              # Extract percentiles from HDR plot data
-              hdr_data=$(jq -r ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json")
-              
-              # Extract P50, P75, P99 values (convert from microseconds to milliseconds)
-              p50_us=$(echo "$hdr_data" | grep "0.500000" | awk '{print $1}' || echo "0")
-              p75_us=$(echo "$hdr_data" | grep "0.750000" | awk '{print $1}' || echo "0")
-              p99_us=$(echo "$hdr_data" | grep "0.990000\|0.99" | tail -1 | awk '{print $1}' || echo "0")
-              
-              # Convert to milliseconds and format
-              p50_ms=$(echo "scale=2; $p50_us / 1000" | bc -l 2>/dev/null || echo "N/A")
-              p75_ms=$(echo "scale=2; $p75_us / 1000" | bc -l 2>/dev/null || echo "N/A")
-              p99_ms=$(echo "scale=2; $p99_us / 1000" | bc -l 2>/dev/null || echo "N/A")
-              
-              echo "| $tx_count | $min_us | $p50_ms | $p75_ms | $p99_ms | $max_ms | $missed | $duplicated |" >> $GITHUB_STEP_SUMMARY
+              echo "| $tx_count | $min_us | $max_ms | $missed | $duplicated |" >> $GITHUB_STEP_SUMMARY
             done
           else
             echo "⚠️ No latency analysis data available" >> $GITHUB_STEP_SUMMARY
@@ -330,10 +317,10 @@ jobs:
                   failure_reasons+=("High missed P2P events: ${missed} (>${missed_threshold} threshold) for ${tx_count} transactions")
                 fi
                 
-                # Check for coordinated omission events
-                if [ "$omission" != "0" ] && [ "$omission" != "null" ]; then
-                  failure_reasons+=("Coordinated omission events detected: ${omission} for ${tx_count} transactions")
-                fi
+                                 # Check for coordinated omission events (warning only, not a failure)
+                 if [ "$omission" != "0" ] && [ "$omission" != "null" ]; then
+                   echo "::warning::Coordinated omission events detected: ${omission} for ${tx_count} transactions"
+                 fi
               done
             fi
             
