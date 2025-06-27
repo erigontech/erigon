@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -148,7 +147,7 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 	if err != nil {
 		return nil, err
 	}
-	return CreateStateReaderFromBlockNumber(ctx, tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, br)), blockNumber, latest, txnIndex, stateCache, chainName)
+	return CreateStateReaderFromBlockNumber(ctx, tx, br.TxnumReader(ctx), blockNumber, latest, txnIndex, stateCache, chainName)
 }
 
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {

@@ -47,7 +47,6 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -66,8 +65,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, api._blockReader))
-
 	var isBorStateSyncTxn bool
 	blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
@@ -82,7 +79,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		if api.useBridgeReader {
 			blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
 			if ok {
-				txNumNextBlock, err := txNumsReader.Min(tx, blockNumber+1)
+				txNumNextBlock, err := api._txNumReader.Min(tx, blockNumber+1)
 				if err != nil {
 					return nil, err
 				}
