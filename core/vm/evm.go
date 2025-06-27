@@ -585,3 +585,12 @@ func (evm *EVM) captureEnd(depth int, typ OpCode, startGas uint64, leftOverGas u
 		tracer.OnExit(depth, ret, startGas-leftOverGas, VMErrorFromErr(err), reverted)
 	}
 }
+
+// Depth returns the current depth
+func (evm *EVM) Depth() int {
+	return evm.interpreter.Depth()
+}
+
+func (evm *EVM) IncDepth() { evm.interpreter.IncDepth() }
+
+func (evm *EVM) DecDepth() { evm.interpreter.DecDepth() }

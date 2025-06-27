@@ -1,4 +1,4 @@
-package entity_extras
+package state
 
 import "github.com/erigontech/erigon-lib/kv"
 
