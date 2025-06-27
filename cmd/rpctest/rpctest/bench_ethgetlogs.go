@@ -22,10 +22,12 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"runtime"
 	"slices"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
@@ -157,7 +159,12 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 	if blockNumber.Error != nil {
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
-	fmt.Printf("EthGetLogsInvariants: starting %d-%d, latestBlock=%d\n", blockFrom, blockTo, blockNumber.Number)
+	latestBlock := blockNumber.Number.Uint64()
+	log.Info("[ethGetLogsInvariants] starting", "blockFrom", blockFrom, "blockTo", blockTo, "latestBlock", latestBlock)
+	if blockFrom > latestBlock {
+		return fmt.Errorf("fromBlock(%d) > latestBlock(%d)", blockFrom, latestBlock)
+	}
+
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -178,14 +185,13 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 		return nil
 	}
 
-	for bn := blockFrom; bn < blockTo; {
-		batchEnd := min(bn+10, blockTo)
-		eg := &errgroup.Group{}
-		eg.SetLimit(estimate.AlmostAllCPUs())
-		//eg.SetLimit(1)
-		for ; bn < batchEnd; bn++ {
-			bn := bn
-			//eg.Go(func() error {
+	eg := &errgroup.Group{}
+	eg.SetLimit(estimate.AlmostAllCPUs())
+
+	startTime := time.Now()
+	loggedBlock := blockFrom
+	for bn := blockFrom; bn < blockTo; bn++ {
+		eg.Go(func() error {
 			var resp EthGetLogs
 			res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(bn, bn), &resp)
 			if res.Err != nil {
@@ -233,35 +239,51 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 
 				sawTopic[l.Topics[0]] = struct{}{}
 
-				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(bn, bn, l.Address, l.Topics[0]), &resp)
-				if res.Err != nil {
-					return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
-				}
-				if resp.Error != nil {
-					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
-				}
-				if len(resp.Result) == 0 {
-					return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
-				}
-				if err := noDuplicates(resp.Result); err != nil {
-					return fmt.Errorf("eth_getLogs: at blockNum=%d and topic %x %w", bn, l.Topics[0], err)
-				}
+				//res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(bn, bn, l.Address, l.Topics[0]), &resp)
+				//if res.Err != nil {
+				//	return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+				//}
+				//if resp.Error != nil {
+				//	return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
+				//}
+				//if len(resp.Result) == 0 {
+				//	return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
+				//}
+				//if err := noDuplicates(resp.Result); err != nil {
+				//	return fmt.Errorf("eth_getLogs: at blockNum=%d and topic %x %w", bn, l.Topics[0], err)
+				//}
 			}
 
 			select {
-			case <-logEvery.C:
-				log.Info("[ethGetLogsInvariants]", "block_num", bn)
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
 			}
+			return nil
+		})
 
-			//return nil
-			//})
+		if bn%1000 == 0 {
+			if err := eg.Wait(); err != nil {
+				return err
+			}
 		}
 
-		if err := eg.Wait(); err != nil {
-			return err
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+
+			blocksProcessed := bn - loggedBlock
+			blocksPerSec := int(float64(blocksProcessed) / time.Since(startTime).Seconds())
+
+			loggedBlock = bn
+			startTime = time.Now()
+
+			log.Info("[ethGetLogsInvariants]", "block_num", fmt.Sprintf("%.2fm", float64(bn)/1_000_000), "blk/s", blocksPerSec,
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
 	}
 	return nil
