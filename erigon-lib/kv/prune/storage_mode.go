@@ -177,10 +177,10 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	if pruneMode.Initialised {
 		// Little initial design flaw: we used maxUint64 as default value for prune distance so history expiry was not accounted for.
 		// We need to use because we are changing defaults in archive node from DefaultBlocksPruneMode to KeepAllBlocksPruneMode which is a different value so it would fail if we are running --prune.mode=archive.
-		if (pm.History == DefaultBlocksPruneMode && pruneMode.History == DefaultBlocksPruneMode) &&
-			(pm.Blocks == DefaultBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
-			return pruneMode, nil
-		}
+		// if (pm.History == DefaultBlocksPruneMode && pruneMode.History == DefaultBlocksPruneMode) &&
+		// 	(pm.Blocks == DefaultBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
+		// 	return pruneMode, nil
+		// }
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
 			return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())
