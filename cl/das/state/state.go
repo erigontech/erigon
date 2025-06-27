@@ -27,9 +27,8 @@ type PeerDasState struct {
 	custodyColumnsCache atomic.Pointer[map[cltypes.CustodyIndex]bool] // map[cltypes.CustodyIndex]bool
 }
 
-func NewPeerDasState(beaconConfig *clparams.BeaconChainConfig, nodeID enode.ID) *PeerDasState {
+func NewPeerDasState(beaconConfig *clparams.BeaconChainConfig) *PeerDasState {
 	return &PeerDasState{
-		nodeID:              atomic.Pointer[enode.ID]{},
 		beaconConfig:        beaconConfig,
 		realCgc:             beaconConfig.CustodyRequirement,
 		advertisedCgc:       beaconConfig.CustodyRequirement,

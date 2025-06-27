@@ -61,11 +61,11 @@ func NewPeerDas(
 	sentinel sentinelproto.SentinelClient,
 	nodeID enode.ID,
 	ethClock eth_clock.EthereumClock,
-) (PeerDas, peerdasstate.PeerDasStateReader) {
+	peerDasState *peerdasstate.PeerDasState,
+) PeerDas {
 	kzg.InitKZG()
-	state := peerdasstate.NewPeerDasState(beaconConfig, nodeID)
 	p := &peerdas{
-		state:         state,
+		state:         peerDasState,
 		nodeID:        nodeID,
 		rpc:           rpc,
 		beaconConfig:  beaconConfig,
@@ -81,7 +81,7 @@ func NewPeerDas(
 	for range numOfBlobRecoveryWorkers {
 		go p.blobsRecoverWorker(ctx)
 	}
-	return p, state
+	return p
 }
 
 func (d *peerdas) StateReader() peerdasstate.PeerDasStateReader {
