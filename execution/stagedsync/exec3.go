@@ -505,7 +505,10 @@ Loop:
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
+
+		// TODO add check on arbitrum at all
+		arbosv := types.GetArbOSVersion(header, chainConfig)
+		signer := *types.MakeSignerArb(chainConfig, blockNum, header.Time, arbosv)
 
 		getHashFnMute := &sync.Mutex{}
 		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
@@ -515,7 +518,7 @@ Loop:
 		})
 		totalGasUsed += b.GasUsed()
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
-		gp := new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(b.Time()))
+		gp := new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(b.Time(), arbosv))
 
 		// print type of engine
 		if parallel {
@@ -536,7 +539,11 @@ Loop:
 			accumulator.StartChange(header, txs, false)
 		}
 
-		rules := chainConfig.Rules(blockNum, b.Time())
+		var arbosVersion uint64
+		if cfg.chainConfig.IsArbitrum() {
+			arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		}
+		rules := chainConfig.Rules(blockNum, b.Time(), arbosVersion)
 		blockReceipts := make(types.Receipts, len(txs))
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
@@ -562,6 +569,7 @@ Loop:
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
+				TxAsMessage:     &types.Message{},
 
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),

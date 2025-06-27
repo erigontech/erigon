@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/erigontech/erigon/core/state"
+
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
@@ -634,7 +636,9 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 }
 
 func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.push(interpreter.evm.GasPrice)
+	// Arbitrum: provide an opportunity to remove the tip from the gas price
+	gasPrice := interpreter.evm.ProcessingHook.GasPriceOp(interpreter.evm)
+	scope.Stack.push(gasPrice)
 	return nil, nil
 }
 
@@ -647,14 +651,20 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		return nil, nil
 	}
 	var upper, lower uint64
-	upper = interpreter.evm.Context.BlockNumber
+	// Arbitrum
+	upper, err := interpreter.evm.ProcessingHook.L1BlockNumber(interpreter.evm.Context)
+	if err != nil {
+		return nil, err
+	}
+	// upper = interpreter.evm.Context.BlockNumber // must be returned by default hook
 	if upper <= params.BlockHashOldWindow {
 		lower = 0
 	} else {
 		lower = upper - params.BlockHashOldWindow
 	}
 	if arg64 >= lower && arg64 < upper {
-		hash, err := interpreter.evm.Context.GetHash(arg64)
+		hash, err := interpreter.evm.ProcessingHook.L1BlockHash(interpreter.evm.Context, arg64)
+		//hash, err := interpreter.evm.Context.GetHash(arg64)
 		if err != nil {
 			arg.Clear()
 			return nil, err
@@ -684,7 +694,13 @@ func opTimestamp(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 }
 
 func opNumber(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	v := new(uint256.Int).SetUint64(interpreter.evm.Context.BlockNumber)
+	bnum, err := interpreter.evm.ProcessingHook.L1BlockNumber(interpreter.evm.Context)
+	if err != nil {
+		return nil, err
+	}
+
+	v := uint256.NewInt(bnum)
+	// v := new(uint256.Int).SetUint64(interpreter.evm.Context.BlockNumber)
 	scope.Stack.push(v)
 	return nil, nil
 }
@@ -1217,6 +1233,10 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	if err != nil {
 		return nil, err
 	}
+	if beneficiaryAddr == scope.Contract.Address() {
+		// Arbitrum: calling selfdestruct(this) burns the balance
+		interpreter.evm.IntraBlockState().ExpectBalanceBurn(&balance)
+	}
 
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
@@ -1233,6 +1253,19 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
+	// Arbitrum: revert if acting account is a Stylus program
+	if interpreter.evm.chainRules.IsStylus {
+		actingAddress := scope.Contract.Address()
+		code, err := interpreter.evm.intraBlockState.GetCode(actingAddress)
+		if err != nil {
+			return nil, err
+		}
+
+		if state.IsStylusProgram(code) {
+			return nil, ErrExecutionReverted
+		}
+	}
+
 	beneficiary := scope.Stack.pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := common.Address(beneficiary.Bytes20())
@@ -1390,3 +1423,30 @@ func makeSwapStringer(n int) stringer {
 		return fmt.Sprintf("SWAP%d (%d %d)", n, &scope.Stack.data[len(scope.Stack.data)-1], &scope.Stack.data[len(scope.Stack.data)-(n+1)])
 	}
 }
+
+// Arbitrum: adaptation of opBlockHash that doesn't require an EVM interpreter
+// func BlockHashOp(evm *EVM, block *big.Int) common.Hash {
+// 	if !block.IsUint64() {
+// 		return common.Hash{}
+// 	}
+// 	num64 := block.Uint64()
+// 	upper, err := evm.ProcessingHook.L1BlockNumber(evm.Context)
+// 	if err != nil {
+// 		return common.Hash{}
+// 	}
+
+// 	var lower uint64
+// 	if upper <= params.BlockHashOldWindow {
+// 		lower = 0
+// 	} else {
+// 		lower = upper - params.BlockHashOldWindow
+// 	}
+// 	if num64 >= lower && num64 < upper {
+// 		hash, err := evm.ProcessingHook.L1BlockHash(evm.Context, num64)
+// 		if err != nil {
+// 			return common.Hash{}
+// 		}
+// 		return hash
+// 	}
+// 	return common.Hash{}
+// }

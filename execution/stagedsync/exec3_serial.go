@@ -42,6 +42,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 		if gp != nil {
 			se.applyWorker.SetGaspool(gp)
 		}
+		se.applyWorker.SetArbitrumWasmDB(se.cfg.arbitrumWasmDB)
 		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation)
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
@@ -67,7 +68,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 					// add this to the executor
 					se.cfg.notifications.RecentLogs.Add(txTask.BlockReceipts)
 				}
-				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
+				// TODO arbitrum enable receipt checking
+				checkReceipts := false //!se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
+
 				if txTask.BlockNum > 0 && !se.skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go

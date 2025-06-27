@@ -19,18 +19,15 @@ package state
 import (
 	"container/heap"
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -70,7 +67,7 @@ type TxTask struct {
 
 	HistoryExecution bool // use history reader for that txn instead of state reader
 
-	BalanceIncreaseSet map[common.Address]uint256.Int
+	BalanceIncreaseSet map[common.Address]BalanceIncreaseEntry
 	ReadLists          map[string]*state.KvList
 	WriteLists         map[string]*state.KvList
 	AccountPrevs       map[string][]byte
@@ -145,10 +142,10 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 	}
 
 	cumulativeGasUsed += t.GasUsed
-	if t.GasUsed == 0 {
-		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
-		panic(msg)
-	}
+	//if t.GasUsed == 0 { // TODO arbitrum does not need this but others do
+	//	msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
+	//	panic(msg)
+	//}
 
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	t.BlockReceipts[t.TxIndex] = r

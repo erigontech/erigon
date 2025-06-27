@@ -54,6 +54,8 @@ type CallArgs struct {
 	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
 	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
+
+	SkipL1Charging *bool `json:"skipL1Charging"` // Arbitrum
 }
 
 // from retrieves the transaction sender address.
@@ -248,6 +250,23 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 	return tx, nil
 }
 
+// Arbiturm
+// Raises the vanilla gas cap by the tx's l1 data costs in l2 terms. This creates a new gas cap that after
+// data payments are made, equals the original vanilla cap for the remaining, L2-specific work the tx does.
+func (args *CallArgs) L2OnlyGasCap(gasCap uint64, header *types.Header) (uint64, error) {
+	msg, err := args.ToMessage(gasCap, nil)
+	if err != nil {
+		return 0, err
+	}
+	InterceptRPCGasCap(&gasCap, msg, header)
+	return gasCap, nil
+}
+
+// Allows ArbOS to update the gas cap so that it ignores the message's specific L1 poster costs.
+var InterceptRPCGasCap = func(gascap *uint64, msg *types.Message, header *types.Header) {}
+
+// End arbitrum
+
 // Account indicates the overriding fields of account during the execution of
 // a message call.
 // Note, state and stateDiff can't be specified at the same time. If state is
@@ -405,11 +424,11 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
-func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
-	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, common.Hash{})
+func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool, isArbitrumNitro bool) (map[string]interface{}, error) {
+	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, common.Hash{}, isArbitrumNitro)
 }
 
-func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash) (map[string]interface{}, error) {
+func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, isArbitrumNitro bool) (map[string]interface{}, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
@@ -454,8 +473,17 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 	if block.Withdrawals() != nil {
 		fields["withdrawals"] = block.Withdrawals()
 	}
-
+	if isArbitrumNitro {
+		fillArbitrumHeaderInfo(block.Header(), fields)
+	}
 	return fields, nil
+}
+
+func fillArbitrumHeaderInfo(header *types.Header, fields map[string]interface{}) {
+	info := types.DeserializeHeaderExtraInformation(header)
+	fields["l1BlockNumber"] = hexutil.Uint64(info.L1BlockNumber)
+	fields["sendRoot"] = info.SendRoot
+	fields["sendCount"] = hexutil.Uint64(info.SendCount)
 }
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
@@ -483,6 +511,20 @@ type RPCTransaction struct {
 	YParity              *hexutil.Big               `json:"yParity,omitempty"`
 	R                    *hexutil.Big               `json:"r"`
 	S                    *hexutil.Big               `json:"s"`
+
+	// Arbitrum fields:
+	RequestId           *common.Hash    `json:"requestId,omitempty"`           // Contract SubmitRetryable Deposit
+	TicketId            *common.Hash    `json:"ticketId,omitempty"`            // Retry
+	MaxRefund           *hexutil.Big    `json:"maxRefund,omitempty"`           // Retry
+	SubmissionFeeRefund *hexutil.Big    `json:"submissionFeeRefund,omitempty"` // Retry
+	RefundTo            *common.Address `json:"refundTo,omitempty"`            // SubmitRetryable Retry
+	L1BaseFee           *hexutil.Big    `json:"l1BaseFee,omitempty"`           // SubmitRetryable
+	DepositValue        *hexutil.Big    `json:"depositValue,omitempty"`        // SubmitRetryable
+	RetryTo             *common.Address `json:"retryTo,omitempty"`             // SubmitRetryable
+	RetryValue          *hexutil.Big    `json:"retryValue,omitempty"`          // SubmitRetryable
+	RetryData           *hexutil.Bytes  `json:"retryData,omitempty"`           // SubmitRetryable
+	Beneficiary         *common.Address `json:"beneficiary,omitempty"`         // SubmitRetryable
+	MaxSubmissionFee    *hexutil.Big    `json:"maxSubmissionFee,omitempty"`    // SubmitRetryable
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
@@ -511,6 +553,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 	result.R = (*hexutil.Big)(r.ToBig())
 	result.S = (*hexutil.Big)(s.ToBig())
 
+	var signed bool
 	if txn.Type() == types.LegacyTxType {
 		chainId = types.DeriveChainId(v)
 		// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
@@ -546,13 +589,55 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 			}
 			result.Authorizations = &ats
 		}
+
+		switch tx := txn.(type) {
+		case *types.ArbitrumInternalTx:
+			result.GasPrice = (*hexutil.Big)(tx.GetPrice().ToBig())
+		case *types.ArbitrumDepositTx:
+			result.GasPrice = (*hexutil.Big)(tx.GetPrice().ToBig())
+			result.RequestId = &tx.L1RequestId
+		case *types.ArbitrumContractTx:
+			result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+			result.RequestId = &tx.RequestId
+			result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
+		case *types.ArbitrumRetryTx:
+			result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+			result.TicketId = &tx.TicketId
+			result.RefundTo = &tx.RefundTo
+			result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
+			result.MaxRefund = (*hexutil.Big)(tx.MaxRefund)
+			result.SubmissionFeeRefund = (*hexutil.Big)(tx.SubmissionFeeRefund)
+		case *types.ArbitrumSubmitRetryableTx:
+			result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+			result.RequestId = &tx.RequestId
+			result.L1BaseFee = (*hexutil.Big)(tx.L1BaseFee)
+			result.DepositValue = (*hexutil.Big)(tx.DepositValue)
+			result.RetryTo = tx.RetryTo
+			result.RetryValue = (*hexutil.Big)(tx.RetryValue)
+			result.RetryData = (*hexutil.Bytes)(&tx.RetryData)
+			result.Beneficiary = &tx.Beneficiary
+			result.RefundTo = &tx.FeeRefundAddr
+			result.MaxSubmissionFee = (*hexutil.Big)(tx.MaxSubmissionFee)
+			result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
+		case *types.ArbitrumUnsignedTx:
+			result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+		}
+		signer := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId.ToBig()))
+		var err error
+		result.From, err = signer.Sender(txn)
+		if err != nil {
+			log.Warn("sender recovery", "err", err)
+		}
+		signed = true
 	}
 
-	signer := types.LatestSignerForChainID(chainId.ToBig())
-	var err error
-	result.From, err = txn.Sender(*signer)
-	if err != nil {
-		log.Warn("sender recovery", "err", err)
+	if !signed {
+		signer := types.LatestSignerForChainID(chainId.ToBig())
+		var err error
+		result.From, err = txn.Sender(*signer)
+		if err != nil {
+			log.Warn("sender recovery", "err", err)
+		}
 	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash

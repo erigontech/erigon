@@ -427,6 +427,24 @@ func TestGenesisBlock() *types.Genesis {
 	return &types.Genesis{Config: chain.TestChainConfig}
 }
 
+func ArbSepoliaRollupGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params2.ArbSepoliaChainConfig,
+		Nonce:      0x0000000000000001,
+		Timestamp:  0x0,
+		ExtraData:  common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x4000000000000, // as given in hex
+		Difficulty: big.NewInt(1),   // "0x1"
+		Mixhash:    common.HexToHash("0x00000000000000000000000000000000000000000000000a0000000000000000"),
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Number:     0x0, // block number 0
+		GasUsed:    0x0,
+		ParentHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		BaseFee:    big.NewInt(0x5f5e100),
+		Alloc:      readPrealloc("allocs/arb_sepolia.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -460,6 +478,7 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis 
 
 // GenesisToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
+// TODO can remove dirs since its tmp db for computing root
 func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
@@ -617,12 +636,14 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
+	arbosVersion := types.GetArbOSVersion(head, g.Config)
+
 	withdrawals = nil
-	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
+	if g.Config != nil && g.Config.IsShanghai(g.Timestamp, arbosVersion) {
 		withdrawals = []*types.Withdrawal{}
 	}
 
-	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
+	if g.Config != nil && g.Config.IsCancun(g.Timestamp, arbosVersion) {
 		if g.BlobGasUsed != nil {
 			head.BlobGasUsed = g.BlobGasUsed
 		} else {
@@ -640,7 +661,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
-	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
+	if g.Config != nil && g.Config.IsPrague(g.Timestamp, arbosVersion) {
 		if g.RequestsHash != nil {
 			head.RequestsHash = g.RequestsHash
 		} else {
@@ -701,6 +722,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return HoodiGenesisBlock()
 	case networkname.Amoy:
 		return AmoyGenesisBlock()
+	case networkname.ArbiturmSepolia:
+		return ArbSepoliaRollupGenesisBlock()
 	case networkname.BorMainnet:
 		return BorMainnetGenesisBlock()
 	case networkname.BorDevnet:

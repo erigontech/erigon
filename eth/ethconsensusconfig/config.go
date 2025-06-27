@@ -48,6 +48,10 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 ) consensus.Engine {
 	var eng consensus.Engine
 
+	if chainConfig.IsArbitrum() {
+		return arbos.Engine{}
+	}
+
 	switch consensusCfg := config.(type) {
 	case *ethashcfg.Config:
 		switch consensusCfg.PowMode {

@@ -243,3 +243,40 @@ func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(0))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(0))
 }
+
+func TestArbitrumSpecifics(t *testing.T) {
+	cfg := &Config{
+		ChainID:               big.NewInt(1337),
+		Consensus:             EtHashConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		TangerineWhistleBlock: big.NewInt(0),
+		SpuriousDragonBlock:   big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		Ethash:                new(EthashConfig),
+		ArbitrumChainParams:   ArbitrumChainParams{EnableArbOS: true},
+	}
+
+	// Check if this is Arbitrum in the end
+	assert.True(t, cfg.IsArbitrum())
+
+	// London is enabled since genesis
+	assert.True(t, cfg.IsLondon(0))
+
+	// Shanghai based on Arbos
+	assert.False(t, cfg.IsShanghai(0, ArbosVersion_10))
+	assert.True(t, cfg.IsShanghai(0, ArbosVersion_11))
+
+	// Cancun based on Arbos
+	assert.False(t, cfg.IsCancun(0, ArbosVersion_11))
+	assert.True(t, cfg.IsCancun(0, ArbosVersion_20))
+
+	// Prague based on Arbos
+	assert.False(t, cfg.IsPrague(0, ArbosVersion_20))
+	assert.True(t, cfg.IsPrague(0, ArbosVersion_40))
+
+}

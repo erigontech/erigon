@@ -1116,7 +1116,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 		if err != nil {
 			return nil, nil, err
 		}
-		txs[i].SetSender(senders[i])
+		// txs[i].SetSender(senders[i]) // TODO arbitrum
 	}
 
 	return txs, senders, nil

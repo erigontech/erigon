@@ -57,7 +57,6 @@ func (st *Stack) pop() (ret uint256.Int) {
 	st.data = st.data[:len(st.data)-1]
 	return
 }
-
 func (st *Stack) Cap() int {
 	return cap(st.data)
 }

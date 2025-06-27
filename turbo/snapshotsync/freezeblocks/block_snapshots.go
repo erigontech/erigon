@@ -641,6 +641,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		}
 
 		valueBuf = valueBuf[:0]
+		// TODO ARB seems like first byte of txn hash and it's sender does not used anywhere
 		valueBuf = append(valueBuf, hashFirstByte...)
 		valueBuf = append(valueBuf, sender[:]...)
 		valueBuf = append(valueBuf, v...)

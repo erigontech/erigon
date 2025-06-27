@@ -68,6 +68,14 @@ type Contract struct {
 
 	Gas   uint64
 	value *uint256.Int
+
+	// Arbitrum
+	delegateOrCallcode bool
+}
+
+// arbitrum
+func (c *Contract) IsDelegateOrCallcode() bool {
+	return c.delegateOrCallcode
 }
 
 type JumpDestCache struct {

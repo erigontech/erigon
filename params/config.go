@@ -58,7 +58,6 @@ func readChainSpec(filename string) *chain.Config {
 		}
 		spec.Bor = borConfig
 	}
-
 	return spec
 }
 
@@ -74,6 +73,7 @@ var (
 	GnosisGenesisHash     = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
 	ChiadoGenesisHash     = common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
 	TestGenesisHash       = common.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc")
+	ArbSepoliaGenesisHash = common.HexToHash("0x77194da4010e549a7028a9c3c51c3e277823be6ac7d138d0bb8a70197b5c004c")
 )
 
 var (
@@ -112,6 +112,8 @@ var (
 		LondonBlock:           big.NewInt(0),
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
 	}
+
+	ArbSepoliaChainConfig = readChainSpec("chainspecs/arb-sepolia.json")
 
 	AmoyChainConfig = readChainSpec("chainspecs/amoy.json")
 
@@ -174,6 +176,8 @@ func ChainConfigByChainName(chainName string) *chain.Config {
 		return ChiadoChainConfig
 	case networkname.Test:
 		return chain.TestChainConfig
+	case networkname.ArbiturmSepolia:
+		return ArbSepoliaChainConfig
 	default:
 		return nil
 	}
@@ -201,6 +205,8 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &ChiadoGenesisHash
 	case networkname.Test:
 		return &TestGenesisHash
+	case networkname.ArbiturmSepolia:
+		return &ArbSepoliaGenesisHash
 	default:
 		return nil
 	}
@@ -226,6 +232,8 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *chain.Config {
 		return GnosisChainConfig
 	case genesisHash == ChiadoGenesisHash:
 		return ChiadoChainConfig
+	case genesisHash == ArbSepoliaGenesisHash:
+		return ArbSepoliaChainConfig
 	default:
 		return nil
 	}

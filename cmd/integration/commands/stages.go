@@ -79,6 +79,8 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/ethdb"
+	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -827,11 +829,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	genesis := readGenesis(chain)
 	br, _ := blocksIO(db, logger)
 
+	ethdb.InitialiazeLocalWasmTarget()
+
 	notifications := shards.NewNotifications(nil)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, nil, genesis, syncCfg, nil)
+		dirs, br, nil, genesis, syncCfg, nil, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -1219,6 +1223,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
+	ethdb.InitialiazeLocalWasmTarget()
 	vmConfig := &vm.Config{}
 
 	events := shards.NewEvents()
@@ -1340,6 +1345,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 				cfg.Genesis,
 				cfg.Sync,
 				nil,
+				wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm),
 			),
 			stagedsync.StageSendersCfg(db, sentryControlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, sentryControlServer.Hd),
 			stagedsync.StageMiningExecCfg(db, miner, events, chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, blockReader),
