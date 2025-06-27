@@ -137,7 +137,7 @@ func NewHttpClient(urlString string, logger log.Logger, opts ...HttpClientOption
 
 const (
 	fetchStateSyncEventsFormatV1 = "from-id=%d&to-time=%d&limit=%d"
-	fetchStateSyncEventsFormatV2 = "from_id=%d&to_time=%s&limit=%d"
+	fetchStateSyncEventsFormatV2 = "from_id=%d&to_time=%s&pagination.limit=%d"
 	fetchStateSyncEventsPathV1   = "clerk/event-record/list"
 	fetchStateSyncEventsPathV2   = "clerk/time"
 
