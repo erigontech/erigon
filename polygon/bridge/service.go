@@ -317,7 +317,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 			continue
 		}
 
-		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + s.borConfig.CalculateSprintLength(blockNum)
+		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + s.borConfig.CalculateSprintLength(lastProcessedBlockInfo.BlockNum)
 		if blockNum != expectedNextBlockNum {
 			return fmt.Errorf("nonsequential block in bridge processing: %d != %d", blockNum, expectedNextBlockNum)
 		}
