@@ -31,7 +31,8 @@ import (
 )
 
 var (
-	MaxReorgDepth = EnvInt("MAX_REORG_DEPTH", 512)
+	MaxReorgDepth       = EnvInt("MAX_REORG_DEPTH", 512)
+	EnableHistoryExpiry = EnvBool("ENABLE_HISTORY_EXPIRY", false)
 
 	noMemstat           = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
