@@ -35,6 +35,7 @@ jobs:
         uses: erigontech/kurtosis-assertoor-github-action@v1.1.7
         with:
           enclave_name: ${{ env.ENCLAVE_NAME }}
+          ethereum_package_url: github.com/ethpandaops/ethereum-package@5.0.1
           ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
           kurtosis_extra_args: --verbosity detailed --cli-log-level trace
           persistent_logs: "true"
