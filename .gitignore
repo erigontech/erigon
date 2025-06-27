@@ -72,8 +72,6 @@ __pycache__
 libmdbx/build/*
 tests/testdata/*
 
-go.work*
-
 docker-compose.*.yml
 .env
 coverage-test.out
