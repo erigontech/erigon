@@ -373,11 +373,14 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
-	}
-	if isEIP7907 && contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
+	if isEIP7907 {
+		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
+			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
+		}
+	} else if isEIP3860 {
+		if contractCreation && len(st.data) > params.MaxInitCodeSize {
+			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+		}
 	}
 
 	// Execute the preparatory steps for state transition which includes:
@@ -520,11 +523,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
-	}
-	if isEIP7907 && contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
+	if isEIP7907 {
+		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
+			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
+		}
+	} else if isEIP3860 {
+		if contractCreation && len(st.data) > params.MaxInitCodeSize {
+			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+		}
 	}
 
 	// Execute the preparatory steps for state transition which includes:
