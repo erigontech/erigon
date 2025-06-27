@@ -207,10 +207,11 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 		}
 	default:
+		tracer := calltracer.NewCallTracer(nil)
+
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		txTask.Tracer.Reset() // txTask is retryable
-		rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
+		rw.vmCfg.Tracer = tracer.Tracer().Hooks
 		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 		txn := txTask.Tx
 
@@ -252,10 +253,11 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			ibs.SoftFinalise()
 
 			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
-			txTask.TraceFroms = txTask.Tracer.Froms()
-			txTask.TraceTos = txTask.Tracer.Tos()
+			txTask.TraceFroms = tracer.Froms()
+			txTask.TraceTos = tracer.Tos()
 		}
 	}
+	rw.vmCfg.Tracer = nil
 }
 
 func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask) {
@@ -613,7 +615,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
-				Tracer:           calltracer.NewCallTracer(nil),
 			}
 
 			if txIndex >= 0 && txIndex < len(txs) {
