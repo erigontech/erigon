@@ -40,6 +40,7 @@ import (
 	"github.com/anacrolix/chansync"
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/c2h5oh/datasize"
+	"github.com/puzpuzpuz/xsync/v4"
 	"golang.org/x/sync/semaphore"
 
 	// Make Go expvars available to Prometheus for diagnostics.
@@ -91,8 +92,9 @@ type Downloader struct {
 	startTime time.Time
 
 	lock sync.RWMutex
-	// Pieces having extra verification due to file size mismatches.
-	piecesBeingVerified   map[*torrent.Piece]struct{}
+	// Files having extra verification due to file size mismatches. Use atomics for this map since
+	// locking requirements are mixed, and it's not coupled to anything else.
+	filesBeingVerified    *xsync.Map[*torrent.File, struct{}]
 	verificationOccurring chansync.Flag
 	// Torrents that block completion. They were requested specifically. Torrents added from disk
 	// that aren't subsequently requested are not required to satisfy the sync stage.
@@ -343,13 +345,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 
 	d := &Downloader{
-		cfg:            cfg,
-		torrentStorage: m,
-		torrentClient:  torrentClient,
-		stats:          stats,
-		logger:         logger,
-		verbosity:      verbosity,
-		torrentFS:      &AtomicTorrentFS{dir: cfg.Dirs.Snap},
+		cfg:                cfg,
+		torrentStorage:     m,
+		torrentClient:      torrentClient,
+		stats:              stats,
+		logger:             logger,
+		verbosity:          verbosity,
+		torrentFS:          &AtomicTorrentFS{dir: cfg.Dirs.Snap},
+		filesBeingVerified: xsync.NewMap[*torrent.File, struct{}](),
 	}
 
 	if len(cfg.WebSeedUrls) == 0 {
@@ -498,9 +501,9 @@ func (d *Downloader) allTorrentsComplete() (ret bool) {
 		}
 		// TODO: Should we write the torrent files here instead of in the goroutine spawned in addTorrentSpec?
 	}
-	// Require that we're not waiting on any piece verification. NB this isn't just requiredTorrent
+	// Require that we're not waiting on any file verification. NB this isn't just requiredTorrent
 	// pieces, but that might be best.
-	if len(d.piecesBeingVerified) != 0 {
+	if d.filesBeingVerified.Size() != 0 {
 		ret = false
 	}
 	return
@@ -542,33 +545,31 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 			d.logger.Crit("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
 		}
 		passed = false
-		d.verifyPieces(f)
+		d.verifyFile(f)
 	}
 	return
 }
 
 // Run verification for pieces of the file that aren't already being verified.
-func (d *Downloader) verifyPieces(f *torrent.File) {
-	for p := range f.Pieces() {
-		if g.MapContains(d.piecesBeingVerified, p) {
-			continue
-		}
-		g.MakeMapIfNil(&d.piecesBeingVerified)
-		if !g.MapInsert(d.piecesBeingVerified, p, struct{}{}).Ok {
-			d.updateVerificationOccurring()
-			d.spawn(func() {
-				err := p.VerifyDataContext(d.ctx)
-				d.lock.Lock()
-				defer d.lock.Unlock()
-				g.MustDelete(d.piecesBeingVerified, p)
-				d.updateVerificationOccurring()
-				if d.ctx.Err() != nil {
-					return
-				}
-				panicif.Err(err)
-			})
-		}
+func (d *Downloader) verifyFile(f *torrent.File) {
+	_, loaded := d.filesBeingVerified.LoadOrStore(f, struct{}{})
+	if loaded {
+		return
 	}
+	d.updateVerificationOccurring()
+	d.spawn(func() {
+		for p := range f.Pieces() {
+			err := p.VerifyDataContext(d.ctx)
+			if d.ctx.Err() != nil {
+				return
+			}
+			panicif.Err(err)
+		}
+		_, loaded := d.filesBeingVerified.LoadAndDelete(f)
+		// We should be the ones removing this value.
+		panicif.False(loaded)
+		d.updateVerificationOccurring()
+	})
 }
 
 // Interval is how long between recalcs.
@@ -1078,12 +1079,12 @@ func (d *Downloader) saveMetainfoWhenComplete(t *torrent.Torrent) {
 		case <-d.ctx.Done():
 			return
 		case <-d.verificationOccurring.Off():
-			// This could be filtered to only pieces we care about...
+			// This could be filtered to only files we care about...
 		}
 		if func() (done bool) {
 			d.lock.Lock()
 			defer d.lock.Unlock()
-			if !t.Complete().Bool() || len(d.piecesBeingVerified) != 0 {
+			if !t.Complete().Bool() || d.filesBeingVerified.Size() != 0 {
 				return
 			}
 			err := d.saveMetainfoPrecheck(t)
@@ -1360,7 +1361,7 @@ func (d *Downloader) spawn(f func()) {
 }
 
 func (d *Downloader) updateVerificationOccurring() {
-	d.verificationOccurring.SetBool(len(d.piecesBeingVerified) != 0)
+	d.verificationOccurring.SetBool(d.filesBeingVerified.Size() != 0)
 }
 
 // Delete - stop seeding, remove file, remove .torrent
