@@ -1,7 +1,0 @@
-go 1.24.0
-
-use .
-
-use ./erigon-lib
-
-use ../
