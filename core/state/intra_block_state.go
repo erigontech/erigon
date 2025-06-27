@@ -1556,9 +1556,9 @@ func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Ha
 	return sdb.accessList.Contains(addr, slot)
 }
 
-func (ibs *IntraBlockState) AddCodeAddressToAccessList(codeAddr common.Address) bool {
-	if ibs.accessList.AddCodeAccess(codeAddr) {
-		ibs.journal.append(accessListAddCodeAccessChange{codeAddr})
+func (sdb *IntraBlockState) AddCodeAddressToAccessList(codeAddr common.Address) bool {
+	if sdb.accessList.AddCodeAccess(codeAddr) {
+		sdb.journal.append(accessListAddCodeAccessChange{codeAddr})
 		return true
 	}
 
