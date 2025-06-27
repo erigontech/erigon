@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"golang.org/x/exp/maps"
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
@@ -42,7 +43,12 @@ func (bs *CachingBeaconState) reinitCaches() error {
 	if bs.Version() == clparams.Phase0Version {
 		return bs.InitBeaconState()
 	}
-	bs.publicKeyIndicies = make(map[[48]byte]uint64)
+	// Reuse the existing map if it exists, otherwise create a new one
+	if bs.publicKeyIndicies == nil {
+		bs.publicKeyIndicies = make(map[[48]byte]uint64)
+	} else {
+		maps.Clear(bs.publicKeyIndicies)
+	}
 
 	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
 		bs.publicKeyIndicies[v.PublicKey()] = uint64(idx)
