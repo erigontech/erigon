@@ -1575,7 +1575,6 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exist)
 	agg.closeDirtyFiles() // because windows
-	agg.OpenList([]string{}, false)
 
 	require.NoError(t, os.Remove(codeMergedFile))
 
@@ -1651,7 +1650,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 		return name, schema
 	})
 	defer domainR.Close()
-	populateFiles2(t, dirs, name, domainR, dirs.SnapDomain, ranges)
+	populateFiles2(t, dirs, domainR, ranges)
 
 	domainHR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
 		accessors := AccessorHashMap
@@ -1662,7 +1661,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 		return name, schema
 	})
 	defer domainHR.Close()
-	populateFiles2(t, dirs, name, domainHR, dirs.SnapHistory, ranges)
+	populateFiles2(t, dirs, domainHR, ranges)
 
 	domainII := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
 		accessors := AccessorHashMap
@@ -1673,7 +1672,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 		return name, schema
 	})
 	defer domainII.Close()
-	populateFiles2(t, dirs, name, domainII, dirs.SnapIdx, ranges)
+	populateFiles2(t, dirs, domainII, ranges)
 }
 
 func generateAccountsFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
@@ -1703,7 +1702,7 @@ func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRa
 		return name, schema
 	})
 	defer commitmentR.Close()
-	populateFiles2(t, dirs, "commitment", commitmentR, dirs.SnapDomain, ranges)
+	populateFiles2(t, dirs, commitmentR, ranges)
 }
 
 func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {

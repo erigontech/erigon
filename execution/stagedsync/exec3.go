@@ -683,7 +683,7 @@ func ExecV3(ctx context.Context,
 		executor.LogComplete(applyTx)
 	}()
 
-	ts := time.Duration(0)
+	computeCommitmentDuration := time.Duration(0)
 	blockNum = executor.domains().BlockNum()
 
 	if maxBlockNum < blockNum {
@@ -1144,9 +1144,7 @@ func ExecV3(ctx context.Context,
 
 	if !parallel && u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			commitStart := time.Now()
-
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, 150*time.Millisecond, logger, u, inMemExec)
+			_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -1282,17 +1280,31 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 	return false, nil
 }
 
-// flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *libstate.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, pruneTimeout time.Duration, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+type FlushAndComputeCommitmentTimes struct {
+	Flush             time.Duration
+	ComputeCommitment time.Duration
+}
 
+// flushAndCheckCommitmentV3 - does write state to db and then check commitment
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
+	if !parallel {
+		if err := e.Update(applyTx, maxBlockNum); err != nil {
+			return false, times, err
+		}
+		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
+			return false, times, fmt.Errorf("writing plain state version: %w", err)
+		}
+	}
+
 	if header == nil {
-		return false, errors.New("header is nil")
+		return false, times, errors.New("header is nil")
 	}
 
 	if dbg.DiscardCommitment() {
-		return true, nil
+		return true, times, nil
 	}
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
@@ -1304,23 +1316,30 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix())
+	times.ComputeCommitment = time.Since(start)
 	if err != nil {
-		return false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
+		return false, times, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}
+
 	if cfg.blockProduction {
 		header.Root = common.BytesToHash(computedRootHash)
-		return true, nil
+		return true, times, nil
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		return handleIncorrectRootHashError(header, applyTx.(kv.TemporalRwTx), cfg, e, maxBlockNum, logger, u)
+		ok, err = handleIncorrectRootHashError(header, applyTx.(kv.TemporalRwTx), cfg, e, maxBlockNum, logger, u)
+		return ok, times, err
 	}
 	if !inMemExec {
-		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
+		start = time.Now()
+		err := doms.Flush(ctx, applyTx)
+		times.Flush = time.Since(start)
+		if err != nil {
+			return false, times, err
 		}
 	}
-	return true, nil
+	return true, times, nil
+
 }
 
 func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {

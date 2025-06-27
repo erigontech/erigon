@@ -24,7 +24,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-db/downloader"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
