@@ -328,6 +328,15 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 }
 
 func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+	begin := time.Now()
+	defer func() {
+		slots := []uint64{}
+		for _, block := range blocks {
+			slots = append(slots, block.Block.Slot)
+		}
+		log.Debug("DownloadColumnsAndRecoverBlobs", "time", time.Since(begin), "slots", slots)
+	}()
+
 	// filter out blocks that don't need to be processed
 	blocksToProcess := []*cltypes.SignedBeaconBlock{}
 	for _, block := range blocks {
