@@ -94,10 +94,10 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+			return fmt.Errorf("debug_getModifiedAccountsByNumber (Erigon): bn=%d, %v\n", bn, res.Err)
 		}
 		if mag.Error != nil {
-			return fmt.Errorf("Error getting modified accounts (Erigon): bn=%d, %d %s\n", bn, mag.Error.Code, mag.Error.Message)
+			return fmt.Errorf("debug_getModifiedAccountsByNumber (Erigon): bn=%d, %d %s\n", bn, mag.Error.Code, mag.Error.Message)
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
