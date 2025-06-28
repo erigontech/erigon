@@ -75,6 +75,11 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		return ErrIgnore
 	}
 
+	if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.ParentRoot) ||
+		s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockHeader.ParentRoot) {
+		return ErrIgnore
+	}
+
 	s.seenSidecar.Add(seenKey, struct{}{})
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).

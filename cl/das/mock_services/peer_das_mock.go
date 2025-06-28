@@ -81,6 +81,82 @@ func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) DoAndReturn(f func(conte
 	return c
 }
 
+// IsBlobAlreadyRecovered mocks base method.
+func (m *MockPeerDas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsBlobAlreadyRecovered", blockRoot)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsBlobAlreadyRecovered indicates an expected call of IsBlobAlreadyRecovered.
+func (mr *MockPeerDasMockRecorder) IsBlobAlreadyRecovered(blockRoot any) *MockPeerDasIsBlobAlreadyRecoveredCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsBlobAlreadyRecovered", reflect.TypeOf((*MockPeerDas)(nil).IsBlobAlreadyRecovered), blockRoot)
+	return &MockPeerDasIsBlobAlreadyRecoveredCall{Call: call}
+}
+
+// MockPeerDasIsBlobAlreadyRecoveredCall wrap *gomock.Call
+type MockPeerDasIsBlobAlreadyRecoveredCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasIsBlobAlreadyRecoveredCall) Return(arg0 bool) *MockPeerDasIsBlobAlreadyRecoveredCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasIsBlobAlreadyRecoveredCall) Do(f func(common.Hash) bool) *MockPeerDasIsBlobAlreadyRecoveredCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasIsBlobAlreadyRecoveredCall) DoAndReturn(f func(common.Hash) bool) *MockPeerDasIsBlobAlreadyRecoveredCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// IsColumnOverHalf mocks base method.
+func (m *MockPeerDas) IsColumnOverHalf(blockRoot common.Hash) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsColumnOverHalf", blockRoot)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsColumnOverHalf indicates an expected call of IsColumnOverHalf.
+func (mr *MockPeerDasMockRecorder) IsColumnOverHalf(blockRoot any) *MockPeerDasIsColumnOverHalfCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsColumnOverHalf", reflect.TypeOf((*MockPeerDas)(nil).IsColumnOverHalf), blockRoot)
+	return &MockPeerDasIsColumnOverHalfCall{Call: call}
+}
+
+// MockPeerDasIsColumnOverHalfCall wrap *gomock.Call
+type MockPeerDasIsColumnOverHalfCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasIsColumnOverHalfCall) Return(arg0 bool) *MockPeerDasIsColumnOverHalfCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasIsColumnOverHalfCall) Do(f func(common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasIsColumnOverHalfCall) DoAndReturn(f func(common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // IsDataAvailable mocks base method.
 func (m *MockPeerDas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
 	m.ctrl.T.Helper()
