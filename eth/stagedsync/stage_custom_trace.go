@@ -333,10 +333,11 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, 
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
 	}
-	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
+	return integrity.ReceiptsNoDuplicatesRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
 }
 
 func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+	fmt.Printf("[dbg] batch: %d-%d\n", fromBlock, toBlock)
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
