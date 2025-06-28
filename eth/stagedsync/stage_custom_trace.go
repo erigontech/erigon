@@ -386,6 +386,14 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 					}
 				}
 
+				if txTask.BlockNum == 1506 {
+					if receipt != nil {
+						logger.Warn("[dbg] CustomTraceMapReduce01", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "firstIndex", receipt.FirstLogIndexWithinBlock)
+					} else {
+						logger.Warn("[dbg] CustomTraceMapReduce02", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "receiptIsNil", true)
+					}
+				}
+
 				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
 					return err
 				}
@@ -406,6 +414,14 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						if receipt == nil {
 							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 						}
+					}
+				}
+
+				if txTask.BlockNum == 1506 {
+					if receipt != nil {
+						logger.Warn("[dbg] CustomTraceMapReduce03", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "firstIndex", receipt.FirstLogIndexWithinBlock)
+					} else {
+						logger.Warn("[dbg] CustomTraceMapReduce04", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "receiptIsNil", true)
 					}
 				}
 				if err := rawdb.WriteReceiptCacheV2(doms, receipt); err != nil {
