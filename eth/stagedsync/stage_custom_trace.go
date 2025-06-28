@@ -390,7 +390,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 					if receipt != nil {
 						logger.Warn("[dbg] CustomTraceMapReduce01", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "txTask.TxNum", txTask.TxNum, "firstIndex", receipt.FirstLogIndexWithinBlock)
 					} else {
-						logger.Warn("[dbg] CustomTraceMapReduce02", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "receiptIsNil", true)
+						logger.Warn("[dbg] CustomTraceMapReduce02", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "txTask.TxNum", txTask.TxNum, "receiptIsNil", true)
 					}
 				}
 
@@ -419,9 +419,9 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 				if txTask.BlockNum == 1506 {
 					if receipt != nil {
-						logger.Warn("[dbg] CustomTraceMapReduce03", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "firstIndex", receipt.FirstLogIndexWithinBlock)
+						logger.Warn("[dbg] CustomTraceMapReduce03", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "txTask.TxNum", txTask.TxNum, "firstIndex", receipt.FirstLogIndexWithinBlock)
 					} else {
-						logger.Warn("[dbg] CustomTraceMapReduce04", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "receiptIsNil", true)
+						logger.Warn("[dbg] CustomTraceMapReduce04", "txTask.BlockNum", txTask.BlockNum, "txTask.TxIndex", txTask.TxIndex, "txTask.TxNum", txTask.TxNum, "receiptIsNil", true)
 					}
 				}
 				if err := rawdb.WriteReceiptCacheV2(doms, receipt); err != nil {
