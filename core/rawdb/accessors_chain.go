@@ -1356,7 +1356,7 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 	} else {
 		toWrite = []byte{}
 	}
-	if receipt.BlockNumber.Uint64() == 1506 {
+	if receipt != nil && receipt.BlockNumber.Uint64() == 1506 {
 		fmt.Printf("[dbg] WriteReceiptCacheV2: %x\n", toWrite)
 	}
 	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, nil, toWrite, nil, 0); err != nil {
