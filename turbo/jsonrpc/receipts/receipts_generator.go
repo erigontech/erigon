@@ -177,36 +177,36 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if receiptFromDB != nil {
 		fmt.Printf("[dbg] GetReceipt05: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
 	}
-	{
-		_receiptFromDB, _, err := rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt06: %d, %d, %d\n", blockNum, index, _receiptFromDB.FirstLogIndexWithinBlock)
-		}
-		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+1, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt07: %d, %d, %d\n", blockNum, index, _receiptFromDB.FirstLogIndexWithinBlock)
-		}
-		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+2, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt08: %d, %d, %d\n", blockNum, index, _receiptFromDB.FirstLogIndexWithinBlock)
-		}
-		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-2, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt09: %d, %d, %d\n", blockNum, index, _receiptFromDB.FirstLogIndexWithinBlock)
-		}
-	}
+	//{
+	//	_receiptFromDB, _, err := rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum, txnHash)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	if _receiptFromDB != nil {
+	//		fmt.Printf("[dbg] GetReceipt06: %d, %d, %d\n", blockNum, index, _receiptFromDB.FirstLogIndexWithinBlock)
+	//	}
+	//	_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+1, txnHash)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	if _receiptFromDB != nil {
+	//		fmt.Printf("[dbg] GetReceipt07: %d, %d, %d\n", blockNum, index, _receiptFromDB.FirstLogIndexWithinBlock)
+	//	}
+	//	_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+2, txnHash)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	if _receiptFromDB != nil {
+	//		fmt.Printf("[dbg] GetReceipt08: %d, %d, %d\n", blockNum, index, _receiptFromDB.FirstLogIndexWithinBlock)
+	//	}
+	//	_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-2, txnHash)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	if _receiptFromDB != nil {
+	//		fmt.Printf("[dbg] GetReceipt09: %d, %d, %d\n", blockNum, index, _receiptFromDB.FirstLogIndexWithinBlock)
+	//	}
+	//}
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
 		return receipts[index], nil
