@@ -1269,6 +1269,7 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txNum uint64, txnHash common.Hash) (*types.Receipt, bool, error) {
 	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing values BEFORE-change*/)
 	if err != nil {
+		fmt.Printf("[dbg] ReadReceiptCacheV2(%d) err=%s\n", txNum+1, err)
 		return nil, false, err
 	}
 	if !ok {
