@@ -347,6 +347,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 		return string(aa)
 	}
 
+	log.Warn("[dbg] assertEqualReceipts: len", "fromExecution", len(fromExecution.Logs), "fromDB", len(fromDB.Logs))
 	generated := fromExecution.Copy()
 	blkNum := generated.BlockNumber.Uint64()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
