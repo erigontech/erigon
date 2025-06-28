@@ -143,15 +143,16 @@ func (d *peerdas) Prune(keepSlotDistance uint64) error {
 
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 	recover := func(toRecover recoverBlobsRequest) {
+		log.Debug("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
 		ctx := context.Background()
 		slot, blockRoot := toRecover.slot, toRecover.blockRoot
 		existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
 		if err != nil {
-			log.Debug("failed to get saved column index", "err", err)
+			log.Debug("[blobsRecover] failed to get saved column index", "err", err)
 			return
 		}
 		if len(existingColumns) < int(d.beaconConfig.NumberOfColumns+1)/2 {
-			log.Debug("not enough columns to recover", "slot", slot, "blockRoot", blockRoot, "existingColumns", len(existingColumns))
+			log.Debug("[blobsRecover] not enough columns to recover", "slot", slot, "blockRoot", blockRoot, "existingColumns", len(existingColumns))
 			return
 		}
 
@@ -161,7 +162,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		for _, columnIndex := range existingColumns {
 			sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
 			if err != nil {
-				log.Debug("failed to read column sidecar", "err", err)
+				log.Debug("[blobsRecover] failed to read column sidecar", "err", err)
 				return
 			}
 			for i := 0; i < sidecar.Column.Len(); i++ {
@@ -179,9 +180,10 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		numberOfBlobs := uint64(anyColumnSidecar.Column.Len())
 		blobMatrix, err := peerdasutils.RecoverMatrix(matrixEntries, numberOfBlobs)
 		if err != nil {
-			log.Warn("failed to recover matrix", "err", err, "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
+			log.Warn("[blobsRecover] failed to recover matrix", "err", err, "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 			return
 		}
+		log.Debug("[blobsRecover] recovered matrix", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
 		// Recover blobs from the matrix
 		blobSidecars := make([]*cltypes.BlobSidecar, 0, len(blobMatrix))
@@ -195,7 +197,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			// blob
 			for i := range len(blobEntries) / 2 {
 				if copied := copy(blob[i*cltypes.BytesPerCell:], blobEntries[i].Cell[:]); copied != cltypes.BytesPerCell {
-					log.Warn("failed to copy cell", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
+					log.Warn("[blobsRecover] failed to copy cell", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
 					return
 				}
 			}
@@ -205,7 +207,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			ckzgBlob := ckzg.Blob(blob)
 			proof, err := ckzg.ComputeBlobKZGProof(&ckzgBlob, ckzg.Bytes48(kzgCommitment))
 			if err != nil {
-				log.Warn("failed to compute blob kzg proof", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
+				log.Warn("[blobsRecover] failed to compute blob kzg proof", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
 				return
 			}
 			copy(kzgProof[:], proof[:])
@@ -221,23 +223,25 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 
 		// Save blobs
 		if err := d.blobStorage.WriteBlobSidecars(ctx, blockRoot, blobSidecars); err != nil {
-			log.Warn("failed to write blob sidecars", "err", err, "slot", slot, "blockRoot", blockRoot)
+			log.Warn("[blobsRecover] failed to write blob sidecars", "err", err, "slot", slot, "blockRoot", blockRoot)
 			return
 		}
+		log.Debug("[blobsRecover] saved blobs", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
 		// remove column sidecars that are not in our custody group
 		custodyColumns, err := d.state.GetMyCustodyColumns()
 		if err != nil {
-			log.Warn("failed to get my custody columns", "err", err, "slot", slot, "blockRoot", blockRoot)
+			log.Warn("[blobsRecover] failed to get my custody columns", "err", err, "slot", slot, "blockRoot", blockRoot)
 			return
 		}
 		for _, column := range existingColumns {
 			if _, ok := custodyColumns[cltypes.CustodyIndex(column)]; !ok {
 				if err := d.columnStorage.RemoveColumnSidecar(ctx, slot, blockRoot, int64(column)); err != nil {
-					log.Warn("failed to remove column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", column)
+					log.Warn("[blobsRecover] failed to remove column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", column)
 				}
 			}
 		}
+		log.Debug("[blobsRecover] removed column sidecars", "slot", slot, "blockRoot", blockRoot, "numberOfColumns", len(existingColumns))
 	}
 
 	// main loop
