@@ -248,6 +248,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		fmt.Printf("[dbg] GetReceipt13: %d, %d, %d\n", blockNum, _m, _firstLogIndex)
 		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, _m+1)
 		fmt.Printf("[dbg] GetReceipt14: %d, %d, %d\n", blockNum, _m+1, _firstLogIndex)
+		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, _m+2)
+		fmt.Printf("[dbg] GetReceipt15: %d, %d, %d\n", blockNum, _m+2, _firstLogIndex)
+		_max, _ := g.txNumReader.Max(tx, blockNum)
+		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, _max)
+		fmt.Printf("[dbg] GetReceipt16: %d, %d, %d\n", blockNum, _max, _firstLogIndex)
 	}
 	receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 	if err != nil {
