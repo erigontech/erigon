@@ -238,7 +238,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	}
 	{
 		fmt.Printf("[dbg] GetReceipt10: %d, %d, %d\n", blockNum, index, firstLogIndex)
-		_, _, _firstLogIndex, _ := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+		_, _, _firstLogIndex, _ := rawtemporaldb.ReceiptAsOf(tx, txNum+2)
 		fmt.Printf("[dbg] GetReceipt10: %d, %d, %d\n", blockNum, index, _firstLogIndex)
 		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, txNum-1)
 		fmt.Printf("[dbg] GetReceipt10: %d, %d, %d\n", blockNum, index, _firstLogIndex)
