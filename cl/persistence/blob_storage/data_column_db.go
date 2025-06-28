@@ -228,9 +228,11 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecar(ctx context.Context, slot ui
 			count--
 			countBytes := make([]byte, 4)
 			binary.LittleEndian.PutUint32(countBytes, count)
-			copy(bytes[:4], countBytes[:])
-			copy(bytes[4+i*4:], bytes[4+(i+1)*4:4+count*4])
-			if err := tx.Put(kv.BlockRootToDataColumnCount, blockRoot[:], bytes[:4+count*4]); err != nil { // truncate bytes
+			newBytes := make([]byte, 4+count*4)
+			copy(newBytes[:4], countBytes[:])
+			copy(newBytes[4:], bytes[4:4+i*4])
+			copy(newBytes[4+i*4:], bytes[4+(i+1)*4:])
+			if err := tx.Put(kv.BlockRootToDataColumnCount, blockRoot[:], newBytes); err != nil { // truncate bytes
 				return err
 			}
 			break
