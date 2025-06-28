@@ -148,7 +148,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
 
-	fmt.Printf("[dbg] GetReceipt01: %d, %d\n", blockNum, index)
+	fmt.Printf("[dbg] GetReceipt01: %d, %d, %d\n", blockNum, index, txNum)
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptFromDB *types.Receipt
