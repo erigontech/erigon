@@ -44,6 +44,14 @@ import (
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
+func TestR(t *testing.T) {
+	r1 := &types.ReceiptForStorage{FirstLogIndexWithinBlock: 1}
+	toWrite, _ := rlp.EncodeToBytes(r1)
+	var r2 types.ReceiptForStorage
+	rlp.DecodeBytes(toWrite, &r2)
+	require.Equal(t, r1.FirstLogIndexWithinBlock, r2.FirstLogIndexWithinBlock)
+}
+
 // Tests block header storage and retrieval operations.
 func TestHeaderStorage(t *testing.T) {
 	t.Parallel()
