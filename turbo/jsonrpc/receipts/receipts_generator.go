@@ -176,6 +176,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	if receiptFromDB != nil {
 		fmt.Printf("[dbg] GetReceipt05: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
+	} else {
+		fmt.Printf("[dbg] GetReceipt05: %d, %d, nil\n", blockNum, index)
 	}
 	{
 		_receiptFromDB, _, err := rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum, txnHash)
