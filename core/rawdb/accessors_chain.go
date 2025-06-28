@@ -1286,9 +1286,9 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 	if err := rlp.DecodeBytes(v, receipt); err != nil {
 		return nil, false, fmt.Errorf("%w, of block %d, len(v)=%d", err, blockNum, len(v))
 	}
+	fmt.Printf("[dbg] ReadReceiptCacheV2(%d) found=%d\n", txNum+1, receipt.FirstLogIndexWithinBlock)
 	res := (*types.Receipt)(receipt)
 	res.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txnHash)
-	fmt.Printf("[dbg] ReadReceiptCacheV2(%d) found=%d\n", txNum+1, res.FirstLogIndexWithinBlock)
 	return res, true, nil
 }
 
