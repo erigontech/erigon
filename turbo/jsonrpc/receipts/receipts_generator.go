@@ -332,10 +332,11 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	generated := fromExecution.Copy()
 	blkNum := generated.BlockNumber.Uint64()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
-		panic(fmt.Sprintf("assert: bn=%d, ti=%d, %d, %d", blkNum, generated.TransactionIndex, generated.TransactionIndex, fromDB.TransactionIndex))
+		fmt.Printf("[dbg] assertEqualReceipts: %s, %s\n", toJson(generated), toJson(fromDB))
+		panic(fmt.Sprintf("assert TransactionIndex: bn=%d, ti=%d, %d, %d", blkNum, generated.TransactionIndex, generated.TransactionIndex, fromDB.TransactionIndex))
 	}
 	if generated.FirstLogIndexWithinBlock != fromDB.FirstLogIndexWithinBlock {
-		panic(fmt.Sprintf("assert: bn=%d, ti=%d, %d, %d", blkNum, generated.TransactionIndex, generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
+		panic(fmt.Sprintf("assert FirstLogIndexWithinBlock: bn=%d, ti=%d, %d, %d", blkNum, generated.TransactionIndex, generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
 	}
 
 	for i := range generated.Logs {
