@@ -56,6 +56,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	return nil
 }
 
+// ReceiptsNoDuplicatesRange checks that cumGasUsed and logIndex in receipts are monotonic
 func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
