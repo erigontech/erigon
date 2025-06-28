@@ -140,7 +140,7 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	if t.BlockNum == 1506 {
-		log.Warn("[dbg] CreateReceipt03", "txTask.BlockNum", t.BlockNum, "txTask.TxIndex", t.TxIndex, "firstIndex", firstLogIndex)
+		log.Warn("[dbg] CreateReceipt03", "txTask.BlockNum", t.BlockNum, "txTask.TxIndex", t.TxIndex, "firstIndex", firstLogIndex, "logs", len(r.Logs))
 	}
 	t.BlockReceipts[t.TxIndex] = r
 }
