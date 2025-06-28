@@ -26,13 +26,13 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
+	txNumsReader := blockReader.TxnumReader(ctx)
+
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	txNumsReader := blockReader.TxnumReader(ctx)
 
 	receiptDomainProgress := state.AggTx(tx).HistoryProgress(kv.ReceiptDomain, tx)
 
