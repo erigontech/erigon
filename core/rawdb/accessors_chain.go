@@ -1348,7 +1348,7 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 		}
 		if dbg.AssertEnabled {
 			storageReceipt2 := &types.ReceiptForStorage{}
-			if err := rlp.DecodeBytes(toWrite, storageReceipt2); err != nil {
+			if err := rlp.DecodeBytes(common.Copy(toWrite), storageReceipt2); err != nil {
 				panic(err)
 			}
 			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
