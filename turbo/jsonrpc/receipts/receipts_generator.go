@@ -290,7 +290,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	generated := fromExecution.Copy()
 	blkNum := generated.BlockNumber.Uint64()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
-		panic(fmt.Sprintf("assert: bn=%d, ti=%d, %d, %d", blkNum, generated.TransactionIndex, fromDB.TransactionIndex))
+		panic(fmt.Sprintf("assert: bn=%d, ti=%d, %d, %d", blkNum, generated.TransactionIndex, generated.TransactionIndex, fromDB.TransactionIndex))
 	}
 	if generated.FirstLogIndexWithinBlock != fromDB.FirstLogIndexWithinBlock {
 		panic(fmt.Sprintf("assert: bn=%d, ti=%d, %d, %d", blkNum, generated.TransactionIndex, generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
