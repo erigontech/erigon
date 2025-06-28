@@ -78,6 +78,7 @@ type Downloader struct {
 	stopMainLoop context.CancelFunc
 	wg           sync.WaitGroup
 
+	// TODO: Add an implicit prefix to messages from this.
 	logger    log.Logger
 	verbosity log.Lvl
 	// Whether to log seeding (for snap downloaders I think).
@@ -189,6 +190,7 @@ func calcBackoff(_min, _max time.Duration, attemptNum int, resp *http.Response) 
 	return sleep
 }
 
+// TODO(anacrolix): Upstream any logic that works reliably.
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	r.downloader.lock.RLock()
 	webseedMaxActiveTrips := r.downloader.stats.WebseedMaxActiveTrips
@@ -233,9 +235,9 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 
 		switch resp.StatusCode {
 		case http.StatusOK:
-			if len(req.Header.Get("Range")) > 0 {
+			if req.Header.Get("Range") != "" {
 				// the torrent lib is expecting http.StatusPartialContent so it will discard this
-				// if this count is higher than 0, its likely there is a server side config issue
+				// if this count is higher than 0, it's likely there is a server side config issue
 				// as it implies that the server is not handling range requests correctly and is just
 				// returning the whole file - which the torrent lib can't handle
 				//
@@ -251,7 +253,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 		// the first two statuses here have been observed from cloudflare
 		// during testing.  The remainder are generally understood to be
 		// retry-able http responses, calcBackoff will use the Retry-After
-		// header if its available
+		// header if it's available
 		case http.StatusInternalServerError, http.StatusBadGateway,
 			http.StatusRequestTimeout, http.StatusTooEarly,
 			http.StatusTooManyRequests, http.StatusServiceUnavailable,
@@ -288,17 +290,27 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 }
 
 func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
-	// TODO: Check this!! Upstream any logic that works reliably.
-	requestHandler := &requestHandler{
+	// Cloudflare, or OS socket overhead seems to limit us to ~100-150MB/s in testing to Cloudflare
+	// buckets. If we could limit HTTP requests to 1 per connection we'd do that, but the HTTP2
+	// config field doesn't do anything yet in Go 1.24 (and 1.25rc1). Disabling HTTP2 is another way
+	// to achieve this.
+	requestHandler := requestHandler{
 		Transport: http.Transport{
-			Proxy:       cfg.ClientConfig.HTTPProxy,
-			DialContext: cfg.ClientConfig.HTTPDialContext,
-			// I think this value was observed from some webseeds. It seems reasonable to extend it
-			// to other uses of HTTP from the client.
-			MaxConnsPerHost: 10,
-		}}
+			ReadBufferSize: 64 << 10,
+			// Note this does nothing in go1.24.
+			HTTP2: &http.HTTP2Config{
+				MaxConcurrentStreams: 1,
+			},
+			// Big hammer to achieve one request per connection.
+			//DisableKeepAlives: true,
+		},
+	}
 
-	cfg.ClientConfig.WebTransport = requestHandler
+	// Disable HTTP2. See above.
+	g.MakeMap(&requestHandler.Transport.TLSNextProto)
+
+	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
+	cfg.ClientConfig.WebTransport = &requestHandler
 
 	db, err := openMdbx(ctx, cfg.Dirs.Downloader, cfg.MdbxWriteMap)
 	if err != nil {
@@ -1211,15 +1223,12 @@ func newTorrentClient(
 	torrentClient *torrent.Client,
 	err error,
 ) {
-	//Reasons why using MMAP instead of files-API:
-	// - i see "10K threads exchaused" error earlier (on `--torrent.download.slots=500` and `pd-ssd`)
-	// - "sig-bus" at disk-full - may happen anyway, because DB is mmap
-	// - MMAP - means less GC pressure, more zero-copy
-	// - MMAP files are pre-allocated - which is not cool, but: 1. we can live with it 2. maybe can just resize MMAP in future
 	// Possibly File storage needs more optimization for handles, will test. Should reduce GC
 	// pressure and improve scheduler handling.
 	// See also: https://github.com/erigontech/erigon/pull/10074
-	// TODO: Should we force sqlite, or defer to part-file-only storage completion?
+	// We're using part-file-only piece completion. This requires hashing incomplete files at
+	// start-up, but the expectation is that files should not be partial. Also managing separate
+	// piece completion complicates user management of snapshots.
 	m = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: snapDir,
 		UsePartFiles:  g.Some(true),
