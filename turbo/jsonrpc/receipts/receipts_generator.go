@@ -146,14 +146,18 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
 
+	fmt.Printf("[dbg] GetReceipt01: %d, %d\n", blockNum, index)
+
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	receiptFromDB, ok, err := rawdb.ReadReceiptCache(tx, blockNum, blockHash, uint32(index), txnHash)
 	if err != nil {
 		return nil, err
 	}
 	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		fmt.Printf("[dbg] GetReceipt02: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
 		return receiptFromDB, nil
 	}
+	fmt.Printf("[dbg] GetReceipt03: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-1, txnHash)
@@ -161,8 +165,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		fmt.Printf("[dbg] GetReceipt04: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
 		return receiptFromDB, nil
 	}
+	fmt.Printf("[dbg] GetReceipt05: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
 		return receipts[index], nil
