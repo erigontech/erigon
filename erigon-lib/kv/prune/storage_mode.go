@@ -39,6 +39,11 @@ var (
 		Blocks:      DefaultBlocksPruneMode,
 		History:     Distance(config3.DefaultPruneDistance),
 	}
+	BlocksMode = Mode{
+		Initialised: true,
+		Blocks:      KeepAllBlocksPruneMode,
+		History:     Distance(config3.DefaultPruneDistance),
+	}
 	MinimalMode = Mode{
 		Initialised: true,
 		Blocks:      Distance(config3.DefaultPruneDistance),
@@ -53,6 +58,7 @@ var (
 
 const (
 	archiveModeStr = "archive"
+	blockModeStr   = "blocks"
 	fullModeStr    = "full"
 	minimalModeStr = "minimal"
 )
@@ -74,6 +80,10 @@ func (m Mode) String() string {
 		return minimalModeStr
 	}
 
+	if m.Blocks.toValue() == BlocksMode.Blocks.toValue() && m.History.toValue() == BlocksMode.History.toValue() {
+		return blockModeStr
+	}
+
 	short := archiveModeStr
 	if m.History.toValue() != DefaultMode.History.toValue() {
 		short += fmt.Sprintf(" --prune.distance=%d", m.History.toValue())
@@ -93,6 +103,8 @@ func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, er
 		mode = FullMode
 	case minimalModeStr:
 		mode = MinimalMode
+	case blockModeStr:
+		mode = BlocksMode
 	default:
 		return Mode{}, ErrUnknownPruneMode
 	}

@@ -80,10 +80,10 @@ var (
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
 		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
-				Full: Keep only necessary blocks and latest state,
-				Blocks: Keep all blocks but not the state history,
-				Archive: Keep the entire state history and all blocks,
-				Minimal: Keep only latest state`,
+				full: Keep only necessary blocks and latest state,
+				blocks: Keep all blocks but not the state history,
+				archive: Keep the entire state history and all blocks,
+				minimal: Keep only latest state`,
 		Value: "full",
 	}
 	PruneDistanceFlag = cli.Uint64Flag{
