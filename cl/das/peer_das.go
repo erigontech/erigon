@@ -337,6 +337,10 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 		req.removeBlock(blockRoot)
 	}
 
+	if len(req.downloadTable) == 0 {
+		return nil
+	}
+
 	type resultData struct {
 		sidecars []*cltypes.DataColumnSidecar
 		pid      string
