@@ -374,6 +374,7 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 	if r.FirstLogIndexWithinBlock == 0 && len(r.Logs) > 0 {
 		r.FirstLogIndexWithinBlock = uint32(r.Logs[0].Index)
 	}
+
 	logsForStorage := make([]*LogForStorage, len(r.Logs))
 	for i, l := range r.Logs {
 		logsForStorage[i] = (*LogForStorage)(l)
