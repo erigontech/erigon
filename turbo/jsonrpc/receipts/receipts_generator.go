@@ -233,7 +233,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 	{
-		fmt.Printf("[dbg] GetReceipt10: %d, txIdx=%d, txNum=%d, ReceiptAsOf(%d), %d\n", blockNum, index, txNum, txNum+1, firstLogIndex)
+		_min, _ := g.txNumReader.Min(tx, blockNum)
+		_max, _ := g.txNumReader.Max(tx, blockNum)
+		fmt.Printf("[dbg] GetReceipt10: %d[%d-%d], txIdx=%d, txNum=%d, ReceiptAsOf(%d), %d\n", blockNum, _min, _max, index, txNum, txNum+1, firstLogIndex)
 		_, _, _firstLogIndex, _ := rawtemporaldb.ReceiptAsOf(tx, txNum+2)
 		fmt.Printf("[dbg] GetReceipt11: %d, %d, %d\n", blockNum, txNum+2, _firstLogIndex)
 		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, txNum)
@@ -246,7 +248,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		fmt.Printf("[dbg] GetReceipt14: %d, %d, %d\n", blockNum, _m+1, _firstLogIndex)
 		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, _m+2)
 		fmt.Printf("[dbg] GetReceipt15: %d, %d, %d\n", blockNum, _m+2, _firstLogIndex)
-		_max, _ := g.txNumReader.Max(tx, blockNum)
 		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, _max)
 		fmt.Printf("[dbg] GetReceipt16: %d, %d, %d\n", blockNum, _max, _firstLogIndex)
 	}
