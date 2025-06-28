@@ -278,18 +278,19 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	}
 
 	generated := fromExecution.Copy()
+	blkNum := generated.BlockNumber.Uint64()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
-		panic(fmt.Sprintf("assert: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
+		panic(fmt.Sprintf("assert: bn=%d, %d, %d", blkNum, generated.TransactionIndex, fromDB.TransactionIndex))
 	}
 	if generated.FirstLogIndexWithinBlock != fromDB.FirstLogIndexWithinBlock {
-		panic(fmt.Sprintf("assert: %d, %d", generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
+		panic(fmt.Sprintf("assert: bn=%d, %d, %d", blkNum, generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
 	}
 
 	for i := range generated.Logs {
 		a := toJson(generated.Logs[i])
 		b := toJson(fromDB.Logs[i])
 		if a != b {
-			panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+			panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), blkNum, generated.TransactionIndex))
 		}
 	}
 	fromDB.Logs, generated.Logs = nil, nil
@@ -297,7 +298,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	a := toJson(generated)
 	b := toJson(fromDB)
 	if a != b {
-		panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+		panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), blkNum, generated.TransactionIndex))
 	}
 }
 
