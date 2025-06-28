@@ -49,6 +49,7 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 			log.Warn(err.Error())
 		}
 	}
+	tx.Rollback()
 
 	if err := ReceiptsNoDupsRangeParallel(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
 		return err
