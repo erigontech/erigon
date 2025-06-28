@@ -1277,6 +1277,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 	if len(v) == 0 {
 		return nil, false, nil
 	}
+	log.Warn("[dbg] ReadReceiptCacheV2: %d\n", blockNum)
 
 	// Convert the receipts from their storage form to their internal representation
 	receipt := &types.ReceiptForStorage{}
