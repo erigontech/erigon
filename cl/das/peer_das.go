@@ -328,6 +328,8 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 }
 
 func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+	return nil
+
 	req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage)
 	if err != nil {
 		return err
