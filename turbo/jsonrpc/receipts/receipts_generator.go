@@ -183,7 +183,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt06: %d, %d, %d\n", blockNum, txNum, _receiptFromDB.FirstLogIndexWithinBlock)
+			fmt.Printf("[dbg] GetReceipt06: %d, ti=%d, %d, %d\n", blockNum, index, txNum, _receiptFromDB.FirstLogIndexWithinBlock)
 		}
 		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+1, txnHash)
 		if err != nil {
