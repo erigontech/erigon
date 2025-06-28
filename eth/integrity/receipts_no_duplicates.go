@@ -66,17 +66,15 @@ func ReceiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 	numWorkers := runtime.NumCPU()
 	chunkSize := uint64(1000)
 
-	log.Info("[integrity] ReceiptsNoDups using parallel processing", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
-
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
 	var completedChunks atomic.Uint64
 	var totalChunks uint64 = (blockRange + chunkSize - 1) / chunkSize
+	log.Info("[integrity] ReceiptsNoDups using parallel processing", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
 
-	logEvery := time.NewTicker(10 * time.Second)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	// Start progress logger
 	go func() {
 		for {
 			select {
@@ -101,13 +99,13 @@ func ReceiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 		chunkEnd := end     // Capture loop variable
 
 		g.Go(func() error {
-			workerTx, err := db.BeginTemporalRo(ctx)
+			tx, err := db.BeginTemporalRo(ctx)
 			if err != nil {
 				return err
 			}
-			defer workerTx.Rollback()
+			defer tx.Rollback()
 
-			chunkErr := ReceiptsNoDupsRange(ctx, chunkStart, chunkEnd, workerTx, blockReader, failFast)
+			chunkErr := ReceiptsNoDupsRange(ctx, chunkStart, chunkEnd, tx, blockReader, failFast)
 			if chunkErr != nil {
 				return chunkErr
 			}
@@ -120,8 +118,6 @@ func ReceiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 	if err := g.Wait(); err != nil {
 		return err
 	}
-
-	log.Info("[integrity] CheckReceiptsNoDups parallel processing completed", "chunks", totalChunks)
 	return nil
 }
 
