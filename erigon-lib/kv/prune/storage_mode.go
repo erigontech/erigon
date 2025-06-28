@@ -89,6 +89,12 @@ func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, er
 	switch pruneMode {
 	case archiveModeStr, "":
 		mode = ArchiveMode
+		if distanceHistory > 0 {
+			mode.History = Distance(distanceHistory)
+		}
+		if distanceBlocks > 0 {
+			mode.Blocks = Distance(distanceBlocks)
+		}
 	case fullModeStr:
 		mode = FullMode
 	case minimalModeStr:
@@ -97,11 +103,14 @@ func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, er
 		return Mode{}, ErrUnknownPruneMode
 	}
 
-	if distanceHistory > 0 {
-		mode.History = Distance(distanceHistory)
-	}
-	if distanceBlocks > 0 {
-		mode.Blocks = Distance(distanceBlocks)
+	if pruneMode != archiveModeStr {
+		// Override is not allowed for full/minimal mode
+		if distanceHistory > 0 && distanceHistory != mode.History.toValue() {
+			return Mode{}, ErrDistanceOnlyForArchive
+		}
+		if distanceBlocks > 0 && distanceBlocks != mode.Blocks.toValue() {
+			return Mode{}, ErrDistanceOnlyForArchive
+		}
 	}
 	return mode, nil
 }
