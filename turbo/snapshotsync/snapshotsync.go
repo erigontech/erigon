@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/config3"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -294,6 +295,21 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
 
+// isTransactionsSegmentExpired - check if the transactions segment is expired according to whichever history expiry policy we use.
+func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snapcfg.PreverifiedItem) bool {
+	// History expiry is the default.
+	if pruneMode.Blocks != prune.DefaultBlocksPruneMode || !dbg.EnableHistoryExpiry {
+		return false
+	}
+
+	// We use the pre-merge data policy.
+	s, _, ok := snaptype.ParseFileName("", p.Name)
+	if !ok {
+		return false
+	}
+	return cc.IsPreMerge(s.From)
+}
+
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(
@@ -387,6 +403,9 @@ func WaitForDownloader(
 		if _, ok := blackListForPruning[p.Name]; ok {
 			continue
 		}
+		// if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
+		// 	continue
+		// }
 
 		downloadRequest = append(downloadRequest, DownloadRequest{
 			Path:        p.Name,
