@@ -379,6 +379,10 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 	for i, l := range r.Logs {
 		logsForStorage[i] = (*LogForStorage)(l)
 	}
+	if r.BlockNumber.Uint64() == 1506 {
+		fmt.Printf("[dbg] ReceiptForStorage.Encode(%d, %d, %d)\n", r.BlockNumber, r.TransactionIndex, r.FirstLogIndexWithinBlock)
+	}
+
 	return rlp.Encode(w, &storedReceiptRLP{
 		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
