@@ -235,6 +235,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if isFinalTxn {
 			continue
 		}
+		fmt.Printf("[dbg] getLogsV3: txIdx=%d, txNum=%d, ReceiptAsOf(%d), %d\n", txIndex, txNum)
 
 		// if block number changed, calculate all related field
 
