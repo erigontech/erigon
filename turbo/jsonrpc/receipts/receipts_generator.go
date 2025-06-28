@@ -199,12 +199,26 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if _receiptFromDB != nil {
 			fmt.Printf("[dbg] GetReceipt08: %d, %d, %d\n", blockNum, txNum+2, _receiptFromDB.FirstLogIndexWithinBlock)
 		}
+		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+3, txnHash)
+		if err != nil {
+			return nil, err
+		}
+		if _receiptFromDB != nil {
+			fmt.Printf("[dbg] GetReceipt09: %d, %d, %d\n", blockNum, txNum+3, _receiptFromDB.FirstLogIndexWithinBlock)
+		}
+		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-1, txnHash)
+		if err != nil {
+			return nil, err
+		}
+		if _receiptFromDB != nil {
+			fmt.Printf("[dbg] GetReceipt010: %d, %d, %d\n", blockNum, txNum-1, _receiptFromDB.FirstLogIndexWithinBlock)
+		}
 		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-2, txnHash)
 		if err != nil {
 			return nil, err
 		}
 		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt09: %d, %d, %d\n", blockNum, txNum-2, _receiptFromDB.FirstLogIndexWithinBlock)
+			fmt.Printf("[dbg] GetReceipt011: %d, %d, %d\n", blockNum, txNum-2, _receiptFromDB.FirstLogIndexWithinBlock)
 		}
 	}
 
