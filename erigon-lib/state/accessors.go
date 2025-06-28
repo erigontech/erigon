@@ -5,11 +5,13 @@ import "strings"
 type Accessors int
 
 func (l Accessors) Has(target Accessors) bool { return l&target != 0 }
+func (l Accessors) Add(a Accessors) Accessors { return l | a }
 
 const (
-	AccessorBTree     Accessors = 0b1
-	AccessorHashMap   Accessors = 0b10
-	AccessorExistence Accessors = 0b100
+	AccessorBTree         Accessors = 0b1
+	AccessorHashMap       Accessors = 0b10
+	AccessorExistence     Accessors = 0b100
+	AccessorHashMap2Layer Accessors = 0b1000
 )
 
 func (l Accessors) String() string {

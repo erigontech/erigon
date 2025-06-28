@@ -62,3 +62,26 @@ func (d DataExtension) String() string {
 func (d DataExtension) Equals(target string) bool {
 	return string(d) == target
 }
+
+type ExistenceExtension string
+
+const (
+	ExistenceExtensionKvei ExistenceExtension = ".kvei"
+	ExistenceExtensionEfei ExistenceExtension = ".efei"
+)
+
+func (e ExistenceExtension) IsSet() bool {
+	switch e {
+	case ExistenceExtensionKvei, ExistenceExtensionEfei:
+		return true
+	}
+	return false
+}
+
+func (e ExistenceExtension) String() string {
+	return string(e)
+}
+
+func (e ExistenceExtension) Equals(target string) bool {
+	return string(e) == target
+}

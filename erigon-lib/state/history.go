@@ -928,6 +928,11 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorFilePath(step, step+1)); err != nil {
 			return HistoryFiles{}, err
 		}
+		if h.InvertedIndex.Accessors.Has(AccessorExistence) {
+			if efExistence, err = existence.OpenFilter(h.InvertedIndex.efAccessorExistenceFilterFilePath(step, step+1), true); err != nil {
+				return HistoryFiles{}, err
+			}
+		}
 	}
 
 	historyDecomp, err = seg.NewDecompressor(collation.historyPath)
@@ -957,6 +962,9 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	if h.snapshotsDisabled {
 		return
+	}
+	if txNumFrom == txNumTo {
+		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
 
 	h.InvertedIndex.integrateDirtyFiles(InvertedFiles{
