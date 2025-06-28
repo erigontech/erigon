@@ -1269,15 +1269,12 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txNum uint64, txnHash common.Hash) (*types.Receipt, bool, error) {
 	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing values BEFORE-change*/)
 	if err != nil {
-		fmt.Printf("[dbg] ReadReceiptCacheV2(%d) err=%s\n", txNum+1, err)
 		return nil, false, err
 	}
 	if !ok {
-		fmt.Printf("[dbg] ReadReceiptCacheV2(%d) not found\n", txNum+1)
 		return nil, false, nil
 	}
 	if len(v) == 0 {
-		fmt.Printf("[dbg] ReadReceiptCacheV2(%d) emtpy. nil=%t\n", txNum+1, v == nil)
 		return nil, false, nil
 	}
 
@@ -1286,7 +1283,6 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 	if err := rlp.DecodeBytes(v, receipt); err != nil {
 		return nil, false, fmt.Errorf("%w, of block %d, len(v)=%d", err, blockNum, len(v))
 	}
-	fmt.Printf("[dbg] ReadReceiptCacheV2(%d) found=%d, %x\n", txNum+1, receipt.FirstLogIndexWithinBlock, v)
 	res := (*types.Receipt)(receipt)
 	res.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txnHash)
 	return res, true, nil
@@ -1360,9 +1356,6 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 		}
 	} else {
 		toWrite = []byte{}
-	}
-	if receipt != nil && receipt.BlockNumber.Uint64() == 1506 {
-		fmt.Printf("[dbg] WriteReceiptCacheV2: %x\n", toWrite)
 	}
 	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, nil, toWrite, nil, 0); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
