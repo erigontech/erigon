@@ -258,7 +258,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].TxIndex = uint(index)
 		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
 	}
-	log.Warn(fmt.Sprintf("[dbg] GetReceipt22: %d, %d, %d\n", blockNum, index, receipt.Logs[0].Index))
+	if len(receipt.Logs) > 0 {
+		log.Warn(fmt.Sprintf("[dbg] GetReceipt22: %d, %d, %d\n", blockNum, index, receipt.Logs[0].Index))
+	}
 
 	g.addToCacheReceipt(receipt.TxHash, receipt)
 
