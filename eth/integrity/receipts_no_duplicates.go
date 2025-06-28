@@ -3,6 +3,8 @@ package integrity
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -11,8 +13,11 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/turbo/services"
+	"golang.org/x/sync/errgroup"
 )
 
+// CheckReceiptsNoDups performs integrity checks on receipts to ensure no duplicates exist.
+// This function uses parallel processing for improved performance.
 func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] ReceiptsNoDups: done", "err", err)
@@ -45,9 +50,77 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 		}
 	}
 
-	if err := ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, blockReader, failFast); err != nil {
+	if err := ReceiptsNoDupsRangeParallel(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
 		return err
 	}
+	return nil
+}
+
+func ReceiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	blockRange := toBlock - fromBlock + 1
+	if blockRange == 0 {
+		return nil
+	}
+
+	numWorkers := runtime.NumCPU()
+	chunkSize := uint64(1000)
+
+	log.Info("[integrity] ReceiptsNoDups using parallel processing", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(numWorkers)
+	var completedChunks atomic.Uint64
+	var totalChunks uint64 = (blockRange + chunkSize - 1) / chunkSize
+
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
+	// Start progress logger
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				completed := completedChunks.Load()
+				progress := float64(completed) / float64(totalChunks) * 100
+				log.Info("[integrity] CheckReceiptsNoDups progress", "progress", fmt.Sprintf("%.1f%%", progress))
+			}
+		}
+	}()
+
+	// Process chunks in parallel
+	for start := fromBlock; start <= toBlock; start += chunkSize {
+		end := start + chunkSize - 1
+		if end > toBlock {
+			end = toBlock
+		}
+
+		chunkStart := start // Capture loop variable
+		chunkEnd := end     // Capture loop variable
+
+		g.Go(func() error {
+			workerTx, err := db.BeginTemporalRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer workerTx.Rollback()
+
+			chunkErr := ReceiptsNoDupsRange(ctx, chunkStart, chunkEnd, workerTx, blockReader, failFast)
+			if chunkErr != nil {
+				return chunkErr
+			}
+
+			completedChunks.Add(1)
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	log.Info("[integrity] CheckReceiptsNoDups parallel processing completed", "chunks", totalChunks)
 	return nil
 }
 
