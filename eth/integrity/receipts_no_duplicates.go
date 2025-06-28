@@ -13,9 +13,9 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	defer func() {
-		log.Info("[integrity] ReceiptsNoDuplicates: done", "err", err)
+		log.Info("[integrity] ReceiptsNoDups: done", "err", err)
 	}()
 
 	logEvery := time.NewTicker(10 * time.Second)
@@ -33,15 +33,10 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 
 	fromBlock := uint64(1)
 	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptDomainProgress)
-	//stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
-	//if err != nil {
-	//	return err
-	//}
-	//toBlock := stageExecProgress
 
 	{
 		ac := state.AggTx(tx)
-		log.Info("[integrity] ReceiptsNoDuplicates starting", "fromBlock", fromBlock, "toBlock", toBlock)
+		log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 		receiptProgress := ac.HistoryProgress(kv.ReceiptDomain, tx)
 		accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
 		if accProgress != receiptProgress {
@@ -50,13 +45,13 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		}
 	}
 
-	if err := ReceiptsNoDuplicatesRange(ctx, fromBlock, toBlock, tx, blockReader, failFast); err != nil {
+	if err := ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, blockReader, failFast); err != nil {
 		return err
 	}
 	return nil
 }
 
-func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
+func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
@@ -97,7 +92,7 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
 		if !strongMonotonicCumGasUsed && cumUsedGas != 0 {
-			err := fmt.Errorf("ReceiptsNoDuplicates: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
+			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
 			if failFast {
 				return err
 			}
@@ -106,7 +101,7 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 
 		monotonicLogIdx := logIdx >= prevLogIdx
 		if !monotonicLogIdx {
-			err := fmt.Errorf("ReceiptsNoDuplicates: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, prevLogIdx=%d", txNum, blockNum, _min, _max, logIdx, prevLogIdx)
+			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, prevLogIdx=%d", txNum, blockNum, _min, _max, logIdx, prevLogIdx)
 			if failFast {
 				return err
 			}
@@ -121,7 +116,7 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%.1fm/%.1fm", float64(txNum)/1_000_000, float64(toTxNum)/1_000_000))
+			log.Info("[integrity] CheckReceiptsNoDups", "progress", fmt.Sprintf("%.1fm/%.1fm", float64(txNum)/1_000_000, float64(toTxNum)/1_000_000))
 		default:
 		}
 	}
