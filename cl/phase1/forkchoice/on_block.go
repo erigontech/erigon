@@ -123,6 +123,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				return err
 			}
 			if !available {
+				// TODO: schedule download of columns and blobs
 				return fmt.Errorf("OnBlock: some column data is not available for block %x, err: %v", common.Hash(blockRoot), ErrEIP7594DataNotAvailable)
 			}
 		} else if block.Version() >= clparams.DenebVersion {
