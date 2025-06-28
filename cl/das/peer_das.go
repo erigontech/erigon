@@ -280,6 +280,17 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
+	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), blockRoot)
+	if err != nil {
+		log.Warn("[blobsRecover] failed to get saved column index", "err", err)
+		return err
+	}
+	if len(existingColumns) < int(d.beaconConfig.NumberOfColumns+1)/2 {
+		// not enough columns to recover, skip
+		log.Debug("[blobsRecover] not enough columns to recover", "slot", slot, "blockRoot", blockRoot, "existingColumns", len(existingColumns))
+		return nil
+	}
+
 	// early check if the blobs are recovering
 	d.recoveringMutex.Lock()
 	if _, ok := d.isRecovering[blockRoot]; ok {
@@ -289,6 +300,7 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	d.recoveringMutex.Unlock()
 
 	// schedule
+	log.Debug("[blobsRecover] scheduling recover", "slot", slot, "blockRoot", blockRoot)
 	timer := time.NewTimer(3 * time.Second)
 	defer timer.Stop()
 	select {
