@@ -51,13 +51,13 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	}
 	tx.Rollback()
 
-	if err := ReceiptsNoDupsRangeParallel(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
+	if err := receiptsNoDupsRangeParallel(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
 		return err
 	}
 	return nil
 }
 
-func ReceiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	blockRange := toBlock - fromBlock + 1
 	if blockRange == 0 {
 		return nil
@@ -185,8 +185,6 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-logEvery.C:
-			log.Info("[integrity] CheckReceiptsNoDups", "progress", fmt.Sprintf("%.1fm/%.1fm", float64(txNum)/1_000_000, float64(toTxNum)/1_000_000))
 		default:
 		}
 	}
