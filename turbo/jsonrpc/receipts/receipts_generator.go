@@ -180,14 +180,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		fmt.Printf("[dbg] GetReceipt05: %d, %d, nil\n", blockNum, index)
 	}
 	{
-		_receiptFromDB, _, err := rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt06: %d, ti=%d, %d, %d\n", blockNum, index, txNum, _receiptFromDB.FirstLogIndexWithinBlock)
-		}
-		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+1, txnHash)
+		_receiptFromDB, _, err := rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+1, txnHash)
 		if err != nil {
 			return nil, err
 		}
