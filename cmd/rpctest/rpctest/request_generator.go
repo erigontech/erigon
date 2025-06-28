@@ -106,7 +106,8 @@ func (g *RequestGenerator) getModifiedAccountsByNumber(prevBn uint64, bn uint64)
 }
 
 func (g *RequestGenerator) getLogs(prevBn uint64, bn uint64, account common.Address) string {
-	return g.getLogsForAddresses(prevBn, bn, []common.Address{account})
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, g.reqID.Add(1))
 }
 func (g *RequestGenerator) getLogsNoFilters(prevBn uint64, bn uint64) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x"}],"id":%d}`
