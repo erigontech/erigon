@@ -174,7 +174,6 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			return nil
 		}
 		var indices []uint64
-
 		for i := 0; i < len(logs); i++ {
 			indices = append(indices, uint64(logs[i].Index))
 		}
@@ -188,7 +187,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 	}
 
 	eg := &errgroup.Group{}
-	eg.SetLimit(estimate.AlmostAllCPUs() * 10)
+	eg.SetLimit(estimate.AlmostAllCPUs())
 
 	startTime := time.Now()
 	loggedBlock := blockFrom
