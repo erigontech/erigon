@@ -160,11 +160,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-			fmt.Printf("[dbg] GetReceipt02: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
 			return receiptFromDB, nil
-		}
-		if receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt03: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
 		}
 
 		//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
