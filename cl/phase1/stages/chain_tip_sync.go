@@ -94,7 +94,7 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 			} else {
 				for _, block := range fuluBlocks {
 					blockRoot, _ := block.Block.HashSSZ() // Ignoring error as block would not process if HashSSZ failed
-					log.Debug("[chainTipSync] downloaded columns and recovered blobs", "blockRoot", blockRoot, "slot", block.Block.Slot)
+					log.Debug("[chainTipSync] downloaded columns and recovered blobs", "blockRoot", common.Hash(blockRoot), "slot", block.Block.Slot)
 				}
 			}
 		}()

@@ -30,6 +30,8 @@ type PeerDas interface {
 	Prune(keepSlotDistance uint64) error
 	UpdateValidatorsCustody(cgc uint64)
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
+	IsBlobAlreadyRecovered(blockRoot common.Hash) bool
+	IsColumnOverHalf(blockRoot common.Hash) bool
 	StateReader() peerdasstate.PeerDasStateReader
 }
 
@@ -86,6 +88,24 @@ func NewPeerDas(
 
 func (d *peerdas) StateReader() peerdasstate.PeerDasStateReader {
 	return d.state
+}
+
+func (d *peerdas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
+	count, err := d.blobStorage.KzgCommitmentsCount(context.Background(), blockRoot)
+	if err != nil {
+		log.Warn("failed to get kzg commitments count", "err", err, "blockRoot", blockRoot)
+		return false
+	}
+	return count > 0
+}
+
+func (d *peerdas) IsColumnOverHalf(blockRoot common.Hash) bool {
+	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), blockRoot)
+	if err != nil {
+		log.Warn("failed to get saved column index", "err", err, "blockRoot", blockRoot)
+		return false
+	}
+	return len(existingColumns) >= int(d.beaconConfig.NumberOfColumns+1)/2
 }
 
 type recoverBlobsRequest struct {
@@ -260,7 +280,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			d.recoveringMutex.Unlock()
 
 			// check if the blobs are already recovered
-			if count, err := d.blobStorage.KzgCommitmentsCount(context.Background(), toRecover.blockRoot); err == nil && count > 0 {
+			if d.IsBlobAlreadyRecovered(toRecover.blockRoot) {
 				// already recovered, skip
 				d.recoveringMutex.Lock()
 				delete(d.isRecovering, toRecover.blockRoot)
@@ -280,14 +300,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
-	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), blockRoot)
-	if err != nil {
-		log.Warn("[blobsRecover] failed to get saved column index", "err", err)
-		return err
-	}
-	if len(existingColumns) < int(d.beaconConfig.NumberOfColumns+1)/2 {
-		// not enough columns to recover, skip
-		log.Debug("[blobsRecover] not enough columns to recover", "slot", slot, "blockRoot", blockRoot, "existingColumns", len(existingColumns))
+	if d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot) {
 		return nil
 	}
 
