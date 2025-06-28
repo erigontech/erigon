@@ -253,10 +253,12 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	receipt.TransactionIndex = uint(index)
 	receipt.FirstLogIndexWithinBlock = firstLogIndex
 
+	log.Warn("[dbg] GetReceipt21: %d, %d, %d\n", blockNum, index, firstLogIndex)
 	for i := range receipt.Logs {
 		receipt.Logs[i].TxIndex = uint(index)
 		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
 	}
+	log.Warn("[dbg] GetReceipt22: %d, %d, %d\n", blockNum, index, receipt.Logs[0].Index)
 
 	g.addToCacheReceipt(receipt.TxHash, receipt)
 
