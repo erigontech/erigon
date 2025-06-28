@@ -273,7 +273,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	g.addToCacheReceipt(receipt.TxHash, receipt)
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
-		log.Warn("[dbg] assertEqualReceipts: len", "fromExecution", len(receipt.Logs), "fromDB", len(receiptFromDB.Logs), "txIdx", index, "txNum", txNum)
+		log.Warn("[dbg] assertEqualReceipts: len", "fromExecution", len(receipt.Logs), "fromDB", len(receiptFromDB.Logs), "txIdx", index, "txNum", txNum, "gen", receipt.FirstLogIndexWithinBlock, "db", receiptFromDB.FirstLogIndexWithinBlock)
 
 		g.assertEqualReceipts(receipt, receiptFromDB)
 	}
