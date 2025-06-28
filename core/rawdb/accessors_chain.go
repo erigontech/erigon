@@ -1272,9 +1272,11 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 		return nil, false, err
 	}
 	if !ok {
+		fmt.Printf("[dbg] ReadReceiptCacheV2(%d) not found\n", txNum+1)
 		return nil, false, nil
 	}
 	if len(v) == 0 {
+		fmt.Printf("[dbg] ReadReceiptCacheV2(%d) emtpy. nil=%t\n", txNum+1, v == nil)
 		return nil, false, nil
 	}
 
