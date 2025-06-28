@@ -265,7 +265,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				d.recoveringMutex.Lock()
 				delete(d.isRecovering, toRecover.blockRoot)
 				d.recoveringMutex.Unlock()
-				return
+				continue
 			}
 
 			// recover the blobs
@@ -348,7 +348,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	requestColumnSidecars := func(req *downloadRequest) {
 		// send the request in a loop with a ticker to avoid overwhelming the peer
 		// keep trying until the request is done
-		ticker := time.NewTicker(50 * time.Millisecond)
+		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		wg := sync.WaitGroup{}
 	loop:
@@ -392,7 +392,7 @@ mainloop:
 		case result := <-resultChan:
 			if result.err != nil {
 				log.Debug("failed to download columns from peer", "pid", result.pid, "err", result.err)
-				d.rpc.BanPeer(result.pid)
+				//d.rpc.BanPeer(result.pid)
 				continue
 			}
 			if len(result.sidecars) == 0 {
