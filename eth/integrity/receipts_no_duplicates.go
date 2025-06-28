@@ -122,9 +122,6 @@ func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 }
 
 func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
-
 	txNumsReader := blockReader.TxnumReader(ctx)
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
