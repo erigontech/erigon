@@ -148,8 +148,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
 
-	fmt.Printf("[dbg] GetReceipt01: %d, %d, %d, %t\n", blockNum, index, txNum, rpcDisableRCache)
-
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptFromDB *types.Receipt
 	var ok bool
@@ -169,51 +167,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-			fmt.Printf("[dbg] GetReceipt04: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
 			return receiptFromDB, nil
-		}
-	}
-
-	if receiptFromDB != nil {
-		fmt.Printf("[dbg] GetReceipt05: %d, %d, %d\n", blockNum, index, receiptFromDB.FirstLogIndexWithinBlock)
-	} else {
-		fmt.Printf("[dbg] GetReceipt05: %d, %d, nil\n", blockNum, index)
-	}
-	{
-		_receiptFromDB, _, err := rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+1, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt07: %d, %d, %d\n", blockNum, txNum+1, _receiptFromDB.FirstLogIndexWithinBlock)
-		}
-		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+2, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt08: %d, %d, %d\n", blockNum, txNum+2, _receiptFromDB.FirstLogIndexWithinBlock)
-		}
-		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum+3, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt09: %d, %d, %d\n", blockNum, txNum+3, _receiptFromDB.FirstLogIndexWithinBlock)
-		}
-		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-1, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt010: %d, %d, %d\n", blockNum, txNum-1, _receiptFromDB.FirstLogIndexWithinBlock)
-		}
-		_receiptFromDB, _, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-2, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if _receiptFromDB != nil {
-			fmt.Printf("[dbg] GetReceipt011: %d, %d, %d\n", blockNum, txNum-2, _receiptFromDB.FirstLogIndexWithinBlock)
 		}
 	}
 
@@ -241,25 +195,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, err
 	}
-	{
-		_min, _ := g.txNumReader.Min(tx, blockNum)
-		_max, _ := g.txNumReader.Max(tx, blockNum)
-		fmt.Printf("[dbg] GetReceipt10: %d[%d-%d], txIdx=%d, txNum=%d, ReceiptAsOf(%d), %d\n", blockNum, _min, _max, index, txNum, txNum+1, firstLogIndex)
-		_, _, _firstLogIndex, _ := rawtemporaldb.ReceiptAsOf(tx, txNum+2)
-		fmt.Printf("[dbg] GetReceipt11: %d, %d, %d\n", blockNum, txNum+2, _firstLogIndex)
-		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, txNum)
-		fmt.Printf("[dbg] GetReceipt12: %d, %d, %d\n", blockNum, txNum, _firstLogIndex)
 
-		_m, _ := g.txNumReader.Min(tx, blockNum)
-		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, _m)
-		fmt.Printf("[dbg] GetReceipt13: %d, %d, %d\n", blockNum, _m, _firstLogIndex)
-		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, _m+1)
-		fmt.Printf("[dbg] GetReceipt14: %d, %d, %d\n", blockNum, _m+1, _firstLogIndex)
-		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, _m+2)
-		fmt.Printf("[dbg] GetReceipt15: %d, %d, %d\n", blockNum, _m+2, _firstLogIndex)
-		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, _max)
-		fmt.Printf("[dbg] GetReceipt16: %d, %d, %d\n", blockNum, _max, _firstLogIndex)
-	}
 	receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
@@ -270,13 +206,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	receipt.TransactionIndex = uint(index)
 	receipt.FirstLogIndexWithinBlock = firstLogIndex
 
-	log.Warn(fmt.Sprintf("[dbg] GetReceipt21: %d, %d, %d\n", blockNum, index, firstLogIndex))
 	for i := range receipt.Logs {
 		receipt.Logs[i].TxIndex = uint(index)
 		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
-	}
-	if len(receipt.Logs) > 0 {
-		log.Warn(fmt.Sprintf("[dbg] GetReceipt22: %d, %d, %d\n", blockNum, index, receipt.Logs[0].Index))
 	}
 
 	g.addToCacheReceipt(receipt.TxHash, receipt)
