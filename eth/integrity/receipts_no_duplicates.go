@@ -89,6 +89,8 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 			prevLogIdx = 0
 		}
 
+		fmt.Printf("[dbg]  tn=%d, prevLogIdx=%d, logIdx=%d\n")
+
 		_max, _ := txNumsReader.Max(tx, blockNum)
 
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
