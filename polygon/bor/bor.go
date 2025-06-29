@@ -1530,6 +1530,12 @@ func (c *Bor) fetchAndCommitSpan(
 		heimdallSpan = chain.Chain.(ChainHeaderReader).BorSpan(newSpanID)
 	}
 
+	if heimdallSpan == nil {
+		panic("heimdallSpan is nil, this should never happen")
+	}
+	if c.chainConfig == nil {
+		panic("c.chainConfig is nil, this should never happen")
+	}
 	// check if chain id matches with heimdall span
 	if heimdallSpan.ChainID != c.chainConfig.ChainID.String() {
 		return fmt.Errorf(
