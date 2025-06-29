@@ -33,7 +33,7 @@ var (
 
 // EncodeZstdIfNeed compresses v into buf if enabled, otherwise returns buf and v unchanged.
 // It pre-allocates buf to ZSTD’s worst-case bound (src + src/255 + 16) and reuses encoders.
-func EncodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
+func EncodeZstdIfNeed(buf, v []byte, enabled bool) (outBuf []byte, decompressed []byte) {
 	if !enabled {
 		return buf, v
 	}
@@ -61,7 +61,7 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 
 	out, err := dec.DecodeAll(v, buf[:0])
 	if err != nil {
-		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
+		return buf, nil, fmt.Errorf("DecodeZstdIfNeed: %w", err)
 	}
 	return out, out, nil
 }

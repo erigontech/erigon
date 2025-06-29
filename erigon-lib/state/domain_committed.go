@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 
@@ -245,7 +246,7 @@ func encodeShorterKey(buf []byte, offset uint64) []byte {
 
 // Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.
 // If item is nil, or shorter key was not found, or anything else goes wrong, nil key and false returned.
-func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, item *FilesItem) (shortened []byte, found bool) {
+func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.PagedReader, item *FilesItem) (shortened []byte, found bool) {
 	if item == nil {
 		return nil, false
 	}
@@ -280,7 +281,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 			return nil, false
 		}
 
-		k, _ := itemGetter.Next(nil)
+		k, _, _ := itemGetter.NextKey(nil)
 		if !bytes.Equal(fullKey, k) {
 			dt.d.logger.Warn("commitment branch key replacement seek invalid key",
 				"key", fmt.Sprintf("%x", fullKey), "idx", "hash", "file", item.decompressor.FileName())
@@ -355,7 +356,7 @@ func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *Fil
 }
 
 // searches in given list of files for a key or searches in domain files if list is empty
-func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) (fullKey []byte, found bool) {
+func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.PagedReader) (fullKey []byte, found bool) {
 	if len(shortKey) < 1 {
 		return nil, false
 	}
@@ -374,12 +375,14 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 	getter.Reset(offset)
 	n := getter.HasNext()
 	if !n || uint64(getter.Size()) <= offset {
-		dt.d.logger.Warn("lookupByShortenedKey failed", "file", getter.FileName(), "short", fmt.Sprintf("%x", shortKey), "offset", offset, "hasNext", n, "size", getter.Size(), "offsetBigger", uint64(getter.Size()) <= offset)
+		dt.d.logger.Warn("lookupByShortenedKey failed", "file", getter.FileName(), "short", fmt.Sprintf("%x", shortKey), "offset", offset, "hasNext", n, "size", getter.Size(),
+			"offsetBigger", uint64(getter.Size()) <= offset)
 		return nil, false
 	}
 
-	fullKey, _ = getter.Next(fullKey[:0])
-	return fullKey, true
+	//fullKey, _, _ = getter.NextKey(fullKey[:0])
+	fullKey, _, _ = getter.NextKey(nil)
+	return common.Copy(fullKey), true
 }
 
 // commitmentValTransform parses the value of the commitment record to extract references
@@ -405,20 +408,20 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	}
 
 	dr := DomainRanges{values: rng}
-	accountFileMap := make(map[uint64]map[uint64]*seg.Reader)
+	accountFileMap := make(map[uint64]map[uint64]*seg.PagedReader)
 	if accountList, _, _ := accounts.staticFilesInRange(dr); accountList != nil {
 		for _, f := range accountList {
 			if _, ok := accountFileMap[f.startTxNum]; !ok {
-				accountFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
+				accountFileMap[f.startTxNum] = make(map[uint64]*seg.PagedReader)
 			}
 			accountFileMap[f.startTxNum][f.endTxNum] = accounts.dataReader(f.decompressor)
 		}
 	}
-	storageFileMap := make(map[uint64]map[uint64]*seg.Reader)
+	storageFileMap := make(map[uint64]map[uint64]*seg.PagedReader)
 	if storageList, _, _ := storage.staticFilesInRange(dr); storageList != nil {
 		for _, f := range storageList {
 			if _, ok := storageFileMap[f.startTxNum]; !ok {
-				storageFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
+				storageFileMap[f.startTxNum] = make(map[uint64]*seg.PagedReader)
 			}
 			storageFileMap[f.startTxNum][f.endTxNum] = storage.dataReader(f.decompressor)
 		}
@@ -433,7 +436,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return valBuf, nil
 		}
 		if _, ok := storageFileMap[keyFromTxNum]; !ok {
-			storageFileMap[keyFromTxNum] = make(map[uint64]*seg.Reader)
+			storageFileMap[keyFromTxNum] = make(map[uint64]*seg.PagedReader)
 		}
 		sig, ok := storageFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
@@ -446,7 +449,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 
 		if _, ok := accountFileMap[keyFromTxNum]; !ok {
-			accountFileMap[keyFromTxNum] = make(map[uint64]*seg.Reader)
+			accountFileMap[keyFromTxNum] = make(map[uint64]*seg.PagedReader)
 		}
 		aig, ok := accountFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
