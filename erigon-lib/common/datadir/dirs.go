@@ -84,7 +84,7 @@ func New(datadir string) Dirs {
 		CaplinColumnData: filepath.Join(datadir, "caplin", "column"),
 		CaplinIndexing:   filepath.Join(datadir, "caplin", "indexing"),
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
-		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis"),
+		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 	}
 
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
