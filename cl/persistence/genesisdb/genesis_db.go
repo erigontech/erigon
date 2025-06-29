@@ -3,8 +3,8 @@ package genesisdb
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/spf13/afero"
@@ -65,16 +65,11 @@ func (g *genesisDB) ReadGenesisState() (*state.CachingBeaconState, error) {
 		return nil, fmt.Errorf("decompressedEnc is too short: expected at least %d bytes, got %d", raw.SlotOffsetSSZ+8, len(decompressedEnc))
 	}
 	// get slot from the state
-	fork := &cltypes.Fork{}
-	if err := fork.DecodeSSZ(decompressedEnc[raw.BeaconForkOffsetSSZ:], 0); err != nil {
-		return nil, fmt.Errorf("could not deserialize fork: %s", err)
-	}
-	versionScheduleEntry := g.beaconConfig.ForkVersionSchedule[fork.CurrentVersion]
-
+	slot := ssz.Uint64SSZDecode(decompressedEnc[raw.SlotOffsetSSZ : raw.SlotOffsetSSZ+8])
+	version := g.beaconConfig.GetCurrentStateVersion(slot / g.beaconConfig.SlotsPerEpoch)
 	st := state.New(g.beaconConfig)
-	if err := st.DecodeSSZ(decompressedEnc, int(versionScheduleEntry.StateVersion)); err != nil {
+	if err := st.DecodeSSZ(decompressedEnc, int(version)); err != nil {
 		return nil, fmt.Errorf("could not deserialize state: %s", err)
 	}
-
 	return st, nil
 }

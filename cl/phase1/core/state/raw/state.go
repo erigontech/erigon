@@ -36,8 +36,7 @@ const (
 	SlashingsLength  = 8192
 
 	// slot offset in the state = genesis time + genesis validators root
-	SlotOffsetSSZ       = 8 + length.Hash
-	BeaconForkOffsetSSZ = SlotOffsetSSZ + 8
+	SlotOffsetSSZ = 8 + length.Hash
 )
 
 type BeaconState struct {
