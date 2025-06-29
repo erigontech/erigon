@@ -351,6 +351,15 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 		return nil
 	}
 
+	begin := time.Now()
+	defer func() {
+		slots := []uint64{}
+		for _, block := range blocks {
+			slots = append(slots, block.Block.Slot)
+		}
+		log.Debug("DownloadColumnsAndRecoverBlobs", "elapsed time", time.Since(begin), "slots", slots)
+	}()
+
 	// initialize the download request
 	req, err := initializeDownloadRequest(blocksToProcess, d.beaconConfig, d.columnStorage)
 	if err != nil {
