@@ -137,17 +137,11 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 		if prevR != nil {
 			cumulativeGasUsed = prevR.CumulativeGasUsed
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
-			if t.BlockNum == 3525000 {
-				log.Warn("[dbg] CreateReceipt1", "blockNum", t.BlockNum, "txNum", t.TxNum, "firstLogIndex", firstLogIndex)
-			}
 		} else {
 			var err error
 			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, t.TxNum)
 			if err != nil {
 				panic(err)
-			}
-			if t.BlockNum == 3525000 {
-				log.Warn("[dbg] CreateReceipt2", "blockNum", t.BlockNum, "txNum", t.TxNum, "firstLogIndex", firstLogIndex)
 			}
 		}
 	}
@@ -158,14 +152,6 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 		panic(msg)
 	}
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
-	if t.BlockNum == 3525000 {
-		if r == nil {
-			log.Warn("[dbg] CreateReceipt3", "blockNum", t.BlockNum, "txNum", t.TxNum, "receipt", nil)
-		} else {
-			log.Warn("[dbg] CreateReceipt3", "blockNum", t.BlockNum, "txNum", t.TxNum, "receipt", len(r.Logs), "firstLogIndexWithinBlock", r.FirstLogIndexWithinBlock)
-		}
-	}
-
 	t.BlockReceipts[t.TxIndex] = r
 }
 
