@@ -192,13 +192,13 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		fmt.Printf("[dbg] GetReceipt2: bn=%d[%d-%d]\n", blockNum, _min, _max)
 
 		_, _, _firstLogIndex, _ := rawtemporaldb.ReceiptAsOf(tx, txNum-2)
-		fmt.Printf("[dbg] GetReceipt3: bn=%d, txNum=%d, firstLogIndex=%d\n", blockNum, txNum-2, _firstLogIndex)
+		fmt.Printf("[dbg] GetReceipt3: txNum=%d, firstLogIndex=%d\n", txNum-2, _firstLogIndex)
 		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, txNum-1)
-		fmt.Printf("[dbg] GetReceipt3: bn=%d, txNum=%d, firstLogIndex=%d\n", blockNum, txNum-1, _firstLogIndex)
+		fmt.Printf("[dbg] GetReceipt3: txNum=%d, firstLogIndex=%d\n", txNum-1, _firstLogIndex)
 		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, txNum)
-		fmt.Printf("[dbg] GetReceipt3: bn=%d, txNum=%d, firstLogIndex=%d\n", blockNum, txNum, _firstLogIndex)
+		fmt.Printf("[dbg] GetReceipt3: txNum=%d, firstLogIndex=%d\n", txNum, _firstLogIndex)
 		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, txNum+2)
-		fmt.Printf("[dbg] GetReceipt3: bn=%d, txNum=%d, firstLogIndex=%d\n", blockNum, txNum+2, _firstLogIndex)
+		fmt.Printf("[dbg] GetReceipt3: txNum=%d, firstLogIndex=%d\n", txNum+2, _firstLogIndex)
 
 	}
 
