@@ -38,7 +38,7 @@ func (l Lvl) String() string {
 	case LvlWarn:
 		return "warn"
 	case LvlError:
-		return "error"
+		return "eror"
 	case LvlCrit:
 		return "crit"
 	default:
