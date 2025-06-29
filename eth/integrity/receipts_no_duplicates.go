@@ -3,6 +3,8 @@ package integrity
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -11,15 +13,20 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/turbo/services"
+	"golang.org/x/sync/errgroup"
 )
 
-func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+// CheckReceiptsNoDups performs integrity checks on receipts to ensure no duplicates exist.
+// This function uses parallel processing for improved performance.
+func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	defer func() {
-		log.Info("[integrity] ReceiptsNoDuplicates: done", "err", err)
+		log.Info("[integrity] ReceiptsNoDups: done", "err", err)
 	}()
 
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
+
+	txNumsReader := blockReader.TxnumReader(ctx)
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -27,21 +34,14 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	}
 	defer tx.Rollback()
 
-	txNumsReader := blockReader.TxnumReader(ctx)
-
 	receiptDomainProgress := state.AggTx(tx).HistoryProgress(kv.ReceiptDomain, tx)
 
 	fromBlock := uint64(1)
 	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptDomainProgress)
-	//stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
-	//if err != nil {
-	//	return err
-	//}
-	//toBlock := stageExecProgress
 
 	{
 		ac := state.AggTx(tx)
-		log.Info("[integrity] ReceiptsNoDuplicates starting", "fromBlock", fromBlock, "toBlock", toBlock)
+		log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 		receiptProgress := ac.HistoryProgress(kv.ReceiptDomain, tx)
 		accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
 		if accProgress != receiptProgress {
@@ -49,17 +49,79 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 			log.Warn(err.Error())
 		}
 	}
+	tx.Rollback()
 
-	if err := ReceiptsNoDuplicatesRange(ctx, fromBlock, toBlock, tx, blockReader, failFast); err != nil {
+	if err := receiptsNoDupsRangeParallel(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
 		return err
 	}
 	return nil
 }
 
-func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
-	logEvery := time.NewTicker(10 * time.Second)
+func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	blockRange := toBlock - fromBlock + 1
+	if blockRange == 0 {
+		return nil
+	}
+
+	numWorkers := runtime.NumCPU()
+	chunkSize := uint64(1000)
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(numWorkers)
+	var completedChunks atomic.Uint64
+	var totalChunks uint64 = (blockRange + chunkSize - 1) / chunkSize
+	log.Info("[integrity] ReceiptsNoDups using parallel processing", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
+
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				completed := completedChunks.Load()
+				progress := float64(completed) / float64(totalChunks) * 100
+				log.Info("[integrity] CheckReceiptsNoDups progress", "progress", fmt.Sprintf("%.1f%%", progress))
+			}
+		}
+	}()
+
+	// Process chunks in parallel
+	for start := fromBlock; start <= toBlock; start += chunkSize {
+		end := start + chunkSize - 1
+		if end > toBlock {
+			end = toBlock
+		}
+
+		chunkStart := start // Capture loop variable
+		chunkEnd := end     // Capture loop variable
+
+		g.Go(func() error {
+			tx, err := db.BeginTemporalRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+
+			chunkErr := ReceiptsNoDupsRange(ctx, chunkStart, chunkEnd, tx, blockReader, failFast)
+			if chunkErr != nil {
+				return chunkErr
+			}
+
+			completedChunks.Add(1)
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
 	txNumsReader := blockReader.TxnumReader(ctx)
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
@@ -97,7 +159,7 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
 		if !strongMonotonicCumGasUsed && cumUsedGas != 0 {
-			err := fmt.Errorf("ReceiptsNoDuplicates: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
+			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
 			if failFast {
 				return err
 			}
@@ -106,7 +168,7 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 
 		monotonicLogIdx := logIdx >= prevLogIdx
 		if !monotonicLogIdx {
-			err := fmt.Errorf("ReceiptsNoDuplicates: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, prevLogIdx=%d", txNum, blockNum, _min, _max, logIdx, prevLogIdx)
+			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, prevLogIdx=%d", txNum, blockNum, _min, _max, logIdx, prevLogIdx)
 			if failFast {
 				return err
 			}
@@ -120,8 +182,6 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-logEvery.C:
-			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%.1fm/%.1fm", float64(txNum)/1_000_000, float64(toTxNum)/1_000_000))
 		default:
 		}
 	}
