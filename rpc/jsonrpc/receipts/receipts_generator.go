@@ -189,7 +189,17 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	{
 		_min, _ := g.txNumReader.Min(tx, blockNum)
 		_max, _ := g.txNumReader.Max(tx, blockNum)
-		fmt.Printf("[dbg] GetReceipt2: bn=%d, txNum=%d, _min=%d, _max=%d\n", blockNum, txNum+1, _min, _max)
+		fmt.Printf("[dbg] GetReceipt2: bn=%d[%d-%d]\n", blockNum, _min, _max)
+
+		_, _, _firstLogIndex, _ := rawtemporaldb.ReceiptAsOf(tx, txNum-2)
+		fmt.Printf("[dbg] GetReceipt3: bn=%d, txNum=%d, firstLogIndex=%d\n", blockNum, txNum-2, _firstLogIndex)
+		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, txNum-1)
+		fmt.Printf("[dbg] GetReceipt3: bn=%d, txNum=%d, firstLogIndex=%d\n", blockNum, txNum-1, _firstLogIndex)
+		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, txNum)
+		fmt.Printf("[dbg] GetReceipt3: bn=%d, txNum=%d, firstLogIndex=%d\n", blockNum, txNum, _firstLogIndex)
+		_, _, _firstLogIndex, _ = rawtemporaldb.ReceiptAsOf(tx, txNum+2)
+		fmt.Printf("[dbg] GetReceipt3: bn=%d, txNum=%d, firstLogIndex=%d\n", blockNum, txNum+2, _firstLogIndex)
+
 	}
 
 	if txn.Type() == types.AccountAbstractionTxType {
