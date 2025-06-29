@@ -473,7 +473,7 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	}
 }
 
-func (rs Receipts) AssertFirstLogIndexWithtinBlock(blockNum uint64) {
+func (rs Receipts) AssertLogIndex(blockNum uint64) {
 	if !dbg.AssertEnabled {
 		return
 	}
