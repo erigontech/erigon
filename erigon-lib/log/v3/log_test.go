@@ -15,17 +15,27 @@ import (
 	"time"
 )
 
-func testHandler() (Handler, *Record) {
+func newLastRecordCaptureTestHandler() (lastRecordCaptureTestHandler, *Record) {
 	rec := new(Record)
-	return FuncHandler(func(r *Record) error {
-		*rec = *r
-		return nil
-	}), rec
+	return lastRecordCaptureTestHandler{rec: rec}, rec
+}
+
+type lastRecordCaptureTestHandler struct {
+	rec *Record
+}
+
+func (h lastRecordCaptureTestHandler) Log(r *Record) error {
+	*h.rec = *r
+	return nil
+}
+
+func (h lastRecordCaptureTestHandler) LogLvl() Lvl {
+	return LvlTrace
 }
 
 func testLogger() (Logger, Handler, *Record) {
 	l := New()
-	h, r := testHandler()
+	h, r := newLastRecordCaptureTestHandler()
 	l.SetHandler(LazyHandler(h))
 	return l, h, r
 }
@@ -172,8 +182,8 @@ func TestLogfmt(t *testing.T) {
 func TestMultiHandler(t *testing.T) {
 	t.Parallel()
 
-	h1, r1 := testHandler()
-	h2, r2 := testHandler()
+	h1, r1 := newLastRecordCaptureTestHandler()
+	h2, r2 := newLastRecordCaptureTestHandler()
 	l := New()
 	l.SetHandler(MultiHandler(h1, h2))
 	l.Debug("clone")
@@ -195,6 +205,10 @@ type waitHandler struct {
 func (h *waitHandler) Log(r *Record) error {
 	h.ch <- *r
 	return nil
+}
+
+func (h *waitHandler) LogLvl() Lvl {
+	return LvlTrace
 }
 
 func TestBufferedHandler(t *testing.T) {
@@ -253,7 +267,7 @@ func TestLvlFilterHandler(t *testing.T) {
 	t.Parallel()
 
 	l := New()
-	h, r := testHandler()
+	h, r := newLastRecordCaptureTestHandler()
 	l.SetHandler(LvlFilterHandler(LvlWarn, h))
 	l.Info("info'd")
 
@@ -389,7 +403,7 @@ func TestFailoverHandler(t *testing.T) {
 	t.Parallel()
 
 	l := New()
-	h, r := testHandler()
+	h, r := newLastRecordCaptureTestHandler()
 	w := &failingWriter{false}
 
 	l.SetHandler(FailoverHandler(
@@ -448,7 +462,7 @@ func TestCallerFileHandler(t *testing.T) {
 	t.Parallel()
 
 	l := New()
-	h, r := testHandler()
+	h, r := newLastRecordCaptureTestHandler()
 	l.SetHandler(CallerFileHandler(h))
 
 	l.Info("baz")
@@ -479,7 +493,7 @@ func TestCallerFuncHandler(t *testing.T) {
 	t.Parallel()
 
 	l := New()
-	h, r := testHandler()
+	h, r := newLastRecordCaptureTestHandler()
 	l.SetHandler(CallerFuncHandler(h))
 
 	l.Info("baz")
@@ -517,7 +531,7 @@ func TestCallerStackHandler(t *testing.T) {
 	t.Parallel()
 
 	l := New()
-	h, r := testHandler()
+	h, r := newLastRecordCaptureTestHandler()
 	l.SetHandler(CallerStackHandler("%#v", h))
 
 	lines := []int{}
@@ -578,10 +592,7 @@ func TestConcurrent(t *testing.T) {
 	l := root.New(make([]interface{}, ctxLen)...)
 	const goroutines = 8
 	var res [goroutines]int
-	l.SetHandler(SyncHandler(FuncHandler(func(r *Record) error {
-		res[r.Ctx[ctxLen+1].(int)]++
-		return nil
-	})))
+	l.SetHandler(SyncHandler(concurrentCaptureTestHandler{res: res[:], ctxLen: ctxLen}))
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 	for i := 0; i < goroutines; i++ {
@@ -600,9 +611,23 @@ func TestConcurrent(t *testing.T) {
 	}
 }
 
+type concurrentCaptureTestHandler struct {
+	res    []int
+	ctxLen int
+}
+
+func (h concurrentCaptureTestHandler) Log(r *Record) error {
+	h.res[r.Ctx[h.ctxLen+1].(int)]++
+	return nil
+}
+
+func (h concurrentCaptureTestHandler) LogLvl() Lvl {
+	return LvlTrace
+}
+
 func TestCallStack(t *testing.T) {
 	l := New()
-	h, r := testHandler()
+	h, r := newLastRecordCaptureTestHandler()
 
 	scenarios := map[string]struct {
 		handler Handler

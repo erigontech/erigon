@@ -43,6 +43,10 @@ func (h *handler) Log(r *log.Record) error {
 	return nil
 }
 
+func (h *handler) LogLvl() log.Lvl {
+	return log.LvlTrace
+}
+
 // logger implements log.Logger such that all output goes to the unit test log via
 // t.Logf(). All methods in between logger.Trace, logger.Debug, etc. are marked as test
 // helpers, so the file and line number in unit test output correspond to the call site
@@ -62,6 +66,10 @@ type bufHandler struct {
 func (h *bufHandler) Log(r *log.Record) error {
 	h.buf = append(h.buf, r)
 	return nil
+}
+
+func (h *bufHandler) LogLvl() log.Lvl {
+	return log.LvlTrace
 }
 
 // Logger returns a logger which logs to the unit test log of t.
@@ -132,6 +140,34 @@ func (l *logger) Log(level log.Lvl, msg string, ctx ...interface{}) {
 	defer l.mu.Unlock()
 	l.log.Log(level, msg, ctx...)
 	l.flush()
+}
+
+func (l *logger) LogLvl() log.Lvl {
+	return l.log.LogLvl()
+}
+
+func (l *logger) LvlTrace() bool {
+	return l.LogLvl() == log.LvlTrace
+}
+
+func (l *logger) LvlDebug() bool {
+	return l.LogLvl() == log.LvlDebug
+}
+
+func (l *logger) LvlInfo() bool {
+	return l.LogLvl() == log.LvlInfo
+}
+
+func (l *logger) LvlWarn() bool {
+	return l.LogLvl() == log.LvlWarn
+}
+
+func (l *logger) LvlError() bool {
+	return l.LogLvl() == log.LvlError
+}
+
+func (l *logger) LvlCrit() bool {
+	return l.LogLvl() == log.LvlCrit
 }
 
 func (l *logger) New(ctx ...interface{}) log.Logger {
