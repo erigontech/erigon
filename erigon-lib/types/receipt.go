@@ -483,6 +483,22 @@ func (rs Receipts) AssertFirstLogIndexWithtinBlock(blockNum uint64) {
 			panic(fmt.Sprintf("assert: bn=%d, len(t.BlockReceipts)=%d, lastReceipt.FirstLogIndexWithinBlock=%d, logs=%d", blockNum, len(rs), r.FirstLogIndexWithinBlock, logIndex))
 		}
 		logIndex += len(r.Logs)
+
+		//no duplicates
+		if len(r.Logs) <= 1 {
+			continue
+		}
+
+		indices := make([]uint64, 0, len(r.Logs))
+		for i := 0; i < len(r.Logs); i++ {
+			indices = append(indices, uint64(r.Logs[i].Index))
+		}
+		slices.Sort(indices)
+		for i := 1; i < len(indices); i++ {
+			if indices[i-1] == indices[i] {
+				panic(fmt.Sprintf("assert: duplicated log_index %d", indices[i]))
+			}
+		}
 	}
 }
 

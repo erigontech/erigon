@@ -177,7 +177,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			indices = append(indices, uint64(logs[i].Index))
 		}
 		slices.Sort(indices)
-		for i := 1; i < len(logs); i++ {
+		for i := 1; i < len(indices); i++ {
 			if indices[i-1] == indices[i] {
 				return fmt.Errorf("duplicated log_index %d", indices[i])
 			}
