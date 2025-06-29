@@ -42,7 +42,8 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 			log.Warn(err.Error())
 		}
 	}
-
+	fromBlock = 3525000
+	toBlock = 3525000 + 1
 	if err := ReceiptsNoDuplicatesRange(ctx, fromBlock, toBlock, tx, blockReader, failFast); err != nil {
 		return err
 	}
@@ -79,6 +80,7 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 		if err != nil {
 			return err
 		}
+
 		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
 		_min, _ := txNumsReader.Min(tx, blockNum)
 		blockChanged := txNum == _min
