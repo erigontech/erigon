@@ -532,11 +532,11 @@ type RoSnapshots struct {
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
 
-	// allows for pruning segments - this is the min availible segment
+	// allows for pruning segments - this is the minimum available segment
 	segmentsMin atomic.Uint64
 	ready       ready
 	operators   map[snaptype.Enum]*retireOperators
-	alignMin    bool // do we want to align all visible segments to min availible
+	alignMin    bool // do we want to align all visible segments to the minimum available
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -838,7 +838,7 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 	}
 
 	if alignMin {
-		// all types must have same hight
+		// all types must have the same height
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
 			if minMaxVisibleBlock == 0 {
