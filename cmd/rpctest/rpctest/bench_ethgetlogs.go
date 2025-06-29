@@ -174,11 +174,11 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			return nil
 		}
 		seen := make(map[hexutil.Uint]struct{}, len(logs))
-		for i := 0; i < len(logs); i++ {
-			if _, ok := seen[logs[i].Index]; ok {
-				return fmt.Errorf("duplicated log_index %d", logs[i].Index)
+		for _, l := range logs {
+			if _, ok := seen[l.Index]; ok {
+				return fmt.Errorf("duplicated log_index %d", l.Index)
 			}
-			seen[logs[i].Index] = struct{}{}
+			seen[l.Index] = struct{}{}
 		}
 		return nil
 	}
