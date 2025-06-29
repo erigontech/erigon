@@ -402,9 +402,9 @@ func WaitForDownloader(
 		if _, ok := blackListForPruning[p.Name]; ok {
 			continue
 		}
-		// if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
-		// 	continue
-		// }
+		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
+			continue
+		}
 
 		downloadRequest = append(downloadRequest, DownloadRequest{
 			Path:        p.Name,
