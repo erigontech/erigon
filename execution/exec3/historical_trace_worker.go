@@ -533,6 +533,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				return nil
 			})
 		}
+		if h == nil {
+			panic(number)
+		}
 		return h, err
 	}
 
@@ -580,6 +583,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
+		if header == nil {
+			panic(blockNum)
+		}
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
