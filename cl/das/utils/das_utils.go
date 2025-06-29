@@ -104,7 +104,7 @@ func ComputeMatrix(blobs [][]byte) ([]cltypes.MatrixEntry, error) {
 			matrix = append(matrix, cltypes.MatrixEntry{
 				Cell:        cells[cellIndex],
 				KzgProof:    proofs[cellIndex],
-				RowIndex:    RowIndex(blobIndex),
+				RowIndex:    uint64(blobIndex),
 				ColumnIndex: ColumnIndex(cellIndex),
 			})
 		}

@@ -255,7 +255,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			return
 		}
 		for _, column := range existingColumns {
-			if _, ok := custodyColumns[cltypes.CustodyIndex(column)]; !ok {
+			if _, ok := custodyColumns[column]; !ok {
 				if err := d.columnStorage.RemoveColumnSidecar(ctx, slot, blockRoot, int64(column)); err != nil {
 					log.Warn("[blobsRecover] failed to remove column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", column)
 				}
@@ -391,12 +391,12 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 				go func() {
 					defer wg.Done()
 					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					defer cancel()
 					ids := req.requestData()
 					if ids.Len() == 0 {
 						return
 					}
 					s, pid, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
-					cancel()
 					select {
 					case resultChan <- resultData{
 						sidecars: s,
