@@ -103,7 +103,7 @@ func TestPing(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -157,7 +157,7 @@ func TestGoodbye(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -218,7 +218,7 @@ func TestMetadataV2(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -277,7 +277,7 @@ func TestMetadataV1(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -364,7 +364,7 @@ func TestStatus(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		getEthClock(t),
-		hs, f, nil, nil, true,
+		hs, f, nil, nil, mockPeerDasStateReader, true,
 	)
 	c.Start()
 
