@@ -1531,7 +1531,7 @@ func (c *Bor) fetchAndCommitSpan(
 	}
 
 	if heimdallSpan == nil {
-		panic("heimdallSpan is nil, this should never happen")
+		panic("heimdallSpan is nil, this should never happen " + strconv.Itoa(int(newSpanID)))
 	}
 	if c.chainConfig == nil {
 		panic("c.chainConfig is nil, this should never happen")
