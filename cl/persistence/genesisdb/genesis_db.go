@@ -1,11 +1,12 @@
 package genesisdb
 
 import (
+	"encoding/binary"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/spf13/afero"
 )
@@ -65,7 +66,7 @@ func (g *genesisDB) ReadGenesisState() (*state.CachingBeaconState, error) {
 		return nil, fmt.Errorf("decompressedEnc is too short: expected at least %d bytes, got %d", raw.SlotOffsetSSZ+8, len(decompressedEnc))
 	}
 	// get slot from the state
-	slot := ssz.Uint64SSZDecode(decompressedEnc[raw.SlotOffsetSSZ : raw.SlotOffsetSSZ+8])
+	slot := binary.LittleEndian.Uint64(decompressedEnc[raw.SlotOffsetSSZ : raw.SlotOffsetSSZ+8])
 	version := g.beaconConfig.GetCurrentStateVersion(slot / g.beaconConfig.SlotsPerEpoch)
 	st := state.New(g.beaconConfig)
 	if err := st.DecodeSSZ(decompressedEnc, int(version)); err != nil {
