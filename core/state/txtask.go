@@ -147,8 +147,15 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
 		panic(msg)
 	}
-
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
+	if t.BlockNum == 3525000 {
+		if r == nil {
+			log.Warn("[dbg] customTraceBatch produce", "blockNum", t.BlockNum, "txNum", t.TxNum, "receipt", nil)
+		} else {
+			log.Warn("[dbg] customTraceBatch produce", "blockNum", t.BlockNum, "txNum", t.TxNum, "receipt", len(r.Logs), "firstLogIndexWithinBlock", r.FirstLogIndexWithinBlock)
+		}
+	}
+
 	t.BlockReceipts[t.TxIndex] = r
 }
 
