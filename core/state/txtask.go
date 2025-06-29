@@ -126,9 +126,7 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 		return
 	}
 	if t.Final {
-		if dbg.AssertEnabled {
-			t.BlockReceipts.AssertFirstLogIndexWithtinBlock(t.BlockNum)
-		}
+		t.BlockReceipts.AssertFirstLogIndexWithtinBlock(t.BlockNum)
 		return
 	}
 

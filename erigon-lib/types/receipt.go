@@ -29,6 +29,7 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -473,6 +474,9 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 }
 
 func (rs Receipts) AssertFirstLogIndexWithtinBlock(blockNum uint64) {
+	if !dbg.AssertEnabled {
+		return
+	}
 	logIndex := 0
 	for _, r := range rs {
 		if logIndex != int(r.FirstLogIndexWithinBlock) {
