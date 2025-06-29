@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -32,6 +33,7 @@ func E3EfFiles(ctx context.Context, db kv.TemporalRwDB, failFast bool, fromStep 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	g := &errgroup.Group{}
+	g.SetLimit(estimate.AlmostAllCPUs())
 	for _, idx := range []kv.InvertedIdx{kv.AccountsHistoryIdx, kv.StorageHistoryIdx, kv.CodeHistoryIdx, kv.CommitmentHistoryIdx, kv.ReceiptHistoryIdx, kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
 		idx := idx
 		g.Go(func() error {
