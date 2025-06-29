@@ -127,18 +127,7 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 	}
 	if t.Final {
 		if dbg.AssertEnabled {
-			if len(t.BlockReceipts) > 0 {
-				lastReceipt := t.BlockReceipts[len(t.BlockReceipts)-1]
-				if lastReceipt.FirstLogIndexWithinBlock == 0 {
-					l := 0
-					for _, r := range t.BlockReceipts {
-						if l != int(r.FirstLogIndexWithinBlock) {
-							panic(fmt.Sprintf("assert: bn=%d, len(t.BlockReceipts)=%d, lastReceipt.FirstLogIndexWithinBlock=%d, logs=%d", t.BlockNum, len(t.BlockReceipts), r.FirstLogIndexWithinBlock, l))
-						}
-						l += len(r.Logs)
-					}
-				}
-			}
+			t.BlockReceipts.AssertFirstLogIndexWithtinBlock(t.BlockNum)
 		}
 		return
 	}
