@@ -478,7 +478,9 @@ func (rs Receipts) AssertFirstLogIndexWithtinBlock(blockNum uint64) {
 		return
 	}
 	logIndex := 0
+	seen := make(map[uint]struct{}, 16)
 	for _, r := range rs {
+		// ensure valid field
 		if logIndex != int(r.FirstLogIndexWithinBlock) {
 			panic(fmt.Sprintf("assert: bn=%d, len(t.BlockReceipts)=%d, lastReceipt.FirstLogIndexWithinBlock=%d, logs=%d", blockNum, len(rs), r.FirstLogIndexWithinBlock, logIndex))
 		}
@@ -489,15 +491,11 @@ func (rs Receipts) AssertFirstLogIndexWithtinBlock(blockNum uint64) {
 			continue
 		}
 
-		indices := make([]uint64, 0, len(r.Logs))
 		for i := 0; i < len(r.Logs); i++ {
-			indices = append(indices, uint64(r.Logs[i].Index))
-		}
-		slices.Sort(indices)
-		for i := 1; i < len(indices); i++ {
-			if indices[i-1] == indices[i] {
-				panic(fmt.Sprintf("assert: duplicated log_index %d", indices[i]))
+			if _, ok := seen[r.Logs[i].Index]; ok {
+				panic(fmt.Sprintf("assert: duplicated log_index %d,  bn=%d", r.Logs[i].Index, blockNum))
 			}
+			seen[r.Logs[i].Index] = struct{}{}
 		}
 	}
 }
