@@ -190,7 +190,7 @@ var (
 	}
 	HTTPIdleTimeoutFlag = cli.DurationFlag{
 		Name:  "http.timeouts.idle",
-		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used.",
+		Usage: "Maximum amount of time to wait for the next request when keep-alive connections are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used.",
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
 	}
 
@@ -206,7 +206,7 @@ var (
 	}
 	AuthRpcIdleTimeoutFlag = cli.DurationFlag{
 		Name:  "authrpc.timeouts.idle",
-		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
+		Usage: "Maximum amount of time to wait for the next request when keep-alive connections are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
 	}
 
