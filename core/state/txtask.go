@@ -122,7 +122,24 @@ func (t *TxTask) Sender() *common.Address {
 }
 
 func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
-	if t.TxIndex < 0 || t.Final {
+	if t.TxIndex < 0 {
+		return
+	}
+	if t.Final {
+		if dbg.AssertEnabled {
+			if len(t.BlockReceipts) > 0 {
+				lastReceipt := t.BlockReceipts[len(t.BlockReceipts)-1]
+				if lastReceipt.FirstLogIndexWithinBlock == 0 {
+					l := 0
+					for _, r := range t.BlockReceipts {
+						l += len(r.Logs)
+					}
+					if l > int(lastReceipt.FirstLogIndexWithinBlock) {
+						panic(fmt.Sprintf("assert: bn=%d, len(t.BlockReceipts)=%d, lastReceipt.FirstLogIndexWithinBlock=%d, logs=%d", t.BlockNum, len(t.BlockReceipts), lastReceipt.FirstLogIndexWithinBlock, l))
+					}
+				}
+			}
+		}
 		return
 	}
 
