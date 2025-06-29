@@ -156,8 +156,14 @@ func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 
 func (d *peerdas) Prune(keepSlotDistance uint64) error {
 	d.columnStorage.Prune(keepSlotDistance)
-	earliestSlot := d.ethClock.GetCurrentSlot() - keepSlotDistance
-	d.state.SetEarliestAvailableSlot(earliestSlot)
+
+	curSlot := d.ethClock.GetCurrentSlot()
+	if curSlot < keepSlotDistance {
+		d.state.SetEarliestAvailableSlot(0)
+	} else {
+		earliestSlot := curSlot - keepSlotDistance
+		d.state.SetEarliestAvailableSlot(earliestSlot)
+	}
 	return nil
 }
 
