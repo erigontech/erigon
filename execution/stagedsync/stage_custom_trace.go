@@ -382,14 +382,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 					}
 				}
 
-				if txTask.BlockNum == 3525000 {
-					if receipt == nil {
-						log.Warn("[dbg] customTraceBatch produce", "blockNum", txTask.BlockNum, "txNum", txTask.TxNum, "receipt", nil)
-					} else {
-						log.Warn("[dbg] customTraceBatch produce", "blockNum", txTask.BlockNum, "txNum", txTask.TxNum, "receipt", len(receipt.Logs), "firstLogIndexWithinBlock", receipt.FirstLogIndexWithinBlock)
-					}
-				}
-
 				if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
