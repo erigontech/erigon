@@ -23,11 +23,11 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
@@ -172,15 +172,12 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 		if len(logs) <= 1 {
 			return nil
 		}
-		var indices []uint64
+		seen := make(map[hexutil.Uint]struct{}, len(logs))
 		for i := 0; i < len(logs); i++ {
-			indices = append(indices, uint64(logs[i].Index))
-		}
-		slices.Sort(indices)
-		for i := 1; i < len(indices); i++ {
-			if indices[i-1] == indices[i] {
-				return fmt.Errorf("duplicated log_index %d", indices[i])
+			if _, ok := seen[logs[i].Index]; ok {
+				return fmt.Errorf("duplicated log_index %d", logs[i].Index)
 			}
+			seen[logs[i].Index] = struct{}{}
 		}
 		return nil
 	}
