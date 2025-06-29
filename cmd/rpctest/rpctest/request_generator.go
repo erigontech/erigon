@@ -115,6 +115,18 @@ func (g *RequestGenerator) getLogsNoFilters(prevBn uint64, bn uint64) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x"}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, g.reqID.Add(1))
 }
+func (g *RequestGenerator) getLogsForAddresses(prevBn uint64, bn uint64, accounts []common.Address) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": [`, prevBn, bn)
+	for i, account := range accounts {
+		if i > 0 {
+			fmt.Fprintf(&sb, `,`)
+		}
+		fmt.Fprintf(&sb, `"0x%x"`, account)
+	}
+	fmt.Fprintf(&sb, `]}],"id":%d}`, g.reqID.Add(1))
+	return sb.String()
+}
 
 func (g *RequestGenerator) getOverlayLogs(prevBn uint64, bn uint64, account libcommon.Address) string {
 	const template = `{"jsonrpc":"2.0","method":"overlay_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"},{}],"id":%d}`
@@ -321,13 +333,22 @@ func (g *RequestGenerator) ethCallLatest(from libcommon.Address, to *libcommon.A
 	fmt.Fprintf(&sb, `},"latest"], "id":%d}`, g.reqID.Add(1))
 	return sb.String()
 }
-
 func (g *RequestGenerator) otsGetBlockTransactions(block_number uint64, page_number uint64, page_size uint64) string {
 	const template = `{"id":1,"jsonrpc":"2.0","method":"ots_getBlockTransactions","params":[%d, %d, %d]}`
 	return fmt.Sprintf(template, block_number, page_number, page_size)
 }
 
-var client = &http.Client{Timeout: 600 * time.Second}
+var client = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        600,
+		MaxIdleConnsPerHost: 600,
+		MaxConnsPerHost:     600,
+		IdleConnTimeout:     90 * time.Second,
+		ReadBufferSize:      64 * 1024,
+		WriteBufferSize:     16 * 1024,
+	},
+	Timeout: 600 * time.Second, // Per-request timeout
+}
 
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
 	start := time.Now()
