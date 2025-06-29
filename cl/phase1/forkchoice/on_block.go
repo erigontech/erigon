@@ -116,13 +116,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check if blob data is available
-	if checkDataAvaiability && !clparams.IsDevnet() && block.Block.Body.BlobKzgCommitments.Len() > 0 {
+	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 {
 		if block.Version() >= clparams.FuluVersion {
 			available, err := f.peerDas.IsDataAvailable(ctx, blockRoot)
 			if err != nil {
 				return err
 			}
 			if !available {
+				// TODO: schedule download of columns and blobs
 				return fmt.Errorf("OnBlock: some column data is not available for block %x, err: %v", common.Hash(blockRoot), ErrEIP7594DataNotAvailable)
 			}
 		} else if block.Version() >= clparams.DenebVersion {
@@ -285,6 +286,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
+	}
+
+	if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
+		// update the custody requirement whenever we see a new block
+		custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
+		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
 	}
 	return nil
 }

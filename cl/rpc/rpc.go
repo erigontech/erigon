@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -130,9 +129,6 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 		}
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
-
-	bytes, _ := json.Marshal(ColumnSidecars)
-	log.Info("[test] success to send column sidecars", "bytes", string(bytes))
 
 	return ColumnSidecars, pid, nil
 }
@@ -253,6 +249,13 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint6
 		FinalizedEpoch: finalizedEpoch,
 		HeadRoot:       gointerfaces.ConvertHashToH256(headRoot),
 		HeadSlot:       headSlot,
+	})
+	return err
+}
+
+func (b *BeaconRpcP2P) SetEarliestAvailableSlot(earliestAvailableSlot uint64) error {
+	_, err := b.sentinel.SetStatus(b.ctx, &sentinel.Status{
+		EarliestAvailableSlot: &earliestAvailableSlot,
 	})
 	return err
 }

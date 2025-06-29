@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -71,6 +72,11 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 
 	// [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
 	if _, ok := s.seenSidecar.Get(seenKey); ok {
+		return ErrIgnore
+	}
+
+	if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.ParentRoot) ||
+		s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockHeader.ParentRoot) {
 		return ErrIgnore
 	}
 
@@ -141,6 +147,9 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	}
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
+	}
+	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
+		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", blockRoot)
 	}
 	return nil
 }

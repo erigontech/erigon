@@ -99,6 +99,9 @@ func init() {
 		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("transition").
 		With("core", &TransitionCore{})
+	TestFormats.Add("networking").
+		WithFn("compute_columns_for_custody_group", TestComputeColumnsForCustodyGroup).
+		WithFn("get_custody_groups", TestGetCustodyGroups)
 
 	addSszTests()
 }

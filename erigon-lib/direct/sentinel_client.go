@@ -36,6 +36,10 @@ func (s *SentinelClientDirect) SendRequest(ctx context.Context, in *sentinel.Req
 	return s.server.SendRequest(ctx, in)
 }
 
+func (s *SentinelClientDirect) SendPeerRequest(ctx context.Context, in *sentinel.RequestDataWithPeer, opts ...grpc.CallOption) (*sentinel.ResponseData, error) {
+	return s.server.SendPeerRequest(ctx, in)
+}
+
 func (s *SentinelClientDirect) SetStatus(ctx context.Context, in *sentinel.Status, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
 	return s.server.SetStatus(ctx, in)
 }

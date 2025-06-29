@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -27,12 +26,17 @@ const (
 
 type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
-	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
+	RemoveColumnSidecar(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) error
+	RemoveAllColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
 	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
 	ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
-	SavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error)
-	//Prune() error
+	GetSavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error)
+	Prune(keepSlotDistance uint64) error
+
+	/*WriteBlob(slot uint64, blockRoot common.Hash, blob [][]byte) error
+	ReadBlob(slot uint64, blockRoot common.Hash) ([]byte, error)
+	BlobExists(slot uint64, blockRoot common.Hash) (bool, error)*/
 }
 
 type dataColumnStorageImpl struct {
@@ -165,7 +169,7 @@ func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot ui
 	return true, nil
 }
 
-func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
+func (s *dataColumnStorageImpl) RemoveAllColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
 	mutex := s.acquireMutexBySlot(slot)
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -197,6 +201,56 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 	return tx.Commit()
 }
 
+func (s *dataColumnStorageImpl) RemoveColumnSidecar(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) error {
+	mutex := s.acquireMutexBySlot(slot)
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	bytes, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
+	if err != nil {
+		return err
+	}
+	if bytes == nil {
+		// empty
+		return nil
+	}
+	// find the column index in the bytes and remove it
+	count := binary.LittleEndian.Uint32(bytes[0:4])
+	for i := uint32(0); i < count; i++ {
+		index := binary.LittleEndian.Uint32(bytes[4+i*4 : 4+(i+1)*4])
+		if index == uint32(columnIndex) {
+			// remove the column index
+			count--
+			countBytes := make([]byte, 4)
+			binary.LittleEndian.PutUint32(countBytes, count)
+			newBytes := make([]byte, 4+count*4)
+			copy(newBytes[:4], countBytes)
+			copy(newBytes[4:], bytes[4:4+i*4])
+			copy(newBytes[4+i*4:], bytes[4+(i+1)*4:])
+			if err := tx.Put(kv.BlockRootToDataColumnCount, blockRoot[:], newBytes); err != nil { // truncate bytes
+				return err
+			}
+			break
+		}
+	}
+	if count == 0 {
+		if err := tx.Delete(kv.BlockRootToDataColumnCount, blockRoot[:]); err != nil {
+			return err
+		}
+	}
+
+	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
+	if err := s.fs.Remove(filepath); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
 	_, filepath := dataColumnFilePath(slot, blockRoot, idx)
 	fh, err := s.fs.Open(filepath)
@@ -208,7 +262,7 @@ func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot 
 	return err
 }
 
-func (s *dataColumnStorageImpl) SavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error) {
+func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error) {
 	// No need to lock the mutex here, as we are only reading from the database
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
@@ -236,13 +290,9 @@ func (s *dataColumnStorageImpl) acquireMutexBySlot(slot uint64) *sync.RWMutex {
 	return s.dbMutexes[index]
 }
 
-func (s *dataColumnStorageImpl) Prune() error {
-	if s.slotsKept == math.MaxUint64 {
-		return nil
-	}
-
+func (s *dataColumnStorageImpl) Prune(keepSlotDistance uint64) error {
 	currentSlot := s.ethClock.GetCurrentSlot()
-	currentSlot -= s.slotsKept
+	currentSlot -= keepSlotDistance
 	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
 	var startPrune uint64
 	minSlotsForBlobSidecarRequest := s.beaconChainConfig.MinSlotsForBlobsSidecarsRequest()
@@ -254,4 +304,16 @@ func (s *dataColumnStorageImpl) Prune() error {
 		s.fs.RemoveAll(strconv.FormatUint(i/subdivisionSlot, 10))
 	}
 	return nil
+}
+
+func (s *dataColumnStorageImpl) WriteBlob(slot uint64, blockRoot common.Hash, blobIndex uint64, blob []byte) error {
+	return nil
+}
+
+func (s *dataColumnStorageImpl) ReadBlob(slot uint64, blockRoot common.Hash, blobIndex uint64) ([]byte, error) {
+	return nil, nil
+}
+
+func (s *dataColumnStorageImpl) BlobExists(slot uint64, blockRoot common.Hash) (bool, error) {
+	return false, nil
 }
