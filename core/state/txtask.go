@@ -132,10 +132,10 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 				if lastReceipt.FirstLogIndexWithinBlock == 0 {
 					l := 0
 					for _, r := range t.BlockReceipts {
+						if l != int(r.FirstLogIndexWithinBlock) {
+							panic(fmt.Sprintf("assert: bn=%d, len(t.BlockReceipts)=%d, lastReceipt.FirstLogIndexWithinBlock=%d, logs=%d", t.BlockNum, len(t.BlockReceipts), r.FirstLogIndexWithinBlock, l))
+						}
 						l += len(r.Logs)
-					}
-					if l > int(lastReceipt.FirstLogIndexWithinBlock) {
-						panic(fmt.Sprintf("assert: bn=%d, len(t.BlockReceipts)=%d, lastReceipt.FirstLogIndexWithinBlock=%d, logs=%d", t.BlockNum, len(t.BlockReceipts), lastReceipt.FirstLogIndexWithinBlock, l))
 					}
 				}
 			}
