@@ -665,8 +665,8 @@ func devTx(chaindata string) error {
 }
 
 func chainConfig(name string) error {
-	chainConfig := params.ChainConfigByChainName(name)
-	if chainConfig == nil {
+	spec := params.ChainSpecByName(name)
+	if spec.IsEmpty() {
 		return fmt.Errorf("unknown name: %s", name)
 	}
 	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
@@ -676,7 +676,7 @@ func chainConfig(name string) error {
 	w := bufio.NewWriter(f)
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	if err = encoder.Encode(chainConfig); err != nil {
+	if err = encoder.Encode(spec.Config); err != nil {
 		return err
 	}
 	if err = w.Flush(); err != nil {
@@ -686,17 +686,6 @@ func chainConfig(name string) error {
 		return err
 	}
 	return nil
-}
-
-func keybytesToHex(str []byte) []byte {
-	l := len(str)*2 + 1
-	var nibbles = make([]byte, l)
-	for i, b := range str {
-		nibbles[i*2] = b / 16
-		nibbles[i*2+1] = b % 16
-	}
-	nibbles[l-1] = 16
-	return nibbles
 }
 
 func iterate(filename string, prefix string) error {

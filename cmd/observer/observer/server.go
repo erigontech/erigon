@@ -117,9 +117,8 @@ func makeLocalNode(ctx context.Context, nodeDBPath string, privateKey *ecdsa.Pri
 }
 
 func makeForksENREntry(chain string) (enr.Entry, error) {
-	chainConfig := params.ChainConfigByChainName(chain)
-	genesisHash := params.GenesisHashByChainName(chain)
-	if (chainConfig == nil) || (genesisHash == nil) {
+	chainSpec := params.ChainSpecByName(chain)
+	if chainSpec.IsEmpty() {
 		return nil, fmt.Errorf("unknown chain %s", chain)
 	}
 
@@ -127,8 +126,8 @@ func makeForksENREntry(chain string) (enr.Entry, error) {
 	// in genesis already, e.g. Holesky.
 	genesisTime := uint64(0)
 
-	heightForks, timeForks := forkid.GatherForks(chainConfig, genesisTime)
-	return eth.CurrentENREntryFromForks(heightForks, timeForks, *genesisHash, 0, 0), nil
+	heightForks, timeForks := forkid.GatherForks(chainSpec.Config, genesisTime)
+	return eth.CurrentENREntryFromForks(heightForks, timeForks, chainSpec.GenesisHash, 0, 0), nil
 }
 
 func (server *Server) Bootnodes() []*enode.Node {
