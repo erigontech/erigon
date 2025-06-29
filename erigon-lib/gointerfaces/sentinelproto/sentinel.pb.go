@@ -110,6 +110,7 @@ type Peer struct {
 	Address       string                 `protobuf:"bytes,4,opt,name=address,proto3" json:"address,omitempty"`
 	Enr           string                 `protobuf:"bytes,5,opt,name=enr,proto3" json:"enr,omitempty"`
 	AgentVersion  string                 `protobuf:"bytes,6,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
+	EnodeId       string                 `protobuf:"bytes,7,opt,name=enode_id,json=enodeId,proto3" json:"enode_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -182,6 +183,13 @@ func (x *Peer) GetEnr() string {
 func (x *Peer) GetAgentVersion() string {
 	if x != nil {
 		return x.AgentVersion
+	}
+	return ""
+}
+
+func (x *Peer) GetEnodeId() string {
+	if x != nil {
+		return x.EnodeId
 	}
 	return ""
 }
@@ -878,14 +886,15 @@ const file_p2psentinel_sentinel_proto_rawDesc = "" +
 	"\fEmptyMessage\":\n" +
 	"\x10SubscriptionData\x12\x1b\n" +
 	"\x06filter\x18\x01 \x01(\tH\x00R\x06filter\x88\x01\x01B\t\n" +
-	"\a_filter\"\x9d\x01\n" +
+	"\a_filter\"\xb8\x01\n" +
 	"\x04Peer\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\tR\x03pid\x12\x14\n" +
 	"\x05state\x18\x02 \x01(\tR\x05state\x12\x1c\n" +
 	"\tdirection\x18\x03 \x01(\tR\tdirection\x12\x18\n" +
 	"\aaddress\x18\x04 \x01(\tR\aaddress\x12\x10\n" +
 	"\x03enr\x18\x05 \x01(\tR\x03enr\x12#\n" +
-	"\ragent_version\x18\x06 \x01(\tR\fagentVersion\"h\n" +
+	"\ragent_version\x18\x06 \x01(\tR\fagentVersion\x12\x19\n" +
+	"\benode_id\x18\a \x01(\tR\aenodeId\"h\n" +
 	"\x10PeersInfoRequest\x12!\n" +
 	"\tdirection\x18\x01 \x01(\tH\x00R\tdirection\x88\x01\x01\x12\x19\n" +
 	"\x05state\x18\x02 \x01(\tH\x01R\x05state\x88\x01\x01B\f\n" +
