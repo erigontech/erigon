@@ -289,6 +289,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
+		// update the custody requirement whenever we see a new block
 		custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
 		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
 	}

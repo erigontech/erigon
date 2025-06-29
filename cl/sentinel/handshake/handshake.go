@@ -104,8 +104,8 @@ func (h *HandShaker) Status() *cltypes.Status {
 
 	// copy the status and add the earliest available slot
 	status := *h.status
-	// check if now is fulu
 	if curEpoch := h.ethClock.GetCurrentEpoch(); curEpoch >= h.beaconConfig.FuluForkEpoch {
+		// get earliest available slot after fulu fork
 		earliestAvailableSlot := h.peerDasStateReader.GetEarliestAvailableSlot()
 		status.EarliestAvailableSlot = &earliestAvailableSlot
 	}
