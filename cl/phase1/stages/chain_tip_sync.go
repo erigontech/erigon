@@ -88,16 +88,10 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 
 	if len(fuluBlocks) > 0 {
 		// download missing column data for the fulu blocks
-		go func() {
-			if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
-				log.Warn("[chainTipSync] failed to download columns and recover blobs", "err", err)
-			} else {
-				for _, block := range fuluBlocks {
-					blockRoot, _ := block.Block.HashSSZ() // Ignoring error as block would not process if HashSSZ failed
-					log.Debug("[chainTipSync] downloaded columns and recovered blobs", "blockRoot", common.Hash(blockRoot), "slot", block.Block.Slot)
-				}
-			}
-		}()
+		if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
+			log.Warn("[chainTipSync] failed to download columns and recover blobs", "err", err)
+			return nil, err
+		}
 	}
 
 	if len(denebBlocks) > 0 {
