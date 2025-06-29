@@ -2,7 +2,7 @@
 
 scriptDir=$(dirname "${BASH_SOURCE[0]}")
 scriptName=$(basename "${BASH_SOURCE[0]}")
-version="v2.1.5"
+version="v2.2.0"
 
 install_dir="$(go env GOBIN)"
 if [ -z "$install_dir" ]; then
