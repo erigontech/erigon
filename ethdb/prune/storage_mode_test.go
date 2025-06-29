@@ -50,14 +50,14 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 
 func TestParseCLIMode(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
-		mode, err := FromCli(0, 0, "full", nil)
+		mode, err := FromCli("full", 0, 0, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, FullMode, mode)
 
 		assert.Equal(t, "full", mode.String())
 	})
 	t.Run("archive", func(t *testing.T) {
-		mode, err := FromCli(0, 0, "archive", nil)
+		mode, err := FromCli("archive", 0, 0, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, ArchiveMode, mode)
 		assert.Equal(t, "archive", mode.String())
@@ -67,23 +67,23 @@ func TestParseCLIMode(t *testing.T) {
 		exp.Blocks = Distance(100500)
 		exp.History = Distance(400500)
 
-		mode, err := FromCli(exp.History.toValue(), exp.Blocks.toValue(), "archive", nil)
+		mode, err := FromCli("archive", exp.History.toValue(), exp.Blocks.toValue(), nil)
 		assert.NoError(t, err)
 		assert.Equal(t, exp, mode)
 		assert.Equal(t, "archive --prune.distance=400500 --prune.distance.blocks=100500", mode.String())
 	})
 	t.Run("minimal", func(t *testing.T) {
-		mode, err := FromCli(0, 0, "minimal", nil)
+		mode, err := FromCli("minimal", 0, 0, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, MinimalMode, mode)
 		assert.Equal(t, "minimal", mode.String())
 	})
 	t.Run("garbage", func(t *testing.T) {
-		_, err := FromCli(1, 2, "garb", nil)
+		_, err := FromCli("garb", 1, 2, nil)
 		assert.ErrorIs(t, err, ErrUnknownPruneMode)
 	})
 	t.Run("empty", func(t *testing.T) {
-		mode, err := FromCli(0, 0, "", nil)
+		mode, err := FromCli("", 0, 0, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, ArchiveMode, mode)
 		assert.Equal(t, "archive", mode.String())
