@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
@@ -37,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
@@ -90,7 +89,6 @@ type TxTask struct {
 	// Need investigate if we can pass here - only limited amount of receipts
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
-	Tracer        *calltracer.CallTracer
 
 	Config *chain.Config
 

@@ -41,6 +41,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolCommitEveryFlag,
 	&PruneDistanceFlag,
 	&PruneBlocksDistanceFlag,
+	&HistoryExpiryEnabledFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
 
