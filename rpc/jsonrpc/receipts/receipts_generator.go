@@ -185,6 +185,12 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("[dbg] GetReceipt1: bn=%d, txNum=%d, firstLogIndex=%d\n", blockNum, txNum+1, firstLogIndex)
+	{
+		_min, _ := g.txNumReader.Min(tx, blockNum)
+		_max, _ := g.txNumReader.Max(tx, blockNum)
+		fmt.Printf("[dbg] GetReceipt2: bn=%d, txNum=%d, _min=%d, _max=%d\n", blockNum, txNum+1, _min, _max)
+	}
 
 	if txn.Type() == types.AccountAbstractionTxType {
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
