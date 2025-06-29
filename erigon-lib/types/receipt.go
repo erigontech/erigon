@@ -472,6 +472,16 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	}
 }
 
+func (rs Receipts) AssertFirstLogIndexWithtinBlock(blockNum uint64) {
+	logIndex := 0
+	for _, r := range rs {
+		if logIndex != int(r.FirstLogIndexWithinBlock) {
+			panic(fmt.Sprintf("assert: bn=%d, len(t.BlockReceipts)=%d, lastReceipt.FirstLogIndexWithinBlock=%d, logs=%d", blockNum, len(rs), r.FirstLogIndexWithinBlock, logIndex))
+		}
+		logIndex += len(r.Logs)
+	}
+}
+
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
 func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
