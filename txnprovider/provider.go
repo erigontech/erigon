@@ -32,6 +32,7 @@ type TxnProvider interface {
 	//   - WithGasTarget
 	//   - WithBlobGasTarget
 	//   - WithTxnIdsFilter
+	//   - WithAvailableRlpSpace
 	ProvideTxns(ctx context.Context, opts ...ProvideOption) ([]types.Transaction, error)
 }
 
@@ -73,13 +74,20 @@ func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) ProvideOption {
 	}
 }
 
+func WithAvailableRlpSpace(size int) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.AvailableRlpSpace = size
+	}
+}
+
 type ProvideOptions struct {
-	BlockTime      uint64
-	ParentBlockNum uint64
-	Amount         int
-	GasTarget      uint64
-	BlobGasTarget  uint64
-	TxnIdsFilter   mapset.Set[[32]byte]
+	BlockTime         uint64
+	ParentBlockNum    uint64
+	Amount            int
+	GasTarget         uint64
+	BlobGasTarget     uint64
+	TxnIdsFilter      mapset.Set[[32]byte]
+	AvailableRlpSpace int
 }
 
 func ApplyProvideOptions(opts ...ProvideOption) ProvideOptions {
@@ -91,9 +99,10 @@ func ApplyProvideOptions(opts ...ProvideOption) ProvideOptions {
 }
 
 var defaultProvideOptions = ProvideOptions{
-	ParentBlockNum: 0,                         // no parent block to wait for by default
-	Amount:         math.MaxInt,               // all transactions by default
-	GasTarget:      math.MaxUint64,            // all transactions by default
-	BlobGasTarget:  math.MaxUint64,            // all transactions by default
-	TxnIdsFilter:   mapset.NewSet[[32]byte](), // no filter by default
+	ParentBlockNum:    0,                         // no parent block to wait for by default
+	Amount:            math.MaxInt,               // all transactions by default
+	GasTarget:         math.MaxUint64,            // all transactions by default
+	BlobGasTarget:     math.MaxUint64,            // all transactions by default
+	TxnIdsFilter:      mapset.NewSet[[32]byte](), // no filter by default
+	AvailableRlpSpace: math.MaxInt,               // unlimited by default
 }
