@@ -437,7 +437,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:], txTask.TxNum); err != nil {
 						return err
 					}
-					if dbg.AssertEnabled {
+					if dbg.AssertEnabled && len(di.logAddrs) < 10_000 { //100mb
 						di.logAddrs = append(di.logAddrs, lg.Address)
 					}
 				}
