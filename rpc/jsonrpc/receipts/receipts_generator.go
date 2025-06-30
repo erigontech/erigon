@@ -148,7 +148,18 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	txnHash := txn.Hash()
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	var receiptFromDB *types.Receipt
+	var receiptFromDB, receipt *types.Receipt
+
+	defer func() {
+		if dbg.Enabled(ctx) {
+			log.Info("[dbg] ReceiptGenerator.GetReceipt",
+				"txNum", txNum,
+				"txHash", txnHash.String(),
+				"receiptFromDB", receiptFromDB,
+				"receiptFromGenerator", receipt)
+		}
+	}()
+
 	if !rpcDisableRCache {
 		var ok bool
 		var err error
@@ -173,8 +184,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
 	}
-
-	var receipt *types.Receipt
 
 	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
 	if err != nil {
@@ -232,6 +241,15 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptsFromDB types.Receipts
+	receipts := make(types.Receipts, len(block.Transactions()))
+	defer func() {
+		if dbg.Enabled(ctx) {
+			log.Info("[dbg] ReceiptGenerator.GetReceipts",
+				"blockNum", block.NumberU64(),
+				"receiptsFromDB len", len(receiptsFromDB),
+				"receiptsFromGenerator len", len(receipts)) // maybe here could be something crucial but idk how to make it short&simple
+		}
+	}()
 	if !rpcDisableRCache {
 		var err error
 		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
@@ -248,8 +266,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
 		return receipts, nil
 	}
-
-	receipts := make(types.Receipts, len(block.Transactions()))
 
 	genEnv, err := g.PrepareEnv(ctx, block.HeaderNoCopy(), cfg, tx, 0)
 	if err != nil {
