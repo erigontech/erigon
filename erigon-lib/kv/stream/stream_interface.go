@@ -22,7 +22,7 @@ import "errors"
 //  - cancelable
 //  - return errors
 //  - batch-friendly
-//  - server-side-streaming-friendly: no cliend-side granular managemnent. all required data described by construtor (query) then only iterate over results.
+//  - server-side-streaming-friendly: no client-side granular management. all required data described by constructor (query) then only iterate over results.
 //  - more high-level than kv.Cursor
 //
 //	for s.HasNext() {
@@ -36,7 +36,7 @@ import "errors"
 //   2. K, V are valid at-least 2 .Next() calls! It allows zero-copy composition of streams. Example: stream.Union
 //		- 1 value used by User and 1 value used internally by stream.Union
 //   3. No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
-//   4. automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
+//   4. automatically checks cancellation of `ctx` passed to `db.Begin(ctx)`, can skip this
 //     check in loops on stream. Duo has very limited API - user has no way to
 //     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
 

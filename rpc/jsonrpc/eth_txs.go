@@ -48,7 +48,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return nil, err
 	}
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
 	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
@@ -149,7 +149,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	}
 	defer tx.Rollback()
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
 	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -201,7 +201,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockHashAndIndex
 	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
@@ -248,7 +248,6 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 	}
 	defer tx.Rollback()
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockHashAndIndex
 	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
@@ -272,7 +271,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockNumberAndIndex
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
@@ -324,7 +323,6 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 	}
 	defer tx.Rollback()
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockNumberAndIndex
 	block, err := api.blockByRPCNumber(ctx, blockNr, tx)
 	if err != nil {
 		return nil, err

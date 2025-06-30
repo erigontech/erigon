@@ -180,7 +180,7 @@ func (h callerFuncHandler) LogLvl() Lvl {
 }
 
 // CallerStackHandler returns a Handler that adds a stack trace to the context
-// with key "stack". The stack trace is formated as a space separated list of
+// with key "stack". The stack trace is formatted as a space separated list of
 // call sites inside matching []'s. The most recent call site is listed first.
 // Each call site is formatted according to format. See the documentation of
 // package github.com/go-stack/stack for the list of supported formats.

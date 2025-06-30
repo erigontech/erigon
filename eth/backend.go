@@ -268,8 +268,8 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	}
 	if cfg.KeepExecutionProofs != isCommitmentHistoryEnabled {
 		return fmt.Errorf(
-			"commitment history flag mismatch from db and config. db: %v, config: %v. please restart erigon with the same flag or delete the chaindata folder: %s",
-			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, dirs.Chaindata)
+			"flag '--prune.experimental.include-commitment-history' mismatch: db: %v; config: %v. please restart Erigon '--prune.experimental.include-commitment-history=%v' or delete the chaindata folder: %s",
+			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, cfg.KeepExecutionProofs, dirs.Chaindata)
 	}
 	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
 		return err

@@ -40,6 +40,8 @@ type testVM struct {
 	isEVMSliceTest    []bool
 	readOnlySliceTest []bool
 	currentIdx        *int
+
+	depth int
 }
 
 func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err error) {
@@ -78,9 +80,10 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	return
 }
 
-func (evm *testVM) Depth() int {
-	return 0
-}
+func (evm *testVM) Depth() int { return evm.depth }
+
+func (evm *testVM) IncDepth() { evm.depth++ }
+func (evm *testVM) DecDepth() { evm.depth-- }
 
 type readOnlyState struct {
 	outer  bool

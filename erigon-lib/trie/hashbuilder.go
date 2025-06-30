@@ -428,7 +428,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	var compactLen int
 	var ni int
 	var compact0 byte
-	// https://github.com/ethereum/wiki/wiki/Patricia-Tree#specification-compact-encoding-of-hex-sequence-with-optional-terminator
+	// https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/#specification
 	if hasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {

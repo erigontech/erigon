@@ -31,7 +31,7 @@ func ReadDir(name string) ([]os.DirEntry, error) {
 		// some windows remote drived return this error
 		// when they are empty - should really be handled
 		// in os.ReadDir but is not
-		// - looks likey fixed in go 1.22
+		// - looks likely fixed in go 1.22
 		if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
 			return nil, nil
 		}

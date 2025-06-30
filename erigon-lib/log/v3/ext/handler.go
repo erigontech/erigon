@@ -55,7 +55,7 @@ func (h escalateErrHandler) LogLvl() log.Lvl {
 // keeps a ring buffer of the given size full of the last events
 // logged into it. When Flush is called, all buffered log records
 // are written to the wrapped handler. This is extremely for
-// continuosly capturing debug level output, but only flushing those
+// continuously capturing debug level output, but only flushing those
 // log records if an exceptional condition is encountered.
 func SpeculativeHandler(size int, h log.Handler) *Speculative {
 	return &Speculative{

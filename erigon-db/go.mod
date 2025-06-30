@@ -26,6 +26,7 @@ require (
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-quicktest/qt v1.101.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
+	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
@@ -70,7 +71,7 @@ require (
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/edsrzf/mmap-go v1.2.0 // indirect
 	github.com/elastic/go-freelru v0.16.0 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250501041114-4a48ac232c83 // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250619025539-884f4110f6af // indirect
 	github.com/erigontech/mdbx-go v0.39.8 // indirect
 	github.com/erigontech/secp256k1 v1.2.0 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
@@ -112,12 +113,12 @@ require (
 	github.com/pion/datachannel v1.5.9 // indirect
 	github.com/pion/dtls/v3 v3.0.3 // indirect
 	github.com/pion/ice/v4 v4.0.2 // indirect
-	github.com/pion/interceptor v0.1.37 // indirect
-	github.com/pion/logging v0.2.2 // indirect
+	github.com/pion/interceptor v0.1.40 // indirect
+	github.com/pion/logging v0.2.3 // indirect
 	github.com/pion/mdns/v2 v2.0.7 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.14 // indirect
-	github.com/pion/rtp v1.8.9 // indirect
+	github.com/pion/rtcp v1.2.15 // indirect
+	github.com/pion/rtp v1.8.18 // indirect
 	github.com/pion/sctp v1.8.33 // indirect
 	github.com/pion/sdp/v3 v3.0.9 // indirect
 	github.com/pion/srtp/v3 v3.0.4 // indirect

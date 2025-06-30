@@ -54,7 +54,7 @@ func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
 }
 
 func (b *SequenceBuilder) AddOffset(offset uint64) {
-	// TODO: write offset already substracting baseNum now that PlainEF is gone
+	// TODO: write offset already subtracting baseNum now that PlainEF is gone
 	b.ef.AddOffset(offset)
 }
 
