@@ -574,7 +574,7 @@ type RequestDataWithPeer struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"` // SSZ encoded data
 	Topic         string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
-	Peer          *Peer                  `protobuf:"bytes,3,opt,name=peer,proto3" json:"peer,omitempty"` // Peer to send the request to.
+	Pid           string                 `protobuf:"bytes,3,opt,name=pid,proto3" json:"pid,omitempty"` // Peer to send the request to.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -623,11 +623,11 @@ func (x *RequestDataWithPeer) GetTopic() string {
 	return ""
 }
 
-func (x *RequestDataWithPeer) GetPeer() *Peer {
+func (x *RequestDataWithPeer) GetPid() string {
 	if x != nil {
-		return x.Peer
+		return x.Pid
 	}
-	return nil
+	return ""
 }
 
 type ResponseData struct {
@@ -931,11 +931,11 @@ const file_p2psentinel_sentinel_proto_rawDesc = "" +
 	"\rdisconnecting\x18\x05 \x01(\x04R\rdisconnecting\"7\n" +
 	"\vRequestData\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
-	"\x05topic\x18\x02 \x01(\tR\x05topic\"c\n" +
+	"\x05topic\x18\x02 \x01(\tR\x05topic\"Q\n" +
 	"\x13RequestDataWithPeer\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
-	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\"\n" +
-	"\x04peer\x18\x03 \x01(\v2\x0e.sentinel.PeerR\x04peer\"\\\n" +
+	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\x10\n" +
+	"\x03pid\x18\x03 \x01(\tR\x03pid\"\\\n" +
 	"\fResponseData\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\bR\x05error\x12\"\n" +
@@ -1004,40 +1004,39 @@ var file_p2psentinel_sentinel_proto_depIdxs = []int32{
 	2,  // 1: sentinel.GossipData.peer:type_name -> sentinel.Peer
 	14, // 2: sentinel.Status.finalized_root:type_name -> types.H256
 	14, // 3: sentinel.Status.head_root:type_name -> types.H256
-	2,  // 4: sentinel.RequestDataWithPeer.peer:type_name -> sentinel.Peer
-	2,  // 5: sentinel.ResponseData.peer:type_name -> sentinel.Peer
-	11, // 6: sentinel.IdentityResponse.metadata:type_name -> sentinel.Metadata
-	13, // 7: sentinel.Sentinel.SetSubscribeExpiry:input_type -> sentinel.RequestSubscribeExpiry
-	1,  // 8: sentinel.Sentinel.SubscribeGossip:input_type -> sentinel.SubscriptionData
-	8,  // 9: sentinel.Sentinel.SendRequest:input_type -> sentinel.RequestData
-	6,  // 10: sentinel.Sentinel.SetStatus:input_type -> sentinel.Status
-	0,  // 11: sentinel.Sentinel.GetPeers:input_type -> sentinel.EmptyMessage
-	2,  // 12: sentinel.Sentinel.BanPeer:input_type -> sentinel.Peer
-	2,  // 13: sentinel.Sentinel.UnbanPeer:input_type -> sentinel.Peer
-	2,  // 14: sentinel.Sentinel.PenalizePeer:input_type -> sentinel.Peer
-	2,  // 15: sentinel.Sentinel.RewardPeer:input_type -> sentinel.Peer
-	5,  // 16: sentinel.Sentinel.PublishGossip:input_type -> sentinel.GossipData
-	0,  // 17: sentinel.Sentinel.Identity:input_type -> sentinel.EmptyMessage
-	3,  // 18: sentinel.Sentinel.PeersInfo:input_type -> sentinel.PeersInfoRequest
-	9,  // 19: sentinel.Sentinel.SendPeerRequest:input_type -> sentinel.RequestDataWithPeer
-	0,  // 20: sentinel.Sentinel.SetSubscribeExpiry:output_type -> sentinel.EmptyMessage
-	5,  // 21: sentinel.Sentinel.SubscribeGossip:output_type -> sentinel.GossipData
-	10, // 22: sentinel.Sentinel.SendRequest:output_type -> sentinel.ResponseData
-	0,  // 23: sentinel.Sentinel.SetStatus:output_type -> sentinel.EmptyMessage
-	7,  // 24: sentinel.Sentinel.GetPeers:output_type -> sentinel.PeerCount
-	0,  // 25: sentinel.Sentinel.BanPeer:output_type -> sentinel.EmptyMessage
-	0,  // 26: sentinel.Sentinel.UnbanPeer:output_type -> sentinel.EmptyMessage
-	0,  // 27: sentinel.Sentinel.PenalizePeer:output_type -> sentinel.EmptyMessage
-	0,  // 28: sentinel.Sentinel.RewardPeer:output_type -> sentinel.EmptyMessage
-	0,  // 29: sentinel.Sentinel.PublishGossip:output_type -> sentinel.EmptyMessage
-	12, // 30: sentinel.Sentinel.Identity:output_type -> sentinel.IdentityResponse
-	4,  // 31: sentinel.Sentinel.PeersInfo:output_type -> sentinel.PeersInfoResponse
-	10, // 32: sentinel.Sentinel.SendPeerRequest:output_type -> sentinel.ResponseData
-	20, // [20:33] is the sub-list for method output_type
-	7,  // [7:20] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	2,  // 4: sentinel.ResponseData.peer:type_name -> sentinel.Peer
+	11, // 5: sentinel.IdentityResponse.metadata:type_name -> sentinel.Metadata
+	13, // 6: sentinel.Sentinel.SetSubscribeExpiry:input_type -> sentinel.RequestSubscribeExpiry
+	1,  // 7: sentinel.Sentinel.SubscribeGossip:input_type -> sentinel.SubscriptionData
+	8,  // 8: sentinel.Sentinel.SendRequest:input_type -> sentinel.RequestData
+	6,  // 9: sentinel.Sentinel.SetStatus:input_type -> sentinel.Status
+	0,  // 10: sentinel.Sentinel.GetPeers:input_type -> sentinel.EmptyMessage
+	2,  // 11: sentinel.Sentinel.BanPeer:input_type -> sentinel.Peer
+	2,  // 12: sentinel.Sentinel.UnbanPeer:input_type -> sentinel.Peer
+	2,  // 13: sentinel.Sentinel.PenalizePeer:input_type -> sentinel.Peer
+	2,  // 14: sentinel.Sentinel.RewardPeer:input_type -> sentinel.Peer
+	5,  // 15: sentinel.Sentinel.PublishGossip:input_type -> sentinel.GossipData
+	0,  // 16: sentinel.Sentinel.Identity:input_type -> sentinel.EmptyMessage
+	3,  // 17: sentinel.Sentinel.PeersInfo:input_type -> sentinel.PeersInfoRequest
+	9,  // 18: sentinel.Sentinel.SendPeerRequest:input_type -> sentinel.RequestDataWithPeer
+	0,  // 19: sentinel.Sentinel.SetSubscribeExpiry:output_type -> sentinel.EmptyMessage
+	5,  // 20: sentinel.Sentinel.SubscribeGossip:output_type -> sentinel.GossipData
+	10, // 21: sentinel.Sentinel.SendRequest:output_type -> sentinel.ResponseData
+	0,  // 22: sentinel.Sentinel.SetStatus:output_type -> sentinel.EmptyMessage
+	7,  // 23: sentinel.Sentinel.GetPeers:output_type -> sentinel.PeerCount
+	0,  // 24: sentinel.Sentinel.BanPeer:output_type -> sentinel.EmptyMessage
+	0,  // 25: sentinel.Sentinel.UnbanPeer:output_type -> sentinel.EmptyMessage
+	0,  // 26: sentinel.Sentinel.PenalizePeer:output_type -> sentinel.EmptyMessage
+	0,  // 27: sentinel.Sentinel.RewardPeer:output_type -> sentinel.EmptyMessage
+	0,  // 28: sentinel.Sentinel.PublishGossip:output_type -> sentinel.EmptyMessage
+	12, // 29: sentinel.Sentinel.Identity:output_type -> sentinel.IdentityResponse
+	4,  // 30: sentinel.Sentinel.PeersInfo:output_type -> sentinel.PeersInfoResponse
+	10, // 31: sentinel.Sentinel.SendPeerRequest:output_type -> sentinel.ResponseData
+	19, // [19:32] is the sub-list for method output_type
+	6,  // [6:19] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_p2psentinel_sentinel_proto_init() }

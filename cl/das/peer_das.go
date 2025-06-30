@@ -40,15 +40,15 @@ var (
 )
 
 type peerdas struct {
-	state         *peerdasstate.PeerDasState
-	nodeID        enode.ID
-	rpc           *rpc.BeaconRpcP2P
-	beaconConfig  *clparams.BeaconChainConfig
-	columnStorage blob_storage.DataColumnStorage
-	blobStorage   blob_storage.BlobStorage
-	sentinel      sentinelproto.SentinelClient
-	ethClock      eth_clock.EthereumClock
-	recoverBlobs  chan recoverBlobsRequest
+	state             *peerdasstate.PeerDasState
+	nodeID            enode.ID
+	rpc               *rpc.BeaconRpcP2P
+	beaconConfig      *clparams.BeaconChainConfig
+	columnStorage     blob_storage.DataColumnStorage
+	blobStorage       blob_storage.BlobStorage
+	sentinel          sentinelproto.SentinelClient
+	ethClock          eth_clock.EthereumClock
+	recoverBlobsQueue chan recoverBlobsRequest
 
 	recoveringMutex sync.Mutex
 	isRecovering    map[common.Hash]bool
@@ -67,15 +67,15 @@ func NewPeerDas(
 ) PeerDas {
 	kzg.InitKZG()
 	p := &peerdas{
-		state:         peerDasState,
-		nodeID:        nodeID,
-		rpc:           rpc,
-		beaconConfig:  beaconConfig,
-		columnStorage: columnStorage,
-		blobStorage:   blobStorage,
-		sentinel:      sentinel,
-		ethClock:      ethClock,
-		recoverBlobs:  make(chan recoverBlobsRequest, 32),
+		state:             peerDasState,
+		nodeID:            nodeID,
+		rpc:               rpc,
+		beaconConfig:      beaconConfig,
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		sentinel:          sentinel,
+		ethClock:          ethClock,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 32),
 
 		recoveringMutex: sync.Mutex{},
 		isRecovering:    make(map[common.Hash]bool),
@@ -113,21 +113,6 @@ type recoverBlobsRequest struct {
 	blockRoot common.Hash
 }
 
-/*
-func (d *peerdas) p2pTopicsControl(ctx context.Context) {
-	// TODO: check if it's upgraded to fulu by notification
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			// check if it's upgraded to fulu
-		}
-	}
-}*/
-
 func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
 	existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
 	if err != nil {
@@ -155,14 +140,18 @@ func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 }
 
 func (d *peerdas) Prune(keepSlotDistance uint64) error {
-	d.columnStorage.Prune(keepSlotDistance)
+	if err := d.columnStorage.Prune(keepSlotDistance); err != nil {
+		return err
+	}
 
 	curSlot := d.ethClock.GetCurrentSlot()
 	if curSlot < keepSlotDistance {
 		d.state.SetEarliestAvailableSlot(0)
 	} else {
 		earliestSlot := curSlot - keepSlotDistance
-		d.state.SetEarliestAvailableSlot(earliestSlot)
+		if earliestSlot > d.state.GetEarliestAvailableSlot() {
+			d.state.SetEarliestAvailableSlot(earliestSlot)
+		}
 	}
 	return nil
 }
@@ -275,7 +264,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case toRecover := <-d.recoverBlobs:
+		case toRecover := <-d.recoverBlobsQueue:
 			d.recoveringMutex.Lock()
 			if _, ok := d.isRecovering[toRecover.blockRoot]; ok {
 				// recovering, skip
@@ -323,7 +312,7 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	timer := time.NewTimer(3 * time.Second)
 	defer timer.Stop()
 	select {
-	case d.recoverBlobs <- recoverBlobsRequest{
+	case d.recoverBlobsQueue <- recoverBlobsRequest{
 		slot:      slot,
 		blockRoot: blockRoot,
 	}:
