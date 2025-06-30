@@ -188,6 +188,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, err
 	}
+	for i := txNum - 10; i < txNum+10; i++ {
+		_, _, _firstLogIndex, _ := rawtemporaldb.ReceiptAsOf(tx, txNum)
+		fmt.Printf("[dbg] GetReceipt1: txNum=%d, _firstLogIndex=%d\n", i, _firstLogIndex)
+	}
 
 	receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 	if err != nil {
