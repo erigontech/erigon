@@ -17,6 +17,7 @@
 package testhelpers
 
 import (
+	"context"
 	"strings"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -38,8 +39,8 @@ func (clh *CollectingLogHandler) Log(r *log.Record) error {
 	return clh.handler.Log(r)
 }
 
-func (clh *CollectingLogHandler) Enabled() log.Lvl {
-	return clh.handler.Enabled()
+func (clh *CollectingLogHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return clh.handler.Enabled(ctx, lvl)
 }
 
 func (clh *CollectingLogHandler) ContainsAll(subStrs []string) bool {

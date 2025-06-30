@@ -627,8 +627,8 @@ func (h testLogHandler) Log(r *log.Record) error {
 	return nil
 }
 
-func (h testLogHandler) Enabled() log.Lvl {
-	return log.LvlTrace
+func (h testLogHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
 }
 
 func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.Logger) *UDPv4 {
