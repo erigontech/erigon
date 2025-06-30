@@ -23,7 +23,6 @@ require (
 	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c
 	github.com/anacrolix/torrent v1.58.2-0.20250604010703-7c29c120a504
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
-	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-quicktest/qt v1.101.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
@@ -63,7 +62,6 @@ require (
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.3.0 // indirect
-	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc // indirect
 	github.com/crate-crypto/go-kzg-4844 v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 // indirect

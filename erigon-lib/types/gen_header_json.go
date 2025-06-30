@@ -7,8 +7,6 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/gballet/go-verkle"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 )
@@ -41,10 +39,7 @@ func (h Header) MarshalJSON() ([]byte, error) {
 		ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas"`
 		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
 		RequestsHash          *common.Hash    `json:"requestsHash"`
-		Verkle                bool
-		VerkleProof           []byte
-		VerkleKeyVals         []verkle.KeyValuePair
-		Hash                  common.Hash `json:"hash"`
+		Hash                  common.Hash     `json:"hash"`
 	}
 	var enc Header
 	enc.ParentHash = h.ParentHash
@@ -70,9 +65,6 @@ func (h Header) MarshalJSON() ([]byte, error) {
 	enc.ExcessBlobGas = (*hexutil.Uint64)(h.ExcessBlobGas)
 	enc.ParentBeaconBlockRoot = h.ParentBeaconBlockRoot
 	enc.RequestsHash = h.RequestsHash
-	enc.Verkle = h.Verkle
-	enc.VerkleProof = h.VerkleProof
-	enc.VerkleKeyVals = h.VerkleKeyVals
 	enc.Hash = h.Hash()
 	return json.Marshal(&enc)
 }
@@ -103,9 +95,6 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 		ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas"`
 		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
 		RequestsHash          *common.Hash    `json:"requestsHash"`
-		Verkle                *bool
-		VerkleProof           []byte
-		VerkleKeyVals         []verkle.KeyValuePair
 	}
 	var dec Header
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -191,15 +180,6 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 	}
 	if dec.RequestsHash != nil {
 		h.RequestsHash = dec.RequestsHash
-	}
-	if dec.Verkle != nil {
-		h.Verkle = *dec.Verkle
-	}
-	if dec.VerkleProof != nil {
-		h.VerkleProof = dec.VerkleProof
-	}
-	if dec.VerkleKeyVals != nil {
-		h.VerkleKeyVals = dec.VerkleKeyVals
 	}
 	return nil
 }
