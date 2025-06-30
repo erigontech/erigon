@@ -360,6 +360,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
+			doms.SetBlockNum(txTask.BlockNum)
 
 			if produce.ReceiptDomain {
 				var receipt *types.Receipt
