@@ -33,10 +33,6 @@ type DataColumnStorage interface {
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	GetSavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error)
 	Prune(keepSlotDistance uint64) error
-
-	/*WriteBlob(slot uint64, blockRoot common.Hash, blob [][]byte) error
-	ReadBlob(slot uint64, blockRoot common.Hash) ([]byte, error)
-	BlobExists(slot uint64, blockRoot common.Hash) (bool, error)*/
 }
 
 type dataColumnStorageImpl struct {
@@ -304,16 +300,4 @@ func (s *dataColumnStorageImpl) Prune(keepSlotDistance uint64) error {
 		s.fs.RemoveAll(strconv.FormatUint(i/subdivisionSlot, 10))
 	}
 	return nil
-}
-
-func (s *dataColumnStorageImpl) WriteBlob(slot uint64, blockRoot common.Hash, blobIndex uint64, blob []byte) error {
-	return nil
-}
-
-func (s *dataColumnStorageImpl) ReadBlob(slot uint64, blockRoot common.Hash, blobIndex uint64) ([]byte, error) {
-	return nil, nil
-}
-
-func (s *dataColumnStorageImpl) BlobExists(slot uint64, blockRoot common.Hash) (bool, error) {
-	return false, nil
 }
