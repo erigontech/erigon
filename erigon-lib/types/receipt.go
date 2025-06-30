@@ -29,6 +29,7 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -469,6 +470,33 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		// For unsupported types, write nothing. Since this is for
 		// DeriveSha, the error will be caught matching the derived hash
 		// to the block.
+	}
+}
+
+func (rs Receipts) AssertLogIndex(blockNum uint64) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	logIndex := 0
+	seen := make(map[uint]struct{}, 16)
+	for _, r := range rs {
+		// ensure valid field
+		if logIndex != int(r.FirstLogIndexWithinBlock) {
+			panic(fmt.Sprintf("assert: bn=%d, len(t.BlockReceipts)=%d, lastReceipt.FirstLogIndexWithinBlock=%d, logs=%d", blockNum, len(rs), r.FirstLogIndexWithinBlock, logIndex))
+		}
+		logIndex += len(r.Logs)
+
+		//no duplicates
+		if len(r.Logs) <= 1 {
+			continue
+		}
+
+		for i := 0; i < len(r.Logs); i++ {
+			if _, ok := seen[r.Logs[i].Index]; ok {
+				panic(fmt.Sprintf("assert: duplicated log_index %d,  bn=%d", r.Logs[i].Index, blockNum))
+			}
+			seen[r.Logs[i].Index] = struct{}{}
+		}
 	}
 }
 

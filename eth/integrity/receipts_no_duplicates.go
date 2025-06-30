@@ -146,6 +146,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		if err != nil {
 			return err
 		}
+
 		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
 		_min, _ := txNumsReader.Min(tx, blockNum)
 		blockChanged := txNum == _min
@@ -153,7 +154,6 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 			prevCumUsedGas = 0
 			prevLogIdx = 0
 		}
-
 		_max, _ := txNumsReader.Max(tx, blockNum)
 
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
