@@ -155,7 +155,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 	batchSize := uint64(50_000)
-	for ; startBlock < endBlock; startBlock += batchSize {
+	for startBlock < endBlock {
 		//var _nextBlock uint64
 		//if err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) (err error) {
 		//	startBlockTxNum, _ := txNumsReader.Min(tx, startBlock)
@@ -175,21 +175,22 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		//}
 
 		_nextBlock := startBlock + batchSize
-		fromStep, toStep, err := exec3.BlkRangeToStepsOnDB(cfg.db, startBlock, _nextBlock, txNumsReader)
-		if err != nil {
-			return err
-		}
-		if toStep-fromStep > 1 { // reduce big jump
-			_nextBlock -= batchSize / 2
-		}
-		if toStep-fromStep < 1 { // increase small jump
-			_nextBlock += batchSize
-		}
+		//fromStep, toStep, err := exec3.BlkRangeToStepsOnDB(cfg.db, startBlock, _nextBlock, txNumsReader)
+		//if err != nil {
+		//	return err
+		//}
+		//if toStep-fromStep > 1 { // reduce big jump
+		//	_nextBlock -= batchSize / 2
+		//}
+		//if toStep-fromStep < 1 { // increase small jump
+		//	_nextBlock += batchSize
+		//}
 
 		to := min(endBlock+1, _nextBlock)
 		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", logger); err != nil {
 			return err
 		}
+		startBlock = to
 	}
 
 	logEvery := time.NewTicker(20 * time.Second)
