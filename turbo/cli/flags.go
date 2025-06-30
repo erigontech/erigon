@@ -26,7 +26,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -93,11 +92,6 @@ var (
 	PruneBlocksDistanceFlag = cli.Uint64Flag{
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
-	}
-	HistoryExpiryEnabledFlag = cli.BoolFlag{
-		Name:  "history-expiry",
-		Usage: "Enable history expiry",
-		Value: true,
 	}
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
@@ -386,11 +380,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
-	}
-
-	enabledHistoryExpiry := f.Bool(HistoryExpiryEnabledFlag.Name, HistoryExpiryEnabledFlag.Value, HistoryExpiryEnabledFlag.Usage)
-	if enabledHistoryExpiry != nil && *enabledHistoryExpiry {
-		dbg.EnableHistoryExpiry = true
 	}
 
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
