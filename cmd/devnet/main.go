@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -167,8 +168,8 @@ func (ph PanicHandler) Log(r *log.Record) error {
 	return nil
 }
 
-func (ph PanicHandler) LogLvl() log.Lvl {
-	return log.LvlTrace
+func (ph PanicHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
 }
 
 func main() {

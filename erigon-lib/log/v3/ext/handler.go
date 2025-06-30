@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"context"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -47,8 +48,8 @@ func (h escalateErrHandler) Log(r *log.Record) error {
 	return h.h.Log(r)
 }
 
-func (h escalateErrHandler) LogLvl() log.Lvl {
-	return h.h.LogLvl()
+func (h escalateErrHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // SpeculativeHandler is a handler for speculative logging. It
@@ -83,8 +84,8 @@ func (h *Speculative) Log(r *log.Record) error {
 	return nil
 }
 
-func (h *Speculative) LogLvl() log.Lvl {
-	return h.handler.LogLvl()
+func (h *Speculative) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return h.handler.Enabled(ctx, lvl)
 }
 
 // Flush logs all records on the handler.
@@ -130,8 +131,8 @@ func (h *HotSwap) Log(r *log.Record) error {
 	return (*(*log.Handler)(atomic.LoadPointer(&h.handler))).Log(r)
 }
 
-func (h *HotSwap) LogLvl() log.Lvl {
-	return (*(*log.Handler)(atomic.LoadPointer(&h.handler))).LogLvl()
+func (h *HotSwap) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return (*(*log.Handler)(atomic.LoadPointer(&h.handler))).Enabled(ctx, lvl)
 }
 
 // Swap atomically the logger handler.
@@ -158,6 +159,6 @@ func (h fatalHandler) Log(r *log.Record) error {
 	return err
 }
 
-func (h fatalHandler) LogLvl() log.Lvl {
-	return h.h.LogLvl()
+func (h fatalHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }

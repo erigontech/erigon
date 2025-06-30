@@ -1,6 +1,7 @@
 package log
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -18,7 +19,16 @@ import (
 // them to achieve the logging structure that suits your applications.
 type Handler interface {
 	Log(r *Record) error
-	LogLvl() Lvl
+	// Enabled reports whether the handler handles records at the given level.
+	// The handler ignores records whose level is higher.
+	// It is called early, before any arguments are processed,
+	// to save effort if the log event should be discarded.
+	// If called from a Logger method, the first argument is the context
+	// passed to that method, or context.Background() if nil was passed
+	// or the method does not take a context.
+	// The context is passed so Enabled can use its values
+	// to make a decision.
+	Enabled(ctx context.Context, lvl Lvl) bool
 }
 
 // StreamHandler writes log records to an io.Writer
@@ -42,8 +52,8 @@ func (h streamHandler) Log(r *Record) error {
 	return err
 }
 
-func (h streamHandler) LogLvl() Lvl {
-	return LvlTrace
+func (h streamHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return true
 }
 
 // SyncHandler can be wrapped around a handler to guarantee that
@@ -65,8 +75,8 @@ func (h syncHandler) Log(r *Record) error {
 	return h.h.Log(r)
 }
 
-func (h syncHandler) LogLvl() Lvl {
-	return h.h.LogLvl()
+func (h syncHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 const DefaultLogMaxSize = 1 << 27 // 128 Mb
@@ -156,8 +166,8 @@ func (h callerFileHandler) Log(r *Record) error {
 	return h.h.Log(r)
 }
 
-func (h callerFileHandler) LogLvl() Lvl {
-	return h.h.LogLvl()
+func (h callerFileHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // CallerFuncHandler returns a Handler that adds the calling function name to
@@ -175,8 +185,8 @@ func (h callerFuncHandler) Log(r *Record) error {
 	return h.h.Log(r)
 }
 
-func (h callerFuncHandler) LogLvl() Lvl {
-	return h.h.LogLvl()
+func (h callerFuncHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // CallerStackHandler returns a Handler that adds a stack trace to the context
@@ -201,8 +211,8 @@ func (h callerStackHandler) Log(r *Record) error {
 	return h.h.Log(r)
 }
 
-func (h callerStackHandler) LogLvl() Lvl {
-	return h.h.LogLvl()
+func (h callerStackHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // FilterHandler returns a Handler that only writes records to the
@@ -233,8 +243,8 @@ func (h filterHandler) Log(r *Record) error {
 	return nil
 }
 
-func (h filterHandler) LogLvl() Lvl {
-	return h.h.LogLvl()
+func (h filterHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // MatchFilterHandler returns a Handler that only writes records
@@ -279,14 +289,14 @@ type lvlFilterHandler struct {
 }
 
 func (h lvlFilterHandler) Log(r *Record) error {
-	if r.Lvl <= h.maxLvl {
+	if h.Enabled(context.Background(), r.Lvl) {
 		return h.h.Log(r)
 	}
 	return nil
 }
 
-func (h lvlFilterHandler) LogLvl() Lvl {
-	return h.maxLvl
+func (h lvlFilterHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return lvl <= h.maxLvl
 }
 
 // MultiHandler dispatches any write to each of its handlers.
@@ -299,23 +309,19 @@ func (h lvlFilterHandler) LogLvl() Lvl {
 //	    log.Must.FileHandler("/var/log/app.log", log.LogfmtFormat()),
 //	    log.StderrHandler)
 func MultiHandler(hs ...Handler) Handler {
-	var maxLvl Lvl
-	for _, h := range hs {
-		if h.LogLvl() > maxLvl {
-			maxLvl = h.LogLvl()
-		}
-	}
-	return multiHandler{hs: hs, maxLvl: maxLvl}
+	return multiHandler{hs: hs}
 }
 
 type multiHandler struct {
-	hs     []Handler
-	maxLvl Lvl
+	hs []Handler
 }
 
 func (h multiHandler) Log(r *Record) error {
 	var accErr error
 	for i, subH := range h.hs {
+		if !subH.Enabled(context.Background(), r.Lvl) {
+			continue
+		}
 		err := subH.Log(r)
 		if err == nil {
 			continue
@@ -331,8 +337,13 @@ func (h multiHandler) Log(r *Record) error {
 	return accErr
 }
 
-func (h multiHandler) LogLvl() Lvl {
-	return h.maxLvl
+func (h multiHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	for _, subH := range h.hs {
+		if subH.Enabled(ctx, lvl) {
+			return true
+		}
+	}
+	return false
 }
 
 // FailoverHandler writes all log records to the first handler
@@ -352,18 +363,11 @@ func (h multiHandler) LogLvl() Lvl {
 // the form "failover_err_{idx}" which explain the error encountered while
 // trying to write to the handlers before them in the list.
 func FailoverHandler(hs ...Handler) Handler {
-	var maxLvl Lvl
-	for _, h := range hs {
-		if h.LogLvl() > maxLvl {
-			maxLvl = h.LogLvl()
-		}
-	}
-	return failoverHandler{hs: hs, maxLvl: maxLvl}
+	return failoverHandler{hs: hs}
 }
 
 type failoverHandler struct {
-	hs     []Handler
-	maxLvl Lvl
+	hs []Handler
 }
 
 func (h failoverHandler) Log(r *Record) error {
@@ -378,8 +382,13 @@ func (h failoverHandler) Log(r *Record) error {
 	return err
 }
 
-func (h failoverHandler) LogLvl() Lvl {
-	return h.maxLvl
+func (h failoverHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	for _, subH := range h.hs {
+		if subH.Enabled(ctx, lvl) {
+			return true
+		}
+	}
+	return false
 }
 
 // ChannelHandler writes all records to the given channel.
@@ -398,8 +407,8 @@ func (h channelHandler) Log(r *Record) error {
 	return nil
 }
 
-func (h channelHandler) LogLvl() Lvl {
-	return LvlTrace
+func (h channelHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return true
 }
 
 // BufferedHandler writes all records to a buffered
@@ -426,8 +435,8 @@ func (h bufferedHandler) Log(r *Record) error {
 	return h.channelHandler.Log(r)
 }
 
-func (h bufferedHandler) LogLvl() Lvl {
-	return h.baseHandler.LogLvl()
+func (h bufferedHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.baseHandler.Enabled(ctx, lvl)
 }
 
 // LazyHandler writes all values to the wrapped handler after evaluating
@@ -469,8 +478,8 @@ func (h lazyHandler) Log(r *Record) error {
 	return h.h.Log(r)
 }
 
-func (h lazyHandler) LogLvl() Lvl {
-	return h.h.LogLvl()
+func (h lazyHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 func evaluateLazy(lz Lazy) (interface{}, error) {
@@ -513,8 +522,8 @@ func (h discardHandler) Log(r *Record) error {
 	return nil
 }
 
-func (h discardHandler) LogLvl() Lvl {
-	return LvlCrit
+func (h discardHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return false
 }
 
 // Must object provides the following Handler creation functions
@@ -549,8 +558,8 @@ func (h *swapHandler) Log(r *Record) error {
 	return (*h.handler.Load().(*Handler)).Log(r)
 }
 
-func (h *swapHandler) LogLvl() Lvl {
-	return (*h.handler.Load().(*Handler)).LogLvl()
+func (h *swapHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return (*h.handler.Load().(*Handler)).Enabled(ctx, lvl)
 }
 
 func (h *swapHandler) Swap(newHandler Handler) {

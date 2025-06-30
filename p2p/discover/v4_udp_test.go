@@ -627,7 +627,7 @@ func (h testLogHandler) Log(r *log.Record) error {
 	return nil
 }
 
-func (h testLogHandler) LogLvl() log.Lvl {
+func (h testLogHandler) Enabled() log.Lvl {
 	return log.LvlTrace
 }
 

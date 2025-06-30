@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"context"
 	"errors"
 	"math"
 	"testing"
@@ -22,8 +23,8 @@ func (h lastRecordCaptureTestHandler) Log(r *log.Record) error {
 	return nil
 }
 
-func (h lastRecordCaptureTestHandler) LogLvl() log.Lvl {
-	return log.LvlTrace
+func (h lastRecordCaptureTestHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
 }
 
 func TestHotSwapHandler(t *testing.T) {

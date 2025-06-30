@@ -21,6 +21,7 @@
 package testlog
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -43,8 +44,8 @@ func (h *handler) Log(r *log.Record) error {
 	return nil
 }
 
-func (h *handler) LogLvl() log.Lvl {
-	return log.LvlTrace
+func (h *handler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
 }
 
 // logger implements log.Logger such that all output goes to the unit test log via
@@ -68,8 +69,8 @@ func (h *bufHandler) Log(r *log.Record) error {
 	return nil
 }
 
-func (h *bufHandler) LogLvl() log.Lvl {
-	return log.LvlTrace
+func (h *bufHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
 }
 
 // Logger returns a logger which logs to the unit test log of t.
@@ -142,32 +143,8 @@ func (l *logger) Log(level log.Lvl, msg string, ctx ...interface{}) {
 	l.flush()
 }
 
-func (l *logger) LogLvl() log.Lvl {
-	return l.log.LogLvl()
-}
-
-func (l *logger) LvlTrace() bool {
-	return l.LogLvl() == log.LvlTrace
-}
-
-func (l *logger) LvlDebug() bool {
-	return l.LogLvl() == log.LvlDebug
-}
-
-func (l *logger) LvlInfo() bool {
-	return l.LogLvl() == log.LvlInfo
-}
-
-func (l *logger) LvlWarn() bool {
-	return l.LogLvl() == log.LvlWarn
-}
-
-func (l *logger) LvlError() bool {
-	return l.LogLvl() == log.LvlError
-}
-
-func (l *logger) LvlCrit() bool {
-	return l.LogLvl() == log.LvlCrit
+func (l *logger) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return l.log.Enabled(ctx, lvl)
 }
 
 func (l *logger) New(ctx ...interface{}) log.Logger {

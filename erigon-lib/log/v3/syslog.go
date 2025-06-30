@@ -4,6 +4,7 @@
 package log
 
 import (
+	"context"
 	"log/syslog"
 	"strings"
 )
@@ -54,8 +55,8 @@ func (h syslogHandler) Log(r *Record) error {
 	return syslogFn(s)
 }
 
-func (h syslogHandler) LogLvl() Lvl {
-	return LvlTrace
+func (h syslogHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return true
 }
 
 func sharedSyslog(fmtr Format, sysWr *syslog.Writer) Handler {

@@ -38,8 +38,8 @@ func (clh *CollectingLogHandler) Log(r *log.Record) error {
 	return clh.handler.Log(r)
 }
 
-func (clh *CollectingLogHandler) LogLvl() log.Lvl {
-	return clh.handler.LogLvl()
+func (clh *CollectingLogHandler) Enabled() log.Lvl {
+	return clh.handler.Enabled()
 }
 
 func (clh *CollectingLogHandler) ContainsAll(subStrs []string) bool {

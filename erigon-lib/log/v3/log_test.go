@@ -3,6 +3,7 @@ package log
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,8 +30,8 @@ func (h lastRecordCaptureTestHandler) Log(r *Record) error {
 	return nil
 }
 
-func (h lastRecordCaptureTestHandler) LogLvl() Lvl {
-	return LvlTrace
+func (h lastRecordCaptureTestHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return true
 }
 
 func testLogger() (Logger, Handler, *Record) {
@@ -207,8 +208,8 @@ func (h *waitHandler) Log(r *Record) error {
 	return nil
 }
 
-func (h *waitHandler) LogLvl() Lvl {
-	return LvlTrace
+func (h *waitHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return true
 }
 
 func TestBufferedHandler(t *testing.T) {
@@ -621,8 +622,8 @@ func (h concurrentCaptureTestHandler) Log(r *Record) error {
 	return nil
 }
 
-func (h concurrentCaptureTestHandler) LogLvl() Lvl {
-	return LvlTrace
+func (h concurrentCaptureTestHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return true
 }
 
 func TestCallStack(t *testing.T) {

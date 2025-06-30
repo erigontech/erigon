@@ -1,6 +1,7 @@
 package log
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -103,14 +104,8 @@ type Logger interface {
 	// SetHandler updates the logger to write records to the specified handler.
 	SetHandler(h Handler)
 
-	// LogLvl gets the max log lvl of its handler
-	LogLvl() Lvl
-	LvlTrace() bool
-	LvlDebug() bool
-	LvlInfo() bool
-	LvlWarn() bool
-	LvlError() bool
-	LvlCrit() bool
+	// Enabled reports whether l emits log records at the given context and level.
+	Enabled(ctx context.Context, lvl Lvl) bool
 
 	// Log a message at the given level with context key/value pairs
 	Trace(msg string, ctx ...interface{})
@@ -184,32 +179,8 @@ func (l *logger) Log(level Lvl, msg string, ctx ...interface{}) {
 	l.write(msg, level, ctx)
 }
 
-func (l *logger) LogLvl() Lvl {
-	return l.GetHandler().LogLvl()
-}
-
-func (l *logger) LvlTrace() bool {
-	return l.LogLvl() == LvlTrace
-}
-
-func (l *logger) LvlDebug() bool {
-	return l.LogLvl() == LvlDebug
-}
-
-func (l *logger) LvlInfo() bool {
-	return l.LogLvl() == LvlInfo
-}
-
-func (l *logger) LvlWarn() bool {
-	return l.LogLvl() == LvlWarn
-}
-
-func (l *logger) LvlError() bool {
-	return l.LogLvl() == LvlError
-}
-
-func (l *logger) LvlCrit() bool {
-	return l.LogLvl() == LvlCrit
+func (l *logger) Enabled(ctx context.Context, lvl Lvl) bool {
+	return l.GetHandler().Enabled(ctx, lvl)
 }
 
 func (l *logger) GetHandler() Handler {
