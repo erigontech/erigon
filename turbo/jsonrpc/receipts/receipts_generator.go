@@ -192,7 +192,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		_min, _ := g.txNumReader.Min(tx, blockNum)
 		_max, _ := g.txNumReader.Max(tx, blockNum)
 		fmt.Printf("[dbg] GetReceipt1: bn=%d[%d-%d], _firstLogIndex=%d\n", blockNum, _min, _max, firstLogIndex)
-		for i := txNum - 100; i < txNum+100; i++ {
+		for i := txNum - 5; i < txNum+5; i++ {
 			_, _, _firstLogIndex, _ := rawtemporaldb.ReceiptAsOf(tx, txNum)
 			fmt.Printf("[dbg] GetReceipt1: txNum=%d, _firstLogIndex=%d\n", i, _firstLogIndex)
 		}
