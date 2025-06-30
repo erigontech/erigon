@@ -85,7 +85,7 @@ func New(datadir string) Dirs {
 		CaplinColumnData: filepath.Join(datadir, "caplin", "column"),
 		CaplinIndexing:   filepath.Join(datadir, "caplin", "indexing"),
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
-		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis"),
+		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 		ArbitrumWasm:     filepath.Join(datadir, "arbitrumwasm"),
 	}
 
@@ -213,6 +213,7 @@ func (d Dirs) RenameOldVersions() error {
 	}
 	renamed := 0
 	torrentsRemoved := 0
+	removed := 0
 	for _, dirPath := range directories {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
@@ -229,6 +230,17 @@ func (d Dirs) RenameOldVersions() error {
 						torrentsRemoved++
 						return nil
 					}
+
+					if strings.Contains(entry.Name(), "commitment") &&
+						(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
+						// remove the file instead of renaming
+						if err := os.Remove(path); err != nil {
+							return fmt.Errorf("failed to remove file %s: %w", path, err)
+						}
+						removed++
+						return nil
+					}
+
 					newName := strings.Replace(name, "v1-", "v1.0-", 1)
 					newPath := filepath.Join(filepath.Dir(path), newName)
 					if err := os.Rename(path, newPath); err != nil {
@@ -244,7 +256,7 @@ func (d Dirs) RenameOldVersions() error {
 		}
 	}
 	log.Info(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
-	if d.Downloader != "" && renamed > 0 {
+	if d.Downloader != "" && (renamed > 0 || removed > 0) {
 		if err := os.RemoveAll(d.Downloader); err != nil {
 			return err
 		}
@@ -262,13 +274,21 @@ func (d Dirs) RenameNewVersions() error {
 	}
 
 	for _, dirPath := range directories {
-		err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+		err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 
-			if !d.IsDir() && strings.HasPrefix(d.Name(), "v1.0-") {
-				newName := strings.Replace(d.Name(), "v1.0-", "v1-", 1)
+			if !dirEntry.IsDir() && strings.HasPrefix(dirEntry.Name(), "v1.0-") {
+				if strings.Contains(dirEntry.Name(), "commitment") &&
+					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
+					// remove the file instead of renaming
+					if err := os.Remove(path); err != nil {
+						return fmt.Errorf("failed to remove file %s: %w", path, err)
+					}
+					return nil
+				}
+				newName := strings.Replace(dirEntry.Name(), "v1.0-", "v1-", 1)
 				oldPath := path
 				newPath := filepath.Join(filepath.Dir(path), newName)
 

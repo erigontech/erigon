@@ -147,6 +147,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter = state.NewNoopWriter()
+	rw.vmCfg.Tracer = nil
 
 	rw.ibs.Reset()
 	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
@@ -207,10 +208,11 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 		}
 	default:
+		tracer := calltracer.NewCallTracer(nil)
+
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time, rw.evm.Context.ArbOSVersion))
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		txTask.Tracer.Reset() // txTask is retryable
-		rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
+		rw.vmCfg.Tracer = tracer.Tracer().Hooks
 		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 		txn := txTask.Tx
 
@@ -227,7 +229,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
-			rw.execAATxn(txTask)
+			rw.execAATxn(txTask, tracer)
 			break
 		}
 
@@ -252,13 +254,14 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			ibs.SoftFinalise()
 
 			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
-			txTask.TraceFroms = txTask.Tracer.Froms()
-			txTask.TraceTos = txTask.Tracer.Tos()
+			txTask.TraceFroms = tracer.Froms()
+			txTask.TraceTos = tracer.Tos()
 		}
 	}
+	rw.vmCfg.Tracer = nil
 }
 
-func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask) {
+func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask, tracer *calltracer.CallTracer) {
 	if !txTask.InBatch {
 		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
 		startIdx := uint64(txTask.TxIndex)
@@ -321,8 +324,8 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask) {
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
-	txTask.TraceFroms = txTask.Tracer.Froms()
-	txTask.TraceTos = txTask.Tracer.Tos()
+	txTask.TraceFroms = tracer.Froms()
+	txTask.TraceTos = tracer.Tos()
 	txTask.CreateReceipt(rw.chainTx)
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
@@ -455,19 +458,18 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			applyWorker.RunTxTaskNoLock(txTask.Reset())
 		}
 
-		hooks := txTask.Tracer.TracingHooks()
+		//hooks := txTask.Tracer.TracingHooks()
 		if txTask.Error != nil {
-			if hooks != nil && hooks.OnTxEnd != nil {
-				hooks.OnTxEnd(nil, err)
-			}
+			//if hooks != nil && hooks.OnTxEnd != nil {
+			//	hooks.OnTxEnd(nil, err)
+			//}
 			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", txTask.BlockNum, txTask.TxNum, txTask.Error)
 		}
 		txTask.CreateReceipt(tx)
 
-		if hooks != nil && hooks.OnTxEnd != nil {
-			hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
-		}
-
+		//if hooks != nil && hooks.OnTxEnd != nil {
+		//	hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+		//}
 		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
 		}
@@ -618,7 +620,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
-				Tracer:           calltracer.NewCallTracer(nil),
 			}
 
 			if txIndex >= 0 && txIndex < len(txs) {

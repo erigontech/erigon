@@ -66,6 +66,7 @@ type Config struct {
 	TerminalTotalDifficulty       *big.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
 	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
 	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
+	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
 	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
@@ -714,6 +715,10 @@ func isForked(s *big.Int, head uint64) bool {
 		return false
 	}
 	return s.Uint64() <= head
+}
+
+func (c *Config) IsPreMerge(blockNumber uint64) bool {
+	return c.MergeHeight != nil && blockNumber < c.MergeHeight.Uint64()
 }
 
 func (c *Config) IsArbitrum() bool {

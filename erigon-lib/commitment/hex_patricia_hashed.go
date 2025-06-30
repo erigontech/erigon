@@ -1487,7 +1487,7 @@ type skipStat struct {
 const DepthWithoutNodeHashes = 35 //nolint
 
 func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, depth int) func(nibble int, skip bool) (*cell, error) {
-	hashBefore := make([]byte, 32) // buffer re-used between calls
+	hashBefore := make([]byte, 32) // buffer reused between calls
 	return func(nibble int, skip bool) (*cell, error) {
 		if skip {
 			if _, err := hph.keccak2.Write(b); err != nil {
@@ -1830,7 +1830,7 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 		cell = &hph.grid[row][nibble]
 		col := uint16(1) << nibble
 		if hph.afterMap[row]&col != 0 {
-			// Prevent "spurios deletions", i.e. deletion of absent items
+			// Prevent "spurious deletions", i.e. deletion of absent items
 			hph.touchMap[row] |= col
 			hph.afterMap[row] &^= col
 			if hph.trace {
