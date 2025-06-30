@@ -812,6 +812,12 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	if err := e.chainRW.InsertBlockAndWait(ctx, block); err != nil {
+		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedError(err),
+			}, nil
+		}
 		return nil, err
 	}
 
