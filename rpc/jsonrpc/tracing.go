@@ -372,7 +372,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	if err != nil {
 		return fmt.Errorf("create state reader: %v", err)
 	}
-	header, err := api._blockReader.Header(ctx, dbtx, hash, blockNumber)
+	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
 	if err != nil {
 		return fmt.Errorf("could not fetch header %d(%x): %v", blockNumber, hash, err)
 	}
@@ -431,6 +431,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	return err
 }
 
+// TraceCall implements debug_traceCallMany. Returns Geth style call traces.
 func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
 	var (
 		hash              common.Hash
@@ -472,7 +473,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
+	blockNum, hash, isLatest, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
 	if err != nil {
 		return err
 	}
@@ -482,39 +483,30 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
-	if err != nil {
-		return err
-	}
-	if block == nil {
-		return fmt.Errorf("block %d not found", blockNum)
+	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	if header == nil {
+		stream.WriteNil()
+		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	// -1 is a default value for transaction index.
-	// If it's -1, we will try to replay every single transaction in that block
-	transactionIndex := -1
+	var stateReader state.StateReader
 
-	if simulateContext.TransactionIndex != nil {
-		transactionIndex = *simulateContext.TransactionIndex
+	if simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest {
+		var blockNrOrHash rpc.BlockNumberOrHash
+
+		rpcBlockNumValue := rpc.BlockNumber(blockNum)
+		blockNrOrHash.BlockNumber = &rpcBlockNumValue
+
+		stateReader, err = rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	} else {
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)
 	}
 
-	if transactionIndex == -1 {
-		transactionIndex = len(block.Transactions())
-	}
-
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), transactionIndex, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return err
 	}
 
 	ibs := state.New(stateReader)
-
-	header := block.Header()
-
-	if header == nil {
-		stream.WriteNil()
-		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
-	}
 
 	getHash := func(i uint64) (common.Hash, error) {
 		if hash, ok := overrideBlockHash[i]; ok {
@@ -563,7 +555,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState()
 			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
-			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, block.Hash(), txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
+			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, header.Hash(), txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
 				return err
 			}
