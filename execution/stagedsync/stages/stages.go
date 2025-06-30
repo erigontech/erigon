@@ -42,9 +42,8 @@ var (
 	Execution       SyncStage = "Execution"       // Executing each block w/o building a trie
 	CustomTrace     SyncStage = "CustomTrace"     // Executing each block w/o building a trie
 	Translation     SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
-	VerkleTrie      SyncStage = "VerkleTrie"
-	TxLookup        SyncStage = "TxLookup" // Generating transactions lookup index
-	Finish          SyncStage = "Finish"   // Nominal stage after all other stages
+	TxLookup        SyncStage = "TxLookup"        // Generating transactions lookup index
+	Finish          SyncStage = "Finish"          // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningBorHeimdall SyncStage = "MiningBorHeimdall"

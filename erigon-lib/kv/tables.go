@@ -58,12 +58,6 @@ const (
 
 const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
 
-// Mapping [block number] => [Verkle Root]
-const VerkleRoots = "VerkleRoots"
-
-// Mapping [Verkle Root] => [Rlp-Encoded Verkle Node]
-const VerkleTrie = "VerkleTrie"
-
 const (
 	// DatabaseInfo is used to store information about data layout.
 	DatabaseInfo = "DbInfo"
@@ -419,8 +413,6 @@ var ChaindataTables = []string{
 
 	MaxTxNum,
 
-	VerkleRoots,
-	VerkleTrie,
 	// Beacon stuff
 	BeaconBlocks,
 	CanonicalBlockRoots,
