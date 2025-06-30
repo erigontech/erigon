@@ -298,7 +298,10 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 		return nil, err
 	}
 	return resp, nil
+}
 
+func (s *SentinelServer) SendPeerRequest(ctx context.Context, req *sentinelrpc.RequestDataWithPeer) (*sentinelrpc.ResponseData, error) {
+	return nil, errors.New("not implemented")
 }
 
 func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMessage) (*sentinelrpc.IdentityResponse, error) {

@@ -141,7 +141,7 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]c
 			blobEntries = append(blobEntries, cltypes.MatrixEntry{
 				Cell:        recoveredCells[index],
 				KzgProof:    recoveredProofs[index],
-				RowIndex:    RowIndex(blobIndex),
+				RowIndex:    blobIndex,
 				ColumnIndex: ColumnIndex(index),
 			})
 		}
