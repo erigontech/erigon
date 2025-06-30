@@ -114,21 +114,7 @@ type recoverBlobsRequest struct {
 }
 
 func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
-	existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
-	if err != nil {
-		return false, err
-	}
-
-	custodyColumns, err := d.state.GetMyCustodyColumns()
-	if err != nil {
-		return false, err
-	}
-
-	for _, column := range existingColumns {
-		delete(custodyColumns, column)
-	}
-
-	return len(custodyColumns) == 0, nil
+	return d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot), nil
 }
 
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
