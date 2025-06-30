@@ -31,8 +31,6 @@ import (
 )
 
 var (
-	EnableHistoryExpiry = EnvBool("ENABLE_HISTORY_EXPIRY", false)
-
 	doMemstat           = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")

@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
@@ -99,16 +98,9 @@ var (
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
 	}
 	ExperimentsFlag = cli.StringFlag{
-		Name: "experiments",
 		Usage: `Enable some experimental stages:
 * tevm - write TEVM translated code to the DB`,
 		Value: "default",
-	}
-
-	HistoryExpiryEnabledFlag = cli.BoolFlag{
-		Name:  "history-expiry",
-		Usage: "Enable history expiry",
-		Value: true,
 	}
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
@@ -397,11 +389,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
-	}
-
-	enabledHistoryExpiry := f.Bool(HistoryExpiryEnabledFlag.Name, HistoryExpiryEnabledFlag.Value, HistoryExpiryEnabledFlag.Usage)
-	if enabledHistoryExpiry != nil && *enabledHistoryExpiry {
-		dbg.EnableHistoryExpiry = true
 	}
 
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
