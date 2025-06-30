@@ -106,7 +106,11 @@ func (t *TxTask) Sender() *libcommon.Address {
 }
 
 func (t *TxTask) CreateReceipt(tx kv.Tx) {
-	if t.TxIndex < 0 || t.Final {
+	if t.TxIndex < 0 {
+		return
+	}
+	if t.Final {
+		t.BlockReceipts.AssertLogIndex(t.BlockNum)
 		return
 	}
 
