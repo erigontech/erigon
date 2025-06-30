@@ -153,7 +153,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 	batchSize := uint64(50_000)
-	for ; startBlock < endBlock; startBlock += batchSize {
+	for startBlock < endBlock {
 		//var _nextBlock uint64
 		//if err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) (err error) {
 		//	startBlockTxNum, _ := txNumsReader.Min(tx, startBlock)
@@ -188,6 +188,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", logger); err != nil {
 			return err
 		}
+		startBlock = _nextBlock
 	}
 
 	logEvery := time.NewTicker(20 * time.Second)
