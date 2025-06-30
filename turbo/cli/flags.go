@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
@@ -82,10 +83,11 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal".
-				Full: Keep only blocks and latest state,
-				Archive: Keep the entire indexed database, aka. no pruning,
-				Minimal: Keep only latest state`,
+		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
+				full: Keep only necessary blocks and latest state,
+				blocks: Keep all blocks but not the state history,
+				archive: Keep the entire state history and all blocks,
+				minimal: Keep only latest state`,
 		Value: "full",
 	}
 	PruneDistanceFlag = cli.Uint64Flag{
@@ -103,6 +105,11 @@ var (
 		Value: "default",
 	}
 
+	HistoryExpiryEnabledFlag = cli.BoolFlag{
+		Name:  "history-expiry",
+		Usage: "Enable history expiry",
+		Value: true,
+	}
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
 		Name:  "tls",
@@ -266,10 +273,11 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
-	distanceH := ctx.Uint64(PruneDistanceFlag.Name)
-	distanceB := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 
-	mode, err := prune.FromCli(distanceH, distanceB, ctx.String(PruneModeFlag.Name), libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)))
+	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
+	distance := ctx.Uint64(PruneDistanceFlag.Name)
+
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -377,7 +385,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if experiments != nil {
 		experimentsVal = *experiments
 	}
-	mode, err := prune.FromCli(distance, blockDistance, *pruneMode, libcommon.CliString2Array(experimentsVal))
+	mode, err := prune.FromCli(*pruneMode, distance, blockDistance, libcommon.CliString2Array(experimentsVal))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -390,6 +398,12 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
+
+	enabledHistoryExpiry := f.Bool(HistoryExpiryEnabledFlag.Name, HistoryExpiryEnabledFlag.Value, HistoryExpiryEnabledFlag.Usage)
+	if enabledHistoryExpiry != nil && *enabledHistoryExpiry {
+		dbg.EnableHistoryExpiry = true
+	}
+
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
 		sizeVal := datasize.ByteSize(0)
 		size := &sizeVal

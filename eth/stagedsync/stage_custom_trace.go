@@ -334,7 +334,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, 
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
 	}
-	return integrity.ReceiptsNoDuplicatesRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
+	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
 }
 
 // customTraceBatch [from:to)
