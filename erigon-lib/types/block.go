@@ -21,7 +21,6 @@
 package types
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -29,8 +28,6 @@ import (
 	"math/big"
 	"reflect"
 	"sync/atomic"
-
-	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -105,11 +102,6 @@ type Header struct {
 
 	RequestsHash *common.Hash `json:"requestsHash"` // EIP-7685
 
-	// The verkle proof is ignored in legacy headers
-	Verkle        bool
-	VerkleProof   []byte
-	VerkleKeyVals []verkle.KeyValuePair
-
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
@@ -176,16 +168,6 @@ func (h *Header) EncodingSize() int {
 
 	if h.RequestsHash != nil {
 		encodingSize += 33
-	}
-
-	if h.Verkle {
-		// Encoding of Verkle Proof
-		encodingSize += rlp.StringLen(h.VerkleProof)
-		var tmpBuffer bytes.Buffer
-		if err := rlp.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
-			panic(err)
-		}
-		encodingSize += rlp.ListPrefixLen(tmpBuffer.Len()) + tmpBuffer.Len()
 	}
 
 	return encodingSize
@@ -335,16 +317,6 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 		if _, err := w.Write(h.RequestsHash[:]); err != nil {
 			return err
-		}
-	}
-
-	if h.Verkle {
-		if err := rlp.EncodeString(h.VerkleProof, w, b[:]); err != nil {
-			return err
-		}
-
-		if err := rlp.Encode(w, h.VerkleKeyVals); err != nil {
-			return nil
 		}
 	}
 
@@ -542,17 +514,6 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	}
 	h.RequestsHash = new(common.Hash)
 	h.RequestsHash.SetBytes(b)
-
-	if h.Verkle {
-		if h.VerkleProof, err = s.Bytes(); err != nil {
-			return fmt.Errorf("read VerkleProof: %w", err)
-		}
-		rawKv, err := s.Raw()
-		if err != nil {
-			return err
-		}
-		rlp.DecodeBytes(rawKv, h.VerkleKeyVals)
-	}
 
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
@@ -1179,15 +1140,6 @@ func CopyHeader(h *Header) *Header {
 	if h.RequestsHash != nil {
 		cpy.RequestsHash = new(common.Hash)
 		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
-	}
-	cpy.Verkle = h.Verkle
-	if h.VerkleProof != nil {
-		cpy.VerkleProof = make([]byte, len(h.VerkleProof))
-		copy(cpy.VerkleProof, h.VerkleProof)
-	}
-	if h.VerkleKeyVals != nil {
-		cpy.VerkleKeyVals = make([]verkle.KeyValuePair, len(h.VerkleKeyVals))
-		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
 	}
 	cpy.mutable = h.mutable
 	return &cpy
