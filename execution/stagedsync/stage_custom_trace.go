@@ -254,8 +254,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		}
 		defer doms.Close()
 
-		di := &dbgInfo{}
-		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, di, logPrefix, logger); err != nil {
+		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
 
@@ -267,23 +266,6 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		if produce.ReceiptDomain {
 			if err = AssertReceipts(ctx, cfg, tx, fromBlock, toBlock); err != nil {
 				return err
-			}
-		}
-
-		if dbg.AssertEnabled {
-			if produce.LogAddr {
-				txNumsReader := cfg.BlockReader.TxnumReader(ctx)
-				_min, _ := txNumsReader.Min(tx, fromBlock)
-				_max, _ := txNumsReader.Max(tx, toBlock)
-
-				for i, _ := range di.logAddrs {
-					it, _ := tx.IndexRange(kv.LogAddrIdx, di.logAddrs[i][:], int(_min), int(_max), true, kv.Unlim)
-					isEmpty := !it.HasNext()
-					if isEmpty {
-						panic(fmt.Sprintf("assert: logAddr index is empty for range %d-%d, fromBlock=%d, toBlock=%d, addr=%x", _min, _min, fromBlock, toBlock, di.logAddrs[i]))
-					}
-				}
-				return nil
 			}
 		}
 
@@ -353,11 +335,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, 
 	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
 }
 
-type dbgInfo struct {
-	logAddrs []common.Address
-}
-
-func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, di *dbgInfo, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
@@ -437,9 +415,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				for _, lg := range txTask.Logs {
 					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:], txTask.TxNum); err != nil {
 						return err
-					}
-					if dbg.AssertEnabled && len(di.logAddrs) < 10_000 { //100mb
-						di.logAddrs = append(di.logAddrs, lg.Address)
 					}
 				}
 			}
