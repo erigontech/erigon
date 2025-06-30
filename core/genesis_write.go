@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -267,6 +266,49 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 	return block, statedb, err
 }
 
+// Writes custom genesis block to db. Allows to write genesis with block number > 0.
+func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block, difficulty *big.Int, genesisBlockNum uint64, cfg *chain.Config) error {
+	// This part already happens in InitializeArbosInDatabase
+	//var stateWriter state.StateWriter
+	//if block.Number().Sign() != 0 {
+	//	return nil, statedb, errors.New("can't commit genesis block with number > 0")
+	//}
+	//if err := statedb.CommitBlock(rules, stateWriter); err != nil {
+	//	return nil, statedb, fmt.Errorf("cannot write state: %w", err)
+	//}
+	//newCfg := gen.ConfigOrDefault(block.Root())
+	//if err := newCfg.CheckConfigForkOrder(); err != nil {
+	//	return err
+	//}
+
+	if err := WriteGenesisIfNotExist(tx, gen); err != nil {
+		return err
+	}
+	if err := rawdb.WriteBlock(tx, block); err != nil {
+		return err
+	}
+	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), difficulty); err != nil {
+		return err
+	}
+	if genesisBlockNum != block.NumberU64() {
+		return fmt.Errorf("genesis block number and given block number mismatches (gen %d != block %d)", genesisBlockNum, block.NumberU64())
+	}
+	if err := rawdbv3.TxNums.Append(tx, genesisBlockNum, uint64(block.Transactions().Len()+1)); err != nil {
+		return err
+	}
+	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
+		return err
+	}
+	rawdb.WriteHeadBlockHash(tx, block.Hash())
+	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
+		return err
+	}
+	if err := WriteChainConfig(tx, block.Hash(), cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Write writes the block a genesis specification to the database.
 // The block is committed as the canonical head block.
 func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) error {
@@ -483,9 +525,74 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
+	//head, withdrawals := rawdb.GenesisWithoutStateToBlock(g)
 	_ = g.Alloc //nil-check
+	head := &types.Header{
+		Number:        new(big.Int).SetUint64(g.Number),
+		Nonce:         types.EncodeNonce(g.Nonce),
+		Time:          g.Timestamp,
+		ParentHash:    g.ParentHash,
+		Extra:         g.ExtraData,
+		GasLimit:      g.GasLimit,
+		GasUsed:       g.GasUsed,
+		Difficulty:    g.Difficulty,
+		MixDigest:     g.Mixhash,
+		Coinbase:      g.Coinbase,
+		BaseFee:       g.BaseFee,
+		BlobGasUsed:   g.BlobGasUsed,
+		ExcessBlobGas: g.ExcessBlobGas,
+		RequestsHash:  g.RequestsHash,
+	}
+	if g.AuRaSeal != nil && len(g.AuRaSeal.AuthorityRound.Signature) > 0 {
+		head.AuRaSeal = g.AuRaSeal.AuthorityRound.Signature
+		head.AuRaStep = uint64(g.AuRaSeal.AuthorityRound.Step)
+	}
+	if g.GasLimit == 0 {
+		head.GasLimit = params.GenesisGasLimit
+	}
+	if g.Difficulty == nil {
+		head.Difficulty = params.GenesisDifficulty
+	}
+	if g.Config != nil && g.Config.IsLondon(0) {
+		if g.BaseFee != nil {
+			head.BaseFee = g.BaseFee
+		} else {
+			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+		}
+	}
 
-	head, withdrawals := GenesisWithoutStateToBlock(g)
+	arbosVersion := types.GetArbOSVersion(head, g.Config)
+
+	var withdrawals []*types.Withdrawal
+	if g.Config != nil && g.Config.IsShanghai(g.Timestamp, arbosVersion) {
+		withdrawals = []*types.Withdrawal{}
+	}
+
+	if g.Config != nil && g.Config.IsCancun(g.Timestamp, arbosVersion) {
+		if g.BlobGasUsed != nil {
+			head.BlobGasUsed = g.BlobGasUsed
+		} else {
+			head.BlobGasUsed = new(uint64)
+		}
+		if g.ExcessBlobGas != nil {
+			head.ExcessBlobGas = g.ExcessBlobGas
+		} else {
+			head.ExcessBlobGas = new(uint64)
+		}
+		if g.ParentBeaconBlockRoot != nil {
+			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
+		} else {
+			head.ParentBeaconBlockRoot = &common.Hash{}
+		}
+	}
+
+	if g.Config != nil && g.Config.IsPrague(g.Timestamp, arbosVersion) {
+		if g.RequestsHash != nil {
+			head.RequestsHash = g.RequestsHash
+		} else {
+			head.RequestsHash = &types.EmptyRequestsHash
+		}
+	}
 
 	var root common.Hash
 	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
@@ -597,79 +704,6 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	head.Root = root
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
-}
-
-// GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.
-func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawals []*types.Withdrawal) {
-	head = &types.Header{
-		Number:        new(big.Int).SetUint64(g.Number),
-		Nonce:         types.EncodeNonce(g.Nonce),
-		Time:          g.Timestamp,
-		ParentHash:    g.ParentHash,
-		Extra:         g.ExtraData,
-		GasLimit:      g.GasLimit,
-		GasUsed:       g.GasUsed,
-		Difficulty:    g.Difficulty,
-		MixDigest:     g.Mixhash,
-		Coinbase:      g.Coinbase,
-		BaseFee:       g.BaseFee,
-		BlobGasUsed:   g.BlobGasUsed,
-		ExcessBlobGas: g.ExcessBlobGas,
-		RequestsHash:  g.RequestsHash,
-		Root:          empty.RootHash,
-	}
-	if g.AuRaSeal != nil && len(g.AuRaSeal.AuthorityRound.Signature) > 0 {
-		head.AuRaSeal = g.AuRaSeal.AuthorityRound.Signature
-		head.AuRaStep = uint64(g.AuRaSeal.AuthorityRound.Step)
-	}
-	if g.GasLimit == 0 {
-		head.GasLimit = params.GenesisGasLimit
-	}
-	if g.Difficulty == nil {
-		head.Difficulty = params.GenesisDifficulty
-	}
-	if g.Config != nil && g.Config.IsLondon(0) {
-		if g.BaseFee != nil {
-			head.BaseFee = g.BaseFee
-		} else {
-			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
-		}
-	}
-
-	arbosVersion := types.GetArbOSVersion(head, g.Config)
-
-	withdrawals = nil
-	if g.Config != nil && g.Config.IsShanghai(g.Timestamp, arbosVersion) {
-		withdrawals = []*types.Withdrawal{}
-	}
-
-	if g.Config != nil && g.Config.IsCancun(g.Timestamp, arbosVersion) {
-		if g.BlobGasUsed != nil {
-			head.BlobGasUsed = g.BlobGasUsed
-		} else {
-			head.BlobGasUsed = new(uint64)
-		}
-		if g.ExcessBlobGas != nil {
-			head.ExcessBlobGas = g.ExcessBlobGas
-		} else {
-			head.ExcessBlobGas = new(uint64)
-		}
-		if g.ParentBeaconBlockRoot != nil {
-			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
-		} else {
-			head.ParentBeaconBlockRoot = &common.Hash{}
-		}
-	}
-
-	if g.Config != nil && g.Config.IsPrague(g.Timestamp, arbosVersion) {
-		if g.RequestsHash != nil {
-			head.RequestsHash = g.RequestsHash
-		} else {
-			head.RequestsHash = &empty.RequestsHash
-		}
-	}
-
-	return
 }
 
 func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
