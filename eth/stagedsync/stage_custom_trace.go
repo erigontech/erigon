@@ -188,7 +188,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", logger); err != nil {
 			return err
 		}
-		startBlock = _nextBlock
+		startBlock = to
 	}
 
 	logEvery := time.NewTicker(20 * time.Second)
