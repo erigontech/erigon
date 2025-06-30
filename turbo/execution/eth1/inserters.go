@@ -97,11 +97,11 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if err := rawdb.WriteTd(tx, header.Hash(), height, td); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeTd: %s", err)
 		}
-		fmt.Println(time.Now(), "end write td")
+		s := time.Now()
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
-		fmt.Println(time.Now(), "end write body")
+		fmt.Println(time.Now(), "end write body", "took", time.Since(s))
 		e.logger.Info("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 

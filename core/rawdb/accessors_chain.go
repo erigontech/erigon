@@ -628,6 +628,7 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 }
 
 func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
+	fmt.Println(time.Now(), "WriteRawBodyIfNotExists")
 	exists, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
 		return false, err
@@ -635,10 +636,12 @@ func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *
 	if exists {
 		return false, nil
 	}
+	fmt.Println(time.Now(), "WriteRawBodyIfNotExists: WriteRawBody")
 	return WriteRawBody(db, hash, number, body)
 }
 
 func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
+	fmt.Println(time.Now(), "IncrementSequence")
 	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
 		return false, err
@@ -649,9 +652,11 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
 	}
+	fmt.Println(time.Now(), "WriteBodyForStorage")
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
+	fmt.Println(time.Now(), "WriteRawTransactions")
 	if err = WriteRawTransactions(db, body.Transactions, data.BaseTxnID.First()); err != nil {
 		return false, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
