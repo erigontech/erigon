@@ -483,7 +483,11 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	var header *types.Header
+	header, err = api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	if err != nil {
+		return err
+	}
 	if header == nil {
 		stream.WriteNil()
 		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
