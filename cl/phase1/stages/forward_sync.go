@@ -137,42 +137,42 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 }
 
 func canDownloadColumnData(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
-	if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
-		return true
-	}
+	return cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling
 
-	// check if data is too far behind
-	// minimum_request_epoch = max(finalized_epoch, current_epoch - MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS, FULU_FORK_EPOCH)
-	// Get the current epoch from the first block
-	if len(blocks) == 0 {
-		return false
-	}
-	currentEpoch := cfg.ethClock.GetCurrentEpoch()
-
-	// Get finalized epoch from forkchoice store
-	//finalizedEpoch := cfg.forkChoice.FinalizedCheckpoint().Epoch
-
-	// Calculate minimum request epoch
-	minimumRequestEpoch := uint64(0)
-	if currentEpoch > cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests {
-		minEpoch := currentEpoch - cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests
-		if minEpoch > minimumRequestEpoch {
-			minimumRequestEpoch = minEpoch
-		}
-	}
-	if cfg.beaconCfg.FuluForkEpoch > minimumRequestEpoch {
-		minimumRequestEpoch = cfg.beaconCfg.FuluForkEpoch
-	}
-
-	// Check if any blocks are before minimum request epoch
-	for _, block := range blocks {
-		blockEpoch := block.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
-		if blockEpoch < minimumRequestEpoch {
+	// todo: comment out for now
+	/*
+		// check if data is too far behind
+		// minimum_request_epoch = max(finalized_epoch, current_epoch - MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS, FULU_FORK_EPOCH)
+		// Get the current epoch from the first block
+		if len(blocks) == 0 {
 			return false
 		}
-	}
+		currentEpoch := cfg.ethClock.GetCurrentEpoch()
 
-	return true
+		// Get finalized epoch from forkchoice store
+		//finalizedEpoch := cfg.forkChoice.FinalizedCheckpoint().Epoch
+
+		// Calculate minimum request epoch
+		minimumRequestEpoch := uint64(0)
+		if currentEpoch > cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests {
+			minEpoch := currentEpoch - cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests
+			if minEpoch > minimumRequestEpoch {
+				minimumRequestEpoch = minEpoch
+			}
+		}
+		if cfg.beaconCfg.FuluForkEpoch > minimumRequestEpoch {
+			minimumRequestEpoch = cfg.beaconCfg.FuluForkEpoch
+		}
+
+		// Check if any blocks are before minimum request epoch
+		for _, block := range blocks {
+			blockEpoch := block.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
+			if blockEpoch < minimumRequestEpoch {
+				return false
+			}
+		}
+
+		return true*/
 }
 
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
