@@ -253,7 +253,8 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		}
 		defer doms.Close()
 
-		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
+		di := &dbgInfo{}
+		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, di, logPrefix, logger); err != nil {
 			return err
 		}
 
