@@ -149,14 +149,15 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptFromDB, receipt *types.Receipt
+	var firstLogIndex uint32
 
 	defer func() {
 		if dbg.Enabled(ctx) {
 			log.Info("[dbg] ReceiptGenerator.GetReceipt",
 				"txNum", txNum,
 				"txHash", txnHash.String(),
-				"receiptFromDB", receiptFromDB,
-				"receiptFromGenerator", receipt)
+				"blockNum", blockNum,
+				"firstLogIndex", firstLogIndex)
 		}
 	}()
 
@@ -245,9 +246,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	defer func() {
 		if dbg.Enabled(ctx) {
 			log.Info("[dbg] ReceiptGenerator.GetReceipts",
-				"blockNum", block.NumberU64(),
-				"receiptsFromDB len", len(receiptsFromDB),
-				"receiptsFromGenerator len", len(receipts)) // maybe here could be something crucial but idk how to make it short&simple
+				"blockNum", block.NumberU64())
 		}
 	}()
 	if !rpcDisableRCache {

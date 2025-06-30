@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dbg"
-
 	"github.com/RoaringBitmap/roaring/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -402,12 +400,6 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64,
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (map[string]interface{}, error) {
-	var dbgPrefix string
-	dbgLogs := dbg.Enabled(ctx)
-	if dbgLogs {
-		dbgPrefix = "[dbg] GetTransactionReceipt"
-	}
-
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -453,10 +445,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	if !ok {
 		return nil, nil
-	}
-
-	if dbg.Enabled(ctx) {
-		log.Info(dbgPrefix, "blockNum", blockNum, "txNum from lookup", txNum, "txNum from txReader", txNumMin)
 	}
 
 	if txNumMin+1 > txNum && !isBorStateSyncTx {
