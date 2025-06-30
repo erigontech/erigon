@@ -219,10 +219,13 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
+	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false)
+	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false), nil); err != nil {
+	}, blockNumberOrHashRef, nil); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			/* Not sure. Here https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md it is not explicitly said that
 			   eth_call should only work with canonical blocks.
@@ -241,11 +244,13 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
+	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)
+	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true), nil); err != nil {
+	}, blockNumberOrHashRef, nil); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
