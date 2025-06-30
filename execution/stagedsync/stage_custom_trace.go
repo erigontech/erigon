@@ -268,10 +268,28 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 			}
 		}
 
+		if dbg.AssertEnabled {
+			if produce.LogAddr {
+				txNumsReader := cfg.BlockReader.TxnumReader(ctx)
+				_min, _ := txNumsReader.Min(tx, fromBlock)
+				_max, _ := txNumsReader.Max(tx, toBlock)
+
+				for i, _ := range di.logAddrs {
+					it, _ := tx.IndexRange(kv.LogAddrIdx, di.logAddrs[i][:], int(_min), int(_max), true, kv.Unlim)
+					isEmpty := !it.HasNext()
+					if isEmpty {
+						panic(fmt.Sprintf("assert: logAddr index is empty for range %d-%d, fromBlock=%d, toBlock=%d, addr=%x", _min, _min, fromBlock, toBlock, di.logAddrs[i]))
+					}
+				}
+				return nil
+			}
+		}
+
 		lastTxNum = doms.TxNum()
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+
 	}
 
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
