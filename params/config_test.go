@@ -146,15 +146,15 @@ func TestMainnetBlobSchedule(t *testing.T) {
 	c := MainnetChainConfig
 	// Original EIP-4844 values
 	time := c.CancunTime.Uint64()
-	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(time))
-	assert.Equal(t, uint64(3), c.GetTargetBlobsPerBlock(time))
-	assert.Equal(t, uint64(3338477), c.GetBlobGasPriceUpdateFraction(time))
+	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(time, 0))
+	assert.Equal(t, uint64(3), c.GetTargetBlobsPerBlock(time, 0))
+	assert.Equal(t, uint64(3338477), c.GetBlobGasPriceUpdateFraction(time, 0))
 
 	// EIP-7691: Blob throughput increase
 	time = c.PragueTime.Uint64()
-	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
-	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(time))
-	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
+	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time, 0))
+	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(time, 0))
+	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time, 0))
 }
 
 func TestGnosisBlobSchedule(t *testing.T) {
@@ -162,12 +162,12 @@ func TestGnosisBlobSchedule(t *testing.T) {
 
 	// Cancun values
 	time := c.CancunTime.Uint64()
-	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time))
-	assert.Equal(t, uint64(1), c.GetTargetBlobsPerBlock(time))
-	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time))
+	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time, 0))
+	assert.Equal(t, uint64(1), c.GetTargetBlobsPerBlock(time, 0))
+	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time, 0))
 
 	// should remain the same in Pectra for Gnosis
-	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time))
-	assert.Equal(t, uint64(1), c.GetTargetBlobsPerBlock(time))
-	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time))
+	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time, 0))
+	assert.Equal(t, uint64(1), c.GetTargetBlobsPerBlock(time, 0))
+	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time, 0))
 }
