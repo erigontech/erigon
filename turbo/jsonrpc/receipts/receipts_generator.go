@@ -188,7 +188,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, err
 	}
-	for i := txNum - 10; i < txNum+10; i++ {
+	for i := txNum - 100; i < txNum+100; i++ {
 		_, _, _firstLogIndex, _ := rawtemporaldb.ReceiptAsOf(tx, txNum)
 		fmt.Printf("[dbg] GetReceipt1: txNum=%d, _firstLogIndex=%d\n", i, _firstLogIndex)
 	}
