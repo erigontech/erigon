@@ -423,7 +423,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 			it, _ = tx.IndexRange(kv.LogAddrIdx, addr[:], int(from-1_000), int(to+1_000), true, kv.Unlim)
 			cnt, _ = stream.Count(it)
 			fmt.Printf("[dbg] getAddrsBitmapV3: addr=%x, from=%d, to=%d, it.cnt=%v\n", addr, from, to, cnt)
-			it, _ = tx.IndexRange(kv.LogAddrIdx, addr[:], 0, int(to+1_000_000), true, kv.Unlim)
+			it, _ = tx.IndexRange(kv.LogAddrIdx, addr[:], int(from-1_000_000), int(to+1_000_000), true, kv.Unlim)
 			cnt, _ = stream.Count(it)
 			fmt.Printf("[dbg] getAddrsBitmapV3: addr=%x, from=%d, to=%d, it.cnt=%v\n", addr, from, to, cnt)
 
