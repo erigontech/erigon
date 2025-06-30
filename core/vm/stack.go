@@ -57,6 +57,8 @@ func (st *Stack) pop() (ret uint256.Int) {
 	st.data = st.data[:len(st.data)-1]
 	return
 }
+func (st *Stack) Push(d *uint256.Int) { st.push(d) }
+func (st *Stack) Pop() uint256.Int    { return st.pop() }
 func (st *Stack) Cap() int {
 	return cap(st.data)
 }

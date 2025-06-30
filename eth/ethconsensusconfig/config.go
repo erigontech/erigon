@@ -22,6 +22,8 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
+	"github.com/erigontech/nitro-erigon/arbos"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
