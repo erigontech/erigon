@@ -25,6 +25,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -257,6 +258,13 @@ func TestT8n(t *testing.T) {
 func TestEvmRun(t *testing.T) {
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
+	}
+
+	if runtime.GOOS == "darwin" {
+		// We run race detector for medium tests which fails on macOS.
+		// This issue has already been reported for other tests.
+		// Important observation for further work on this: Only `statetest` test fails.
+		t.Skip("issue #15007")
 	}
 
 	t.Parallel()
