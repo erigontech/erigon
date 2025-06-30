@@ -254,8 +254,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		}
 		defer doms.Close()
 
-		di := &dbgInfo{}
-		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, di, logPrefix, logger); err != nil {
+		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
 
@@ -338,11 +337,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, 
 	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
 }
 
-type dbgInfo struct {
-	logAddrs []common.Address
-}
-
-func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, di *dbgInfo, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
@@ -424,9 +419,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				for _, lg := range txTask.Logs {
 					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
 						return err
-					}
-					if dbg.AssertEnabled {
-						di.logAddrs = append(di.logAddrs, lg.Address)
 					}
 				}
 			}
