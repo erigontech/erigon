@@ -23,14 +23,14 @@ import (
 	"io"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon-lib/common/empty"
 
 	"github.com/erigontech/erigon-lib/common"
 	length2 "github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/rlphacks"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
@@ -91,7 +91,7 @@ func (hb *HashBuilder) setProofElement(pe *proofElement) {
 	hb.proofElement = pe
 }
 
-func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAF %d\n", length)
 	}
@@ -121,7 +121,7 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 }
 
 // To be called internally
-func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlp.RlpSerializable) error {
 	// Compute the total length of binary representation
 	var kp, kl int
 	// Write key
@@ -166,9 +166,9 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 	return nil
 }
 
-func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
-	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
+	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalLen)
 
 	var writer io.Writer
 	var reader io.Reader
@@ -219,7 +219,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 	return nil
 }
 
-func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlp.RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAFHASH %d\n", length)
 	}
@@ -365,7 +365,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	}
 	valLen := hb.acc.EncodingLengthForHashing()
 	hb.acc.EncodeForHashing(hb.valBuf[:])
-	val := rlphacks.RlpEncodedBytes(hb.valBuf[:valLen])
+	val := rlp.RlpEncodedBytes(hb.valBuf[:valLen])
 	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
 	if err != nil {
 		return err
@@ -452,7 +452,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		kl = 1
 	}
 	totalLen := kp + kl + 33
-	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
+	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalLen)
 	hb.sha.Reset()
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
@@ -561,7 +561,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		}
 	}
 	hb.sha.Reset()
-	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalSize)
+	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalSize)
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
