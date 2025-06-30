@@ -225,6 +225,7 @@ Loop:
 	return nil
 }
 
+// customTraceBatchProduce [from:to)
 func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		ac := state2.AggTx(tx)
@@ -336,6 +337,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, 
 	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
 }
 
+// customTraceBatch [from:to)
 func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
@@ -408,6 +410,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						}
 					}
 				}
+
 				if err := rawdb.WriteReceiptCacheV2(doms, receipt); err != nil {
 					return err
 				}

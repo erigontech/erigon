@@ -102,6 +102,8 @@ func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*ty
 	return g.receiptCache.Get(hash)
 }
 
+var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
+
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := g.blockReader.TxnumReader(ctx)
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, txNumsReader, tx, txIndex)
@@ -147,21 +149,26 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	txnHash := txn.Hash()
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptFromDB, ok, err := rawdb.ReadReceiptCache(tx, blockNum, blockHash, uint32(index), txnHash)
-	if err != nil {
-		return nil, err
-	}
-	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-		return receiptFromDB, nil
-	}
+	var receiptFromDB *types.Receipt
+	var ok bool
+	var err error
+	if !rpcDisableRCache {
+		receiptFromDB, ok, err = rawdb.ReadReceiptCache(tx, blockNum, blockHash, uint32(index), txnHash)
+		if err != nil {
+			return nil, err
+		}
+		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+			return receiptFromDB, nil
+		}
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-1, txnHash)
-	if err != nil {
-		return nil, err
-	}
-	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-		return receiptFromDB, nil
+		//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum, txnHash)
+		if err != nil {
+			return nil, err
+		}
+		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+			return receiptFromDB, nil
+		}
 	}
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
@@ -184,7 +191,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
-	cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+	cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
 	}
@@ -215,22 +222,26 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptsFromDB, err := rawdb.ReadReceiptsCache(tx, block)
-	if err != nil {
-		return nil, err
-	}
-	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
-		return receiptsFromDB, nil
-	}
+	var receiptsFromDB types.Receipts
+	var err error
+	if !rpcDisableRCache {
+		//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+		receiptsFromDB, err = rawdb.ReadReceiptsCache(tx, block)
+		if err != nil {
+			return nil, err
+		}
+		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+			return receiptsFromDB, nil
+		}
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
-	if err != nil {
-		return nil, err
-	}
-	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
-		return receiptsFromDB, nil
+		//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		if err != nil {
+			return nil, err
+		}
+		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+			return receiptsFromDB, nil
+		}
 	}
 
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
@@ -278,18 +289,19 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	}
 
 	generated := fromExecution.Copy()
+	blkNum := generated.BlockNumber.Uint64()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
-		panic(fmt.Sprintf("assert: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
+		panic(fmt.Sprintf("assert TransactionIndex: bn=%d, ti=%d, %d, %d", blkNum, generated.TransactionIndex, generated.TransactionIndex, fromDB.TransactionIndex))
 	}
 	if generated.FirstLogIndexWithinBlock != fromDB.FirstLogIndexWithinBlock {
-		panic(fmt.Sprintf("assert: %d, %d", generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
+		panic(fmt.Sprintf("assert FirstLogIndexWithinBlock: bn=%d, ti=%d, %d, %d", blkNum, generated.TransactionIndex, generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
 	}
 
 	for i := range generated.Logs {
 		a := toJson(generated.Logs[i])
 		b := toJson(fromDB.Logs[i])
 		if a != b {
-			panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+			panic(fmt.Sprintf("assert: %v, bn=%d, ti=%d", cmp.Diff(a, b), blkNum, generated.TransactionIndex))
 		}
 	}
 	fromDB.Logs, generated.Logs = nil, nil
@@ -297,7 +309,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	a := toJson(generated)
 	b := toJson(fromDB)
 	if a != b {
-		panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+		panic(fmt.Sprintf("assert: %v, bn=%d, ti=%d", cmp.Diff(a, b), blkNum, generated.TransactionIndex))
 	}
 }
 

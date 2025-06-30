@@ -57,6 +57,7 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	return nil
 }
 
+// ReceiptsNoDuplicatesRange checks that cumGasUsed and logIndex in receipts are monotonic
 func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	blockRange := toBlock - fromBlock + 1
 	if blockRange == 0 {

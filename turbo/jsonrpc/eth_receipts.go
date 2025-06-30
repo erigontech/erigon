@@ -258,7 +258,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum+1)
+		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum)
 		if err != nil {
 			return nil, err
 		}
@@ -475,7 +475,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	if txNumMin+2 > txNum { //TODO: what a magic is this "2" and how to avoid it
+	if txNumMin+1 > txNum { //TODO: what a magic is this "2" and how to avoid it
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
@@ -484,7 +484,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	var txnIndex = int(txNum - txNumMin - 2)
+	var txnIndex = int(txNum - txNumMin - 1)
 
 	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
 	if err != nil {
