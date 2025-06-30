@@ -143,7 +143,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 	prevLogIdx := uint32(0)
 	prevBN := uint64(1)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
-		cumUsedGas, _, logIdx, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+		cumUsedGas, _, logIdx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 		if err != nil {
 			return err
 		}
@@ -158,7 +158,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		_max, _ := txNumsReader.Max(tx, blockNum)
 
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
-		if !strongMonotonicCumGasUsed && cumUsedGas != 0 {
+		if !strongMonotonicCumGasUsed && txNum != _min && txNum != _max { // system tx can be skipped
 			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
 			if failFast {
 				return err
