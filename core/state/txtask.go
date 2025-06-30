@@ -122,7 +122,11 @@ func (t *TxTask) Sender() *common.Address {
 }
 
 func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
-	if t.TxIndex < 0 || t.Final {
+	if t.TxIndex < 0 {
+		return
+	}
+	if t.Final {
+		t.BlockReceipts.AssertLogIndex(t.BlockNum)
 		return
 	}
 
@@ -147,7 +151,6 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
 		panic(msg)
 	}
-
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	t.BlockReceipts[t.TxIndex] = r
 }
