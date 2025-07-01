@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
@@ -141,13 +140,22 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 
 	prevCumUsedGas := -1
 	prevLogIdx := uint32(0)
-	prevBN := uint64(1)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
 		cumUsedGas, _, logIdx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 		if err != nil {
 			return err
 		}
-		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
+		blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			err := fmt.Errorf("CheckReceiptsNoDups: didn't find block at txnum: %d", txNum)
+			if failFast {
+				return err
+			}
+			log.Error(err.Error())
+		}
 		_min, _ := txNumsReader.Min(tx, blockNum)
 		blockChanged := txNum == _min
 		if blockChanged {
@@ -177,7 +185,6 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 
 		prevCumUsedGas = int(cumUsedGas)
 		prevLogIdx = logIdx
-		prevBN = blockNum
 
 		select {
 		case <-ctx.Done():
@@ -186,14 +193,4 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		}
 	}
 	return nil
-}
-
-func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsReader, curTxNum uint64) uint64 {
-	txNumMax, _ := txNumsReader.Max(tx, fromBlock)
-	i := uint64(0)
-	for txNumMax < curTxNum {
-		i++
-		txNumMax, _ = txNumsReader.Max(tx, fromBlock+i)
-	}
-	return fromBlock + i
 }
