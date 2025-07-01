@@ -29,6 +29,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon/internal/reexec"
 	"github.com/erigontech/erigon/turbo/cmdtest"
 )
@@ -259,8 +260,8 @@ func TestEvmRun(t *testing.T) {
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
 	}
-
-	if runtime.GOOS == "darwin" {
+	//goland:noinspection GoBoolExpressions
+	if race.Enabled && runtime.GOOS == "darwin" {
 		// We run race detector for medium tests which fails on macOS.
 		// This issue has already been reported for other tests.
 		// Important observation for further work on this: Only `statetest` test fails.
