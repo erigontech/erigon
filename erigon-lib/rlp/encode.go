@@ -32,7 +32,7 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// https://github.com/ethereum/wiki/wiki/RLP
+// https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/
 const (
 	// EmptyStringCode is the RLP code for empty strings.
 	EmptyStringCode = 0x80
@@ -495,7 +495,7 @@ func makeEncoderWriter(typ reflect.Type) writer {
 			// package json simply doesn't call MarshalJSON for this case, but encodes the
 			// value as if it didn't implement the interface. We don't want to handle it that
 			// way.
-			return fmt.Errorf("rlp: unadressable value of type %v, EncodeRLP is pointer method", val.Type())
+			return fmt.Errorf("rlp: unaddressable value of type %v, EncodeRLP is pointer method", val.Type())
 		}
 		return val.Addr().Interface().(Encoder).EncodeRLP(w)
 	}

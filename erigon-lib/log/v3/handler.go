@@ -1,6 +1,7 @@
 package log
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -18,18 +19,16 @@ import (
 // them to achieve the logging structure that suits your applications.
 type Handler interface {
 	Log(r *Record) error
-}
-
-// FuncHandler returns a Handler that logs records with the given
-// function.
-func FuncHandler(fn func(r *Record) error) Handler {
-	return funcHandler(fn)
-}
-
-type funcHandler func(r *Record) error
-
-func (h funcHandler) Log(r *Record) error {
-	return h(r)
+	// Enabled reports whether the handler handles records at the given level.
+	// The handler ignores records whose level is higher.
+	// It is called early, before any arguments are processed,
+	// to save effort if the log event should be discarded.
+	// If called from a Logger method, the first argument is the context
+	// passed to that method, or context.Background() if nil was passed
+	// or the method does not take a context.
+	// The context is passed so Enabled can use its values
+	// to make a decision.
+	Enabled(ctx context.Context, lvl Lvl) bool
 }
 
 // StreamHandler writes log records to an io.Writer
@@ -40,11 +39,21 @@ func (h funcHandler) Log(r *Record) error {
 // StreamHandler wraps itself with LazyHandler and SyncHandler
 // to evaluate Lazy objects and perform safe concurrent writes.
 func StreamHandler(wr io.Writer, fmtr Format) Handler {
-	h := FuncHandler(func(r *Record) error {
-		_, err := wr.Write(fmtr.Format(r))
-		return err
-	})
-	return LazyHandler(SyncHandler(h))
+	return LazyHandler(SyncHandler(streamHandler{wr: wr, fmtr: fmtr}))
+}
+
+type streamHandler struct {
+	wr   io.Writer
+	fmtr Format
+}
+
+func (h streamHandler) Log(r *Record) error {
+	_, err := h.wr.Write(h.fmtr.Format(r))
+	return err
+}
+
+func (h streamHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return true
 }
 
 // SyncHandler can be wrapped around a handler to guarantee that
@@ -52,11 +61,22 @@ func StreamHandler(wr io.Writer, fmtr Format) Handler {
 // for thread-safe concurrent writes.
 func SyncHandler(h Handler) Handler {
 	var mu sync.Mutex
-	return FuncHandler(func(r *Record) error {
-		defer mu.Unlock()
-		mu.Lock()
-		return h.Log(r)
-	})
+	return syncHandler{mu: &mu, h: h}
+}
+
+type syncHandler struct {
+	mu *sync.Mutex
+	h  Handler
+}
+
+func (h syncHandler) Log(r *Record) error {
+	defer h.mu.Unlock()
+	h.mu.Lock()
+	return h.h.Log(r)
+}
+
+func (h syncHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 const DefaultLogMaxSize = 1 << 27 // 128 Mb
@@ -134,34 +154,65 @@ func (h *closingHandler) Close() error {
 // CallerFileHandler returns a Handler that adds the line number and file of
 // the calling function to the context with key "caller".
 func CallerFileHandler(h Handler) Handler {
-	return FuncHandler(func(r *Record) error {
-		r.Ctx = append(r.Ctx, "caller", fmt.Sprint(r.Call(6)))
-		return h.Log(r)
-	})
+	return callerFileHandler{h: h}
+}
+
+type callerFileHandler struct {
+	h Handler
+}
+
+func (h callerFileHandler) Log(r *Record) error {
+	r.Ctx = append(r.Ctx, "caller", fmt.Sprint(r.Call(5)))
+	return h.h.Log(r)
+}
+
+func (h callerFileHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // CallerFuncHandler returns a Handler that adds the calling function name to
 // the context with key "fn".
 func CallerFuncHandler(h Handler) Handler {
-	return FuncHandler(func(r *Record) error {
-		r.Ctx = append(r.Ctx, "fn", fmt.Sprintf("%+n", r.Call(6)))
-		return h.Log(r)
-	})
+	return callerFuncHandler{h: h}
+}
+
+type callerFuncHandler struct {
+	h Handler
+}
+
+func (h callerFuncHandler) Log(r *Record) error {
+	r.Ctx = append(r.Ctx, "fn", fmt.Sprintf("%+n", r.Call(5)))
+	return h.h.Log(r)
+}
+
+func (h callerFuncHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // CallerStackHandler returns a Handler that adds a stack trace to the context
-// with key "stack". The stack trace is formated as a space separated list of
+// with key "stack". The stack trace is formatted as a space separated list of
 // call sites inside matching []'s. The most recent call site is listed first.
 // Each call site is formatted according to format. See the documentation of
 // package github.com/go-stack/stack for the list of supported formats.
 func CallerStackHandler(format string, h Handler) Handler {
-	return FuncHandler(func(r *Record) error {
-		s := stack.Trace().TrimBelow(r.Call(6)).TrimRuntime()
-		if len(s) > 0 {
-			r.Ctx = append(r.Ctx, "stack", fmt.Sprintf(format, s))
-		}
-		return h.Log(r)
-	})
+	return callerStackHandler{format: format, h: h}
+}
+
+type callerStackHandler struct {
+	format string
+	h      Handler
+}
+
+func (h callerStackHandler) Log(r *Record) error {
+	s := stack.Trace().TrimBelow(r.Call(5)).TrimRuntime()
+	if len(s) > 0 {
+		r.Ctx = append(r.Ctx, "stack", fmt.Sprintf(h.format, s))
+	}
+	return h.h.Log(r)
+}
+
+func (h callerStackHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // FilterHandler returns a Handler that only writes records to the
@@ -177,12 +228,23 @@ func CallerStackHandler(format string, h Handler) Handler {
 //	    return false
 //	}, h))
 func FilterHandler(fn func(r *Record) bool, h Handler) Handler {
-	return FuncHandler(func(r *Record) error {
-		if fn(r) {
-			return h.Log(r)
-		}
-		return nil
-	})
+	return filterHandler{fn: fn, h: h}
+}
+
+type filterHandler struct {
+	fn func(r *Record) bool
+	h  Handler
+}
+
+func (h filterHandler) Log(r *Record) error {
+	if h.fn(r) {
+		return h.h.Log(r)
+	}
+	return nil
+}
+
+func (h filterHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // MatchFilterHandler returns a Handler that only writes records
@@ -218,12 +280,27 @@ func MatchFilterHandler(key string, value interface{}, h Handler) Handler {
 //
 //	log.LvlFilterHandler(log.LvlError, log.StdoutHandler)
 func LvlFilterHandler(maxLvl Lvl, h Handler) Handler {
-	return FilterHandler(func(r *Record) (pass bool) {
-		return r.Lvl <= maxLvl
-	}, h)
+	return lvlFilterHandler{maxLvl: maxLvl, h: h}
+}
+
+type lvlFilterHandler struct {
+	maxLvl Lvl
+	h      Handler
+}
+
+func (h lvlFilterHandler) Log(r *Record) error {
+	if h.Enabled(context.Background(), r.Lvl) {
+		return h.h.Log(r)
+	}
+	return nil
+}
+
+func (h lvlFilterHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return lvl <= h.maxLvl
 }
 
 // MultiHandler dispatches any write to each of its handlers.
+// It also provides the max log lvl across all sub-handlers.
 // This is useful for writing different types of log information
 // to different locations. For example, to log to a file and
 // standard error:
@@ -232,18 +309,47 @@ func LvlFilterHandler(maxLvl Lvl, h Handler) Handler {
 //	    log.Must.FileHandler("/var/log/app.log", log.LogfmtFormat()),
 //	    log.StderrHandler)
 func MultiHandler(hs ...Handler) Handler {
-	return FuncHandler(func(r *Record) error {
-		for _, h := range hs {
-			// what to do about failures?
-			h.Log(r)
+	return multiHandler{hs: hs}
+}
+
+type multiHandler struct {
+	hs []Handler
+}
+
+func (h multiHandler) Log(r *Record) error {
+	var accErr error
+	for i, subH := range h.hs {
+		if !subH.Enabled(context.Background(), r.Lvl) {
+			continue
 		}
-		return nil
-	})
+		err := subH.Log(r)
+		if err == nil {
+			continue
+		}
+
+		err = fmt.Errorf("handler %d failed: %w", i, err)
+		if accErr == nil {
+			accErr = err
+		} else {
+			accErr = fmt.Errorf("%w: %w", accErr, err)
+		}
+	}
+	return accErr
+}
+
+func (h multiHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	for _, subH := range h.hs {
+		if subH.Enabled(ctx, lvl) {
+			return true
+		}
+	}
+	return false
 }
 
 // FailoverHandler writes all log records to the first handler
 // specified, but will failover and write to the second handler if
 // the first handler has failed, and so on for all handlers specified.
+// It also provides the max log lvl across all failover handlers.
 // For example you might want to log to a network socket, but failover
 // to writing to a file if the network fails, and then to
 // standard out if the file write fails:
@@ -257,27 +363,52 @@ func MultiHandler(hs ...Handler) Handler {
 // the form "failover_err_{idx}" which explain the error encountered while
 // trying to write to the handlers before them in the list.
 func FailoverHandler(hs ...Handler) Handler {
-	return FuncHandler(func(r *Record) error {
-		var err error
-		for i, h := range hs {
-			err = h.Log(r)
-			if err == nil {
-				return nil
-			}
-			r.Ctx = append(r.Ctx, fmt.Sprintf("failover_err_%d", i), err)
+	return failoverHandler{hs: hs}
+}
+
+type failoverHandler struct {
+	hs []Handler
+}
+
+func (h failoverHandler) Log(r *Record) error {
+	var err error
+	for i, subH := range h.hs {
+		err = subH.Log(r)
+		if err == nil {
+			return nil
 		}
-		return err
-	})
+		r.Ctx = append(r.Ctx, fmt.Sprintf("failover_err_%d", i), err)
+	}
+	return err
+}
+
+func (h failoverHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	for _, subH := range h.hs {
+		if subH.Enabled(ctx, lvl) {
+			return true
+		}
+	}
+	return false
 }
 
 // ChannelHandler writes all records to the given channel.
 // It blocks if the channel is full. Useful for async processing
 // of log messages, it's used by BufferedHandler.
 func ChannelHandler(recs chan<- *Record) Handler {
-	return FuncHandler(func(r *Record) error {
-		recs <- r
-		return nil
-	})
+	return channelHandler{recs: recs}
+}
+
+type channelHandler struct {
+	recs chan<- *Record
+}
+
+func (h channelHandler) Log(r *Record) error {
+	h.recs <- r
+	return nil
+}
+
+func (h channelHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return true
 }
 
 // BufferedHandler writes all records to a buffered
@@ -292,7 +423,20 @@ func BufferedHandler(bufSize int, h Handler) Handler {
 			_ = h.Log(m)
 		}
 	}()
-	return ChannelHandler(recs)
+	return bufferedHandler{baseHandler: h, channelHandler: channelHandler{recs}}
+}
+
+type bufferedHandler struct {
+	baseHandler    Handler
+	channelHandler channelHandler
+}
+
+func (h bufferedHandler) Log(r *Record) error {
+	return h.channelHandler.Log(r)
+}
+
+func (h bufferedHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.baseHandler.Enabled(ctx, lvl)
 }
 
 // LazyHandler writes all values to the wrapped handler after evaluating
@@ -300,32 +444,42 @@ func BufferedHandler(bufSize int, h Handler) Handler {
 // around StreamHandler and SyslogHandler in this library, you'll only need
 // it if you write your own Handler.
 func LazyHandler(h Handler) Handler {
-	return FuncHandler(func(r *Record) error {
-		// go through the values (odd indices) and reassign
-		// the values of any lazy fn to the result of its execution
-		hadErr := false
-		for i := 1; i < len(r.Ctx); i += 2 {
-			lz, ok := r.Ctx[i].(Lazy)
-			if ok {
-				v, err := evaluateLazy(lz)
-				if err != nil {
-					hadErr = true
-					r.Ctx[i] = err
-				} else {
-					if cs, ok := v.(stack.CallStack); ok {
-						v = cs.TrimBelow(r.Call(6)).TrimRuntime()
-					}
-					r.Ctx[i] = v
+	return lazyHandler{h: h}
+}
+
+type lazyHandler struct {
+	h Handler
+}
+
+func (h lazyHandler) Log(r *Record) error {
+	// go through the values (odd indices) and reassign
+	// the values of any lazy fn to the result of its execution
+	hadErr := false
+	for i := 1; i < len(r.Ctx); i += 2 {
+		lz, ok := r.Ctx[i].(Lazy)
+		if ok {
+			v, err := evaluateLazy(lz)
+			if err != nil {
+				hadErr = true
+				r.Ctx[i] = err
+			} else {
+				if cs, ok := v.(stack.CallStack); ok {
+					v = cs.TrimBelow(r.Call(5)).TrimRuntime()
 				}
+				r.Ctx[i] = v
 			}
 		}
+	}
 
-		if hadErr {
-			r.Ctx = append(r.Ctx, errorKey, "bad lazy")
-		}
+	if hadErr {
+		r.Ctx = append(r.Ctx, errorKey, "bad lazy")
+	}
 
-		return h.Log(r)
-	})
+	return h.h.Log(r)
+}
+
+func (h lazyHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 func evaluateLazy(lz Lazy) (interface{}, error) {
@@ -359,9 +513,17 @@ func evaluateLazy(lz Lazy) (interface{}, error) {
 // It is useful for dynamically disabling logging at runtime via
 // a Logger's SetHandler method.
 func DiscardHandler() Handler {
-	return FuncHandler(func(r *Record) error {
-		return nil
-	})
+	return discardHandler{}
+}
+
+type discardHandler struct{}
+
+func (h discardHandler) Log(r *Record) error {
+	return nil
+}
+
+func (h discardHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return false
 }
 
 // Must object provides the following Handler creation functions
@@ -394,6 +556,10 @@ type swapHandler struct {
 
 func (h *swapHandler) Log(r *Record) error {
 	return (*h.handler.Load().(*Handler)).Log(r)
+}
+
+func (h *swapHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return (*h.handler.Load().(*Handler)).Enabled(ctx, lvl)
 }
 
 func (h *swapHandler) Swap(newHandler Handler) {
