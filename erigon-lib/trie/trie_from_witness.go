@@ -5,7 +5,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/rlphacks"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
@@ -18,7 +18,7 @@ func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 			}
 			keyHex := op.Key
 			val := op.Value
-			if err := hb.leaf(len(op.Key), keyHex, rlphacks.RlpSerializableBytes(val)); err != nil {
+			if err := hb.leaf(len(op.Key), keyHex, rlp.RlpSerializableBytes(val)); err != nil {
 				return nil, err
 			}
 		case *OperatorExtension:
