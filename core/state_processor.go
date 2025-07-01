@@ -320,7 +320,7 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 	//	Data:      prevHash.Bytes(),
 	//}
 	msg := types.NewMessage(
-		chain.SystemAddress,
+		state.SystemAddress,
 		&params.HistoryStorageAddress,
 		0,
 		common.Num0,
@@ -415,9 +415,9 @@ var depositTopic = common.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912
 //}
 
 //func onSystemCallStart(tracer *tracing.Hooks, ctx *tracing.VMContext) {
-//	//if tracer.OnSystemCallStartV2 != nil {
-//	//	tracer.OnSystemCallStartV2(ctx)
-//	//} else if tracer.OnSystemCallStart != nil {
-//	tracer.OnSystemCallStart()
-//	//}
+//	if tracer.OnSystemCallStartV2 != nil {
+//		tracer.OnSystemCallStartV2(ctx)
+//	} else if tracer.OnSystemCallStart != nil {
+//		tracer.OnSystemCallStart()
+//	}
 //}
