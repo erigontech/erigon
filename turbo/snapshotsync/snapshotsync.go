@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -287,7 +286,7 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 // isTransactionsSegmentExpired - check if the transactions segment is expired according to whichever history expiry policy we use.
 func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snapcfg.PreverifiedItem) bool {
 	// History expiry is the default.
-	if pruneMode.Blocks != prune.DefaultBlocksPruneMode || !dbg.EnableHistoryExpiry {
+	if pruneMode.Blocks != prune.DefaultBlocksPruneMode {
 		return false
 	}
 
@@ -379,9 +378,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if _, ok := blackListForPruning[p.Name]; ok {
 			continue
 		}
-		// if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
-		// 	continue
-		// }
+		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
+			continue
+		}
 
 		downloadRequest = append(downloadRequest, NewDownloadRequest(p.Name, p.Hash))
 	}
