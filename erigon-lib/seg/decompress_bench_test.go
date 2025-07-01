@@ -50,30 +50,16 @@ func BenchmarkDecompress(b *testing.B) {
 			}
 		}
 	})
-}
-
-func BenchmarkDecompressMatchCmp(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-	for i := 0; i < b.N; i++ {
-		_ = g.MatchCmp([]byte("longlongword"))
-		if !g.HasNext() {
-			g.Reset(0)
+	b.Run("matchcmp", func(b *testing.B) {
+		b.ReportAllocs()
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			_ = g.MatchCmp([]byte("longlongword"))
+			if !g.HasNext() {
+				g.Reset(0)
+			}
 		}
-	}
-}
-
-func BenchmarkDecompressMatchPrefix(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-
-	for i := 0; i < b.N; i++ {
-		_ = g.MatchPrefix([]byte("longlongword"))
-	}
+	})
 }
 
 func BenchmarkDecompressTorrent(t *testing.B) {
