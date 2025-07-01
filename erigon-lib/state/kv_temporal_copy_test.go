@@ -561,6 +561,9 @@ func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
+func (tx *Tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
+	return tx.aggtx.TxNumsInFiles(domains...)
+}
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 	return tx.aggtx.TxNumsInFiles(domains...)
 }
