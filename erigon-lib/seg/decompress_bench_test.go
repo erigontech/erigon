@@ -24,45 +24,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func BenchmarkDecompressNext(b *testing.B) {
+func BenchmarkDecompress(b *testing.B) {
 	t := new(testing.T)
 	d := prepareDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
-	for i := 0; i < b.N; i++ {
-		_, _ = g.Next(nil)
-		if !g.HasNext() {
-			g.Reset(0)
-		}
-	}
-}
+	var buf []byte
 
-func BenchmarkDecompressFastNext(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-	buf := make([]byte, 100)
-	for i := 0; i < b.N; i++ {
-		_, _ = g.FastNext(buf)
-		if !g.HasNext() {
-			g.Reset(0)
+	b.Run("next", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			buf, _ = g.Next(buf[:0])
+			if !g.HasNext() {
+				g.Reset(0)
+			}
 		}
-	}
-}
-
-func BenchmarkDecompressSkip(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-
-	for i := 0; i < b.N; i++ {
-		_, _ = g.Skip()
-		if !g.HasNext() {
-			g.Reset(0)
+	})
+	b.Run("skip", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, _ = g.Skip()
+			if !g.HasNext() {
+				g.Reset(0)
+			}
 		}
-	}
+	})
 }
 
 func BenchmarkDecompressMatchCmp(b *testing.B) {

@@ -17,6 +17,7 @@
 package seg
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"hash/crc32"
@@ -93,17 +94,19 @@ func prepareDict(t *testing.T) *Decompressor {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	k := bytes.Repeat([]byte("long"), 100_000)
+	v := bytes.Repeat([]byte("word"), 100_000)
 	for i := 0; i < 100; i++ {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
-		if err = c.AddWord([]byte("long")); err != nil {
+		if err = c.AddWord(k); err != nil {
 			t.Fatal(err)
 		}
-		if err = c.AddWord([]byte("word")); err != nil {
+		if err = c.AddWord(v); err != nil {
 			t.Fatal(err)
 		}
-		if err = c.AddWord([]byte(fmt.Sprintf("%d longlongword %d", i, i))); err != nil {
+		if err = c.AddWord(bytes.Repeat([]byte(fmt.Sprintf("%d longlongword %d", i, i)), 100_000)); err != nil {
 			t.Fatal(err)
 		}
 	}

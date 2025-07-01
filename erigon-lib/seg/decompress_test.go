@@ -756,44 +756,6 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 	}
 }
 
-func TestDecompressRandomFastNext(t *testing.T) {
-	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
-	defer d.Close()
-
-	if d.wordsCount != uint64(len(INPUT_FLAGS)) {
-		t.Fatalf("TestDecompressRandomDict: d.wordsCount != len(INPUT_FLAGS)")
-	}
-
-	g := d.MakeGetter()
-
-	word_idx := 0
-	input_idx := 0
-	total := 0
-	buf := make([]byte, (1 << 23))
-	// check for existing and non existing keys
-	for g.HasNext() {
-		if INPUT_FLAGS[input_idx] == 0 { // []byte input
-			expected := WORDS[word_idx]
-			word, _ := g.FastNext(buf)
-			if bytes.Compare(expected, word) != 0 {
-				t.Fatalf("1 expected: %v, got %v\n", expected, word)
-			}
-			word_idx++
-		} else { // nil input
-			expected := []byte{}
-			word, _ := g.FastNext(buf)
-			if bytes.Compare(expected, word) != 0 {
-				t.Fatalf("2 expected: %v, got %v\n", expected, word)
-			}
-		}
-		input_idx++
-		total++
-	}
-	if total != int(d.wordsCount) {
-		t.Fatalf("expected word count: %d, got %d\n", int(d.wordsCount), total)
-	}
-}
-
 // func TestDecompressRandomDict(t *testing.T) {
 // 	d := prepareRandomDict(t)
 // 	defer d.Close()
