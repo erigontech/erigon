@@ -283,7 +283,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			return nil
 		})
 
-		if bn%1000 == 0 {
+		if bn%1000 == 0 || bn == blockTo-1 {
 			if err := eg.Wait(); err != nil {
 				return err
 			}
