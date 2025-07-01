@@ -61,12 +61,12 @@ func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 	}
 
 	numWorkers := runtime.NumCPU()
-	chunkSize := uint64(1000)
+	chunkSize := uint64(10000)
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
-	var completedChunks atomic.Uint64
-	var totalChunks uint64 = (blockRange + chunkSize - 1) / chunkSize
+	var completedBlocks atomic.Uint64
+	var totalCompletedBlocks uint64 = blockRange + chunkSize - 1
 	log.Info("[integrity] ReceiptsNoDups using parallel processing", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -78,8 +78,8 @@ func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 			case <-ctx.Done():
 				return
 			case <-logEvery.C:
-				completed := completedChunks.Load()
-				progress := float64(completed) / float64(totalChunks) * 100
+				completed := completedBlocks.Load()
+				progress := float64(completed) / float64(totalCompletedBlocks) * 100
 				log.Info("[integrity] CheckReceiptsNoDups progress", "progress", fmt.Sprintf("%.1f%%", progress))
 			}
 		}
@@ -87,7 +87,7 @@ func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 
 	initialChunkSize := chunkSize
 
-	minChunkSize := initialChunkSize / 10
+	minChunkSize := initialChunkSize / 100
 
 	steps := uint64(10)
 	totalBlocks := toBlock - fromBlock
@@ -95,8 +95,8 @@ func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 
 	// Process chunks in parallel
 	for start := fromBlock; start <= toBlock; start += chunkSize {
-		progress := start - fromBlock
-		step := progress / stepSize
+		progressBlocks := start - fromBlock
+		step := progressBlocks / stepSize
 		if step > steps {
 			step = steps
 		}
@@ -127,7 +127,7 @@ func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 				return chunkErr
 			}
 
-			completedChunks.Add(1)
+			completedBlocks.Add(chunkSize)
 			return nil
 		})
 	}
