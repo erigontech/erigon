@@ -144,12 +144,13 @@ func (d *peerdas) Prune(keepSlotDistance uint64) error {
 
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 	recover := func(toRecover recoverBlobsRequest) {
-		log.Debug("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
+		begin := time.Now()
+		log.Trace("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
 		ctx := context.Background()
 		slot, blockRoot := toRecover.slot, toRecover.blockRoot
 		existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
 		if err != nil {
-			log.Debug("[blobsRecover] failed to get saved column index", "err", err)
+			log.Warn("[blobsRecover] failed to get saved column index", "err", err)
 			return
 		}
 		if len(existingColumns) < int(d.beaconConfig.NumberOfColumns+1)/2 {
@@ -163,7 +164,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		for _, columnIndex := range existingColumns {
 			sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
 			if err != nil {
-				log.Debug("[blobsRecover] failed to read column sidecar", "err", err)
+				log.Warn("[blobsRecover] failed to read column sidecar", "err", err)
 				return
 			}
 			for i := 0; i < sidecar.Column.Len(); i++ {
@@ -184,7 +185,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			log.Warn("[blobsRecover] failed to recover matrix", "err", err, "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 			return
 		}
-		log.Debug("[blobsRecover] recovered matrix", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
+		log.Trace("[blobsRecover] recovered matrix", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
 		// Recover blobs from the matrix
 		blobSidecars := make([]*cltypes.BlobSidecar, 0, len(blobMatrix))
@@ -227,7 +228,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			log.Warn("[blobsRecover] failed to write blob sidecars", "err", err, "slot", slot, "blockRoot", blockRoot)
 			return
 		}
-		log.Debug("[blobsRecover] saved blobs", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
+		log.Trace("[blobsRecover] saved blobs", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
 		// remove column sidecars that are not in our custody group
 		custodyColumns, err := d.state.GetMyCustodyColumns()
@@ -242,7 +243,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				}
 			}
 		}
-		log.Debug("[blobsRecover] removed column sidecars", "slot", slot, "blockRoot", blockRoot, "numberOfColumns", len(existingColumns))
+		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin))
 	}
 
 	// main loop
@@ -281,7 +282,8 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
-	if d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot) {
+	if !d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot) {
+		// no need to recover if column data is not over 50% or the blobs are already recovered
 		return nil
 	}
 
@@ -397,11 +399,24 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	// send the request
 	go requestColumnSidecars(req)
 
+	// check if the column data is over half at the same time because we might also receive the column sidecars from other peers
+	halfCheckTicker := time.NewTicker(500 * time.Millisecond)
+	defer halfCheckTicker.Stop()
 mainloop:
 	for {
 		select {
 		case <-ctx.Done():
 			break mainloop
+		case <-halfCheckTicker.C:
+			for _, blockRoot := range req.remainingBlockRoots() {
+				if d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot) {
+					// no need to schedule recovery for this block because someone else will do it
+					req.removeBlock(blockRoot)
+				}
+			}
+			if req.requestData().Len() == 0 {
+				break mainloop
+			}
 		case result := <-resultChan:
 			if result.err != nil {
 				log.Debug("failed to download columns from peer", "pid", result.pid, "err", result.err)
@@ -428,9 +443,7 @@ mainloop:
 						// check if need to schedule recover whenever we download a column sidecar
 						if d.IsColumnOverHalf(blockRoot) {
 							req.removeBlock(blockRoot)
-							if err := d.TryScheduleRecover(slot, blockRoot); err != nil {
-								log.Warn("failed to schedule recover", "err", err, "slot", slot, "blockRoot", blockRoot)
-							}
+							d.TryScheduleRecover(slot, blockRoot)
 						}
 					}()
 
@@ -568,6 +581,16 @@ func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig
 	}, nil
 }
 
+func (d *downloadRequest) remainingBlockRoots() []common.Hash {
+	d.mutex.RLock()
+	defer d.mutex.RUnlock()
+	remaining := []common.Hash{}
+	for blockRoot := range d.downloadTable {
+		remaining = append(remaining, blockRoot)
+	}
+	return remaining
+}
+
 func (d *downloadRequest) removeColumn(blockRoot common.Hash, columnIndex uint64) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -583,16 +606,6 @@ func (d *downloadRequest) removeBlock(blockRoot common.Hash) {
 	defer d.mutex.Unlock()
 	delete(d.downloadTable, blockRoot)
 	d.cacheRequest = nil
-}
-
-func (d *downloadRequest) isColumnDataOverHalf(blockRoot common.Hash) bool {
-	d.mutex.RLock()
-	defer d.mutex.RUnlock()
-	toDownload, ok := d.downloadTable[blockRoot]
-	if !ok {
-		return true // if the block is not in the download table, it means all columns are already downloaded
-	}
-	return len(toDownload) <= int(d.beaconConfig.NumberOfColumns)/2
 }
 
 func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier] {
