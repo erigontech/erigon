@@ -9,7 +9,6 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/services"
 	"golang.org/x/sync/errgroup"
@@ -192,14 +191,4 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		}
 	}
 	return nil
-}
-
-func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsReader, curTxNum uint64) uint64 {
-	txNumMax, _ := txNumsReader.Max(tx, fromBlock)
-	i := uint64(0)
-	for txNumMax < curTxNum {
-		i++
-		txNumMax, _ = txNumsReader.Max(tx, fromBlock+i)
-	}
-	return fromBlock + i
 }
