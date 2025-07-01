@@ -94,7 +94,7 @@ func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 	stepSize := totalBlocks / steps
 
 	// Process chunks in parallel
-	for start := fromBlock; start <= toBlock; {
+	for start := fromBlock; start <= toBlock; start += chunkSize {
 		progress := start - fromBlock
 		step := progress / stepSize
 		if step > steps {
