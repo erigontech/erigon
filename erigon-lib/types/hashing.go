@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/rlphacks"
 	"github.com/erigontech/erigon-lib/trie"
 )
 
@@ -78,7 +77,7 @@ func DeriveSha(list DerivableList) common.Hash {
 
 		if curr.Len() > 0 {
 			list.EncodeIndex(i, &value)
-			leafData.Value = rlphacks.RlpEncodedBytes(value.Bytes())
+			leafData.Value = rlp.RlpEncodedBytes(value.Bytes())
 			groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
 		}
 	})

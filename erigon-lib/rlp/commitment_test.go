@@ -14,13 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package rlphacks
+package rlp
 
 import (
 	"bytes"
 	"testing"
-
-	"github.com/erigontech/erigon-lib/rlp"
 )
 
 func TestFastDoubleRlpForByteArrays(t *testing.T) {
@@ -47,9 +45,9 @@ func doTestWithByte(t *testing.T, b byte, iterations int) {
 		buffer.WriteByte(b)
 		source := buffer.Bytes()
 
-		encSingle, _ := rlp.EncodeToBytes(source)
+		encSingle, _ := EncodeToBytes(source)
 
-		encDouble, _ := rlp.EncodeToBytes(encSingle)
+		encDouble, _ := EncodeToBytes(encSingle)
 
 		if RlpSerializableBytes(source).DoubleRLPLen() != len(encDouble) {
 			t.Errorf("source [%2x * %d] wrong RlpSerializableBytes#DoubleRLPLen prediction: %d (expected %d)", source[0], len(source), RlpSerializableBytes(source).DoubleRLPLen(), len(encDouble))

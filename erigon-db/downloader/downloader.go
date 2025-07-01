@@ -40,6 +40,7 @@ import (
 	"github.com/anacrolix/chansync"
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/c2h5oh/datasize"
+	"github.com/puzpuzpuz/xsync/v4"
 	"golang.org/x/sync/semaphore"
 
 	// Make Go expvars available to Prometheus for diagnostics.
@@ -77,6 +78,7 @@ type Downloader struct {
 	stopMainLoop context.CancelFunc
 	wg           sync.WaitGroup
 
+	// TODO: Add an implicit prefix to messages from this.
 	logger    log.Logger
 	verbosity log.Lvl
 	// Whether to log seeding (for snap downloaders I think).
@@ -90,8 +92,9 @@ type Downloader struct {
 	startTime time.Time
 
 	lock sync.RWMutex
-	// Pieces having extra verification due to file size mismatches.
-	piecesBeingVerified   map[*torrent.Piece]struct{}
+	// Files having extra verification due to file size mismatches. Use atomics for this map since
+	// locking requirements are mixed, and it's not coupled to anything else.
+	filesBeingVerified    *xsync.Map[*torrent.File, struct{}]
 	verificationOccurring chansync.Flag
 	// Torrents that block completion. They were requested specifically. Torrents added from disk
 	// that aren't subsequently requested are not required to satisfy the sync stage.
@@ -187,6 +190,7 @@ func calcBackoff(_min, _max time.Duration, attemptNum int, resp *http.Response) 
 	return sleep
 }
 
+// TODO(anacrolix): Upstream any logic that works reliably.
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	r.downloader.lock.RLock()
 	webseedMaxActiveTrips := r.downloader.stats.WebseedMaxActiveTrips
@@ -231,9 +235,9 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 
 		switch resp.StatusCode {
 		case http.StatusOK:
-			if len(req.Header.Get("Range")) > 0 {
+			if req.Header.Get("Range") != "" {
 				// the torrent lib is expecting http.StatusPartialContent so it will discard this
-				// if this count is higher than 0, its likely there is a server side config issue
+				// if this count is higher than 0, it's likely there is a server side config issue
 				// as it implies that the server is not handling range requests correctly and is just
 				// returning the whole file - which the torrent lib can't handle
 				//
@@ -249,7 +253,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 		// the first two statuses here have been observed from cloudflare
 		// during testing.  The remainder are generally understood to be
 		// retry-able http responses, calcBackoff will use the Retry-After
-		// header if its available
+		// header if it's available
 		case http.StatusInternalServerError, http.StatusBadGateway,
 			http.StatusRequestTimeout, http.StatusTooEarly,
 			http.StatusTooManyRequests, http.StatusServiceUnavailable,
@@ -286,17 +290,27 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 }
 
 func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
-	// TODO: Check this!! Upstream any logic that works reliably.
-	requestHandler := &requestHandler{
+	// Cloudflare, or OS socket overhead seems to limit us to ~100-150MB/s in testing to Cloudflare
+	// buckets. If we could limit HTTP requests to 1 per connection we'd do that, but the HTTP2
+	// config field doesn't do anything yet in Go 1.24 (and 1.25rc1). Disabling HTTP2 is another way
+	// to achieve this.
+	requestHandler := requestHandler{
 		Transport: http.Transport{
-			Proxy:       cfg.ClientConfig.HTTPProxy,
-			DialContext: cfg.ClientConfig.HTTPDialContext,
-			// I think this value was observed from some webseeds. It seems reasonable to extend it
-			// to other uses of HTTP from the client.
-			MaxConnsPerHost: 10,
-		}}
+			ReadBufferSize: 64 << 10,
+			// Note this does nothing in go1.24.
+			HTTP2: &http.HTTP2Config{
+				MaxConcurrentStreams: 1,
+			},
+			// Big hammer to achieve one request per connection.
+			//DisableKeepAlives: true,
+		},
+	}
 
-	cfg.ClientConfig.WebTransport = requestHandler
+	// Disable HTTP2. See above.
+	g.MakeMap(&requestHandler.Transport.TLSNextProto)
+
+	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
+	cfg.ClientConfig.WebTransport = &requestHandler
 
 	db, err := openMdbx(ctx, cfg.Dirs.Downloader, cfg.MdbxWriteMap)
 	if err != nil {
@@ -331,14 +345,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 
 	d := &Downloader{
-		cfg:            cfg,
-		torrentStorage: m,
-		torrentClient:  torrentClient,
-		stats:          stats,
-		logger:         logger,
-		verbosity:      verbosity,
-		torrentFS:      &AtomicTorrentFS{dir: cfg.Dirs.Snap},
-		logPrefix:      "",
+		cfg:                cfg,
+		torrentStorage:     m,
+		torrentClient:      torrentClient,
+		stats:              stats,
+		logger:             logger,
+		verbosity:          verbosity,
+		torrentFS:          &AtomicTorrentFS{dir: cfg.Dirs.Snap},
+		filesBeingVerified: xsync.NewMap[*torrent.File, struct{}](),
 	}
 
 	if len(cfg.WebSeedUrls) == 0 {
@@ -487,9 +501,9 @@ func (d *Downloader) allTorrentsComplete() (ret bool) {
 		}
 		// TODO: Should we write the torrent files here instead of in the goroutine spawned in addTorrentSpec?
 	}
-	// Require that we're not waiting on any piece verification. NB this isn't just requiredTorrent
+	// Require that we're not waiting on any file verification. NB this isn't just requiredTorrent
 	// pieces, but that might be best.
-	if len(d.piecesBeingVerified) != 0 {
+	if d.filesBeingVerified.Size() != 0 {
 		ret = false
 	}
 	return
@@ -531,33 +545,31 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 			d.logger.Crit("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
 		}
 		passed = false
-		d.verifyPieces(f)
+		d.verifyFile(f)
 	}
 	return
 }
 
 // Run verification for pieces of the file that aren't already being verified.
-func (d *Downloader) verifyPieces(f *torrent.File) {
-	for p := range f.Pieces() {
-		if g.MapContains(d.piecesBeingVerified, p) {
-			continue
-		}
-		g.MakeMapIfNil(&d.piecesBeingVerified)
-		if !g.MapInsert(d.piecesBeingVerified, p, struct{}{}).Ok {
-			d.updateVerificationOccurring()
-			d.spawn(func() {
-				err := p.VerifyDataContext(d.ctx)
-				d.lock.Lock()
-				defer d.lock.Unlock()
-				g.MustDelete(d.piecesBeingVerified, p)
-				d.updateVerificationOccurring()
-				if d.ctx.Err() != nil {
-					return
-				}
-				panicif.Err(err)
-			})
-		}
+func (d *Downloader) verifyFile(f *torrent.File) {
+	_, loaded := d.filesBeingVerified.LoadOrStore(f, struct{}{})
+	if loaded {
+		return
 	}
+	d.updateVerificationOccurring()
+	d.spawn(func() {
+		for p := range f.Pieces() {
+			err := p.VerifyDataContext(d.ctx)
+			if d.ctx.Err() != nil {
+				return
+			}
+			panicif.Err(err)
+		}
+		_, loaded := d.filesBeingVerified.LoadAndDelete(f)
+		// We should be the ones removing this value.
+		panicif.False(loaded)
+		d.updateVerificationOccurring()
+	})
 }
 
 // Interval is how long between recalcs.
@@ -1067,12 +1079,12 @@ func (d *Downloader) saveMetainfoWhenComplete(t *torrent.Torrent) {
 		case <-d.ctx.Done():
 			return
 		case <-d.verificationOccurring.Off():
-			// This could be filtered to only pieces we care about...
+			// This could be filtered to only files we care about...
 		}
 		if func() (done bool) {
 			d.lock.Lock()
 			defer d.lock.Unlock()
-			if !t.Complete().Bool() || len(d.piecesBeingVerified) != 0 {
+			if !t.Complete().Bool() || d.filesBeingVerified.Size() != 0 {
 				return
 			}
 			err := d.saveMetainfoPrecheck(t)
@@ -1211,15 +1223,12 @@ func newTorrentClient(
 	torrentClient *torrent.Client,
 	err error,
 ) {
-	//Reasons why using MMAP instead of files-API:
-	// - i see "10K threads exchaused" error earlier (on `--torrent.download.slots=500` and `pd-ssd`)
-	// - "sig-bus" at disk-full - may happen anyway, because DB is mmap
-	// - MMAP - means less GC pressure, more zero-copy
-	// - MMAP files are pre-allocated - which is not cool, but: 1. we can live with it 2. maybe can just resize MMAP in future
 	// Possibly File storage needs more optimization for handles, will test. Should reduce GC
 	// pressure and improve scheduler handling.
 	// See also: https://github.com/erigontech/erigon/pull/10074
-	// TODO: Should we force sqlite, or defer to part-file-only storage completion?
+	// We're using part-file-only piece completion. This requires hashing incomplete files at
+	// start-up, but the expectation is that files should not be partial. Also managing separate
+	// piece completion complicates user management of snapshots.
 	m = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: snapDir,
 		UsePartFiles:  g.Some(true),
@@ -1352,7 +1361,7 @@ func (d *Downloader) spawn(f func()) {
 }
 
 func (d *Downloader) updateVerificationOccurring() {
-	d.verificationOccurring.SetBool(len(d.piecesBeingVerified) != 0)
+	d.verificationOccurring.SetBool(d.filesBeingVerified.Size() != 0)
 }
 
 // Delete - stop seeding, remove file, remove .torrent

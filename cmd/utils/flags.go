@@ -1141,8 +1141,9 @@ var (
 		Value: false,
 	}
 	KeepExecutionProofsFlag = cli.BoolFlag{
-		Name:  "experimental.commitment-history",
-		Usage: "Enables blazing fast eth_getProof for executed block",
+		Name:    "prune.experimental.include-commitment-history",
+		Usage:   "Enables blazing fast eth_getProof for executed block",
+		Aliases: []string{"experimental.commitment-history"},
 	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",

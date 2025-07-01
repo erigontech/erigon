@@ -168,7 +168,7 @@ func New(
 
 func NewNodeConfig() *nodecfg.Config {
 	nodeConfig := nodecfg.DefaultConfig
-	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
+	// see similar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {

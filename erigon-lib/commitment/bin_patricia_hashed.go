@@ -971,7 +971,7 @@ package commitment
 //}
 //
 //// The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
-//// until that current key becomes a prefix of hashedKey that we will proccess next
+//// until that current key becomes a prefix of hashedKey that we will process next
 //// (in other words until the needFolding function returns 0)
 //func (bph *BinPatriciaHashed) fold() (err error) {
 //	updateKeyLen := bph.currentKeyLen
@@ -1194,7 +1194,7 @@ package commitment
 //		col := int(hashedKey[bph.currentKeyLen])
 //		cell = &bph.grid[row][col]
 //		if bph.afterMap[row]&(uint16(1)<<col) != 0 {
-//			// Prevent "spurios deletions", i.e. deletion of absent items
+//			// Prevent "spurious deletions", i.e. deletion of absent items
 //			bph.touchMap[row] |= uint16(1) << col
 //			bph.afterMap[row] &^= uint16(1) << col
 //			if bph.trace {

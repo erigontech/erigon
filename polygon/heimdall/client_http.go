@@ -141,7 +141,7 @@ func NewHttpClient(urlString string, logger log.Logger, opts ...HttpClientOption
 
 const (
 	fetchStateSyncEventsFormatV1 = "from-id=%d&to-time=%d&limit=%d"
-	fetchStateSyncEventsFormatV2 = "from_id=%d&to_time=%s&limit=%d"
+	fetchStateSyncEventsFormatV2 = "from_id=%d&to_time=%s&pagination.limit=%d"
 	fetchStateSyncEventsPathV1   = "clerk/event-record/list"
 	fetchStateSyncEventsPathV2   = "clerk/time"
 
@@ -170,7 +170,8 @@ const (
 
 	fetchSpanListFormatV1 = "page=%d&limit=%d" // max limit = 150
 	fetchSpanListFormatV2 = "pagination.offset=%d&pagination.limit=%d"
-	fetchSpanListPath     = "bor/span/list"
+	fetchSpanListPathV1   = "bor/span/list"
+	fetchSpanListPathV2   = "bor/spans/list"
 )
 
 func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
@@ -337,7 +338,7 @@ func (c *HttpClient) FetchSpans(ctx context.Context, page uint64, limit uint64) 
 	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
 		offset := (page - 1) * limit // page start from 1
 
-		url, err := makeURL(c.urlString, fetchSpanListPath, fmt.Sprintf(fetchSpanListFormatV2, offset, limit))
+		url, err := makeURL(c.urlString, fetchSpanListPathV2, fmt.Sprintf(fetchSpanListFormatV2, offset, limit))
 		if err != nil {
 			return nil, err
 		}
@@ -350,7 +351,7 @@ func (c *HttpClient) FetchSpans(ctx context.Context, page uint64, limit uint64) 
 		return response.ToList()
 	}
 
-	url, err := makeURL(c.urlString, fetchSpanListPath, fmt.Sprintf(fetchSpanListFormatV1, page, limit))
+	url, err := makeURL(c.urlString, fetchSpanListPathV1, fmt.Sprintf(fetchSpanListFormatV1, page, limit))
 	if err != nil {
 		return nil, err
 	}
