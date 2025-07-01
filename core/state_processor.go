@@ -414,8 +414,10 @@ var depositTopic = common.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912
 //	return nil
 //}
 
+//func onSystemCallStart(tracer *tracing.Hooks, ctx *tracing.VMContext) {
 //	//if tracer.OnSystemCallStartV2 != nil {
 //	//	tracer.OnSystemCallStartV2(ctx)
 //	//} else if tracer.OnSystemCallStart != nil {
 //	tracer.OnSystemCallStart()
 //	//}
+//}
