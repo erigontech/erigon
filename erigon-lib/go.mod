@@ -8,7 +8,7 @@ replace (
 )
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250501041114-4a48ac232c83
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250619025539-884f4110f6af
 	github.com/erigontech/interfaces v0.0.0-20250617105115-44025d7ddebf
 	github.com/erigontech/mdbx-go v0.39.8
 	github.com/erigontech/secp256k1 v1.2.0
@@ -22,14 +22,12 @@ require (
 	github.com/consensys/gnark-crypto v0.17.0
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-eth-kzg v1.3.0
-	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
 	github.com/crate-crypto/go-kzg-4844 v1.1.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/elastic/go-freelru v0.16.0
 	github.com/erigontech/speedtest v0.0.2
-	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-stack/stack v1.8.1
 	github.com/go-test/deep v1.1.1
 	github.com/gofrs/flock v0.12.1

@@ -24,6 +24,9 @@ import (
 // shouldProcessBlobs checks if any block in the given list of blocks
 // has a version greater than or equal to DenebVersion and contains BlobKzgCommitments.
 func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
+	if !cfg.caplinConfig.ArchiveBlobs && !cfg.caplinConfig.ImmediateBlobsBackfilling {
+		return false
+	}
 	blobsExist := false
 	highestSlot := blocks[0].Block.Slot
 	for _, block := range blocks {
@@ -203,8 +206,9 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
+		checkDataAvaiability := cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling
 		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, true); err != nil {
+		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, checkDataAvaiability); err != nil {
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594DataNotAvailable) {
 				// Return an error if EIP-4844 data is not available
 				logger.Trace("[Caplin] forward sync EIP-4844 data not available", "blockSlot", block.Block.Slot)

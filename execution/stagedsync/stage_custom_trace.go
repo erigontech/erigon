@@ -155,41 +155,12 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 	batchSize := uint64(50_000)
-	for ; startBlock < endBlock; startBlock += batchSize {
-		//var _nextBlock uint64
-		//if err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) (err error) {
-		//	startBlockTxNum, _ := txNumsReader.Min(tx, startBlock)
-		//	nextStep := (startBlockTxNum / stepSize) + 1
-		//	bn, ok, _ := txNumsReader.FindBlockNum(tx, nextStep*stepSize)
-		//	if ok {
-		//		_nextBlock = bn + 1
-		//	}
-		//	return nil
-		//}); err != nil {
-		//	return err
-		//}
-		//
-		//to := endBlock + 1
-		//if _nextBlock > 0 {
-		//	to = min(endBlock+1, _nextBlock)
-		//}
-
-		_nextBlock := startBlock + batchSize
-		fromStep, toStep, err := exec3.BlkRangeToStepsOnDB(cfg.db, startBlock, _nextBlock, txNumsReader)
-		if err != nil {
-			return err
-		}
-		if toStep-fromStep > 1 { // reduce big jump
-			_nextBlock -= batchSize / 2
-		}
-		if toStep-fromStep < 1 { // increase small jump
-			_nextBlock += batchSize
-		}
-
-		to := min(endBlock+1, _nextBlock)
+	for startBlock < endBlock {
+		to := min(endBlock+1, startBlock+batchSize)
 		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", logger); err != nil {
 			return err
 		}
+		startBlock = to
 	}
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -272,6 +243,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+
 	}
 
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
@@ -330,7 +302,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, 
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
 	}
-	return integrity.ReceiptsNoDuplicatesRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
+	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
 }
 
 func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {

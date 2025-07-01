@@ -294,6 +294,21 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
 
+// isTransactionsSegmentExpired - check if the transactions segment is expired according to whichever history expiry policy we use.
+func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snapcfg.PreverifiedItem) bool {
+	// History expiry is the default.
+	if pruneMode.Blocks != prune.DefaultBlocksPruneMode {
+		return false
+	}
+
+	// We use the pre-merge data policy.
+	s, _, ok := snaptype.ParseFileName("", p.Name)
+	if !ok {
+		return false
+	}
+	return cc.IsPreMerge(s.From)
+}
+
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(
@@ -387,6 +402,9 @@ func WaitForDownloader(
 		if _, ok := blackListForPruning[p.Name]; ok {
 			continue
 		}
+		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
+			continue
+		}
 
 		downloadRequest = append(downloadRequest, DownloadRequest{
 			Path:        p.Name,
@@ -456,8 +474,8 @@ func WaitForDownloader(
 	if firstNonGenesis != nil {
 		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
 		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
-			return fmt.Errorf("some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
 		}
 	}
 	return nil
