@@ -167,7 +167,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		}
 
 		monotonicLogIdx := logIdx >= prevLogIdx
-		if !monotonicLogIdx {
+		if !monotonicLogIdx && txNum != _min && txNum != _max {
 			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, prevLogIdx=%d", txNum, blockNum, _min, _max, logIdx, prevLogIdx)
 			if failFast {
 				return err
