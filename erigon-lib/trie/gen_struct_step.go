@@ -25,15 +25,15 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlphacks"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // Experimental code for separating data and structural information
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type structInfoReceiver interface {
-	leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error
-	leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error
+	leaf(length int, keyHex []byte, val rlp.RlpSerializable) error
+	leafHash(length int, keyHex []byte, val rlp.RlpSerializable) error
 	accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32, codeSize int) error
 	accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32) error
 	extension(key []byte) error
@@ -75,7 +75,7 @@ type GenStructStepAccountData struct {
 func (GenStructStepAccountData) GenStructStepData() {}
 
 type GenStructStepLeafData struct {
-	Value rlphacks.RlpSerializable
+	Value rlp.RlpSerializable
 }
 
 func (GenStructStepLeafData) GenStructStepData() {}
