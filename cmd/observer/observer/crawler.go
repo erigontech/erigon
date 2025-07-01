@@ -87,9 +87,8 @@ func NewCrawler(
 	saveQueue := utils.NewTaskQueue("Crawler.saveQueue", config.ConcurrencyLimit*2, saveQueueLogFuncProvider)
 
 	chain := config.Chain
-	chainConfig := params.ChainConfigByChainName(chain)
-	genesisHash := params.GenesisHashByChainName(chain)
-	if (chainConfig == nil) || (genesisHash == nil) {
+	chainSpec := params.supportedChains[chain]
+	if chainSpec.IsEmpty() {
 		return nil, fmt.Errorf("unknown chain %s", chain)
 	}
 
@@ -97,7 +96,7 @@ func NewCrawler(
 	// in genesis already, e.g. Holesky.
 	genesisTime := uint64(0)
 
-	forkFilter := forkid.NewStaticFilter(chainConfig, *genesisHash, genesisTime)
+	forkFilter := forkid.NewStaticFilter(chainSpec.Config, chainSpec.GenesisHash, genesisTime)
 
 	diplomacy := NewDiplomacy(
 		database.NewDBRetrier(db, logger),

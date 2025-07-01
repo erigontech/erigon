@@ -85,7 +85,11 @@ func getChainGenesisAndConfig() (genesis *types.Genesis, chainConfig *chain2.Con
 	if chain == "" {
 		genesis, chainConfig = core.MainnetGenesisBlock(), params.MainnetChainConfig
 	} else {
-		genesis, chainConfig = core.GenesisBlockByChainName(chain), params.ChainConfigByChainName(chain)
+		spec := params.ChainSpecByName(chain)
+		if spec.IsEmpty() {
+			utils.Fatalf("unknown chain name: %s", chain)
+		}
+		genesis, chainConfig = &spec.Genesis, spec.Config
 	}
 	return genesis, chainConfig
 }

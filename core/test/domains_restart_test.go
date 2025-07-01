@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"io/fs"
 	"math/rand"
 	"os"
@@ -414,7 +415,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		rh, err := domains.ComputeCommitment(ctx, false, blockNum, txNum, "")
 		require.NoError(t, err)
-		require.Equal(t, params.TestGenesisStateRoot, common.BytesToHash(rh))
+		require.Equal(t, params.ChainSpecByName(networkname.Test).GenesisStateRoot, common.BytesToHash(rh))
 		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 		//common.BytesToHash(rh))
 

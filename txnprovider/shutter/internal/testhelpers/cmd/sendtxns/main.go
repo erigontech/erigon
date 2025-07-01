@@ -78,7 +78,12 @@ func main() {
 }
 
 func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
-	chainId := params.ChainConfigByChainName(chain).ChainID
+	spec := params.ChainSpecByName(chain)
+	if spec.IsEmpty() {
+		return fmt.Errorf("unknown chain name: %s", chain)
+	}
+
+	chainId := spec.Config.ChainID
 	rpcClient := requests.NewRequestGenerator(url, logger)
 	transactor := testhelpers.NewTransactor(rpcClient, chainId)
 	amount, _ := new(big.Int).SetString(amountStr, 10)
