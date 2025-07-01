@@ -26,7 +26,7 @@ import (
 
 func BenchmarkDecompress(b *testing.B) {
 	t := new(testing.T)
-	d := prepareDict(t)
+	d := prepareDict(t, 100_000)
 	defer d.Close()
 
 	b.Run("next", func(b *testing.B) {
@@ -50,7 +50,7 @@ func BenchmarkDecompress(b *testing.B) {
 			}
 		}
 	})
-	b.Run("matchcmp", func(b *testing.B) {
+	b.Run("matchcmp_non_existing_key", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
