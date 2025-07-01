@@ -494,12 +494,14 @@ func WriteRawTransactions(rwTx kv.RwTx, txs [][]byte, txnID uint64) error {
 	stx := txnID
 	txIdKey := make([]byte, 8)
 	for _, txn := range txs {
+		s := time.Now()
 		binary.BigEndian.PutUint64(txIdKey, txnID)
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := rwTx.Append(kv.EthTx, txIdKey, txn); err != nil {
 			return fmt.Errorf("txnID=%d, firstNonSysTxn=%d, %w", txnID, stx, err)
 		}
 		txnID++
+		fmt.Println("WriteRawTransactions", "txnID", txnID, "stx", stx, "len(txn)", len(txn), "took", time.Since(s))
 	}
 	return nil
 }
