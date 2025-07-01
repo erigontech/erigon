@@ -380,18 +380,6 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 						return
 					}
 					s, pid, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
-					if err != nil {
-						// print the ids in the request
-						for i := 0; i < ids.Len(); i++ {
-							columns := []uint64{}
-							ids.Get(i).Columns.Range(func(index int, value uint64, length int) bool {
-								columns = append(columns, value)
-								return true
-							})
-							log.Debug("request ids", "blockRoot", ids.Get(i).BlockRoot, "columns", columns)
-						}
-					}
-
 					select {
 					case resultChan <- resultData{
 						sidecars: s,
