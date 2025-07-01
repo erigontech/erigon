@@ -185,12 +185,12 @@ func TestCreation(t *testing.T) {
 			params.BorMainnetChainConfig,
 			params.BorMainnetGenesisHash,
 			[]testcase{
-				{0, 0, ID{Hash: ChecksumToBytes(0x0e07e722), Next: 3395000}},
-				{3395000, 0, ID{Hash: ChecksumToBytes(0x27806576), Next: 14750000}},  // First Istanbul block
-				{14750000, 0, ID{Hash: ChecksumToBytes(0x66e26adb), Next: 23850000}}, // First Berlin block
-				{23850000, 0, ID{Hash: ChecksumToBytes(0x4f2f71cc), Next: 50523000}}, // First London block
-				{50523000, 0, ID{Hash: ChecksumToBytes(0xdc08865c), Next: 54876000}}, // First Agra block
-				{54876000, 0, ID{Hash: ChecksumToBytes(0xf097bc13), Next: 0}},        // First Napoli block
+				{0, 0, ID{Hash: checksumToBytes(0x0e07e722), Next: 3395000}},
+				{3395000, 0, ID{Hash: checksumToBytes(0x27806576), Next: 14750000}},  // First Istanbul block
+				{14750000, 0, ID{Hash: checksumToBytes(0x66e26adb), Next: 23850000}}, // First Berlin block
+				{23850000, 0, ID{Hash: checksumToBytes(0x4f2f71cc), Next: 50523000}}, // First London block
+				{50523000, 0, ID{Hash: checksumToBytes(0xdc08865c), Next: 54876000}}, // First Agra block
+				{54876000, 0, ID{Hash: checksumToBytes(0xf097bc13), Next: 73440256}}, // First Napoli block
 			},
 		},
 	}
