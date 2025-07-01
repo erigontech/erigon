@@ -75,8 +75,12 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		return ErrIgnore
 	}
 
-	if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.ParentRoot) ||
-		s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockHeader.ParentRoot) {
+	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to get block root: %v", err)
+	}
+	if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockRoot) ||
+		s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
 		return ErrIgnore
 	}
 
@@ -141,10 +145,6 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
-	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("failed to get block root: %v", err)
-	}
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
 	}
