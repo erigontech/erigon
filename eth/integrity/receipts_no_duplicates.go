@@ -85,8 +85,28 @@ func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64,
 		}
 	}()
 
+	initialChunkSize := chunkSize
+
+	minChunkSize := initialChunkSize / 10
+
+	steps := uint64(10)
+	totalBlocks := toBlock - fromBlock
+	stepSize := totalBlocks / steps
+
 	// Process chunks in parallel
-	for start := fromBlock; start <= toBlock; start += chunkSize {
+	for start := fromBlock; start <= toBlock; {
+		progress := start - fromBlock
+		step := progress / stepSize
+		if step > steps {
+			step = steps
+		}
+
+		scale := float64(steps-step) / float64(steps) // от 1.0 до 0.0
+		chunkSize = uint64(float64(initialChunkSize) * scale)
+		if chunkSize < minChunkSize {
+			chunkSize = minChunkSize
+		}
+
 		end := start + chunkSize - 1
 		if end > toBlock {
 			end = toBlock
