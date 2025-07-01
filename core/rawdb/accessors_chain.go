@@ -643,25 +643,30 @@ func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *
 }
 
 func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
-	fmt.Println(time.Now(), "IncrementSequence")
+	s := time.Now()
 	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
 		return false, err
 	}
+	fmt.Println("WriteRawBody: IncrementSequence", "baseTxnID", baseTxnID, "took", time.Since(s))
 	data := types.BodyForStorage{
 		BaseTxnID:   types.BaseTxnID(baseTxnID),
 		TxCount:     types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
 	}
-	fmt.Println(time.Now(), "WriteBodyForStorage")
+	s = time.Now()
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
-	fmt.Println(time.Now(), "WriteRawTransactions")
+
+	fmt.Println("WriteRawBody: WriteBodyForStorage", "took", time.Since(s))
+
+	s = time.Now()
 	if err = WriteRawTransactions(db, body.Transactions, data.BaseTxnID.First()); err != nil {
 		return false, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
+	fmt.Println("WriteRawBody: WriteRawTransactions", "took", time.Since(s))
 	return true, nil
 }
 
