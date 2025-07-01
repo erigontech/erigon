@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -70,12 +69,14 @@ type InvertedIndex struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visible in zero-copy way
-	dirtyFiles *btree2.BTreeG[*filesItem]
+	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *iiVisible
 	logger   log.Logger
+
+	checker *DependencyIntegrityChecker
 }
 
 type iiCfg struct {
@@ -123,7 +124,7 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 
 	ii := InvertedIndex{
 		iiCfg:      cfg,
-		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newIIVisible(cfg.filenameBase, []visibleFile{}),
 		logger:     logger,
 
@@ -224,23 +225,27 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 }
 
-type Accessors = ee.Accessors
-
-const (
-	AccessorBTree     Accessors = ee.AccessorBTree
-	AccessorHashMap   Accessors = ee.AccessorHashMap
-	AccessorExistence Accessors = ee.AccessorExistence
-)
-
-func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, nil, false, toTxNum))
+func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
+	ii.checker = checker
 }
 
-func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
+func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
+	var checker func(startTxNum, endTxNum uint64) bool
+	c := ii.checker
+	if c != nil {
+		ue := FromII(ii.name)
+		checker = func(startTxNum, endTxNum uint64) bool {
+			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+		}
+	}
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+}
+
+func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
 	return ii.missedMapAccessors(ii.dirtyFiles.Items())
 }
 
-func (ii *InvertedIndex) missedMapAccessors(source []*filesItem) (l []*filesItem) {
+func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !ii.Accessors.Has(AccessorHashMap) {
 		return nil
 	}
@@ -251,12 +256,33 @@ func (ii *InvertedIndex) missedMapAccessors(source []*filesItem) (l []*filesItem
 	})
 }
 
-func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
+func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
 	if item.decompressor == nil {
 		return fmt.Errorf("buildEfAccessor: passed item with nil decompressor %s %d-%d", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
 	}
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-	return ii.buildMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
+	return ii.buildMapAccessor(ctx, fromStep, toStep, ii.dataReader(item.decompressor), ps)
+}
+func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
+	if !strings.Contains(f.FileName(), ".ef") {
+		panic("assert: miss-use " + f.FileName())
+	}
+	return seg.NewReader(f.MakeGetter(), ii.Compression)
+}
+func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
+	if !strings.Contains(f.FileName(), ".ef") {
+		panic("assert: miss-use " + f.FileName())
+	}
+	if forceNoCompress {
+		return seg.NewWriter(f, seg.CompressNone)
+	}
+	return seg.NewWriter(f, ii.Compression)
+}
+func (iit *InvertedIndexRoTx) dataReader(f *seg.Decompressor) *seg.Reader {
+	return iit.ii.dataReader(f)
+}
+func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
+	return iit.ii.dataWriter(f, forceNoCompress)
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -270,9 +296,9 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 }
 
 func (ii *InvertedIndex) openDirtyFiles() error {
-	var invalidFileItems []*filesItem
+	var invalidFileItems []*FilesItem
 	invalidFileItemsLock := sync.Mutex{}
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
@@ -362,8 +388,8 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
 	}
-	var toClose []*filesItem
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	var toClose []*FilesItem
+	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
 				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
@@ -474,19 +500,22 @@ func (w *InvertedIndexBufferedWriter) close() {
 }
 
 func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
+	if iit.ii.aggregationStep != iit.aggStep {
+		panic(fmt.Sprintf("assert: %d %d", iit.ii.aggregationStep, iit.aggStep))
+	}
 	w := &InvertedIndexBufferedWriter{
 		name:            iit.name,
 		discard:         discard,
 		tmpdir:          tmpdir,
 		filenameBase:    iit.ii.filenameBase,
-		aggregationStep: iit.ii.aggregationStep,
+		aggregationStep: iit.aggStep,
 
 		indexKeysTable: iit.ii.keysTable,
 		indexTable:     iit.ii.valuesTable,
 
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollectorWithAllocator(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
-		index:     etl.NewCollectorWithAllocator(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
+		indexKeys: etl.NewCollectorWithAllocator(iit.ii.filenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
+		index:     etl.NewCollectorWithAllocator(iit.ii.filenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
 	}
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
@@ -504,6 +533,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		ii:      ii,
 		visible: ii._visible,
 		files:   files,
+		aggStep: ii.aggregationStep,
 		name:    ii.name,
 		salt:    ii.salt.Load(),
 	}
@@ -574,7 +604,8 @@ type InvertedIndexRoTx struct {
 
 	// TODO: retrofit recent optimization in main and reenable the next line
 	// ef *multiencseq.SequenceBuilder // re-usable
-	salt *uint32
+	salt    *uint32
+	aggStep uint64
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -614,7 +645,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	}
 
 	if txNum < iit.files[0].startTxNum {
-		return false, 0, fmt.Errorf("seek with txNum=%d but data before txNum=%d is not available", txNum, iit.files[0].startTxNum)
+		return false, 0, fmt.Errorf("seekInFiles(invIndex=%s,txNum=%d) but data before txNum=%d not available", iit.name.String(), txNum, iit.files[0].startTxNum)
 	}
 	if iit.files[len(iit.files)-1].endTxNum <= txNum {
 		return false, 0, nil
@@ -824,8 +855,8 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
-	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
-	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.ii.aggregationStep
+	maxStepInFiles := iit.files.EndTxNum() / iit.aggStep
+	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.aggStep
 	return maxStepInFiles < maxStepInDB
 }
 
@@ -900,7 +931,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//	ii.logger.Error("[snapshots] prune index",
 	//		"name", ii.filenameBase,
 	//		"forced", forced,
-	//		"pruned tx", fmt.Sprintf("%.2f-%.2f", float64(minTxnum)/float64(iit.ii.aggregationStep), float64(maxTxnum)/float64(iit.ii.aggregationStep)),
+	//		"pruned tx", fmt.Sprintf("%.2f-%.2f", float64(minTxnum)/float64(iit.aggStep), float64(maxTxnum)/float64(iit.aggStep)),
 	//		"pruned values", pruneCount,
 	//		"tx until limit", limit)
 	//}()
@@ -1015,7 +1046,7 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 		if item.endTxNum >= endTxNum {
 			ii1.hasNextInDb = false
 		}
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), iit.ii.Compression)
+		g := iit.dataReader(item.src.decompressor)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key})
@@ -1217,7 +1248,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
 
-	if err := ii.buildMapAccessor(ctx, step, step+1, decomp, ps); err != nil {
+	if err := ii.buildMapAccessor(ctx, step, step+1, ii.dataReader(decomp), ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 	if index, err = recsplit.OpenIndex(ii.efAccessorFilePath(step, step+1)); err != nil {
@@ -1228,7 +1259,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	return InvertedFiles{decomp: decomp, index: index, existence: existence}, nil
 }
 
-func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
+func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	// Design decision: `why Enum=true and LessFalsePositives=true`?
 	//
@@ -1267,7 +1298,15 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger)
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		ii.logger.Crit("panic in buildHashMapAccessor", "idxPath", idxPath, "r", r)
+		panic(r)
+	}()
+	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger)
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
@@ -1281,11 +1320,11 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	fst, _ := kv.FirstKey(tx, iit.ii.keysTable)
 	if len(fst) > 0 {
-		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.ii.aggregationStep)
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.aggStep)
 	}
 	lst, _ := kv.LastKey(tx, iit.ii.keysTable)
 	if len(lst) > 0 {
-		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.ii.aggregationStep)
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.aggStep)
 	}
 	if to == 0 {
 		to = from

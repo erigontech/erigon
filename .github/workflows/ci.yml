@@ -15,17 +15,16 @@ on:
     
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: ${{ !contains(fromJSON('[
-      "refs/heads/release/2.60",
-      "refs/heads/release/2.61",
-      "refs/heads/release/3.0",
-      "refs/heads/main"
-    ]'), github.ref) }}
-
 jobs:
   linux:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
+        }}
+      cancel-in-progress: true
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
@@ -68,9 +67,17 @@ jobs:
           fi
 
       - name: Test
-        run: make test
+        run: make test-short
 
   win:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
+        }}
+      cancel-in-progress: true
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
@@ -107,13 +114,10 @@ jobs:
         run: .\wmake.ps1 all
 
       - name: Test
-        run: .\wmake.ps1 test
+        run: .\wmake.ps1 test-short
 
       - name: Test erigon-lib
-        run: cd erigon-lib && make test
+        run: cd erigon-lib && make test-short
 
       - name: Test erigon-db
-        run: cd erigon-db && make test
-
-      - name: Test p2p
-        run: cd p2p && make test
+        run: cd erigon-db && make test-short

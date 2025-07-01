@@ -40,10 +40,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
@@ -495,7 +495,7 @@ func (s *RoTx) Close() {
 type BlockSnapshots interface {
 	LogStat(label string)
 	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps bool) error
+	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
 	Delete(fileName string) error
@@ -532,11 +532,11 @@ type RoSnapshots struct {
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
 
-	// allows for pruning segments - this is the min availible segment
+	// allows for pruning segments - this is the minimum available segment
 	segmentsMin atomic.Uint64
 	ready       ready
 	operators   map[snaptype.Enum]*retireOperators
-	alignMin    bool // do we want to align all visible segments to min availible
+	alignMin    bool // do we want to align all visible segments to the minimum available
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -567,7 +567,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 
 	s.segmentsMin.Store(segmentsMin)
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 
 	if cfg.NoDownloader {
 		s.DownloadComplete()
@@ -811,7 +811,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 	return newVisibleSegments
 }
 
-func (s *RoSnapshots) recalcVisibleFiles() {
+func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
@@ -832,13 +832,13 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		if len(newVisibleSegments) > 0 {
 			to = newVisibleSegments[len(newVisibleSegments)-1].to - 1
 		}
-		if s.alignMin {
+		if alignMin {
 			maxVisibleBlocks = append(maxVisibleBlocks, to)
 		}
 	}
 
-	if s.alignMin {
-		// all types must have same hight
+	if alignMin {
+		// all types must have the same height
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
 			if minMaxVisibleBlock == 0 {
@@ -974,7 +974,7 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -997,7 +997,7 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 		return err
 	}
 
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
@@ -1167,7 +1167,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		return err
 	}
 
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
@@ -1177,8 +1177,8 @@ func (s *RoSnapshots) OpenFolder() error {
 	return nil
 }
 
-func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps bool) error {
-	defer s.recalcVisibleFiles()
+func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error {
+	defer s.recalcVisibleFiles(alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -1204,7 +1204,7 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
@@ -1359,7 +1359,7 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	v := s.View()
 	defer v.Close()
 
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 	if err := s.delete(fileName); err != nil {
 		return fmt.Errorf("can't delete file: %w", err)
 	}

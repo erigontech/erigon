@@ -27,9 +27,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/requests"
 )

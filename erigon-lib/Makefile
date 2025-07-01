@@ -39,7 +39,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v31.1/protoc-31.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
@@ -60,6 +60,7 @@ protoc-clean:
 	rm -f "$(GOBIN)/protoc"*
 	rm -rf "$(PROTOC_INCLUDE)"
 
+	# Use go mod replaces until this is made Go workspace aware. Pass GOWORK in the env to disable for this. Don't do it by default so behaviour is not unexpected.
 grpc: protoc-clean protoc-all
 	go mod vendor
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
@@ -109,8 +110,11 @@ lint-mod-tidy:
 lint-deps: lintci-deps
 lint: lintci lint-mod-tidy
 
-test:
+test-short:
 	$(GOTEST_NOFUZZ) -short -coverprofile=coverage-test.out ./...
 
 test-all:
+	$(GOTEST) -coverprofile=coverage-test-all.out ./...
+
+test-all-race:
 	$(GOTEST) -coverprofile=coverage-test-all.out -race ./...

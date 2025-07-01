@@ -44,9 +44,9 @@ import (
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/tests"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type callContext struct {
@@ -60,10 +60,11 @@ type callContext struct {
 
 // callLog is the result of LOG opCode
 type callLog struct {
-	Index   uint64         `json:"index"`
-	Address common.Address `json:"address"`
-	Topics  []common.Hash  `json:"topics"`
-	Data    hexutil.Bytes  `json:"data"`
+	Index    uint64         `json:"index"`
+	Address  common.Address `json:"address"`
+	Topics   []common.Hash  `json:"topics"`
+	Data     hexutil.Bytes  `json:"data"`
+	Position hexutil.Uint   `json:"position"`
 }
 
 // callTrace is the result of a callTracer run.
@@ -283,7 +284,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		if _, err = tracer.GetResult(); err != nil {
 			b.Fatal(err)
 		}
-		statedb.RevertToSnapshot(snap)
+		statedb.RevertToSnapshot(snap, nil)
 	}
 }
 

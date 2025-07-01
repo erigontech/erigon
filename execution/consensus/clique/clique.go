@@ -531,6 +531,10 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}
 }
 
+func (c *Clique) TxDependencies(h *types.Header) [][]int {
+	return nil
+}
+
 func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader, blockReader services.FullBlockReader) rpc.API {
 	var c *Clique
 	if casted, ok := engine.(*Clique); ok {

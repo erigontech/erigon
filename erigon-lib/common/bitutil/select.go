@@ -94,7 +94,7 @@ func Select64(x uint64, k int) (place int) {
 	s := x - ((x & kOnesStep4xA) >> 1)
 	s = (s & kOnesStep4x3) + ((s >> 2) & kOnesStep4x3)
 	byteSums := ((s + (s >> 4)) & kOnesStep8xF) * kOnesStep8
-	/* Original implementaiton:
+	/* Original implementation:
 	kStep8 := uint64(k) * kOnesStep8
 	geqKStep8 := ((kStep8 | kLAMBDAsStep8) - byteSums) & kLAMBDAsStep8
 	place = bits.OnesCount64(geqKStep8) * 8

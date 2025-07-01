@@ -288,7 +288,8 @@ var encTests = []encTest{
 	{val: simplestruct{A: 3, B: "foo"}, output: "C50383666F6F"},
 	{val: &recstruct{5, nil}, output: "C205C0"},
 	{val: &recstruct{5, &recstruct{4, &recstruct{3, nil}}}, output: "C605C404C203C0"},
-	{val: &intField{X: 3}, error: "rlp: type int is not RLP-serializable (struct field rlp.intField.X)"},
+	{val: &intField{X: -3}, error: "rlp: type reflect.Value -ve values are not RLP-serializable"},
+	{val: &intField{X: 3}, output: "C103"},
 
 	// struct tag "-"
 	{val: &ignoredField{A: 1, B: 2, C: 3}, output: "C20103"},
@@ -383,7 +384,7 @@ var encTests = []encTest{
 	{val: &struct{ TE testEncoder }{testEncoder{errors.New("test error")}}, error: "test error"},
 
 	// Verify the error for non-addressable non-pointer Encoder.
-	{val: testEncoder{}, error: "rlp: unadressable value of type rlp.testEncoder, EncodeRLP is pointer method"},
+	{val: testEncoder{}, error: "rlp: unaddressable value of type rlp.testEncoder, EncodeRLP is pointer method"},
 
 	// Verify Encoder takes precedence over []byte.
 	{val: []byteEncoder{0, 1, 2, 3, 4}, output: "C5C0C0C0C0C0"},

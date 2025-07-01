@@ -43,7 +43,6 @@ import (
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -203,7 +202,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
 		require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
-		require.Equal(t, page.WordsAmount2PagesAmount(3, d.historyValuesOnCompressedPage), c.historyComp.Count())
+		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.historyValuesOnCompressedPage), c.historyComp.Count())
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -211,7 +210,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
+		g := d.dataReader(sf.valuesDecomp)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -248,7 +247,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), seg.CompressNone)
+		g := d.dataReader(sf.valuesDecomp)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -840,9 +839,8 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	logger := log.New()
 	keysCount, txCount := uint64(16), uint64(64)
 
-	db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomainOfStep(t, 16, logger)
 	ctx := context.Background()
-	d.aggregationStep = 16
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -1094,7 +1092,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, d := testDbAndDomain(t, log.New())
+
+	maxTx := uint64(10000)
+	db, d := testDbAndDomainOfStep(t, maxTx, log.New())
 	ctx := context.Background()
 	defer d.Close()
 
@@ -1103,8 +1103,6 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer tx.Rollback()
 	dc := d.BeginFilesRo()
 	defer dc.Close()
-	maxTx := uint64(10000)
-	d.aggregationStep = maxTx
 
 	writer := dc.NewWriter()
 	defer writer.Close()
@@ -1139,7 +1137,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
 	require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
-	require.Equal(t, page.WordsAmount2PagesAmount(int(3*maxTx), d.hist.historyValuesOnCompressedPage), c.historyComp.Count())
+	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.hist.historyValuesOnCompressedPage), c.historyComp.Count())
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -1147,7 +1145,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer sf.CleanupOnError()
 	c.Close()
 
-	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
+	g := d.dataReader(sf.valuesDecomp)
 	g.Reset(0)
 	var words []string
 	for g.HasNext() {
@@ -1183,18 +1181,15 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
 	t.Parallel()
 
-	db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomainOfStep(t, 20, log.New())
 	defer db.Close()
 	defer d.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-
-	d.aggregationStep = 20
 
 	keys, vals := generateInputData(t, 8, 4, 100)
 	keys = keys[:20]
@@ -2056,13 +2051,11 @@ func TestDomain_Unwind(t *testing.T) {
 
 	t.Parallel()
 
-	db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomainOfStep(t, 16, log.New())
 	defer d.Close()
 	defer db.Close()
 	ctx := context.Background()
 
-	d.aggregationStep = 16
-	//maxTx := uint64(float64(d.aggregationStep) * 1.5)
 	maxTx := d.aggregationStep - 2
 	currTx := maxTx - 1
 	diffSetMap := map[uint64][]kv.DomainEntryDiff{}
@@ -2320,8 +2313,6 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		ctx := context.Background()
 
-		d.aggregationStep = stepSize
-
 		dc := d.BeginFilesRo()
 		defer dc.Close()
 		tx, err := db.BeginRw(ctx)
@@ -2400,11 +2391,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 	}
 
 	t.Run("simple history inside 1step", func(t *testing.T) {
-		db, d := testDbAndDomain(t, log.New())
-		defer db.Close()
-		defer d.Close()
-
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(13), uint64(17)
+		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
 		dc := d.BeginFilesRo()
@@ -2415,11 +2403,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 	})
 
 	t.Run("simple history between 2 steps", func(t *testing.T) {
-		db, d := testDbAndDomain(t, log.New())
-		defer db.Close()
-		defer d.Close()
-
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(8), uint64(17)
+		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
 		dc := d.BeginFilesRo()
@@ -2430,11 +2415,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 	})
 
 	t.Run("simple prune whole step", func(t *testing.T) {
-		db, d := testDbAndDomain(t, log.New())
-		defer db.Close()
-		defer d.Close()
-
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(10)
+		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
 		ctx := context.Background()
@@ -2473,11 +2455,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 	})
 
 	t.Run("simple history discard", func(t *testing.T) {
-		db, d := testDbAndDomain(t, log.New())
-		defer db.Close()
-		defer d.Close()
-
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(20)
+		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
 		writeOneKey(t, d, db, 2*stepSize, stepSize)
 
 		dc := d.BeginFilesRo()
@@ -2535,9 +2514,9 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 
 	dc = d.BeginFilesRo()
 
-	findFile := func(start, end uint64) *filesItem {
-		var foundFile *filesItem
-		dc.d.dirtyFiles.Walk(func(items []*filesItem) bool {
+	findFile := func(start, end uint64) *FilesItem {
+		var foundFile *FilesItem
+		dc.d.dirtyFiles.Walk(func(items []*FilesItem) bool {
 			for _, item := range items {
 				if item.startTxNum == start && item.endTxNum == end {
 					foundFile = item
@@ -2565,7 +2544,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		lastFile := findFile(st, en)
 		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
 
-		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.Compression)
+		lf := dc.dataReader(lastFile.decompressor)
 
 		shortenedKey, found := dc.findShortenedKey([]byte(key), lf, lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())

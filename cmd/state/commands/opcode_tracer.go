@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -585,7 +584,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	timeLastBlock := startTime
 	blockNumLastReport := blockNum
-	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader))
+	txNumReader := blockReader.TxnumReader(context.Background())
 
 	for !interrupt {
 		var block *types.Block
@@ -737,9 +736,10 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	usedBlobGas := new(uint64)
 	var receipts types.Receipts
 	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
-	rules := chainConfig.Rules(block.NumberU64(), block.Time())
+	blockNum := block.NumberU64()
+	rules := chainConfig.Rules(blockNum, block.Time())
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(i)
+		ibs.SetTxContext(blockNum, i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply txn %d [%x] failed: %w", i, txn.Hash(), err)

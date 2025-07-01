@@ -35,8 +35,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/tests/contracts"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
@@ -87,7 +87,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := m.DB.BeginRw(context.Background())
+	tx, err := m.DB.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -171,7 +171,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -245,7 +245,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -319,7 +319,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -393,7 +393,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -449,7 +449,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -479,7 +479,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal("should fail")
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -505,7 +505,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -559,7 +559,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -585,7 +585,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -659,7 +659,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -686,7 +686,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -764,7 +764,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
@@ -790,7 +790,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {

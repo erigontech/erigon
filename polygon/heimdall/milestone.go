@@ -17,10 +17,12 @@
 package heimdall
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
 )
@@ -130,18 +132,73 @@ func (m *Milestone) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type MilestoneResponse struct {
+type MilestoneResponseV1 struct {
 	Height string    `json:"height"`
 	Result Milestone `json:"result"`
+}
+
+type MilestoneResponseV2 struct {
+	Milestone struct {
+		MilestoneID string         `json:"milestone_id"`
+		Proposer    common.Address `json:"proposer"`
+		StartBlock  string         `json:"start_block"`
+		EndBlock    string         `json:"end_block"`
+		Hash        string         `json:"hash"`
+		ChainID     string         `json:"bor_chain_id"`
+		Timestamp   string         `json:"timestamp"`
+	} `json:"milestone"`
+}
+
+func (v *MilestoneResponseV2) ToMilestone(id int64) (*Milestone, error) {
+	r := Milestone{
+		Id:          MilestoneId(id),
+		MilestoneId: v.Milestone.MilestoneID,
+		Fields: WaypointFields{
+			Proposer: v.Milestone.Proposer,
+			ChainID:  v.Milestone.ChainID,
+		},
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(v.Milestone.Hash)
+	if err != nil {
+		return nil, err
+	}
+
+	startBlock, err := strconv.Atoi(v.Milestone.StartBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	endBlock, err := strconv.Atoi(v.Milestone.EndBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Fields.RootHash = common.BytesToHash(decoded)
+	r.Fields.StartBlock = big.NewInt(int64(startBlock))
+	r.Fields.EndBlock = big.NewInt(int64(endBlock))
+
+	timestamp, err := strconv.Atoi(v.Milestone.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Fields.Timestamp = uint64(timestamp)
+
+	return &r, nil
 }
 
 type MilestoneCount struct {
 	Count int64 `json:"count"`
 }
 
-type MilestoneCountResponse struct {
+type MilestoneCountResponseV1 struct {
 	Height string         `json:"height"`
 	Result MilestoneCount `json:"result"`
+}
+
+type MilestoneCountResponseV2 struct {
+	Count string `json:"count"`
 }
 
 type MilestoneLastNoAck struct {

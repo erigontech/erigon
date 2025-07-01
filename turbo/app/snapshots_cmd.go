@@ -39,6 +39,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-db/downloader"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
@@ -49,17 +50,15 @@ import (
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/version"
@@ -71,8 +70,8 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -233,12 +232,31 @@ var snapshotCommand = cli.Command{
 				&cli.PathFlag{Name: "src", Required: true},
 				&cli.StringFlag{Name: "key", Required: true},
 			}),
+			Description: "Search for a key in a btree index",
 		},
 		{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
+			Name:  "reset-to-old-ver-format",
+			Usage: "change all the snapshots to 3.0 file format",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				return dirs.RenameNewVersions()
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
+			Name:  "update-to-new-ver-format",
+			Usage: "change all the snapshots to 3.1 file ver format",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				return dirs.RenameOldVersions()
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
@@ -375,7 +393,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			}
 
 			// check that commitment file has state in it
-			// When domains are "purified", we want to keep latest commitment file with state key in it
+			// When domains are "compacted", we want to keep latest commitment file with state key in it
 			if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
 				const trieStateKey = "state"
 
@@ -501,7 +519,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			}
 			minS, maxS = 0, math.MaxUint64
 
-		} else { // prevent all commitment files with trie state from deletion for "purified" domains case
+		} else { // prevent all commitment files with trie state from deletion for "compacted" domains case
 			hasStateTrie := 0
 			for _, file := range commitmentFilesWithState {
 				if file.To <= minS {
@@ -705,6 +723,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
 				return err
 			}
+		case integrity.HeaderNoGaps:
+			if err := integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
 		case integrity.Blocks:
 			if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
 				return err
@@ -734,7 +756,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
-			if err := integrity.ReceiptsNoDuplicates(ctx, db, blockReader, failFast); err != nil {
+			if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
 				return err
 			}
 		default:
@@ -840,7 +862,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
-			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
+			return fmt.Errorf("failed to parse filename %s", info.Name())
 		}
 		from, to := res.From, res.To
 		maxStep = max(maxStep, to)
@@ -1158,7 +1180,7 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, seg.CompressNone)
+		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
 		if err != nil {
 			return err
 		}
@@ -1367,7 +1389,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := blockReader.TxnumReader(ctx).FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 		return nil
@@ -1808,7 +1830,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+	txNumsReader := blockReader.TxnumReader(ctx)
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)

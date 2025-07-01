@@ -24,6 +24,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof" //nolint:gosec
+
+	"github.com/felixge/fgprof"
+
 	"os"
 	"path/filepath"
 
@@ -197,7 +200,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 }
 
 // SetupTracerCtx performs the tracing setup according to the parameters
-// containted in the given urfave context.
+// contained in the given urfave context.
 func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
 	tracerName := ctx.String(vmTraceFlag.Name)
 	if tracerName == "" {
@@ -277,6 +280,7 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 		pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		pprofMux.Handle("/debug/fgprof", fgprof.Handler())
 
 		pprofServer := &http.Server{
 			Addr:    address,

@@ -549,6 +549,11 @@ func (r *ReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
 func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
 
+func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
+	_, _, hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, address[:])
+	return hasStorage, err
+}
+
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.tx.GetLatest(kv.AccountsDomain, address[:])
 	if err != nil {
@@ -651,6 +656,17 @@ func (r *ReaderParallelV3) SetTx(tx kv.TemporalTx)               { r.tx = tx }
 func (r *ReaderParallelV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
 func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
+
+func (r *ReaderParallelV3) HasStorage(address common.Address) (bool, error) {
+	firstK, firstV, hasStorage, err := r.sd.HasPrefix(kv.StorageDomain, address[:], r.tx)
+	if err != nil {
+		return false, err
+	}
+	if !r.discardReadList {
+		r.readLists[kv.StorageDomain.String()].Push(string(firstK), firstV)
+	}
+	return hasStorage, nil
+}
 
 func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, r.tx, address[:])

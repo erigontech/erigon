@@ -533,7 +533,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
-	cw := bufio.NewWriterSize(cf, 2*etl.BufIOSize)
+	cw := bufio.NewWriterSize(cf, 4*etl.BufIOSize)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -651,6 +651,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var hc BitWriter
 	hc.w = cw
 	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
+	copyNBuf := make([]byte, 32*1024)
+
 	var l uint64
 	var e error
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
@@ -713,18 +715,20 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 			// Copy uncovered characters
 			if uncoveredCount > 0 {
-				if _, e = io.CopyN(cw, r, int64(uncoveredCount)); e != nil {
+				if e = copyN(r, cw, uncoveredCount, copyNBuf); e != nil {
 					return e
 				}
 			}
 		}
 		wc++
-		select {
-		case <-logEvery.C:
-			if lvl < log.LvlTrace {
-				logger.Log(lvl, fmt.Sprintf("[%s] Compressed", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(wc)/float64(totalWords)))
+		if wc%1024 == 0 {
+			select {
+			case <-logEvery.C:
+				if lvl < log.LvlTrace {
+					logger.Log(lvl, fmt.Sprintf("[%s] Compressed", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(wc)/float64(totalWords)))
+				}
+			default:
 			}
-		default:
 		}
 	}
 	if !errors.Is(e, io.EOF) {
@@ -735,6 +739,29 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	}
 	if err = cw.Flush(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// copyN - is alloc-free analog of io.CopyN func
+func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
+	// Replace the io.CopyN call with manual copy using the buffer
+	if uncoveredCount <= 0 {
+		return nil
+	}
+	remaining := int64(uncoveredCount)
+	for remaining > 0 {
+		bufLen := len(buf)
+		if remaining < int64(bufLen) {
+			bufLen = int(remaining)
+		}
+		if _, e := io.ReadFull(r, buf[:bufLen]); e != nil {
+			return e
+		}
+		if _, e := w.Write(buf[:bufLen]); e != nil {
+			return e
+		}
+		remaining -= int64(bufLen)
 	}
 	return nil
 }

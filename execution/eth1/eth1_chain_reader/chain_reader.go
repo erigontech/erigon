@@ -36,8 +36,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 type ChainReaderWriterEth1 struct {
@@ -329,7 +329,7 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 		return context.DeadlineExceeded
 	}
 	if response.Result != execution.ExecutionStatus_Success {
-		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())
+		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", response.Result.String())
 	}
 	return nil
 }

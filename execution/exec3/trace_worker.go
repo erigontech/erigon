@@ -19,7 +19,6 @@ package exec3
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/aa"
+	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -47,7 +47,7 @@ type Resetable interface {
 type TraceWorker struct {
 	stateReader  *state.HistoryReaderV3
 	engine       consensus.EngineReader
-	headerReader interfaces.HeaderReader
+	headerReader services.HeaderReader
 	tx           kv.Getter
 	chainConfig  *chain.Config
 	tracer       GenericTracer
@@ -64,7 +64,7 @@ type TraceWorker struct {
 	vmConfig  *vm.Config
 }
 
-func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineReader, br interfaces.HeaderReader, tracer GenericTracer) *TraceWorker {
+func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineReader, br services.HeaderReader, tracer GenericTracer) *TraceWorker {
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
 
@@ -108,7 +108,7 @@ func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint
 func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) error {
 	e.stateReader.SetTxNum(txNum)
 	e.ibs.Reset()
-	e.ibs.SetTxContext(txIndex)
+	e.ibs.SetTxContext(e.blockNum, txIndex)
 
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if txn.Type() != types.AccountAbstractionTxType && err != nil {
@@ -137,9 +137,9 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 			return err
 		}
 	} else {
-		_, err = core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
+		result, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
 		if err != nil {
-			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
+			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, result.Err)
 		}
 	}
 

@@ -1,0 +1,7 @@
+[
+  {
+    "Input": "ceb1111d81601c1dd873f4b415817b28166efd2f470d8d8f83ba8b7d02dafdf83bae796f1acafdc73b17562560e7019e676d423eb9a53138d995f98d96f508e33295e6670e0f2682b8428194c2829cb66b8ccbb00789edc663578b5c024b9edc805a42f1755b9b7cbc6ce44307b6d04b37867ec32f6b08804082b2f9838f322c",
+    "Name": "greater_than_modulus",
+    "ExpectedError": "invalid fp.Element encoding"
+  }
+]

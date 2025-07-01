@@ -37,24 +37,25 @@ import (
 	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/types"
-	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
-	"github.com/erigontech/erigon/turbo/engineapi"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -65,7 +66,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if runtime.GOOS == "darwin" {
+	//goland:noinspection GoBoolExpressions
+	if race.Enabled && runtime.GOOS == "darwin" {
 		// We run race detector for medium tests which fails on macOS.
 		t.Skip("issue #15007")
 	}

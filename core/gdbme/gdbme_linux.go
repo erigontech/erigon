@@ -4,9 +4,10 @@ package gdbme
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon/cmd/utils"
 	"os"
 	"os/exec"
+
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
 const gdbPath = "/usr/bin/gdb"

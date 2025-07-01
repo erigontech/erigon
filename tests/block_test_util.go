@@ -45,9 +45,9 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/testutil"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -141,7 +141,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 		return err
 	}
 
-	tx, err := m.DB.BeginRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	if err != nil {
 		return err
 	}

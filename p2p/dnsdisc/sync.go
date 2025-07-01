@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/mclock"
-	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // This is the number of consecutive leaf requests that may fail before

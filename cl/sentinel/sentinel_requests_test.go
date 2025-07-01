@@ -78,11 +78,12 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		Port:          7070,
 		EnableBlocks:  true,
 		MaxPeerCount:  8883,
-	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil)
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
-	require.NoError(t, sentinel.Start())
+	_, err = sentinel.Start()
+	require.NoError(t, err)
 	h := sentinel.host
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/3202"
@@ -183,11 +184,12 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		Port:          7070,
 		EnableBlocks:  true,
 		MaxPeerCount:  8883,
-	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil)
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
-	require.NoError(t, sentinel.Start())
+	_, err = sentinel.Start()
+	require.NoError(t, err)
 	h := sentinel.host
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5021"
@@ -293,11 +295,12 @@ func TestSentinelStatusRequest(t *testing.T) {
 		Port:          7070,
 		EnableBlocks:  true,
 		MaxPeerCount:  8883,
-	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil)
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
-	require.NoError(t, sentinel.Start())
+	_, err = sentinel.Start()
+	require.NoError(t, err)
 	h := sentinel.host
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5001"
