@@ -29,8 +29,8 @@ func BenchmarkDecompress(b *testing.B) {
 	d := prepareDict(t)
 	defer d.Close()
 
-	b.ReportAllocs()
 	b.Run("next", func(b *testing.B) {
+		b.ReportAllocs()
 		var buf []byte
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
@@ -41,6 +41,7 @@ func BenchmarkDecompress(b *testing.B) {
 		}
 	})
 	b.Run("skip", func(b *testing.B) {
+		b.ReportAllocs()
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
 			_, _ = g.Skip()
