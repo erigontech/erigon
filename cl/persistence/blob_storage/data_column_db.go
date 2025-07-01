@@ -117,6 +117,16 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		curCount = binary.LittleEndian.Uint32(bytes[0:4])
 		restBytes = bytes[4:]
 	}
+	// check if the column index is already in the list
+	for i := 0; i < int(curCount); i++ {
+		index := binary.LittleEndian.Uint32(restBytes[i*4 : (i+1)*4])
+		if index == uint32(columnIndex) {
+			// column index already exists
+			fh.Close()
+			return nil
+		}
+	}
+	// append the column index to the list
 	curCount++
 	countBytes := make([]byte, 4)
 	columnIndexBytes := make([]byte, 4)
