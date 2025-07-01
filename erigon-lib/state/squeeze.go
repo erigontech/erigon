@@ -85,17 +85,18 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	defer decompressor.Close()
 	defer decompressor.MadvSequential().DisableReadAhead()
 
-	c, err := seg.NewCompressor(ctx, "sqeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
+	c, err := seg.NewCompressor(ctx, "sqeeze", to, a.dirs.Tmp, compressCfg.WordLvlCfg, log.LvlInfo, a.logger)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
+
 	r := a.d[domain].dataReader(decompressor)
 	w := a.d[domain].dataWriter(c, false)
 	if err := w.ReadFrom(r); err != nil {
 		return err
 	}
-	if err := c.Compress(); err != nil {
+	if err := w.Compress(); err != nil {
 		return err
 	}
 
@@ -197,26 +198,21 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		cf.decompressor.MadvNormal()
 
 		err = func() error {
-			steps := cf.endTxNum/at.a.aggregationStep - cf.startTxNum/at.a.aggregationStep
-			compression := commitment.d.Compression
-			if steps < DomainMinStepsToCompress {
-				compression = seg.CompressNone
-			}
 			at.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
-				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
+				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg)
 
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
 			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, at.a.dirs.Tmp,
-				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
+				commitment.d.CompressCfg.WordLvlCfg, log.LvlInfo, commitment.d.logger)
 			if err != nil {
 				return err
 			}
 			defer squeezedCompr.Close()
 
 			writer := commitment.d.dataWriter(squeezedCompr, false)
-			reader := seg.NewReader(cf.decompressor.MakeGetter(), compression)
+			reader := commitment.d.dataReader(cf.decompressor)
 			reader.Reset(0)
 
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
@@ -228,8 +224,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			ki := 0
 			var k, v []byte
 			for reader.HasNext() {
-				k, _ = reader.Next(k[:0])
-				v, _ = reader.Next(v[:0])
+				k, v, _, _, _ = reader.Next2Copy(nil, nil)
 				ki += 2
 
 				if k == nil {
@@ -243,13 +238,9 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 						return fmt.Errorf("failed to transform commitment value: %w", err)
 					}
 				}
-				if _, err = writer.Write(k); err != nil {
+				if err = writer.Add(k, v); err != nil {
 					return fmt.Errorf("write key word: %w", err)
 				}
-				if _, err = writer.Write(v); err != nil {
-					return fmt.Errorf("write value word: %w", err)
-				}
-
 				select {
 				case <-logEvery.C:
 					logger.Info("[squeeze_migration]", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
