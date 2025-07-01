@@ -140,30 +140,23 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 
 	prevCumUsedGas := -1
 	prevLogIdx := uint32(0)
+	blockNum := fromBlock
+	var _min, _max uint64
+	_min, _ = txNumsReader.Min(tx, fromBlock)
+	_max, _ = txNumsReader.Max(tx, fromBlock)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
 		cumUsedGas, _, logIdx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 		if err != nil {
 			return err
 		}
-		blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			err := fmt.Errorf("CheckReceiptsNoDups: didn't find block at txnum: %d", txNum)
-			if failFast {
-				return err
-			}
-			log.Error(err.Error())
-		}
-		_min, _ := txNumsReader.Min(tx, blockNum)
+
 		blockChanged := txNum == _min
 		if blockChanged {
 			prevCumUsedGas = 0
 			prevLogIdx = 0
 		}
 
-		_max, _ := txNumsReader.Max(tx, blockNum)
+		_max, _ = txNumsReader.Max(tx, blockNum)
 
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
 		if !strongMonotonicCumGasUsed && txNum != _min && txNum != _max { // system tx can be skipped
@@ -185,6 +178,12 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 
 		prevCumUsedGas = int(cumUsedGas)
 		prevLogIdx = logIdx
+
+		if txNum == _max {
+			blockNum++
+			_min = _max + 1
+			_max, _ = txNumsReader.Max(tx, blockNum)
+		}
 
 		select {
 		case <-ctx.Done():
