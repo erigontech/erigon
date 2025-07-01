@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	evmone "github.com/erigontech/evmone_precompiles"
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -546,37 +547,9 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		}
 	}
 
-	if len(input) > 96 {
-		input = input[96:]
-	} else {
-		input = input[:0]
-	}
-	// Handle a special case when both the base and mod length is zero
-	if baseLen == 0 && modLen == 0 {
-		return []byte{}, nil
-	}
-	// Retrieve the operands and execute the exponentiation
-	var (
-		base = new(big.Int).SetBytes(getData(input, 0, baseLen))
-		exp  = new(big.Int).SetBytes(getData(input, baseLen, expLen))
-		mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
-		v    []byte
-	)
-	switch {
-	case mod.BitLen() == 0:
-		// Modulo 0 is undefined, return zero
-		return common.LeftPadBytes([]byte{}, int(modLen)), nil
-	case base.Cmp(common.Big1) == 0:
-		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
-		v = base.Mod(base, mod).Bytes()
-	case mod.Bit(0) == 0:
-		// Modulo is even
-		v = math.FastExp(base, exp, mod).Bytes()
-	default:
-		// Modulo is odd
-		v = base.Exp(base, exp, mod).Bytes()
-	}
-	return common.LeftPadBytes(v, int(modLen)), nil
+	output := make([]byte, modLen)
+	evmone.ModExp(output, input)
+	return output, nil
 }
 
 // newCurvePoint unmarshals a binary blob into a bn256 elliptic curve point,
