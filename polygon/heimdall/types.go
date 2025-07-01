@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon/core/rawdb"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
@@ -89,7 +88,7 @@ type EventRangeExtractor struct {
 	EventsDb func() kv.RoDB
 }
 
-func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, chainDb kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, chainDb kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -114,9 +113,14 @@ func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uin
 	if err := kv.BigChunks(eventsDb, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
 		endEventId := binary.BigEndian.Uint64(eventIdBytes) + 1
 		blockNum := binary.BigEndian.Uint64(blockNumBytes)
-		blockHash, e := rawdb.ReadCanonicalHash(chainTx, blockNum)
-		if e != nil {
-			return false, e
+
+		blockHash, ok, err := hashResolver.CanonicalHash(ctx, chainTx, blockNum)
+		if err != nil {
+			return false, err
+		}
+
+		if !ok {
+			return false, fmt.Errorf("failed to read canonical hash for the block number %d", blockNum)
 		}
 
 		if blockNum >= blockTo {
@@ -256,7 +260,7 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				spanFrom := uint64(SpanIdAt(blockFrom))
 				spanTo := uint64(SpanIdAt(blockTo))
 				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, collect, workers, lvl, logger)
@@ -285,7 +289,7 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				var checkpointTo, checkpointFrom CheckpointId
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
@@ -351,7 +355,7 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				var milestoneFrom, milestoneTo MilestoneId
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {

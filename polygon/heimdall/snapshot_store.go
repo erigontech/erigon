@@ -87,9 +87,9 @@ func (s *SpanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
 
 func (s *SpanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
-		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
-				s.EntityStore.(*mdbxEntityStore[*Span]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
+				s.EntityStore.(*mdbxEntityStore[*Span]).db.RoDB(), chainConfig, collect, workers, lvl, logger, hashResolver)
 		})
 }
 
@@ -225,9 +225,9 @@ func (s *MilestoneSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Milestone] {
 
 func (s *MilestoneSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
-		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
-				s.EntityStore.(*mdbxEntityStore[*Milestone]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
+				s.EntityStore.(*mdbxEntityStore[*Milestone]).db.RoDB(), chainConfig, collect, workers, lvl, logger, hashResolver)
 		})
 }
 
@@ -344,9 +344,9 @@ func NewCheckpointSnapshotStore(base EntityStore[*Checkpoint], snapshots *RoSnap
 
 func (s *CheckpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
-		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
-				s.EntityStore.(*mdbxEntityStore[*Checkpoint]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
+				s.EntityStore.(*mdbxEntityStore[*Checkpoint]).db.RoDB(), chainConfig, collect, workers, lvl, logger, hashResolver)
 		})
 }
 
