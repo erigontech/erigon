@@ -142,7 +142,7 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clpara
 	// Read varint for length of message.
 	encodedLn, bytesCount, err := ReadUvarint(r)
 	if err != nil {
-		return fmt.Errorf("unable to read varint from message prefix: %v", err)
+		return fmt.Errorf("failed to decode listSSZ. Unable to read varint: %v", err)
 	}
 	pos := 4 + bytesCount
 	if len(list) != int(count) {

@@ -307,7 +307,7 @@ func (b *BeaconRpcP2P) sendRequest(
 		// Read varint for length of message.
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
-			return nil, message.Peer.Pid, fmt.Errorf("unable to read varint from message prefix: %w", err)
+			return nil, message.Peer.Pid, fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err)
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {
