@@ -320,7 +320,7 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 	//	Data:      prevHash.Bytes(),
 	//}
 	msg := types.NewMessage(
-		chain.SystemAddress,
+		state.SystemAddress,
 		&params.HistoryStorageAddress,
 		0,
 		common.Num0,
