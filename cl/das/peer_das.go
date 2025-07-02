@@ -421,7 +421,7 @@ mainloop:
 			if result.err != nil {
 				log.Debug("failed to download columns from peer", "pid", result.pid, "err", result.err)
 				//d.rpc.BanPeer(result.pid)
-				continue
+				//continue
 			}
 			if len(result.sidecars) == 0 {
 				continue
