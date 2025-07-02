@@ -387,6 +387,10 @@ func (api *ZkEvmAPIImpl) getOrCalcBatchData(ctx context.Context, tx kv.Tx, dbRea
 		return nil, err
 	}
 
+	if batchBlocks == nil {
+		return []byte{}, nil
+	}
+
 	// batch l2 data - must build on the fly
 	forkId, err := dbReader.GetForkId(batchNo)
 	if err != nil {
