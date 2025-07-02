@@ -104,6 +104,7 @@ type Sentinel struct {
 	logger             log.Logger
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
 	pidToEnr           sync.Map
+	pidToEnodeId       sync.Map
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
 
@@ -525,6 +526,11 @@ func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
 		}
 		if enr, ok := s.pidToEnr.Load(p); ok {
 			entry.Enr = enr.(string)
+		} else {
+			continue
+		}
+		if enodeId, ok := s.pidToEnodeId.Load(p); ok {
+			entry.EnodeId = enodeId.(enode.ID).String()
 		} else {
 			continue
 		}
