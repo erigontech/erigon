@@ -19,6 +19,7 @@ package engine_block_downloader
 import (
 	"context"
 	"fmt"
+	"math"
 	"runtime"
 	"time"
 
@@ -100,6 +101,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 			sentToPeer = false
 			if req != nil {
 				start = time.Now()
+				req.MaxPeers = math.MaxUint64
 				peer, sentToPeer = e.bodyReqSend(ctx, req)
 				d2 += time.Since(start)
 			}

@@ -195,12 +195,13 @@ type PeerPenalty struct {
 
 // Request for chain segment starting with hash and going to its parent, etc, with length headers in total
 type HeaderRequest struct {
-	Hash    common.Hash
-	Number  uint64
-	Length  uint64
-	Skip    uint64
-	Reverse bool
-	Anchor  *Anchor
+	Hash     common.Hash
+	Number   uint64
+	Length   uint64
+	Skip     uint64
+	Reverse  bool
+	Anchor   *Anchor
+	MaxPeers uint64
 }
 
 type PenaltyItem struct {

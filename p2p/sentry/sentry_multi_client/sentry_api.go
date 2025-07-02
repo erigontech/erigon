@@ -73,13 +73,21 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			cs.logger.Error("Could not encode block bodies request", "err", err)
 			return [64]byte{}, false
 		}
+
+		var maxPeers uint64
+		if req.MaxPeers > 0 {
+			maxPeers = req.MaxPeers
+		} else {
+			maxPeers = 1 // default
+		}
+
 		outreq := proto_sentry.SendMessageByMinBlockRequest{
 			MinBlock: req.BlockNums[len(req.BlockNums)-1],
 			Data: &proto_sentry.OutboundMessageData{
 				Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
 				Data: bytes,
 			},
-			MaxPeers: 1,
+			MaxPeers: maxPeers,
 		}
 
 		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
@@ -147,13 +155,20 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		}
 		minBlock := req.Number
 
+		var maxPeers uint64
+		if req.MaxPeers > 0 {
+			maxPeers = req.MaxPeers
+		} else {
+			maxPeers = 5 // default
+		}
+
 		outreq := proto_sentry.SendMessageByMinBlockRequest{
 			MinBlock: minBlock,
 			Data: &proto_sentry.OutboundMessageData{
 				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 				Data: bytes,
 			},
-			MaxPeers: 5,
+			MaxPeers: maxPeers,
 		}
 		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
 		if err1 != nil {
