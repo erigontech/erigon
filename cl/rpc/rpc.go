@@ -79,7 +79,6 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beac
 		sentinel,
 		beaconConfig,
 		ethClock,
-		rpc.sendRequestWithPeer,
 	)
 	return rpc
 }
@@ -124,7 +123,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, error) {
-	filteredReq, pid, err := b.columnDataPeerSelector.getPeer(ctx, req)
+	filteredReq, pid, err := b.columnDataPeerSelector.pickPeer(ctx, req)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -441,11 +440,10 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 }
 
 type columnSidecarPeerSelector struct {
-	sentinel            sentinel.SentinelClient
-	beaconConfig        *clparams.BeaconChainConfig
-	ethClock            eth_clock.EthereumClock
-	sendRequestWithPeer func(ctx context.Context, topic string, reqPayload []byte, dataCount uint64, peerId string) ([]responseData, string, error)
-	peerCache           *lru.CacheWithTTL[peerDataKey, *peerData]
+	sentinel     sentinel.SentinelClient
+	beaconConfig *clparams.BeaconChainConfig
+	ethClock     eth_clock.EthereumClock
+	peerCache    *lru.CacheWithTTL[peerDataKey, *peerData]
 
 	peersMutex sync.RWMutex
 	peers      []peerData
@@ -456,36 +454,34 @@ func newColumnSidecarPeerSelector(
 	sentinel sentinel.SentinelClient,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
-	sendRequestWithPeer func(ctx context.Context, topic string, reqPayload []byte, dataCount uint64, peerId string) ([]responseData, string, error),
 ) *columnSidecarPeerSelector {
 	s := &columnSidecarPeerSelector{
-		sentinel:            sentinel,
-		beaconConfig:        beaconConfig,
-		ethClock:            ethClock,
-		sendRequestWithPeer: sendRequestWithPeer,
-		peerCache:           lru.NewWithTTL[peerDataKey, *peerData]("peer-cache", 1000, 5*time.Minute),
-		peers:               []peerData{},
-		peersIndex:          0,
+		sentinel:     sentinel,
+		beaconConfig: beaconConfig,
+		ethClock:     ethClock,
+		peerCache:    lru.NewWithTTL[peerDataKey, *peerData]("peer-cache", 512, 5*time.Minute),
+		peers:        []peerData{},
+		peersIndex:   0,
 	}
-	go s.runPeerCache(context.Background())
+	go s.updatePeersMeta(context.Background())
 	return s
 }
 
 type peerDataKey struct {
 	pid string
-	cgc uint64
+	//cgc uint64
 }
 
 type peerData struct {
-	//enodeId enode.ID
 	pid  string
 	mask map[uint64]bool
 }
 
-func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
+func (c *columnSidecarPeerSelector) updatePeersMeta(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 	run := func() {
+		begin := time.Now()
 		state := "connected"
 		peers, err := c.sentinel.PeersInfo(ctx, &sentinel.PeersInfoRequest{
 			State: &state,
@@ -498,6 +494,13 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 		var newPeers []peerData
 		for _, peer := range peers.Peers {
 			pid := peer.Pid
+			peerKey := peerDataKey{pid: pid}
+			if data, ok := c.peerCache.Get(peerKey); ok {
+				newPeers = append(newPeers, *data)
+				continue
+			}
+
+			// request metadata
 			topic := communication.MetadataProtocolV3
 			resp, err := c.sentinel.SendPeerRequest(ctx, &sentinel.RequestDataWithPeer{
 				Pid:   pid,
@@ -514,39 +517,12 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 				log.Debug("[peerSelector] failed to decode peer metadata", "peer", pid, "err", err)
 				continue
 			}
-			cgc := 0
-			if metadata.CustodyGroupCount != nil {
-				cgc = int(*metadata.CustodyGroupCount)
-			}
-			log.Debug("[peerSelector] received metadata", "peer", pid, "cgc", cgc, "rawSize", len(rawData))
-
-			/*resp, _, err := c.sendRequestWithPeer(ctx, topic, []byte{}, 1, pid)
-			if err != nil {
-				log.Debug("[peerSelector] failed to request peer metadata", "peer", pid, "err", err)
-				continue
-			}
-			if len(resp) == 0 {
-				log.Debug("[peerSelector] no metadata", "peer", pid)
-				continue
-			}
-			log.Debug("[peerSelector] received metadata", "peer", pid)
-			version := resp[0].version
-			raw := resp[0].raw
-			metadata := &cltypes.Metadata{}
-			if err := metadata.DecodeSSZ(raw, int(version)); err != nil {
-				log.Debug("[peerSelector] failed to decode peer metadata", "peer", pid, "err", err, "version", version, "rawSize", len(raw))
-				continue
-			}*/
 			if metadata.CustodyGroupCount == nil {
-				log.Debug("[peerSelector] empty cgc", "peer", pid, "err", err)
-				continue
-			}
-			peerKey := peerDataKey{pid: pid, cgc: *metadata.CustodyGroupCount}
-			if data, ok := c.peerCache.Get(peerKey); ok {
-				newPeers = append(newPeers, *data)
+				log.Debug("[peerSelector] empty cgc", "peer", pid)
 				continue
 			}
 
+			// get custody indices
 			enodeId := enode.HexID(peer.EnodeId)
 			custodyIndices, err := peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
 			if err != nil {
@@ -565,7 +541,11 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 		c.peers = newPeers
 		c.peersIndex = 0
 		c.peersMutex.Unlock()
-		log.Debug("[peerSelector] updated peers", "peerCount", len(newPeers))
+		cgcs := []uint64{}
+		for _, peer := range newPeers {
+			cgcs = append(cgcs, uint64(len(peer.mask)))
+		}
+		log.Debug("[peerSelector] updated peers", "peerCount", len(newPeers), "cgcs", cgcs, "elapsedTime", time.Since(begin))
 	}
 
 	run()
@@ -579,7 +559,7 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 	}
 }
 
-func (c *columnSidecarPeerSelector) getPeer(
+func (c *columnSidecarPeerSelector) pickPeer(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, error) {
