@@ -197,7 +197,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 
 	startTime := time.Now()
 	loggedBlock := blockFrom
-	batchSize := uint64(10000)
+	batchSize := uint64(100000)
 	for bn := blockFrom; bn < blockTo; bn += batchSize {
 		eg.Go(func() error {
 			var resp EthGetLogs
