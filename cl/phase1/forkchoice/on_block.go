@@ -44,8 +44,8 @@ import (
 const foreseenProposers = 16
 
 var (
-	ErrEIP4844DataNotAvailable = errors.New("EIP-4844 blob data is not available")
-	ErrEIP7594DataNotAvailable = errors.New("EIP-7594 column data is not available")
+	ErrEIP4844DataNotAvailable       = errors.New("EIP-4844 blob data is not available")
+	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -123,8 +123,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				return err
 			}
 			if !available {
-				// TODO: schedule download of columns and blobs
-				return fmt.Errorf("OnBlock: some column data is not available for block %x, err: %v", common.Hash(blockRoot), ErrEIP7594DataNotAvailable)
+				return ErrEIP7594ColumnDataNotAvailable
 			}
 		} else if block.Version() >= clparams.DenebVersion {
 			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
