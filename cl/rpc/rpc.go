@@ -593,7 +593,7 @@ func (c *columnSidecarPeerSelector) getPeer(
 		// matching
 		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(req.Len()))
 		req.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, length int) bool {
-			identifier := &cltypes.DataColumnsByRootIdentifier{}
+			identifier := cltypes.NewDataColumnsByRootIdentifier()
 			item.Columns.Range(func(_ int, column uint64, _ int) bool {
 				if peer.mask[column] {
 					identifier.Columns.Append(column)
