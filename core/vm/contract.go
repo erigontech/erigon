@@ -22,11 +22,12 @@ package vm
 import (
 	"fmt"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/tracing"
 )
