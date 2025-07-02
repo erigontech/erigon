@@ -483,69 +483,77 @@ type peerData struct {
 }
 
 func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
+	run := func() {
+		state := "connected"
+		peers, err := c.sentinel.PeersInfo(ctx, &sentinel.PeersInfoRequest{
+			State: &state,
+		})
+		if err != nil {
+			log.Warn("[peerSelector] failed to get peers info", "err", err)
+			return
+		}
+		log.Debug("[peerSelector] peers info", "peerCount", len(peers.Peers))
+		var newPeers []peerData
+		for _, peer := range peers.Peers {
+			pid := peer.Pid
+			topic := communication.MetadataProtocolV3
+			resp, _, err := c.sendRequestWithPeer(ctx, topic, []byte{}, 1, pid)
+			if err != nil {
+				log.Debug("[peerSelector] failed to request peer metadata", "peer", pid, "err", err)
+				continue
+			}
+			if len(resp) == 0 {
+				log.Debug("[peerSelector] no metadata", "peer", pid)
+				continue
+			}
+			log.Debug("[peerSelector] received metadata", "peer", pid)
+			version := resp[0].version
+			raw := resp[0].raw
+			metadata := &cltypes.Metadata{}
+			if err := metadata.DecodeSSZ(raw, int(version)); err != nil {
+				log.Debug("[peerSelector] failed to decode peer metadata", "peer", pid, "err", err)
+				continue
+			}
+			if metadata.CustodyGroupCount == nil {
+				log.Debug("[peerSelector] empty cgc", "peer", pid, "err", err)
+				continue
+			}
+			peerKey := peerDataKey{pid: pid, cgc: *metadata.CustodyGroupCount}
+			if data, ok := c.peerCache.Get(peerKey); ok {
+				newPeers = append(newPeers, *data)
+				continue
+			}
+
+			enodeId := enode.HexID(peer.EnodeId)
+			custodyIndices, err := peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
+			if err != nil {
+				log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
+				continue
+			}
+			data := &peerData{pid: pid, mask: custodyIndices}
+			c.peerCache.Add(peerKey, data)
+			newPeers = append(newPeers, *data)
+		}
+		// sort by length of mask in descending order
+		sort.Slice(newPeers, func(i, j int) bool {
+			return len(newPeers[i].mask) > len(newPeers[j].mask)
+		})
+		c.peersMutex.Lock()
+		c.peers = newPeers
+		c.peersIndex = 0
+		c.peersMutex.Unlock()
+		log.Debug("[peerSelector] updated peers", "peerCount", len(newPeers))
+	}
+
+	run()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			state := "connected"
-			peers, err := c.sentinel.PeersInfo(ctx, &sentinel.PeersInfoRequest{
-				State: &state,
-			})
-			if err != nil {
-				continue
-			}
-			log.Debug("peers info", "peerCount", len(peers.Peers))
-			var newPeers []peerData
-			for _, peer := range peers.Peers {
-				pid := peer.Pid
-				topic := communication.MetadataProtocolV3
-				resp, _, err := c.sendRequestWithPeer(ctx, topic, []byte{}, 1, pid)
-				if err != nil {
-					log.Debug("failed to request peer metadata", "peer", pid, "err", err)
-					continue
-				}
-				if len(resp) == 0 {
-					continue
-				}
-				log.Debug("received metadata", "peer", pid)
-				version := resp[0].version
-				raw := resp[0].raw
-				metadata := &cltypes.Metadata{}
-				if err := metadata.DecodeSSZ(raw, int(version)); err != nil {
-					log.Debug("failed to decode peer metadata", "peer", pid, "err", err)
-					continue
-				}
-				if metadata.CustodyGroupCount == nil {
-					log.Debug("empty cgc", "peer", pid, "err", err)
-					continue
-				}
-				peerKey := peerDataKey{pid: pid, cgc: *metadata.CustodyGroupCount}
-				if data, ok := c.peerCache.Get(peerKey); ok {
-					newPeers = append(newPeers, *data)
-					continue
-				}
-
-				enodeId := enode.HexID(peer.EnodeId)
-				custodyIndices, err := peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
-				if err != nil {
-					log.Debug("failed to get custody indices", "peer", pid, "err", err)
-					continue
-				}
-				data := &peerData{pid: pid, mask: custodyIndices}
-				c.peerCache.Add(peerKey, data)
-				newPeers = append(newPeers, *data)
-			}
-			// sort by length of mask in descending order
-			sort.Slice(newPeers, func(i, j int) bool {
-				return len(newPeers[i].mask) > len(newPeers[j].mask)
-			})
-			c.peersMutex.Lock()
-			c.peers = newPeers
-			c.peersIndex = 0
-			c.peersMutex.Unlock()
+			run()
 		}
 	}
 }
