@@ -13,8 +13,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/sysutils"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
+	"github.com/erigontech/erigon-lib/sysutils"
 	"golang.org/x/sync/errgroup"
 )
 
