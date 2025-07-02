@@ -27,11 +27,12 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 type mockRoundTripper func(req *http.Request) (*http.Response, error)

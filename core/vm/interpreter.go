@@ -21,9 +21,10 @@ package vm
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon/core/state"
 	"hash"
 	"slices"
+
+	"github.com/erigontech/erigon/core/state"
 
 	"github.com/holiman/uint256"
 
@@ -133,13 +134,6 @@ type keccakState interface {
 	Read([]byte) (int, error)
 }
 
-// EVMInterpreter represents an EVM interpreter
-type EVMInterpreter struct {
-	*VM
-	jt    *JumpTable // EVM instruction table
-	depth int
-}
-
 // structcheck doesn't see embedding
 //
 //nolint:structcheck
@@ -154,6 +148,20 @@ type VM struct {
 	returnData []byte // Last CALL's return data for subsequent reuse
 }
 
+func (vm *VM) setReadonly(outerReadonly bool) func() {
+	if outerReadonly && !vm.readOnly {
+		vm.readOnly = true
+		return func() {
+			vm.readOnly = false
+		}
+	}
+	return func() {}
+}
+
+func (vm *VM) getReadonly() bool {
+	return vm.readOnly
+}
+
 func copyJumpTable(jt *JumpTable) *JumpTable {
 	var copy JumpTable
 	for i, op := range jt {
@@ -165,10 +173,19 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 	return &copy
 }
 
+// EVMInterpreter represents an EVM interpreter
+type EVMInterpreter struct {
+	*VM
+	jt    *JumpTable // EVM instruction table
+	depth int
+}
+
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.chainRules.IsOsaka:
+		jt = &osakaInstructionSet
 	case evm.ChainRules().IsBhilai:
 		jt = &bhilaiInstructionSet
 	case evm.ChainRules().IsPrague:
@@ -270,15 +287,15 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	}
 
 	// Increment the call depth which is restricted to 1024
-	in.depth++
+	in.IncDepth()
 	defer func() {
 		// first: capture data/memory/state/depth/etc... then clenup them
 		if debug && err != nil {
 			if !logged && in.cfg.Tracer.OnOpcode != nil {
-				in.cfg.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+				in.cfg.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.Depth(), VMErrorFromErr(err))
 			}
 			if logged && in.cfg.Tracer.OnFault != nil {
-				in.cfg.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.depth, VMErrorFromErr(err))
+				in.cfg.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.Depth(), VMErrorFromErr(err))
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
@@ -287,7 +304,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if restoreReadonly {
 			in.readOnly = false
 		}
-		in.depth--
+		in.DecDepth()
 	}()
 
 	// Arbitrum: handle Stylus programs
@@ -363,7 +380,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}
 			if in.cfg.Tracer.OnOpcode != nil {
-				in.cfg.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+				in.cfg.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.Depth(), VMErrorFromErr(err))
 				logged = true
 			}
 		}
@@ -402,20 +419,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 }
 
 // Depth returns the current call stack depth.
-func (in *EVMInterpreter) Depth() int {
-	return in.depth
-}
+func (in *EVMInterpreter) Depth() int { return in.depth }
 
-func (vm *VM) setReadonly(outerReadonly bool) func() {
-	if outerReadonly && !vm.readOnly {
-		vm.readOnly = true
-		return func() {
-			vm.readOnly = false
-		}
-	}
-	return func() {}
-}
+// Increments the current call stack's depth.
+func (in *EVMInterpreter) IncDepth() { in.depth++ }
 
-func (vm *VM) getReadonly() bool {
-	return vm.readOnly
-}
+// Decrements the current call stack's depth
+func (in *EVMInterpreter) DecDepth() { in.depth-- }

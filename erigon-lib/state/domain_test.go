@@ -2514,9 +2514,9 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 
 	dc = d.BeginFilesRo()
 
-	findFile := func(start, end uint64) *filesItem {
-		var foundFile *filesItem
-		dc.d.dirtyFiles.Walk(func(items []*filesItem) bool {
+	findFile := func(start, end uint64) *FilesItem {
+		var foundFile *FilesItem
+		dc.d.dirtyFiles.Walk(func(items []*FilesItem) bool {
 			for _, item := range items {
 				if item.startTxNum == start && item.endTxNum == end {
 					foundFile = item

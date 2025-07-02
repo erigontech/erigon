@@ -51,16 +51,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
-	//if msg.FeeCap().IsZero() && engine != nil {
-	//	// Only zero-gas transactions may be service ones
-	//	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-	//		b, logs, err := SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */, evm.Config().Tracer)
-	//		_ = logs
-	//		return b, err
-	//	}
-	//	msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-	//}
-
 	if cfg.Tracer != nil {
 		if cfg.Tracer.OnTxStart != nil {
 			cfg.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
@@ -255,51 +245,6 @@ func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) (com
 	return applyArbTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
 }
 
-// ProcessBeaconBlockRoot applies the EIP-4788 system call to the beacon block root
-// contract. This method is exported to be used in tests.
-//
-//	func ProcessBeaconBlockRoot(beaconRoot libcommon.Hash, evm *vm.EVM) {
-//		//if tracer := evm.Config.Tracer; tracer != nil {
-//		//	onSystemCallStart(tracer, evm.GetVMContext())
-//		//	if tracer.OnSystemCallEnd != nil {
-//		//		defer tracer.OnSystemCallEnd()
-//		//	}
-//		////}
-//		//msg := &Message{
-//		//	From:      params.SystemAddress,
-//		//	GasLimit:  30_000_000,
-//		//	GasPrice:  common.Big0,
-//		//	GasFeeCap: common.Big0,
-//		//	GasTipCap: common.Big0,
-//		//	To:        &params.BeaconRootsAddress,
-//		//	Data:      beaconRoot[:],
-//		//}
-//		gasLimit := hexutil.Uint64(30_000_000)
-//		data := hexutil.Bytes(beaconRoot[:])
-//		msg := ethapi.CallArgs{
-//			From:                 &params.SystemAddress,
-//			To:                   &params.BeaconRootsAddress,
-//			Gas:                  &gasLimit,
-//			GasPrice:             new(hexutil.Big),
-//			MaxPriorityFeePerGas: new(hexutil.Big),
-//			MaxFeePerGas:         new(hexutil.Big),
-//			MaxFeePerBlobGas:     nil,
-//			Value:                nil,
-//			Nonce:                nil,
-//			Data:                 &data,
-//			Input:                nil,
-//			AccessList:           nil,
-//			//ChainID:              evm.ChainConfig().ChainID,
-//			AuthorizationList: nil,
-//			SkipL1Charging:    nil,
-//		}
-//		evm.SetTxContext(NewEVMTxContext(msg))
-//		//evm.
-//		evm.StateDB.AddAddressToAccessList(params.BeaconRootsAddress)
-//		_, _, _ = evm.Call(msg.From, *msg.To, msg.Data, 30_000_000, common.U2560)
-//		evm.StateDB.Finalise(true)
-//	}
-//
 // ProcessParentBlockHash stores the parent block hash in the history storage contract
 // as per EIP-2935/7709.
 func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
@@ -349,75 +294,3 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 	//}
 	//evm.StateDB.Finalise(true)
 }
-
-//
-// ProcessWithdrawalQueue calls the EIP-7002 withdrawal queue contract.
-// It returns the opaque request data returned by the contract.
-//func ProcessWithdrawalQueue(requests *[][]byte, evm *vm.EVM) {
-//	processRequestsSystemCall(requests, evm, 0x01, params.WithdrawalQueueAddress)
-//}
-//
-//// ProcessConsolidationQueue calls the EIP-7251 consolidation queue contract.
-//// It returns the opaque request data returned by the contract.
-//func ProcessConsolidationQueue(requests *[][]byte, evm *vm.EVM) {
-//	processRequestsSystemCall(requests, evm, 0x02, params.ConsolidationQueueAddress)
-//}
-//
-//func processRequestsSystemCall(requests *[][]byte, evm *vm.EVM, requestType byte, addr libcommon.Address) {
-//	//if tracer := evm.Config.Tracer; tracer != nil {
-//	//	onSystemCallStart(tracer, evm.GetVMContext())
-//	//	if tracer.OnSystemCallEnd != nil {
-//	//		defer tracer.OnSystemCallEnd()
-//	//	}
-//	//}
-//	msg := &Message{
-//		From:      params.SystemAddress,
-//		GasLimit:  30_000_000,
-//		GasPrice:  common.Big0,
-//		GasFeeCap: common.Big0,
-//		GasTipCap: common.Big0,
-//		To:        &addr,
-//	}
-//	evm.SetTxContext(NewEVMTxContext(msg))
-//	evm.StateDB.AddAddressToAccessList(addr)
-//	ret, _, _ := evm.Call(msg.From, *msg.To, msg.Data, 30_000_000, libcommon.U2560)
-//	evm.StateDB.Finalise(true)
-//	if len(ret) == 0 {
-//		return // skip empty output
-//	}
-//
-//	// Append prefixed requestsData to the requests list.
-//	requestsData := make([]byte, len(ret)+1)
-//	requestsData[0] = requestType
-//	copy(requestsData[1:], ret)
-//	*requests = append(*requests, requestsData)
-//}
-
-var depositTopic = common.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
-
-// ParseDepositLogs extracts the EIP-6110 deposit values from logs emitted by
-// BeaconDepositContract.
-//func ParseDepositLogs(requests *[][]byte, logs []*types.Log, config *params.ChainConfig) error {
-//	deposits := make([]byte, 1) // note: first byte is 0x00 (== deposit request type)
-//	for _, log := range logs {
-//		if log.Address == config.DepositContractAddress && len(log.Topics) > 0 && log.Topics[0] == depositTopic {
-//			request, err := types.DepositLogToRequest(log.Data)
-//			if err != nil {
-//				return fmt.Errorf("unable to parse deposit data: %v", err)
-//			}
-//			deposits = append(deposits, request...)
-//		}
-//	}
-//	if len(deposits) > 1 {
-//		*requests = append(*requests, deposits)
-//	}
-//	return nil
-//}
-
-//func onSystemCallStart(tracer *tracing.Hooks, ctx *tracing.VMContext) {
-//	//if tracer.OnSystemCallStartV2 != nil {
-//	//	tracer.OnSystemCallStartV2(ctx)
-//	//} else if tracer.OnSystemCallStart != nil {
-//	tracer.OnSystemCallStart()
-//	//}
-//}

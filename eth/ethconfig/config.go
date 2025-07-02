@@ -31,10 +31,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -49,9 +49,51 @@ import (
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
 var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
-var BorDefaultMinerGasLimit uint64 = 45_000_000
 
-var DefaultMinerGasLimit uint64 = 36_000_000
+var (
+	DefaultMinerGasLimitEthMainnet uint64 = 45_000_000
+	BorDefaultMinerGasLimit        uint64 = 45_000_000
+	DefaultMinerGasLimitSepolia    uint64 = 60_000_000
+	DefaultMinerGasLimitHolesky    uint64 = 60_000_000
+	DefaultMinerGasLimitHoodi      uint64 = 60_000_000
+	DefaultMinerGasLimitBorMainnet uint64 = 45_000_000
+	DefaultMinerGasLimitAmoy       uint64 = 45_000_000
+	DefaultMinerGasLimitGnosis     uint64 = 17_000_000
+	DefaultMinerGasLimitChiado     uint64 = 17_000_000
+)
+
+func DefaultMinerGasLimitByChain(config *Config) uint64 {
+	if config.Genesis == nil {
+		return DefaultMinerGasLimitEthMainnet
+	}
+
+	switch config.NetworkID {
+	case params.MainnetChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitEthMainnet
+	case params.SepoliaChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitSepolia
+	case params.HoleskyChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitHolesky
+	case params.HoodiChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitHoodi
+	case params.BorMainnetChainConfig.ChainID.Uint64():
+		return BorDefaultMinerGasLimit
+	case params.AmoyChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitAmoy
+	case params.GnosisChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitGnosis
+	case params.ChiadoChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitChiado
+	default:
+		if config.Genesis.Config == nil {
+			return DefaultMinerGasLimitEthMainnet
+		}
+		if config.Genesis.Config.Bor != nil {
+			return BorDefaultMinerGasLimit
+		}
+	}
+	return DefaultMinerGasLimitEthMainnet
+}
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -143,7 +185,6 @@ type BlocksFreezing struct {
 	ProduceE2         bool // produce new block files
 	ProduceE3         bool // produce new state files
 	NoDownloader      bool // possible to use snapshots without calling Downloader
-	Verify            bool // verify snapshots on startup
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string

@@ -106,7 +106,7 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 	gas := p.RequiredGas(in)
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
-		if res, _, err := RunPrecompiledContract(p, in, gas, nil); err != nil {
+		if res, _, err := RunPrecompiledContract(p, in, gas, nil, nil); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
 			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
@@ -129,7 +129,7 @@ func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
-		_, _, err := RunPrecompiledContract(p, in, gas, nil)
+		_, _, err := RunPrecompiledContract(p, in, gas, nil, nil)
 		if err.Error() != "out of gas" {
 			t.Errorf("Expected error [out of gas], got [%v]", err)
 		}
@@ -147,7 +147,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	gas := p.RequiredGas(in)
 	t.Run(test.Name, func(t *testing.T) {
 		t.Parallel()
-		_, _, err := RunPrecompiledContract(p, in, gas, nil)
+		_, _, err := RunPrecompiledContract(p, in, gas, nil, nil)
 		if err == nil || err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
@@ -179,7 +179,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 		bench.ResetTimer()
 		for i := 0; i < bench.N; i++ {
 			copy(data, in)
-			res, _, err = RunPrecompiledContract(p, data, reqGas, nil)
+			res, _, err = RunPrecompiledContract(p, data, reqGas, nil, nil)
 		}
 		bench.StopTimer()
 		elapsed := uint64(time.Since(start))
@@ -274,7 +274,7 @@ func TestPrecompiledModExpPotentialOutOfRange(t *testing.T) {
 	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
 	input := hexutil.MustDecode(hexString)
 	maxGas := uint64(math.MaxUint64)
-	_, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil)
+	_, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil, nil)
 	require.NoError(t, err)
 }
 
@@ -284,19 +284,20 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 
 	pragueModExp := allPrecompiles[common.BytesToAddress([]byte{0xa5})]
 	gas := pragueModExp.RequiredGas(in)
-	res, _, err := RunPrecompiledContract(pragueModExp, in, gas, nil)
+	res, _, err := RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 
 	osakaModExp := allPrecompiles[common.BytesToAddress([]byte{0xb5})]
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 }
 
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
 func TestPrecompiledBn256ScalarMul(t *testing.T)      { testJson("bn256ScalarMul", "07", t) }
 func BenchmarkPrecompiledBn256ScalarMul(b *testing.B) { benchJson("bn256ScalarMul", "07", b) }
+func TestPrecompiledBn256ScalarMulFail(t *testing.T)  { testJsonFail("bn256ScalarMul", "07", t) }
 
 // Tests the sample inputs from the elliptic curve pairing check EIP 197.
 func TestPrecompiledBn256Pairing(t *testing.T)      { testJson("bn256Pairing", "08", t) }

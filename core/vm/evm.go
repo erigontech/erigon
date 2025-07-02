@@ -512,22 +512,26 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 			err = nil
 		}
 	}
-	// if the contract creation ran successfully and no errors were returned
+	// If the contract creation ran successfully and no errors were returned,
 	// calculate the gas required to store the code. If the code could not
-	// be stored due to not enough gas set an error and let it be handled
+	// be stored due to not enough gas, set an error when we're in Homestead and let it be handled
 	// by the error checking condition below.
 	if err == nil {
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
 		if contract.UseGas(createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage) {
 			evm.intraBlockState.SetCode(address, ret)
-		} else if evm.chainRules.IsHomestead { // TODO ARBitrum! does not check IsHomestead; but not affects on stylus exec
-			err = ErrCodeStoreOutOfGas
+		} else {
+			// If we run out of gas, we do not store the code: the returned code must be empty.
+			ret = []byte{}
+			if evm.chainRules.IsHomestead { // TODO ARBitrum! does not check IsHomestead; but not affects on stylus exec
+				err = ErrCodeStoreOutOfGas
+			}
 		}
 	}
 
 	// When an error was returned by the EVM or when setting the creation code
-	// above we revert to the snapshot and consume any gas remaining. Additionally
-	// when we're in homestead this also counts for code storage gas errors.
+	// above, we revert to the snapshot and consume any gas remaining. Additionally,
+	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
 		if err != ErrExecutionReverted {
@@ -641,3 +645,12 @@ func (evm *EVM) captureEnd(depth int, typ OpCode, startGas uint64, leftOverGas u
 		tracer.OnExit(depth, ret, startGas-leftOverGas, VMErrorFromErr(err), reverted)
 	}
 }
+
+// Depth returns the current depth
+func (evm *EVM) Depth() int {
+	return evm.interpreter.Depth()
+}
+
+func (evm *EVM) IncDepth() { evm.interpreter.IncDepth() }
+
+func (evm *EVM) DecDepth() { evm.interpreter.DecDepth() }

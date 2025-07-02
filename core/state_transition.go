@@ -23,11 +23,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/chain"
 	"slices"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"

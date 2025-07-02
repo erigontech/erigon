@@ -36,19 +36,18 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-db/downloader"
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/version"
-	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -149,19 +148,20 @@ type TorrentClient struct {
 }
 
 type CreateNewTorrentClientConfig struct {
-	Chain        string
-	WebSeeds     string
-	DownloadRate string
-	UploadRate   string
-	Verbosity    int
-	TorrentPort  int
-	ConnsPerFile int
-	DisableIPv6  bool
-	DisableIPv4  bool
-	NatFlag      string
-	Logger       log.Logger
-	TempDir      string
-	CleanDir     bool
+	Chain             string
+	WebSeeds          string
+	DownloadRate      string
+	UploadRate        string
+	Verbosity         int
+	TorrentPort       int
+	ConnsPerFile      int
+	DisableIPv6       bool
+	DisableIPv4       bool
+	NatFlag           string
+	Logger            log.Logger
+	TempDir           string
+	CleanDir          bool
+	DownloaderCfgOpts downloadercfg.NewCfgOpts
 }
 
 func NewTorrentClientConfigFromCobra(cliCtx *cli.Context, chain string) CreateNewTorrentClientConfig {
@@ -224,7 +224,7 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 		return nil, err
 	}
 
-	logLevel, _, err := downloadercfg.Int2LogLevel(config.Verbosity)
+	logLevel, err := downloadercfg.Int2LogLevel(config.Verbosity)
 
 	if err != nil {
 		return nil, err
@@ -232,9 +232,21 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
-	cfg, err := downloadercfg.New(ctx, dirs, version, logLevel, downloadRate, uploadRate,
+	cfg, err := downloadercfg.New(
+		ctx,
+		dirs,
+		version,
+		logLevel,
+		downloadRate,
+		uploadRate,
 		config.TorrentPort,
-		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true, true)
+		config.ConnsPerFile,
+		nil,
+		webseedsList,
+		config.Chain,
+		true,
+		config.DownloaderCfgOpts,
+	)
 
 	if err != nil {
 		return nil, err
@@ -447,13 +459,13 @@ func (s *torrentSession) Download(ctx context.Context, files ...string) error {
 			case <-t.GotInfo():
 			}
 
-			if !t.Complete.Bool() {
+			if !t.Complete().Bool() {
 				t.AllowDataDownload()
 				t.DownloadAll()
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case <-t.Complete.On():
+				case <-t.Complete().On():
 				}
 			}
 
@@ -474,7 +486,7 @@ func (s *torrentSession) Label() string {
 
 func NewTorrentSession(cli *TorrentClient, chain string) *torrentSession {
 	session := &torrentSession{cli, map[string]snapcfg.PreverifiedItem{}}
-	for _, it := range snapcfg.KnownCfg(chain).Preverified {
+	for _, it := range snapcfg.KnownCfg(chain).Preverified.Items {
 		session.items[it.Name] = it
 	}
 

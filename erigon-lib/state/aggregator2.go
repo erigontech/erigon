@@ -2,7 +2,11 @@ package state
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -10,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 )
 
 // this is supposed to register domains/iis
@@ -23,6 +28,10 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 }
 
 func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, salt *uint32, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+	err := checkSnapshotsCompatibility(dirs)
+	if err != nil {
+		return nil, err
+	}
 	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
 		return nil, err
@@ -198,7 +207,7 @@ var Schema = SchemaGen{
 	},
 	CodeDomain: domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compressing Code with keys doesn't show any benefits. Compression of values shows 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
 		Accessors:   AccessorBTree | AccessorExistence,
 		largeValues: true,
@@ -229,7 +238,7 @@ var Schema = SchemaGen{
 			historyIdx: kv.CommitmentHistoryIdx,
 
 			historyLargeValues:            false,
-			historyValuesOnCompressedPage: 16,
+			historyValuesOnCompressedPage: 64,
 
 			snapshotsDisabled: true,
 			historyDisabled:   true,
@@ -344,4 +353,58 @@ func EnableHistoricalRCache() {
 	cfg.hist.historyDisabled = false
 	cfg.hist.snapshotsDisabled = false
 	Schema.RCacheDomain = cfg
+}
+
+var SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{}
+
+func checkSnapshotsCompatibility(d datadir.Dirs) error {
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !entry.IsDir() {
+				name := entry.Name()
+				if strings.HasPrefix(name, "v1-") {
+					return errors.New("The datadir has bad snapshot files or they are " +
+						"incompatible with the current erigon version. If you want to upgrade from an" +
+						"older version, you may run the following to rename files to the " +
+						"new version: `erigon seg update-to-new-ver-format`")
+				}
+				fileInfo, _, _ := snaptype.ParseFileName("", name)
+
+				currentFileVersion := fileInfo.Version
+
+				msVs, ok := SchemeMinSupportedVersions[fileInfo.TypeString]
+				if !ok {
+					//println("file type not supported", fileInfo.TypeString, name)
+					return nil
+				}
+				requiredVersion, ok := msVs[fileInfo.Ext]
+				if !ok {
+					return nil
+				}
+
+				if currentFileVersion.Major < requiredVersion.Major {
+					return fmt.Errorf("snapshot file major version mismatch for file %s, "+
+						" requiredVersion: %d, currentVersion: %d"+
+						" You may want to downgrade to an older version (not older than 3.1)",
+						fileInfo.Name(), requiredVersion.Major, currentFileVersion.Major)
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

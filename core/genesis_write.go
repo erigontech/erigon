@@ -20,15 +20,16 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"math/big"
 	"slices"
+	"sort"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -47,6 +48,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -190,7 +192,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 	}
 	if storedCfg == nil {
 		logger.Warn("Found genesis block without chain config")
-		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
+		err1 := WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
 			return newCfg, nil, err1
 		}
@@ -212,7 +214,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
-	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
+	if err := WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
 	}
 	return newCfg, storedBlock, nil
@@ -260,7 +262,7 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 	if err != nil {
 		return block, statedb, err
 	}
-	err = rawdb.WriteGenesisBesideState(block, tx, g)
+	err = WriteGenesisBesideState(block, tx, g)
 	return block, statedb, err
 }
 
@@ -301,10 +303,42 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return err
 	}
-	if err := rawdb.WriteChainConfig(tx, block.Hash(), cfg); err != nil {
+	if err := WriteChainConfig(tx, block.Hash(), cfg); err != nil {
 		return err
 	}
 	return nil
+}
+
+// Write writes the block a genesis specification to the database.
+// The block is committed as the canonical head block.
+func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) error {
+	config := g.Config
+	if config == nil {
+		config = chain.AllProtocolChanges
+	}
+	if err := config.CheckConfigForkOrder(); err != nil {
+		return err
+	}
+
+	if err := rawdb.WriteBlock(tx, block); err != nil {
+		return err
+	}
+	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
+		return err
+	}
+	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
+		return err
+	}
+
+	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
+		return err
+	}
+
+	rawdb.WriteHeadBlockHash(tx, block.Hash())
+	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
+		return err
+	}
+	return WriteChainConfig(tx, block.Hash(), config)
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
@@ -624,9 +658,8 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			statedb.CreateAccount(common.Address{}, false)
 		}
 
-		keys := sortedAllocKeys(g.Alloc)
-		for _, key := range keys {
-			addr := common.BytesToAddress([]byte(key))
+		addrs := sortedAllocAddresses(g.Alloc)
+		for _, addr := range addrs {
 			account := g.Alloc[addr]
 
 			balance, overflow := uint256.FromBig(account.Balance)
@@ -636,10 +669,10 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			statedb.AddBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
+			var slotVal uint256.Int
 			for key, value := range account.Storage {
-				key := key
-				val := uint256.NewInt(0).SetBytes(value.Bytes())
-				statedb.SetState(addr, key, *val)
+				slotVal.SetBytes(value.Bytes())
+				statedb.SetState(addr, key, slotVal)
 			}
 
 			if len(account.Constructor) > 0 {
@@ -671,6 +704,18 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	head.Root = root
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+}
+
+func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
+	addrs := make([]common.Address, 0, len(m))
+	for addr := range m {
+		addrs = append(addrs, addr)
+	}
+
+	sort.Slice(addrs, func(i, j int) bool {
+		return bytes.Compare(addrs[i][:], addrs[j][:]) < 0
+	})
+	return addrs
 }
 
 func sortedAllocKeys(m types.GenesisAlloc) []string {

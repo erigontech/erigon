@@ -24,6 +24,9 @@ import (
 // shouldProcessBlobs checks if any block in the given list of blocks
 // has a version greater than or equal to DenebVersion and contains BlobKzgCommitments.
 func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
+	if !cfg.caplinConfig.ArchiveBlobs && !cfg.caplinConfig.ImmediateBlobsBackfilling {
+		return false
+	}
 	blobsExist := false
 	highestSlot := blocks[0].Block.Slot
 	for _, block := range blocks {
@@ -77,6 +80,10 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 
 	// Request blobs from the network
 	blobs, err = network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
+	if errors.Is(err, network2.ErrTimeout) {
+		log.Warn("Blob request timeout", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
+		return highestSlotProcessed, nil
+	}
 	if err != nil {
 		// Return an error if blobs could not be retrieved
 		err = fmt.Errorf("failed to get blobs: %w", err)
@@ -101,6 +108,69 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 	return highestProcessed - 1, err
 }
 
+func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBlockProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (err error) {
+	var denebBlocks, fuluBlocks []*cltypes.SignedBeaconBlock
+	for _, block := range blocks {
+		if block.Version() >= clparams.FuluVersion {
+			fuluBlocks = append(fuluBlocks, block)
+		} else if block.Version() >= clparams.DenebVersion {
+			denebBlocks = append(denebBlocks, block)
+		}
+	}
+
+	if len(denebBlocks) > 0 && shouldProcessBlobs(denebBlocks, cfg) {
+		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, denebBlocks)
+		if err != nil {
+			logger.Trace("[Caplin] Failed to process blobs", "err", err)
+			return err
+		}
+	}
+
+	if len(fuluBlocks) > 0 && canDownloadColumnData(fuluBlocks, cfg) {
+		if err = cfg.peerDas.DownloadMissingColumnsByBlocks(ctx, fuluBlocks); err != nil {
+			logger.Trace("[Caplin] Failed to download missing columns", "err", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
+func canDownloadColumnData(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
+	// check if data is too far behind
+	// minimum_request_epoch = max(finalized_epoch, current_epoch - MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS, FULU_FORK_EPOCH)
+	// Get the current epoch from the first block
+	if len(blocks) == 0 {
+		return false
+	}
+	currentEpoch := cfg.ethClock.GetCurrentEpoch()
+
+	// Get finalized epoch from forkchoice store
+	//finalizedEpoch := cfg.forkChoice.FinalizedCheckpoint().Epoch
+
+	// Calculate minimum request epoch
+	minimumRequestEpoch := uint64(0)
+	if currentEpoch > cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests {
+		minEpoch := currentEpoch - cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests
+		if minEpoch > minimumRequestEpoch {
+			minimumRequestEpoch = minEpoch
+		}
+	}
+	if cfg.beaconCfg.FuluForkEpoch > minimumRequestEpoch {
+		minimumRequestEpoch = cfg.beaconCfg.FuluForkEpoch
+	}
+
+	// Check if any blocks are before minimum request epoch
+	for _, block := range blocks {
+		blockEpoch := block.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
+		if blockEpoch < minimumRequestEpoch {
+			return false
+		}
+	}
+
+	return true
+}
+
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
 // It takes the highest block processed, a flag to determine if insertion is needed, and a list of signed beacon blocks as input.
 // It returns the new highest block processed and an error if any.
@@ -110,18 +180,12 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
 	})
 
-	var (
-		blockRoot common.Hash
-		st        *state.CachingBeaconState
-	)
-	newHighestBlockProcessed = highestBlockProcessed
-	if shouldProcessBlobs(blocks, cfg) {
-		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, blocks)
-		if err != nil {
-			logger.Trace("[Caplin] Failed to process blobs", "err", err)
-			return highestBlockProcessed, nil
-		}
+	if err = downloadBlobs(ctx, logger, cfg, highestBlockProcessed, blocks); err != nil {
+		return
 	}
+
+	var blockRoot common.Hash
+	newHighestBlockProcessed = highestBlockProcessed
 	// Iterate over each block in the sorted list
 	for _, block := range blocks {
 		// Compute the hash of the current block
@@ -142,9 +206,10 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
+		checkDataAvaiability := cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling
 		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, true); err != nil {
-			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) {
+		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, checkDataAvaiability); err != nil {
+			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594DataNotAvailable) {
 				// Return an error if EIP-4844 data is not available
 				logger.Trace("[Caplin] forward sync EIP-4844 data not available", "blockSlot", block.Block.Slot)
 				if newHighestBlockProcessed == 0 {
@@ -158,6 +223,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 
 		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
+			var st *state.CachingBeaconState
 			// Perform post-processing on the block
 			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
 			if err == nil && st != nil {
@@ -198,12 +264,18 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
 		shouldInsert = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
-		startSlot    = cfg.forkChoice.HighestSeen() - 8                                     // Start forwardsync a little bit behind the highest seen slot (account for potential reorgs)
 		secsPerLog   = 30                                                                   // Interval in seconds for logging progress
 		logTicker    = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
 		downloader   = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
 		currentSlot  atomic.Uint64                                                          // Atomic variable to track the current slot
+		startSlot    = cfg.forkChoice.HighestSeen()
 	)
+	// Start forwardsync a little bit behind the highest seen slot (account for potential reorgs)
+	if startSlot < 8 {
+		startSlot = 0
+	} else {
+		startSlot = startSlot - 8
+	}
 
 	// Initialize the slot to download from the finalized checkpoint
 	currentSlot.Store(startSlot)

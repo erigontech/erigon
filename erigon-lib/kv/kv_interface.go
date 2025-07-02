@@ -46,7 +46,7 @@ import (
 //Methods Naming:
 //  Prune: delete old data
 //  Unwind: delete recent data
-//  Get: exact match of criterias
+//  Get: exact match of criteria
 //  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
 //      Range is analog of SQL's: SELECT * FROM Table WHERE k>=from AND k<to ORDER BY k ASC/DESC LIMIT n
 //  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
@@ -407,7 +407,7 @@ type Tx interface {
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
-	// if `order.Desc` expecing `from`<`to`
+	// if `order.Desc` expecting `from`<`to`
 	// Limit -1 means Unlimited
 	// Designed for requesting huge data (Example: full table scan). Client can't stop it.
 	// Example: RangeDescend("Table", "B", "A", order.Asc, -1)
@@ -538,8 +538,8 @@ type RwCursorDupSort interface {
 type (
 	Domain      uint16
 	Appendable  uint16
-	History     string
 	InvertedIdx uint16
+	ForkableId  uint16
 )
 
 type TemporalGetter interface {
@@ -551,11 +551,8 @@ type TemporalTx interface {
 	TemporalGetter
 	WithFreezeInfo
 
-	// return the earliest known txnum in history of a given domain
-	HistoryStartFrom(domainName Domain) uint64
-
 	// DomainGetAsOf - state as of given `ts`
-	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
+	// Example: GetAsOf(Account, key, txNum) - returns account's value before `txNum` transaction changed it
 	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
 	GetAsOf(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
@@ -580,6 +577,9 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+
+	AggForkablesTx(ForkableId) any // any forkableId, returns that group
+	Unmarked(ForkableId) UnmarkedTx
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -589,8 +589,17 @@ type TemporalDebugTx interface {
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
 	DomainFiles(domain ...Domain) VisibleFiles
-
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
+
+	// return the earliest known txnum in history of a given domain
+	HistoryStartFrom(domainName Domain) uint64
+
+	DomainProgress(domain Domain) (txNum uint64)
+	IIProgress(name InvertedIdx) (txNum uint64)
+	StepSize() uint64
+
+	CanUnwindToBlockNum() (uint64, error)
+	CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error)
 }
 
 type TemporalDebugDB interface {
@@ -615,6 +624,8 @@ type TemporalRwTx interface {
 	TemporalTx
 	TemporalPutDel
 
+	UnmarkedRw(ForkableId) UnmarkedRwTx
+
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
@@ -624,14 +635,14 @@ type TemporalPutDel interface {
 	// DomainPut
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
-	//   - user can append k2 into k1, then underlying methods will not preform append
+	//   - user can append k2 into k1, then underlying methods will not perform append
 	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error
 	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
-	//   - user can append k2 into k1, then underlying methods will not preform append
+	//   - user can append k2 into k1, then underlying methods will not perform append
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
@@ -651,7 +662,7 @@ type TemporalRwDB interface {
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 }
 
-// ---- non-importnt utilites
+// ---- non-important utilities
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
 

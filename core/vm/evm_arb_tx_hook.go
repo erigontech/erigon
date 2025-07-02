@@ -8,31 +8,6 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// ARB deprecated: remove this implementation on next merge
-// Depth returns the current depth
-func (evm *EVM) Depth() int {
-	return evm.interpreter.Depth()
-}
-
-func (evm *EVM) IncrementDepth() {
-	evm.interpreter.IncDepth()
-}
-
-func (evm *EVM) DecrementDepth() {
-	evm.interpreter.DecDepth()
-}
-
-// Depth returns the current call stack depth.
-func (in *EVMInterpreter) IncDepth() {
-	in.depth++
-}
-
-func (in *EVMInterpreter) DecDepth() {
-	in.depth--
-}
-
-// ARB end of deprecated
-
 func (in *EVMInterpreter) EVM() *EVM {
 	return in.VM.evm
 }

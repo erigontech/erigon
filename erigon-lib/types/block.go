@@ -21,7 +21,6 @@
 package types
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -29,8 +28,6 @@ import (
 	"math/big"
 	"reflect"
 	"sync/atomic"
-
-	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -122,11 +119,6 @@ type Header struct {
 
 	RequestsHash *common.Hash `json:"requestsHash"` // EIP-7685
 
-	// The verkle proof is ignored in legacy headers
-	Verkle        bool
-	VerkleProof   []byte
-	VerkleKeyVals []verkle.KeyValuePair
-
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
@@ -193,16 +185,6 @@ func (h *Header) EncodingSize() int {
 
 	if h.RequestsHash != nil {
 		encodingSize += 33
-	}
-
-	if h.Verkle {
-		// Encoding of Verkle Proof
-		encodingSize += rlp.StringLen(h.VerkleProof)
-		var tmpBuffer bytes.Buffer
-		if err := rlp.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
-			panic(err)
-		}
-		encodingSize += rlp.ListPrefixLen(tmpBuffer.Len()) + tmpBuffer.Len()
 	}
 
 	return encodingSize
@@ -352,16 +334,6 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 		if _, err := w.Write(h.RequestsHash[:]); err != nil {
 			return err
-		}
-	}
-
-	if h.Verkle {
-		if err := rlp.EncodeString(h.VerkleProof, w, b[:]); err != nil {
-			return err
-		}
-
-		if err := rlp.Encode(w, h.VerkleKeyVals); err != nil {
-			return nil
 		}
 	}
 
@@ -560,17 +532,6 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.RequestsHash = new(common.Hash)
 	h.RequestsHash.SetBytes(b)
 
-	if h.Verkle {
-		if h.VerkleProof, err = s.Bytes(); err != nil {
-			return fmt.Errorf("read VerkleProof: %w", err)
-		}
-		rawKv, err := s.Raw()
-		if err != nil {
-			return err
-		}
-		rlp.DecodeBytes(rawKv, h.VerkleKeyVals)
-	}
-
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
 	}
@@ -722,6 +683,31 @@ func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
 // LastSystemTx returns last system txn number in block. result+1 will be baseID of next block a.k.a. beginning system txn number
 // Supposed that txAmount includes 2 system txns.
 func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
+
+type BodyOnlyTxn struct {
+	// 50% of BodyForStorage spent on withdrawal
+	// this structure does rlp decode only for
+	// "tx related" data
+	BaseTxnID BaseTxnID
+	TxCount   uint32
+}
+
+func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
+	// discard rlp.Stream after this...
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode BaseTxId
+	if err = s.Decode(&b.BaseTxnID); err != nil {
+		return err
+	}
+	// decode TxCount
+	if err = s.Decode(&b.TxCount); err != nil {
+		return err
+	}
+	return nil
+}
 
 type BodyForStorage struct {
 	BaseTxnID   BaseTxnID
@@ -1172,15 +1158,6 @@ func CopyHeader(h *Header) *Header {
 		cpy.RequestsHash = new(common.Hash)
 		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
 	}
-	cpy.Verkle = h.Verkle
-	if h.VerkleProof != nil {
-		cpy.VerkleProof = make([]byte, len(h.VerkleProof))
-		copy(cpy.VerkleProof, h.VerkleProof)
-	}
-	if h.VerkleKeyVals != nil {
-		cpy.VerkleKeyVals = make([]verkle.KeyValuePair, len(h.VerkleKeyVals))
-		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
-	}
 	cpy.mutable = h.mutable
 	return &cpy
 }
@@ -1328,7 +1305,7 @@ func (b *Block) Body() *Body {
 	return bd
 }
 func (b *Block) SendersToTxs(senders []common.Address) {
-	return// TODO Arbitrum!!!
+	return // TODO Arbitrum!!!
 	if len(senders) == 0 {
 		return
 	}

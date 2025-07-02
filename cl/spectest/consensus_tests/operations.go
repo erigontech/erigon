@@ -325,6 +325,7 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 	if err := spectest.ReadSszOld(root, executionPayload, c.Version(), executionPayloadFileName); err != nil {
 		return err
 	}
+
 	if err := c.Machine.ProcessWithdrawals(preState, executionPayload.Withdrawals); err != nil {
 		if expectedError {
 			return nil

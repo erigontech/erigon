@@ -237,7 +237,7 @@ func checkNumberText(input []byte) (raw []byte, err error) {
 }
 
 func wrapTypeError(err error, typ reflect.Type) error {
-	// keeping compatiblity with go ethereum tests
+	// keeping compatibility with go ethereum tests
 	// nolint:errorlint
 	//if _, ok := err.(*decError); ok {
 	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}

@@ -21,12 +21,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/erigontech/erigon-db/downloader"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 var ProhibitNewDownloadsLock = Migration{
