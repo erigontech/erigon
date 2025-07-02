@@ -122,33 +122,33 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
-) ([]*cltypes.DataColumnSidecar, string, error) {
-	filteredReq, pid, err := b.columnDataPeerSelector.pickPeer(ctx, req)
+) ([]*cltypes.DataColumnSidecar, string, uint64, error) {
+	filteredReq, pid, cgc, err := b.columnDataPeerSelector.pickPeer(ctx, req)
 	if err != nil {
-		return nil, pid, err
+		return nil, pid, 0, err
 	}
 
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
 	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, uint64(req.Len()), pid)
 	if err != nil {
-		return nil, pid, err
+		return nil, pid, 0, err
 	}
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, data := range responsePacket {
 		columnSidecar := &cltypes.DataColumnSidecar{}
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
+			return nil, pid, 0, err
 		}
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
 
-	return ColumnSidecars, pid, nil
+	return ColumnSidecars, pid, cgc, nil
 }
 
 func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
@@ -562,7 +562,7 @@ func (c *columnSidecarPeerSelector) updatePeersMeta(ctx context.Context) {
 func (c *columnSidecarPeerSelector) pickPeer(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
-) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, error) {
+) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, uint64, error) {
 	c.peersMutex.RLock()
 	defer c.peersMutex.RUnlock()
 
@@ -571,7 +571,7 @@ func (c *columnSidecarPeerSelector) pickPeer(
 		peer := c.peers[c.peersIndex]
 		if len(peer.mask) == int(c.beaconConfig.NumberOfColumns) {
 			// full mask, no need to filter
-			return req, peer.pid, nil
+			return req, peer.pid, uint64(len(peer.mask)), nil
 		}
 		// matching
 		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(req.Len()))
@@ -593,9 +593,9 @@ func (c *columnSidecarPeerSelector) pickPeer(
 			// no matching columns
 			continue
 		}
-		return newReq, peer.pid, nil
+		return newReq, peer.pid, uint64(len(peer.mask)), nil
 	}
 
 	log.Debug("no good peer found", "peerCount", len(c.peers))
-	return nil, "", errors.New("no good peer found")
+	return nil, "", 0, errors.New("no good peer found")
 }
