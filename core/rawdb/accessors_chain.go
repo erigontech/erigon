@@ -482,8 +482,14 @@ func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, txnID uint64) erro
 		}
 
 		binary.BigEndian.PutUint64(txIdKey, txnID)
-		if err := rwTx.Append(kv.EthTx, txIdKey, buf.Bytes()); err != nil {
+		bufBytes := buf.Bytes()
+		t := time.Now()
+		if err := rwTx.Append(kv.EthTx, txIdKey, bufBytes); err != nil {
 			return err
+		}
+		took := time.Since(t)
+		if took > 10*time.Millisecond {
+			log.Warn("WriteRawTransactions", "txnID", txnID, "len(txn)", len(bufBytes), "took", took)
 		}
 		txnID++
 	}
