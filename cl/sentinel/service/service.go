@@ -300,8 +300,24 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 	return resp, nil
 }
 
-func (s *SentinelServer) SendPeerRequest(ctx context.Context, req *sentinelrpc.RequestDataWithPeer) (*sentinelrpc.ResponseData, error) {
-	return nil, errors.New("not implemented")
+func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *sentinelrpc.RequestDataWithPeer) (*sentinelrpc.ResponseData, error) {
+	pid := peer.ID(reqWithPeer.Pid)
+	req := &sentinelrpc.RequestData{
+		Data:  reqWithPeer.Data,
+		Topic: reqWithPeer.Topic,
+	}
+	resp, err := s.requestPeer(ctx, pid, req)
+	if err != nil {
+		if strings.Contains(err.Error(), "protocols not supported") {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+			s.sentinel.Peers().SetBanStatus(pid, true)
+		}
+		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMessage) (*sentinelrpc.IdentityResponse, error) {
