@@ -579,5 +579,7 @@ func (c *columnSidecarPeerSelector) getPeer(
 		}
 		return newReq, peer.pid, nil
 	}
+
+	log.Debug("no good peer found", "req", req.Len())
 	return nil, "", errors.New("no good peer found")
 }
