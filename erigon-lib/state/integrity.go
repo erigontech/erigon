@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
+	"golang.org/x/sync/errgroup"
 )
 
 // search key in all files of all domains and print file names
@@ -138,45 +139,57 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 }
 
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
+	fromTxNum := fromStep * iit.ii.aggregationStep
+	g := &errgroup.Group{}
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	fromTxNum := fromStep * iit.ii.aggregationStep
 	iterStep := func(item visibleFile) error {
+		item.src.decompressor.MadvSequential()
+		defer item.src.decompressor.DisableReadAhead()
+
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)
+
+		i := 0
+		var s multiencseq.SequenceReader
 
 		for g.HasNext() {
 			k, _ := g.NextUncompressed()
 			_ = k
 
 			encodedSeq, _ := g.NextUncompressed()
-			r := multiencseq.ReadMultiEncSeq(item.startTxNum, encodedSeq)
-			if r.Count() == 0 {
+			s.Reset(item.startTxNum, encodedSeq)
+
+			if s.Count() == 0 {
 				continue
 			}
-			if item.startTxNum > r.Min() {
-				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, r.Min(), g.FileName(), common.Shorten(k, 8))
+			if item.startTxNum > s.Min() {
+				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, s.Min(), g.FileName(), common.Shorten(k, 8))
 				if failFast {
 					return err
 				} else {
 					log.Warn(err.Error())
 				}
 			}
-			if item.endTxNum < r.Max() {
-				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, r.Max(), g.FileName(), common.Shorten(k, 8))
+			if item.endTxNum < s.Max() {
+				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, s.Max(), g.FileName(), common.Shorten(k, 8))
 				if failFast {
 					return err
 				} else {
 					log.Warn(err.Error())
 				}
 			}
+			i++
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[integrity] InvertedIndex: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
-			default:
+			if i%1000 == 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[integrity] InvertedIndex: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
+				default:
+				}
 			}
 		}
 		return nil
@@ -189,10 +202,14 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 		if item.endTxNum <= fromTxNum {
 			continue
 		}
-		if err := iterStep(item); err != nil {
-			return err
-		}
-		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
+		g.Go(func() error {
+			return iterStep(item)
+		})
 	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
 	return nil
 }
