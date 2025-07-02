@@ -25,12 +25,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/sysutils"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -41,7 +41,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	g := &errgroup.Group{}
-	g.SetLimit(sysutils.AlmostAllCPUs())
+	g.SetLimit(estimate.AlmostAllCPUs())
 
 	skipForPerf := 11
 	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}

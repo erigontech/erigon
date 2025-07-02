@@ -32,8 +32,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/sysutils"
 	"github.com/erigontech/erigon-lib/types"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
@@ -156,7 +156,7 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	}
 
 	var eg errgroup.Group
-	eg.SetLimit(sysutils.AlmostAllCPUs())
+	eg.SetLimit(estimate.AlmostAllCPUs())
 	txns := make([]types.Transaction, len(encryptedTxns))
 	var totalGasLimit atomic.Uint64
 	var totalBytes atomic.Int64

@@ -30,10 +30,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/sysutils"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -511,7 +511,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	in := state.NewQueueWithRetry(10_000)
 	defer in.Close()
 
-	var WorkerCount = sysutils.AlmostAllCPUs()
+	var WorkerCount = estimate.AlmostAllCPUs()
 	if cfg.Workers > 0 {
 		WorkerCount = cfg.Workers
 	}

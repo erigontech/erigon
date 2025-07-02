@@ -28,8 +28,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/sysutils"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 )
@@ -184,7 +184,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 	}
 
 	eg := &errgroup.Group{}
-	eg.SetLimit(sysutils.AlmostAllCPUs())
+	eg.SetLimit(estimate.AlmostAllCPUs())
 
 	startTime := time.Now()
 	loggedBlock := blockFrom
