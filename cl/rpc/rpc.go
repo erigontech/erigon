@@ -497,6 +497,7 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 			if err != nil {
 				continue
 			}
+			log.Debug("peers info", "peerCount", len(peers.Peers))
 			var newPeers []peerData
 			for _, peer := range peers.Peers {
 				pid := peer.Pid
