@@ -513,7 +513,7 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 			raw := resp[0].raw
 			metadata := &cltypes.Metadata{}
 			if err := metadata.DecodeSSZ(raw, int(version)); err != nil {
-				log.Debug("[peerSelector] failed to decode peer metadata", "peer", pid, "err", err)
+				log.Debug("[peerSelector] failed to decode peer metadata", "peer", pid, "err", err, "version", version, "rawSize", len(raw))
 				continue
 			}
 			if metadata.CustodyGroupCount == nil {
