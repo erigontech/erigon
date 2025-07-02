@@ -59,6 +59,7 @@ type seenSidecarKey struct {
 
 func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
 	if s.syncDataManager.Syncing() {
+		// later processing
 		return ErrIgnore
 	}
 
