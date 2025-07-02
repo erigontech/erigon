@@ -509,6 +509,7 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 				if len(resp) == 0 {
 					continue
 				}
+				log.Debug("received metadata", "peer", pid)
 				version := resp[0].version
 				raw := resp[0].raw
 				metadata := &cltypes.Metadata{}
