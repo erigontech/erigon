@@ -379,17 +379,17 @@ func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, un
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
-) (types.Transactions, types.Receipts, types.FlatRequests, error) {
-	return txs, r, nil, nil
+) (types.FlatRequests, error) {
+	return nil, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
+) (*types.Block, types.FlatRequests, error) {
 	// Assemble and return the final block for sealing
-	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), txs, receipts, nil, nil
+	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), nil, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

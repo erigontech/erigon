@@ -9,7 +9,6 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/services"
 	"golang.org/x/sync/errgroup"
@@ -140,21 +139,21 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 
 	prevCumUsedGas := -1
 	prevLogIdx := uint32(0)
-	prevBN := uint64(1)
+	blockNum := fromBlock
+	var _min, _max uint64
+	_min, _ = txNumsReader.Min(tx, fromBlock)
+	_max, _ = txNumsReader.Max(tx, fromBlock)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
 		cumUsedGas, _, logIdx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 		if err != nil {
 			return err
 		}
 
-		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
-		_min, _ := txNumsReader.Min(tx, blockNum)
 		blockChanged := txNum == _min
 		if blockChanged {
 			prevCumUsedGas = 0
 			prevLogIdx = 0
 		}
-		_max, _ := txNumsReader.Max(tx, blockNum)
 
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
 		if !strongMonotonicCumGasUsed && txNum != _min && txNum != _max { // system tx can be skipped
@@ -166,7 +165,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		}
 
 		monotonicLogIdx := logIdx >= prevLogIdx
-		if !monotonicLogIdx {
+		if !monotonicLogIdx && txNum != _min && txNum != _max {
 			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, prevLogIdx=%d", txNum, blockNum, _min, _max, logIdx, prevLogIdx)
 			if failFast {
 				return err
@@ -176,7 +175,12 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 
 		prevCumUsedGas = int(cumUsedGas)
 		prevLogIdx = logIdx
-		prevBN = blockNum
+
+		if txNum == _max {
+			blockNum++
+			_min = _max + 1
+			_max, _ = txNumsReader.Max(tx, blockNum)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -185,14 +189,4 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		}
 	}
 	return nil
-}
-
-func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsReader, curTxNum uint64) uint64 {
-	txNumMax, _ := txNumsReader.Max(tx, fromBlock)
-	i := uint64(0)
-	for txNumMax < curTxNum {
-		i++
-		txNumMax, _ = txNumsReader.Max(tx, fromBlock+i)
-	}
-	return fromBlock + i
 }

@@ -195,7 +195,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	}
 
 	var block *types.Block
-	block, current.Txns, current.Receipts, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger, nil)
+	block, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger, nil)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
@@ -260,6 +260,7 @@ func getNextTransactions(
 	simStateWriter state.StateWriter,
 	logger log.Logger,
 ) ([]types.Transaction, error) {
+	availableRlpSpace := cfg.miningState.MiningBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
@@ -274,6 +275,7 @@ func getNextTransactions(
 		txnprovider.WithGasTarget(remainingGas),
 		txnprovider.WithBlobGasTarget(remainingBlobGas),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
+		txnprovider.WithAvailableRlpSpace(availableRlpSpace),
 	}
 
 	txns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
@@ -472,7 +474,7 @@ func addTransactionsToMiningBlock(
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 			receipt := aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
 
-			current.Txns = append(current.Txns, txn)
+			current.AddTxn(txn)
 			current.Receipts = append(current.Receipts, receipt)
 			return receipt.Logs, nil
 		}
@@ -484,7 +486,7 @@ func addTransactionsToMiningBlock(
 			return nil, err
 		}
 
-		current.Txns = append(current.Txns, txn)
+		current.AddTxn(txn)
 		current.Receipts = append(current.Receipts, receipt)
 		return receipt.Logs, nil
 	}
@@ -524,6 +526,18 @@ LOOP:
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			done = true
 			break
+		}
+
+		rlpSpacePostTxn := current.AvailableRlpSpace(chainConfig, txn)
+		if rlpSpacePostTxn < 0 {
+			rlpSpacePreTxn := current.AvailableRlpSpace(chainConfig)
+			logger.Debug(
+				fmt.Sprintf("[%s] Skipping transaction since it does not fit in available rlp space", logPrefix),
+				"hash", txn.Hash(),
+				"pre", rlpSpacePreTxn,
+				"post", rlpSpacePostTxn,
+			)
+			continue
 		}
 
 		// We use the eip155 signer regardless of the env hf.

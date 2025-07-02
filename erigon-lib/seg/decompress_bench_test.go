@@ -24,69 +24,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func BenchmarkDecompressNext(b *testing.B) {
+func BenchmarkDecompress(b *testing.B) {
 	t := new(testing.T)
-	d := prepareDict(t)
+	d := prepareDict(t, 100_000)
 	defer d.Close()
-	g := d.MakeGetter()
-	for i := 0; i < b.N; i++ {
-		_, _ = g.Next(nil)
-		if !g.HasNext() {
-			g.Reset(0)
+
+	b.Run("next", func(b *testing.B) {
+		b.ReportAllocs()
+		var buf []byte
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			buf, _ = g.Next(buf[:0])
+			if !g.HasNext() {
+				g.Reset(0)
+			}
 		}
-	}
-}
-
-func BenchmarkDecompressFastNext(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-	buf := make([]byte, 100)
-	for i := 0; i < b.N; i++ {
-		_, _ = g.FastNext(buf)
-		if !g.HasNext() {
-			g.Reset(0)
+	})
+	b.Run("skip", func(b *testing.B) {
+		b.ReportAllocs()
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			_, _ = g.Skip()
+			if !g.HasNext() {
+				g.Reset(0)
+			}
 		}
-	}
-}
-
-func BenchmarkDecompressSkip(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-
-	for i := 0; i < b.N; i++ {
-		_, _ = g.Skip()
-		if !g.HasNext() {
-			g.Reset(0)
+	})
+	b.Run("matchcmp_non_existing_key", func(b *testing.B) {
+		b.ReportAllocs()
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			_ = g.MatchCmp([]byte("longlongword"))
+			if !g.HasNext() {
+				g.Reset(0)
+			}
 		}
-	}
-}
-
-func BenchmarkDecompressMatchCmp(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-	for i := 0; i < b.N; i++ {
-		_ = g.MatchCmp([]byte("longlongword"))
-		if !g.HasNext() {
-			g.Reset(0)
-		}
-	}
-}
-
-func BenchmarkDecompressMatchPrefix(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-
-	for i := 0; i < b.N; i++ {
-		_ = g.MatchPrefix([]byte("longlongword"))
-	}
+	})
 }
 
 func BenchmarkDecompressTorrent(t *testing.B) {
