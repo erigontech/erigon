@@ -219,6 +219,12 @@ type DataColumnsByRootIdentifier struct {
 	Columns   solid.Uint64ListSSZ
 }
 
+func NewDataColumnsByRootIdentifier() *DataColumnsByRootIdentifier {
+	d := &DataColumnsByRootIdentifier{}
+	d.tryInit()
+	return d
+}
+
 func (d *DataColumnsByRootIdentifier) tryInit() {
 	if d.Columns == nil {
 		d.Columns = solid.NewUint64ListSSZ(int(clparams.GetBeaconConfig().NumberOfColumns))
