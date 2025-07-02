@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
@@ -31,25 +29,18 @@ func E3EfFiles(ctx context.Context, db kv.TemporalRwDB, failFast bool, fromStep 
 	defer log.Info("[integrity] E3EfFiles done")
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	g := &errgroup.Group{}
 	for _, idx := range []kv.InvertedIdx{kv.AccountsHistoryIdx, kv.StorageHistoryIdx, kv.CodeHistoryIdx, kv.CommitmentHistoryIdx, kv.ReceiptHistoryIdx, kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
 		idx := idx
-		g.Go(func() error {
-			tx, err := db.BeginTemporalRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
+		tx, err := db.BeginTemporalRo(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-			err = state.AggTx(tx).IntegrityInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
-		return err
+		err = state.AggTx(tx).IntegrityInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
