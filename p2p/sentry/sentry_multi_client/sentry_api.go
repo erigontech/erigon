@@ -75,10 +75,10 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 		}
 
 		var maxPeers uint64
-		if req.MaxPeers > 0 {
-			maxPeers = req.MaxPeers
-		} else {
+		if req.MaxPeers == nil {
 			maxPeers = 1 // default
+		} else {
+			maxPeers = *req.MaxPeers
 		}
 
 		outreq := proto_sentry.SendMessageByMinBlockRequest{
@@ -156,10 +156,10 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		minBlock := req.Number
 
 		var maxPeers uint64
-		if req.MaxPeers > 0 {
-			maxPeers = req.MaxPeers
-		} else {
+		if req.MaxPeers == nil {
 			maxPeers = 5 // default
+		} else {
+			maxPeers = *req.MaxPeers
 		}
 
 		outreq := proto_sentry.SendMessageByMinBlockRequest{

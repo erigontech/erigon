@@ -75,7 +75,7 @@ type BodyDownload struct {
 type BodyRequest struct {
 	BlockNums []uint64
 	Hashes    []common.Hash
-	MaxPeers  uint64
+	MaxPeers  *uint64
 	peerID    [64]byte
 	waitUntil uint64
 }

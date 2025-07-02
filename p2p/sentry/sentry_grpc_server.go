@@ -820,7 +820,8 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
 		if deadlines < maxPermitsPerPeer {
 			heap.Push(&byMinBlock, PeerRef{pi: peerInfo, height: height})
-			if byMinBlock.Len() > peerCount {
+			// note peerCount=0 means unlimited
+			if peerCount != 0 && byMinBlock.Len() > peerCount {
 				// Remove the worst peer
 				peerRef := heap.Pop(&byMinBlock).(PeerRef)
 				latestDeadline := peerRef.pi.LatestDeadline()

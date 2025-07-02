@@ -201,7 +201,7 @@ type HeaderRequest struct {
 	Skip     uint64
 	Reverse  bool
 	Anchor   *Anchor
-	MaxPeers uint64
+	MaxPeers *uint64
 }
 
 type PenaltyItem struct {

@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/big"
 	"slices"
 	"sort"
@@ -1363,7 +1362,8 @@ func (hd *HeaderDownload) StartPoSDownloader(
 			hd.lock.Unlock()
 
 			if req != nil {
-				req.MaxPeers = math.MaxUint64
+				maxPeers := uint64(0) // unlimited
+				req.MaxPeers = &maxPeers
 				_, sentToPeer := headerReqSend(ctx, req)
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
