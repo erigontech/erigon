@@ -589,6 +589,10 @@ func (c *columnSidecarPeerSelector) getPeer(
 	for range len(c.peers) {
 		c.peersIndex = (c.peersIndex + 1) % len(c.peers)
 		peer := c.peers[c.peersIndex]
+		if len(peer.mask) == int(c.beaconConfig.NumberOfColumns) {
+			// full mask, no need to filter
+			return req, peer.pid, nil
+		}
 		// matching
 		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(req.Len()))
 		req.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, length int) bool {
