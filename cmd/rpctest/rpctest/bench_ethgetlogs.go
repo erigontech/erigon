@@ -168,17 +168,26 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-
+	type BlockNIndex struct {
+		BlockNumber hexutil.Uint64
+		Index       hexutil.Uint
+	}
 	noDuplicates := func(logs []Log) error {
 		if len(logs) <= 1 {
 			return nil
 		}
-		seen := make(map[hexutil.Uint]struct{}, len(logs))
+		seen := make(map[BlockNIndex]struct{}, len(logs))
 		for _, l := range logs {
-			if _, ok := seen[l.Index]; ok {
-				return fmt.Errorf("duplicated log_index %d", l.Index)
+			if _, ok := seen[BlockNIndex{
+				BlockNumber: l.BlockNumber,
+				Index:       l.Index,
+			}]; ok {
+				return fmt.Errorf("duplicated log_index %d at blocknum %d", l.Index, l.BlockNumber)
 			}
-			seen[l.Index] = struct{}{}
+			seen[BlockNIndex{
+				BlockNumber: l.BlockNumber,
+				Index:       l.Index,
+			}] = struct{}{}
 		}
 		return nil
 	}
@@ -188,16 +197,18 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 
 	startTime := time.Now()
 	loggedBlock := blockFrom
-	for bn := blockFrom; bn < blockTo; bn++ {
+	batchSize := uint64(10000)
+	for bn := blockFrom; bn < blockTo; bn += batchSize {
 		eg.Go(func() error {
 			var resp EthGetLogs
-			res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(bn, bn), &resp)
+			res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(bn, bn+batchSize), &resp)
 			if res.Err != nil {
 				return fmt.Errorf("could not get modified accounts (Erigon): %v", res.Err)
 			}
 			if resp.Error != nil {
 				return fmt.Errorf("error getting modified accounts (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
 			}
+
 			if err := noDuplicates(resp.Result); err != nil {
 				return fmt.Errorf("eth_getLogs: at blockNum=%d %w", bn, err)
 			}
@@ -207,7 +218,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				sawAddr[l.Address] = struct{}{}
 			}
 
-			res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, maps.Keys(sawAddr)), &resp)
+			res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn+batchSize, maps.Keys(sawAddr)), &resp)
 			if res.Err != nil {
 				return fmt.Errorf("could not get modified accounts (Erigon): %v", res.Err)
 			}
@@ -226,54 +237,6 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				}
 			}
 
-			// sawTopic := map[common.Hash]struct{}{}
-			// for _, l := range resp.Result {
-			// 	if _, ok := sawAddr[l.Address]; ok {
-			// 		continue
-			// 	}
-			// 	sawAddr[l.Address] = struct{}{}
-
-			// 	res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(bn, bn, l.Address), &resp)
-			// 	if res.Err != nil {
-			// 		return fmt.Errorf("could not get modified accounts (Erigon): %v", res.Err)
-			// 	}
-			// 	if resp.Error != nil {
-			// 		return fmt.Errorf("error getting modified accounts (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
-			// 	}
-			// 	//invariant1: if `log` visible without filter - then must be visible with filter. (in another words: `address` must be indexed well)
-			// 	if len(resp.Result) == 0 {
-			// 		return fmt.Errorf("eth_getLogs: at blockNum=%d account %x not indexed", bn, l.Address)
-			// 	}
-
-			// 	if err := noDuplicates(resp.Result); err != nil {
-			// 		return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x %w", bn, l.Address, err)
-			// 	}
-
-			// 	//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
-			// 	if len(l.Topics) == 0 {
-			// 		continue
-			// 	}
-
-			// 	if _, ok := sawTopic[l.Topics[0]]; ok {
-			// 		continue
-			// 	}
-			// 	sawTopic[l.Topics[0]] = struct{}{}
-
-			// 	//res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(bn, bn, l.Address, l.Topics[0]), &resp)
-			// 	//if res.Err != nil {
-			// 	//	return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
-			// 	//}
-			// 	//if resp.Error != nil {
-			// 	//	return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
-			// 	//}
-			// 	//if len(resp.Result) == 0 {
-			// 	//	return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
-			// 	//}
-			// 	//if err := noDuplicates(resp.Result); err != nil {
-			// 	//	return fmt.Errorf("eth_getLogs: at blockNum=%d and topic %x %w", bn, l.Topics[0], err)
-			// 	//}
-			// }
-
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -282,7 +245,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			return nil
 		})
 
-		if bn%1000 == 0 || bn == blockTo-1 {
+		if bn%1000 == 0 || bn+batchSize > blockTo {
 			if err := eg.Wait(); err != nil {
 				return err
 			}
@@ -316,4 +279,24 @@ func filterLogsByAddr(logs []Log, addr common.Address) (filtered []Log) {
 		}
 	}
 	return
+}
+
+func LogsArranging(logs []Log, batchSize uint64) [][]Log {
+	result := make([][]Log, 0, batchSize)
+	if len(logs) == 0 {
+		return result
+	}
+	blockNum := logs[0].BlockNumber.Uint64()
+	ind := 0
+	for _, l := range logs {
+		if l.BlockNumber.Uint64() != blockNum {
+			ind++
+			blockNum = l.BlockNumber.Uint64()
+		}
+		if len(result) == ind {
+			result = append(result, make([]Log, 0, len(logs)))
+		}
+		result[ind] = append(result[ind], l)
+	}
+	return result
 }
