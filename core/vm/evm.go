@@ -528,6 +528,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 			}
 		}
 	}
+	if err == nil && evm.chainRules.IsOsaka { // EIP-7907
+		evm.intraBlockState.AddCodeAddressToAccessList(address)
+	}
 
 	// When an error was returned by the EVM or when setting the creation code
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
@@ -545,6 +548,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 func (evm *EVM) maxCodeSize() int {
 	if evm.chainConfig.Bor != nil && evm.chainConfig.Bor.IsAhmedabad(evm.Context.BlockNumber) {
 		return params.MaxCodeSizePostAhmedabad
+	}
+	if evm.chainRules.IsOsaka {
+		return params.MaxCodeSizeEip7907
 	}
 	return params.MaxCodeSize
 }

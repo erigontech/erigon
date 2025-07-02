@@ -400,6 +400,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
+	isEIP7907 := rules.IsOsaka
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	// set code tx
@@ -410,8 +411,14 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+	if isEIP7907 {
+		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
+			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
+		}
+	} else if isEIP3860 {
+		if contractCreation && len(st.data) > params.MaxInitCodeSize {
+			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+		}
 	}
 
 	// Execute the preparatory steps for state transition which includes:
@@ -523,17 +530,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		return nil, err
 	}
 
-	var (
-		msg       = st.msg
-		sender    = vm.AccountRef(msg.From())
-		rules     = st.evm.ChainRules()
-		vmConfig  = st.evm.Config()
-		isEIP3860 = vmConfig.HasEip3860(rules)
-
-		accessTuples     = slices.Clone[types.AccessList](msg.AccessList())
-		contractCreation = msg.To() == nil
-	)
-	// coinbase = st.msg.From() // arbitrum
+	msg := st.msg
+	sender := vm.AccountRef(msg.From())
+	contractCreation := msg.To() == nil
+	rules := st.evm.ChainRules()
+	vmConfig := st.evm.Config()
+	isEIP3860 := vmConfig.HasEip3860(rules)
+	isEIP7907 := rules.IsOsaka
+	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
@@ -585,8 +589,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+	if isEIP7907 {
+		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
+			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
+		}
+	} else if isEIP3860 {
+		if contractCreation && len(st.data) > params.MaxInitCodeSize {
+			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+		}
 	}
 
 	// Execute the preparatory steps for state transition which includes:
