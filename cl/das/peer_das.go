@@ -361,7 +361,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	requestColumnSidecars := func(req *downloadRequest) {
 		// send the request in a loop with a ticker to avoid overwhelming the peer
 		// keep trying until the request is done
-		ticker := time.NewTicker(50 * time.Millisecond)
+		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		wg := sync.WaitGroup{}
 	loop:
@@ -426,7 +426,7 @@ mainloop:
 			if len(result.sidecars) == 0 {
 				continue
 			}
-
+			log.Debug("received column sidecars", "pid", result.pid, "count", len(result.sidecars))
 			wg := sync.WaitGroup{}
 			for _, sidecar := range result.sidecars {
 				wg.Add(1)
