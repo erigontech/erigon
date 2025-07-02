@@ -352,6 +352,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	type resultData struct {
 		sidecars []*cltypes.DataColumnSidecar
 		pid      string
+		cgc      uint64
 		err      error
 	}
 
@@ -379,11 +380,12 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 					if ids.Len() == 0 {
 						return
 					}
-					s, pid, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
+					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
 					select {
 					case resultChan <- resultData{
 						sidecars: s,
 						pid:      pid,
+						cgc:      cgc,
 						err:      err,
 					}:
 					default:
@@ -426,7 +428,7 @@ mainloop:
 			if len(result.sidecars) == 0 {
 				continue
 			}
-			log.Debug("received column sidecars", "pid", result.pid, "count", len(result.sidecars))
+			log.Debug("received column sidecars", "pid", result.pid, "count", len(result.sidecars), "cgc", result.cgc)
 			wg := sync.WaitGroup{}
 			for _, sidecar := range result.sidecars {
 				wg.Add(1)
