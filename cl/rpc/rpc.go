@@ -500,7 +500,24 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 		for _, peer := range peers.Peers {
 			pid := peer.Pid
 			topic := communication.MetadataProtocolV3
-			resp, _, err := c.sendRequestWithPeer(ctx, topic, []byte{}, 1, pid)
+			resp, err := c.sentinel.SendPeerRequest(ctx, &sentinel.RequestDataWithPeer{
+				Pid:   pid,
+				Data:  []byte{},
+				Topic: topic,
+			})
+			if err != nil {
+				log.Debug("[peerSelector] failed to request peer metadata", "peer", pid, "err", err)
+				continue
+			}
+			rawData := resp.GetData()
+			metadata := &cltypes.Metadata{}
+			if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(rawData), metadata, clparams.FuluVersion); err != nil {
+				log.Debug("[peerSelector] failed to decode peer metadata", "peer", pid, "err", err)
+				continue
+			}
+			log.Debug("[peerSelector] received metadata", "peer", pid, "cgc", metadata.CustodyGroupCount, "rawSize", len(rawData))
+
+			/*resp, _, err := c.sendRequestWithPeer(ctx, topic, []byte{}, 1, pid)
 			if err != nil {
 				log.Debug("[peerSelector] failed to request peer metadata", "peer", pid, "err", err)
 				continue
@@ -516,7 +533,7 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 			if err := metadata.DecodeSSZ(raw, int(version)); err != nil {
 				log.Debug("[peerSelector] failed to decode peer metadata", "peer", pid, "err", err, "version", version, "rawSize", len(raw))
 				continue
-			}
+			}*/
 			if metadata.CustodyGroupCount == nil {
 				log.Debug("[peerSelector] empty cgc", "peer", pid, "err", err)
 				continue
