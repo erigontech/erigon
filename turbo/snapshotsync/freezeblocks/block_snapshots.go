@@ -51,9 +51,9 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon-lib/sysutils"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -707,7 +707,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, err
 		}
 
-		workers := estimate.AlmostAllCPUs()
+		workers := sysutils.AlmostAllCPUs()
 
 		if workers > 3 {
 			workers = workers / 3 * 2

@@ -49,12 +49,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/sysutils"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -712,7 +712,7 @@ func (c *Bor) initFrozenSnapshot(chain ChainHeaderReader, number uint64, logEver
 		c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
 
 		g := errgroup.Group{}
-		g.SetLimit(estimate.AlmostAllCPUs())
+		g.SetLimit(sysutils.AlmostAllCPUs())
 		defer g.Wait()
 
 		batchSize := 128 // must be < inmemorySignatures

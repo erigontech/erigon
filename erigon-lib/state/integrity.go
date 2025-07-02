@@ -13,8 +13,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/sysutils"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -142,7 +142,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	fromTxNum := fromStep * iit.ii.aggregationStep
 	g := &errgroup.Group{}
-	g.SetLimit(estimate.AlmostAllCPUs())
+	g.SetLimit(sysutils.AlmostAllCPUs())
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()

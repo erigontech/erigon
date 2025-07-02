@@ -17,11 +17,10 @@
 package estimate
 
 import (
-	"runtime"
-
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/mmap"
+	"github.com/erigontech/erigon-lib/sysutils"
 )
 
 type EstimatedRamPerWorker datasize.ByteSize
@@ -29,7 +28,7 @@ type EstimatedRamPerWorker datasize.ByteSize
 // Workers - return max workers amount based on total Memory/CPU's and estimated RAM per worker
 func (r EstimatedRamPerWorker) Workers() int {
 	maxWorkersForGivenMemory := r.WorkersByRAMOnly()
-	res := min(AlmostAllCPUs(), maxWorkersForGivenMemory)
+	res := min(sysutils.AlmostAllCPUs(), maxWorkersForGivenMemory)
 	return max(1, res) // must have at-least 1 worker
 }
 
@@ -60,12 +59,3 @@ const (
 	//BlocksExecution - in multi-threaded mode
 	BlocksExecution = EstimatedRamPerWorker(512 * datasize.MB)
 )
-
-// AlmostAllCPUs - return all-but-one cpus. Leaving 1 cpu for "work producer", also cloud-providers do recommend leave 1 CPU for their IO software
-// user can reduce GOMAXPROCS env variable
-func AlmostAllCPUs() int {
-	return max(1, runtime.GOMAXPROCS(-1)-1)
-}
-func HalfCPUs() int {
-	return max(1, runtime.GOMAXPROCS(-1)/2)
-}

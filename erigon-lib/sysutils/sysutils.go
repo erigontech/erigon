@@ -17,6 +17,7 @@
 package sysutils
 
 import (
+	"runtime"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -209,4 +210,13 @@ func TotalMemoryUsage() float64 {
 	}
 
 	return float64(totalMemory.UsedPercent)
+}
+
+// AlmostAllCPUs - return all-but-one cpus. Leaving 1 cpu for "work producer", also cloud-providers do recommend leave 1 CPU for their IO software
+// user can reduce GOMAXPROCS env variable
+func AlmostAllCPUs() int {
+	return max(1, runtime.GOMAXPROCS(-1)-1)
+}
+func HalfCPUs() int {
+	return max(1, runtime.GOMAXPROCS(-1)/2)
 }
