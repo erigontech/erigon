@@ -492,7 +492,6 @@ func (c *columnSidecarPeerSelector) updatePeersMeta(ctx context.Context) {
 			log.Warn("[peerSelector] failed to get peers info", "err", err)
 			return
 		}
-		log.Debug("[peerSelector] peers info", "peerCount", len(peers.Peers))
 		var newPeers []peerData
 		for _, peer := range peers.Peers {
 			pid := peer.Pid
