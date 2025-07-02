@@ -350,10 +350,11 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	}
 
 	type resultData struct {
-		sidecars []*cltypes.DataColumnSidecar
-		pid      string
-		cgc      uint64
-		err      error
+		sidecars  []*cltypes.DataColumnSidecar
+		pid       string
+		cgc       uint64
+		reqLength int
+		err       error
 	}
 
 	stopChan := make(chan struct{})
@@ -380,13 +381,19 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 					if ids.Len() == 0 {
 						return
 					}
+					reqLength := 0
+					ids.Range(func(_ int, id *cltypes.DataColumnsByRootIdentifier, length int) bool {
+						reqLength += id.Columns.Length()
+						return true
+					})
 					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
 					select {
 					case resultChan <- resultData{
-						sidecars: s,
-						pid:      pid,
-						cgc:      cgc,
-						err:      err,
+						sidecars:  s,
+						pid:       pid,
+						cgc:       cgc,
+						reqLength: reqLength,
+						err:       err,
 					}:
 					default:
 						// just drop it if the channel is full
@@ -428,7 +435,7 @@ mainloop:
 			if len(result.sidecars) == 0 {
 				continue
 			}
-			log.Debug("received column sidecars", "pid", result.pid, "count", len(result.sidecars), "cgc", result.cgc)
+			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars), "cgc", result.cgc)
 			wg := sync.WaitGroup{}
 			for _, sidecar := range result.sidecars {
 				wg.Add(1)
