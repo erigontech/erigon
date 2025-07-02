@@ -515,7 +515,11 @@ func (c *columnSidecarPeerSelector) runPeerCache(ctx context.Context) {
 				log.Debug("[peerSelector] failed to decode peer metadata", "peer", pid, "err", err)
 				continue
 			}
-			log.Debug("[peerSelector] received metadata", "peer", pid, "cgc", metadata.CustodyGroupCount, "rawSize", len(rawData))
+			cgc := 0
+			if metadata.CustodyGroupCount != nil {
+				cgc = int(*metadata.CustodyGroupCount)
+			}
+			log.Debug("[peerSelector] received metadata", "peer", pid, "cgc", cgc, "rawSize", len(rawData))
 
 			/*resp, _, err := c.sendRequestWithPeer(ctx, topic, []byte{}, 1, pid)
 			if err != nil {
