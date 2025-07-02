@@ -59,7 +59,7 @@ type seenSidecarKey struct {
 
 func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
 	if s.syncDataManager.Syncing() {
-		// later processing
+		// maybe later processing
 		return ErrIgnore
 	}
 
@@ -149,10 +149,6 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
 	}
-
-	savedColumnIndicies, _ := s.columnSidecarStorage.GetSavedColumnIndex(context.Background(), blockRoot)
-	log.Debug("[dataColumnSidecar] now number of column index", "length", len(savedColumnIndicies))
-
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", blockRoot)
 	}
