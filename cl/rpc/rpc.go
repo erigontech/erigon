@@ -560,17 +560,18 @@ func (c *columnSidecarPeerSelector) getPeer(
 		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(req.Len()))
 		req.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, length int) bool {
 			identifier := &cltypes.DataColumnsByRootIdentifier{}
-			item.Columns.Range(func(_ int, column uint64, length int) bool {
+			item.Columns.Range(func(_ int, column uint64, _ int) bool {
 				if peer.mask[column] {
 					identifier.Columns.Append(column)
 				}
 				return true
 			})
-			if identifier.Columns.Length() == 0 {
-				return true
+			if identifier.Columns.Length() > 0 {
+				identifier.BlockRoot = item.BlockRoot
+				newReq.Append(identifier)
+			} else {
+				log.Debug("no matching columns", "peer", peer.pid, "column", item.Columns, "mask", peer.mask)
 			}
-			identifier.BlockRoot = item.BlockRoot
-			newReq.Append(identifier)
 			return true
 		})
 		if newReq.Len() == 0 {
@@ -580,6 +581,6 @@ func (c *columnSidecarPeerSelector) getPeer(
 		return newReq, peer.pid, nil
 	}
 
-	log.Debug("no good peer found", "req", req.Len())
+	log.Debug("no good peer found", "peerCount", len(c.peers))
 	return nil, "", errors.New("no good peer found")
 }
