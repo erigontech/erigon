@@ -134,7 +134,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, uint64(req.Len()), pid)
+	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, 0, pid)
 	if err != nil {
 		return nil, pid, 0, err
 	}
@@ -367,7 +367,7 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	ctx context.Context,
 	topic string,
 	reqPayload []byte,
-	dataCount uint64,
+	_ uint64,
 	peerId string,
 ) ([]responseData, string, error) {
 	ctx, cn := context.WithTimeout(ctx, time.Second*2)
@@ -389,13 +389,15 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 
 	responsePacket := []responseData{}
 	r := bytes.NewReader(message.Data)
-	for i := 0; i < int(dataCount); i++ {
+	for {
 		forkDigest := make([]byte, 4)
-		if _, err := r.Read(forkDigest); err != nil {
+		if n, err := r.Read(forkDigest); err != nil {
 			if err == io.EOF {
 				break
 			}
 			return nil, message.Peer.Pid, err
+		} else if n == 0 {
+			break
 		}
 
 		// Read varint for length of message.
