@@ -35,7 +35,7 @@ jobs:
 
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
-        run: sudo apt update && sudo apt install build-essential
+        run: sudo apt update && sudo apt install build-essential libgmp-dev
 
       - name: test-integration-caplin
         run: cd cl/spectest && make tests && make mainnet

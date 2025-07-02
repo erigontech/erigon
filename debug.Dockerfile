@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1.2
 FROM docker.io/library/golang:1.24-alpine3.20 AS builder
 
-RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++ gmp-dev
 
 WORKDIR /app
 ADD go.mod go.mod
@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache \
 
 
 FROM docker.io/library/golang:1.24-alpine3.20 AS tools-builder
-RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++ gmp-dev
 WORKDIR /app
 
 ADD Makefile Makefile
@@ -30,7 +30,7 @@ RUN mkdir -p /app/build/bin
 FROM docker.io/library/alpine:3.20
 
 # install required runtime libs, along with some helpers for debugging
-RUN apk add --no-cache ca-certificates libstdc++ tzdata
+RUN apk add --no-cache ca-certificates libstdc++ tzdata gmp
 RUN apk add --no-cache curl jq bind-tools
 
 # Setup user and group
