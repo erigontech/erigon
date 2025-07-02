@@ -301,7 +301,10 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 }
 
 func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *sentinelrpc.RequestDataWithPeer) (*sentinelrpc.ResponseData, error) {
-	pid := peer.ID(reqWithPeer.Pid)
+	pid, err := peer.Decode(reqWithPeer.Pid)
+	if err != nil {
+		return nil, err
+	}
 	req := &sentinelrpc.RequestData{
 		Data:  reqWithPeer.Data,
 		Topic: reqWithPeer.Topic,
