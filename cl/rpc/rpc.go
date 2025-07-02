@@ -458,7 +458,7 @@ func newColumnSidecarPeerSelector(
 	ethClock eth_clock.EthereumClock,
 	sendRequestWithPeer func(ctx context.Context, topic string, reqPayload []byte, dataCount uint64, peerId string) ([]responseData, string, error),
 ) *columnSidecarPeerSelector {
-	return &columnSidecarPeerSelector{
+	s := &columnSidecarPeerSelector{
 		sentinel:            sentinel,
 		beaconConfig:        beaconConfig,
 		ethClock:            ethClock,
@@ -467,6 +467,8 @@ func newColumnSidecarPeerSelector(
 		peers:               []peerData{},
 		peersIndex:          0,
 	}
+	go s.runPeerCache(context.Background())
+	return s
 }
 
 type peerDataKey struct {
