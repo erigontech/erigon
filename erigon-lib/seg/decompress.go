@@ -1015,64 +1015,6 @@ func (g *Getter) MatchCmpUncompressed(buf []byte) int {
 	return bytes.Compare(buf, g.data[g.dataP:g.dataP+wordLen])
 }
 
-// FastNext extracts a compressed word from current offset in the file
-// into the given buf, returning a new byte slice which contains extracted word.
-// It is important to allocate enough buf size. Could throw an error if word in file is larger then the buf size.
-// After extracting next word, it moves to the beginning of the next one
-func (g *Getter) FastNext(buf []byte) ([]byte, uint64) {
-	savePos := g.dataP
-	wordLen := g.nextPos(true)
-	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
-	// decoded := make([]byte, wordLen)
-	if wordLen == 0 {
-		if g.dataBit > 0 {
-			g.dataP++
-			g.dataBit = 0
-		}
-		return buf[:wordLen], g.dataP
-	}
-	bufPos := 0 // Tracking position in buf where to insert part of the word
-	lastUncovered := 0
-
-	// if int(wordLen) > cap(buf) {
-	// 	newBuf := make([]byte, int(wordLen))
-	// 	buf = newBuf
-	// }
-	// Loop below fills in the patterns
-	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
-		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
-		pt := g.nextPattern()
-		copy(buf[bufPos:], pt)
-	}
-	if g.dataBit > 0 {
-		g.dataP++
-		g.dataBit = 0
-	}
-	postLoopPos := g.dataP
-	g.dataP = savePos
-	g.dataBit = 0
-	g.nextPos(true /* clean */) // Reset the state of huffman reader
-	bufPos = lastUncovered      // Restore to the beginning of buf
-	// Loop below fills the data which is not in the patterns
-	for pos := g.nextPos(false); pos != 0; pos = g.nextPos(false) {
-		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
-		if bufPos > lastUncovered {
-			dif := uint64(bufPos - lastUncovered)
-			copy(buf[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif])
-			postLoopPos += dif
-		}
-		lastUncovered = bufPos + len(g.nextPattern())
-	}
-	if int(wordLen) > lastUncovered {
-		dif := wordLen - uint64(lastUncovered)
-		copy(buf[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif])
-		postLoopPos += dif
-	}
-	g.dataP = postLoopPos
-	g.dataBit = 0
-	return buf[:wordLen], postLoopPos
-}
-
 // BinarySearch - !expecting sorted file - does Seek `g` to key which >= `fromPrefix` by using BinarySearch - means unoptimal and touching many places in file
 // use `.Next` to read found
 // at `ok = false` leaving `g` in unpredictible state
