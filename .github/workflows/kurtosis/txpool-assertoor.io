@@ -12,7 +12,7 @@ participants:
   cl_type: prysm
   count: 1
 network_params:
-  #electra_fork_epoch: 1
+  electra_fork_epoch: 0
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
 additional_services:
