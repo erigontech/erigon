@@ -407,6 +407,7 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 	for i, l := range r.Logs {
 		logsForStorage[i] = (*LogForStorage)(l)
 	}
+
 	return rlp.Encode(w, &storedReceiptRLP{
 		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),

@@ -370,6 +370,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	return
 }
 
+// CustomTraceMapReduce [from:to)
 func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
