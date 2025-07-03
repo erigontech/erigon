@@ -124,9 +124,9 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 	if err != nil {
 		return err
 	}
-	if fromTxNum < 2 {
-		fromTxNum = 2 //i don't remember why need this
-	}
+	// if fromTxNum < 2 {
+	// 	fromTxNum = 2 //i don't remember why need this
+	// }
 
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)
@@ -138,13 +138,13 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 	}
 
 	prevCumUsedGas := -1
-	prevLogIdx := uint32(0)
+	prevLogIdxAfterTx := uint32(0)
 	blockNum := fromBlock
 	var _min, _max uint64
 	_min, _ = txNumsReader.Min(tx, fromBlock)
 	_max, _ = txNumsReader.Max(tx, fromBlock)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
-		cumUsedGas, _, logIdx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+		cumUsedGas, _, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		blockChanged := txNum == _min
 		if blockChanged {
 			prevCumUsedGas = 0
-			prevLogIdx = 0
+			prevLogIdxAfterTx = 0
 		}
 
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
@@ -164,9 +164,9 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 			log.Error(err.Error())
 		}
 
-		monotonicLogIdx := logIdx >= prevLogIdx
+		monotonicLogIdx := logIdxAfterTx >= prevLogIdxAfterTx
 		if !monotonicLogIdx && txNum != _min && txNum != _max {
-			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, prevLogIdx=%d", txNum, blockNum, _min, _max, logIdx, prevLogIdx)
+			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdxAfterTx=%d, prevLogIdxAfterTx=%d", txNum, blockNum, _min, _max, logIdxAfterTx, prevLogIdxAfterTx)
 			if failFast {
 				return err
 			}
@@ -174,7 +174,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		}
 
 		prevCumUsedGas = int(cumUsedGas)
-		prevLogIdx = logIdx
+		prevLogIdxAfterTx = logIdxAfterTx
 
 		if txNum == _max {
 			blockNum++

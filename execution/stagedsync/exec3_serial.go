@@ -113,11 +113,15 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 		}
 
 		var receipt *types.Receipt
+		var logIndexAfterTx uint32
 		if !txTask.Final {
 			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
-			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
+			if receipt != nil {
+				logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(txTask.Logs))
+			}
+			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, logIndexAfterTx, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
 		} else {
@@ -152,10 +156,11 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
 						FirstLogIndexWithinBlock: uint32(firstIndex),
 					}
+					logIndexAfterTx = uint32(firstIndex) + uint32(len(txTask.Logs))
 				}
 			}
 		}
-		if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
+		if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, logIndexAfterTx, se.blobGasUsed, txTask.TxNum); err != nil {
 			return false, err
 		}
 

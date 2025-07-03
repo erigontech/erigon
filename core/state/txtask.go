@@ -132,17 +132,33 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 
 	var cumulativeGasUsed uint64
 	var firstLogIndex uint32
+	//	fmt.Println("TxTask.CreateReceipt", t.TxIndex, t.TxNum, t.BlockNum, "gasUsed", t.GasUsed, "blockReceiptsLen", len(t.BlockReceipts))
 	if t.TxIndex > 0 {
 		prevR := t.BlockReceipts[t.TxIndex-1]
 		if prevR != nil {
 			cumulativeGasUsed = prevR.CumulativeGasUsed
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
 		} else {
+
+			// for i := t.TxIndex; i >= 0; i-- {
+			// 	cumulativeGasUsed, _, lastLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, t.TxNum-(uint64(t.TxIndex)-uint64(i)))
+			// 	if err != nil {
+			// 		panic(err)
+			// 	}
+			// 	fmt.Printf("TxTask.CreateReceipt: receipt values for txNum= %d (txIndex = %d) in block %d: cumulativeGasUsed: %d, firstLogIndex: %d\n", t.TxNum-(uint64(t.TxIndex)-uint64(i)), i, t.BlockNum, cumulativeGasUsed, lastLogIndex)
+			// }
+
 			var err error
-			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, t.TxNum)
+			var logIndexAfterTx uint32
+			cumulativeGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(tx, t.TxNum)
 			if err != nil {
 				panic(err)
 			}
+			firstLogIndex = logIndexAfterTx
+
+			fmt.Printf("previous receipt is nil for tx %d (txNum = %d) in block %d\n", t.TxIndex, t.TxNum, t.BlockNum)
+			fmt.Printf("cumulativeGasUsed: %d, firstLogIndex: %d\n", cumulativeGasUsed, firstLogIndex)
+			//panic("previous receipt is nil")
 		}
 	}
 
