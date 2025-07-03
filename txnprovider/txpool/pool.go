@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -56,6 +57,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -254,6 +256,15 @@ func New(
 		shanghaiTimeU64 := chainConfig.ShanghaiTime.Uint64()
 		res.shanghaiTime = &shanghaiTimeU64
 	}
+
+	if chainConfig.BorJSON != nil {
+		cfg := borcfg.BorConfig{}
+		if err := json.Unmarshal(chainConfig.BorJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal bor config: %w", err)
+		}
+		chainConfig.Bor = &cfg
+	}
+
 	if chainConfig.Bor != nil {
 		agraBlock := chainConfig.Bor.GetAgraBlock()
 		if agraBlock != nil {
