@@ -710,7 +710,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := chainConfig.Bor != nil && (config.PolygonSync)
+	sentryMcDisableBlockDownload := (chainConfig.Bor != nil && config.PolygonSync) || config.ElBlockDownloaderV2
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -1141,7 +1141,11 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	var err error
 
 	if chainConfig.Bor == nil {
-		s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
+		if config.ElBlockDownloaderV2 {
+
+		} else {
+			s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
+		}
 	}
 
 	emptyBadHash := config.BadBlockHash == common.Hash{}

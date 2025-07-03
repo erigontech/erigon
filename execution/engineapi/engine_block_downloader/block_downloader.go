@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -76,11 +75,13 @@ type EngineBlockDownloader struct {
 	config  *chain.Config
 	syncCfg ethconfig.Sync
 
-	// lock
-	lock sync.Mutex
-
 	// logs
 	logger log.Logger
+
+	// V2 downloader
+	v2              bool
+	p2pGateway      p2pGateway
+	headerCollector *etl.Collector
 }
 
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
