@@ -27,7 +27,7 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [ self-hosted, qa, RpcSpecific ]
+    runs-on: [ self-hosted, qa, rpc-integration, Gnosis ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
