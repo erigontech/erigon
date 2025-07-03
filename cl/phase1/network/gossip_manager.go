@@ -111,12 +111,12 @@ func NewGossipReceiver(
 }
 
 func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) (err error) {
-	// defer func() {
-	// 	r := recover()
-	// 	if r != nil {
-	// 		err = fmt.Errorf("%v", r)
-	// 	}
-	// }()
+	defer func() {
+		r := recover()
+		if r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
 	// Make a copy of the gossip data so that we the received data is not modified.
 	// 1) When we publish and corrupt the data, the peers bans us.
 	// 2) We decode the block wrong

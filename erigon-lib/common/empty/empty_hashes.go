@@ -45,7 +45,4 @@ var (
 
 	// RequestsHash is the known hash of an empty request set, sha256("").
 	RequestsHash = common.HexToHash("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-
-	// VerkleHash is the known hash of an empty verkle trie.
-	VerkleHash = common.Hash{} //nolint:unused
 )

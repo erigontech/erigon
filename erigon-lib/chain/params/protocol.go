@@ -139,6 +139,12 @@ const (
 	MaxCodeSizePostAhmedabad = 32768           // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
 	MaxInitCodeSize          = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
 
+	// EIP-7907: Meter Contract Code Size And Increase Limit
+	MaxCodeSizeEip7907             = 262144                 // Maximum bytecode to permit for a contract post EIP-7907
+	MaxInitCodeSizeEip7907         = 2 * MaxCodeSizeEip7907 // Maximum initcode to permit in a creation transaction and create instructions post EIP 7907
+	LargeCodeThresholdEip7907      = 24576                  // We charge extra gas if the code size exceeds this threshold
+	LargeCodeAccessWordCostEip7907 = 2                      // How much extra we charge per word above large code threshold
+
 	// Precompiled contract gas prices
 
 	TendermintHeaderValidateGas uint64 = 3000 // Gas for validate tendermiint consensus state
@@ -200,6 +206,11 @@ const (
 	SetCodeMagicPrefix  = byte(0x05)
 	PerEmptyAccountCost = 25000
 	PerAuthBaseCost     = 12500
+
+	// EIP-7934: RLP Execution Block Size Limit
+	MaxBlockSize             = 10_485_760 // 10 MiB
+	MaxBlockSizeSafetyMargin = 2_097_152  // 2 MiB
+	MaxRlpBlockSize          = MaxBlockSize - MaxBlockSizeSafetyMargin
 )
 
 // EIP-7702: Set EOA account code

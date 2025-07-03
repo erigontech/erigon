@@ -52,7 +52,7 @@ const (
 	//   Problem is "nature of false-positives" - they are randomly/smashed across .seg files.
 	//   It makes .seg files "warm" - which is bad because they are big and
 	//      data-locality of touches is bad (and maybe need visit a lot of shards to find key).
-	//   Can add build-in "existence filter" (like bloom/cucko/ribbon/xor-filter/fuse-filter) it will improve
+	//   Can add a built-in "existence filter" (like bloom/cuckoo/ribbon/xor-filter/fuse-filter); it will improve
 	//      data-locality - filters are small-enough and existance-chekcs will be co-located on disk.
 	//   But there are 2 additional properties we have in our data:
 	//      "keys are known", "keys are hashed" (.idx works on murmur3), ".idx can calc key-number by key".
@@ -85,7 +85,7 @@ type Index struct {
 	bucketSize         int
 	size               int64
 	modTime            time.Time
-	baseDataID         uint64 // Index internaly organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
+	baseDataID         uint64 // Index internally organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
 	bucketCount        uint64 // Number of buckets
 	keyCount           uint64
 	recMask            uint64

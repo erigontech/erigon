@@ -236,7 +236,17 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	logger.Info("[snapshots] cli flags", "chain", chain, "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String(), "webseed", webseeds)
+	logger.Info(
+		"[snapshots] cli flags",
+		"chain", chain,
+		"addr", downloaderApiAddr,
+		"datadir", dirs.DataDir,
+		"ipv6-enabled", !disableIPV6,
+		"ipv4-enabled", !disableIPV4,
+		"download.rate", downloadRate.String(),
+		"upload.rate", uploadRate.String(),
+		"webseed", webseeds,
+	)
 	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
@@ -569,17 +579,11 @@ func manifest(ctx context.Context, logger log.Logger) error {
 	l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "history/"+fName)
 	}
 	l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "idx/"+fName)
 	}
 
@@ -623,13 +627,6 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	}
 
 	for _, t := range torrents {
-		// we don't release commitment history in this time. let's skip it here.
-		if strings.Contains(t.DisplayName, "history") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
-		if strings.Contains(t.DisplayName, "idx") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
 		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)

@@ -25,10 +25,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/erigontech/erigon-lib/common/length"
-
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlphacks"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
@@ -631,7 +630,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			copy(hashData.Hash[:], hashRef)
 			return &hashData
 		} else if !isAccount {
-			leafData.Value = rlphacks.RlpSerializableBytes(value.Bytes())
+			leafData.Value = rlp.RlpSerializableBytes(value.Bytes())
 			return &leafData
 		} else {
 			accData.FieldSet = fieldSet

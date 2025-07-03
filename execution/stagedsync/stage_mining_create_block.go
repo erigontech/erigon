@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
@@ -51,6 +52,64 @@ type MiningBlock struct {
 	Withdrawals      []*types.Withdrawal
 	PreparedTxns     types.Transactions
 	Requests         types.FlatRequests
+
+	headerRlpSize         *int
+	withdrawalsRlpSize    *int
+	unclesRlpSize         *int
+	txnsRlpSize           int
+	txnsRlpSizeCalculated int
+}
+
+func (mb *MiningBlock) AddTxn(txn types.Transaction) {
+	mb.Txns = append(mb.Txns, txn)
+	s := txn.EncodingSize()
+	s += rlp.ListPrefixLen(s)
+	mb.txnsRlpSize += s
+	mb.txnsRlpSizeCalculated++
+}
+
+func (mb *MiningBlock) AvailableRlpSpace(chainConfig *chain.Config, withAdditional ...types.Transaction) int {
+	if mb.headerRlpSize == nil {
+		s := mb.Header.EncodingSize()
+		s += rlp.ListPrefixLen(s)
+		mb.headerRlpSize = &s
+	}
+	if mb.withdrawalsRlpSize == nil {
+		var s int
+		if mb.Withdrawals != nil {
+			s = types.EncodingSizeGenericList(mb.Withdrawals)
+			s += rlp.ListPrefixLen(s)
+		}
+		mb.withdrawalsRlpSize = &s
+	}
+	if mb.unclesRlpSize == nil {
+		s := types.EncodingSizeGenericList(mb.Uncles)
+		s += rlp.ListPrefixLen(s)
+		mb.unclesRlpSize = &s
+	}
+
+	blockSize := *mb.headerRlpSize
+	blockSize += *mb.unclesRlpSize
+	blockSize += *mb.withdrawalsRlpSize
+	blockSize += mb.TxnsRlpSize(withAdditional...)
+	blockSize += rlp.ListPrefixLen(blockSize)
+	maxSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Number.Uint64())
+	return maxSize - blockSize
+}
+
+func (mb *MiningBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
+	if len(mb.PreparedTxns) > 0 {
+		s := types.EncodingSizeGenericList(mb.PreparedTxns)
+		s += rlp.ListPrefixLen(s)
+		return s
+	}
+	if len(mb.Txns) != mb.txnsRlpSizeCalculated {
+		panic("mismatch between mb.Txns and mb.txnsRlpSizeCalculated - did you forget to use mb.AddTxn()?")
+	}
+	s := mb.txnsRlpSize
+	s += types.EncodingSizeGenericList(withAdditional) // what size would be if we add additional txns
+	s += rlp.ListPrefixLen(s)
+	return s
 }
 
 type MiningState struct {
@@ -104,6 +163,7 @@ func StageMiningCreateBlockCfg(
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
 	current := cfg.miner.MiningBlock
+	*current = MiningBlock{}          // always start with a clean state
 	var txPoolLocals []common.Address //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
 

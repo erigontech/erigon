@@ -270,8 +270,8 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	}
 	if cfg.KeepExecutionProofs != isCommitmentHistoryEnabled {
 		return fmt.Errorf(
-			"commitment history flag mismatch from db and config. db: %v, config: %v. please restart erigon with the same flag or delete the chaindata folder: %s",
-			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, dirs.Chaindata)
+			"flag '--prune.experimental.include-commitment-history' mismatch: db: %v; config: %v. please restart Erigon '--prune.experimental.include-commitment-history=%v' or delete the chaindata folder: %s",
+			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, cfg.KeepExecutionProofs, dirs.Chaindata)
 	}
 	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
 		return err
@@ -628,6 +628,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				BorConfig:    borConfig,
 				EventFetcher: heimdallClient,
 			})
+
+			if err := heimdallStore.Milestones().Prepare(ctx); err != nil {
+				return nil, err
+			}
+
+			_, err := heimdallStore.Milestones().DeleteFromBlockNum(ctx, 0)
+			if err != nil {
+				return nil, err
+			}
 
 			heimdallService = heimdall.NewService(heimdall.ServiceConfig{
 				Store:     heimdallStore,

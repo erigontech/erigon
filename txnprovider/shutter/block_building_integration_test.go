@@ -37,6 +37,7 @@ import (
 	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/kv"
@@ -66,7 +67,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if runtime.GOOS == "darwin" {
+	//goland:noinspection GoBoolExpressions
+	if race.Enabled && runtime.GOOS == "darwin" {
 		// We run race detector for medium tests which fails on macOS.
 		t.Skip("issue #15007")
 	}
@@ -365,6 +367,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	chainDB.Close()
 
+	// note we need to create jwt secret before calling ethBackend.Init to avoid race conditions
+	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
+	require.NoError(t, err)
 	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
 	require.NoError(t, err)
 	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
@@ -375,8 +380,6 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
 	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
 	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
-	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
-	require.NoError(t, err)
 	//goland:noinspection HttpUrlsUsage
 	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
 	engineApiClient, err := engineapi.DialJsonRpcClient(

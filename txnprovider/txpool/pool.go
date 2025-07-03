@@ -778,7 +778,7 @@ func (p *TxPool) Started() bool {
 	return p.started.Load()
 }
 
-func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (bool, int, error) {
+func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -812,6 +812,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		if availableGas < params.TxGas {
 			break
 		}
+		if availableRlpSpace <= 0 {
+			break
+		}
 
 		mt := best.ms[i]
 
@@ -821,6 +824,11 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 		if mt.TxnSlot.Gas >= p.blockGasLimit.Load() {
 			// Skip transactions with very large gas limit
+			continue
+		}
+
+		if int64(mt.TxnSlot.Size) > int64(availableRlpSpace) {
+			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", int64(mt.TxnSlot.Size), "available", int64(availableRlpSpace))
 			continue
 		}
 
@@ -863,7 +871,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			continue
 		}
 		availableGas -= intrinsicGas
-
+		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
 		copy(txns.Senders.At(count), sender.Bytes())
 		txns.IsLocal[count] = isLocal
@@ -898,6 +906,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 		provideOptions.GasTarget,
 		provideOptions.BlobGasTarget,
 		provideOptions.TxnIdsFilter,
+		provideOptions.AvailableRlpSpace,
 	)
 	if err != nil {
 		return nil, err
@@ -919,13 +928,13 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 	return txns, nil
 }
 
-func (p *TxPool) YieldBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
-	return p.best(ctx, n, txns, onTopOf, availableGas, availableBlobGas, toSkip)
+func (p *TxPool) YieldBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
+	return p.best(ctx, n, txns, onTopOf, availableGas, availableBlobGas, toSkip, availableRlpSpace)
 }
 
-func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
+func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, availableRlpSpace int) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.YieldBest(ctx, n, txns, onTopOf, availableGas, availableBlobGas, set)
+	onTime, _, err := p.YieldBest(ctx, n, txns, onTopOf, availableGas, availableBlobGas, set, availableRlpSpace)
 	return onTime, err
 }
 
@@ -969,8 +978,16 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isPrague := p.isPrague() || p.isBhilai()
 	isEIP7825 := p.isOsaka()
-	if isEIP3860 && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
-		return txpoolcfg.InitCodeTooLarge // EIP-3860
+	isEIP7907 := p.isOsaka()
+
+	if isEIP7907 {
+		if txn.Creation && txn.DataLen > params.MaxInitCodeSizeEip7907 {
+			return txpoolcfg.InitCodeTooLarge
+		}
+	} else if isEIP3860 {
+		if txn.Creation && txn.DataLen > params.MaxInitCodeSize {
+			return txpoolcfg.InitCodeTooLarge
+		}
 	}
 
 	if txn.Type == types.AccountAbstractionTxType {

@@ -944,7 +944,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 }
 
 func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, prune.Mode) error) {
-	err := runPermutation(t, testFunc, 0, prune.DefaultMode)
+	err := runPermutation(t, testFunc, 0, prune.MockMode)
 	if err != nil {
 		t.Errorf("error while testing stuff: %v", err)
 	}
