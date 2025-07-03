@@ -70,6 +70,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
+	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 

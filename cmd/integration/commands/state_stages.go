@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"os"
 	"time"
 
@@ -49,8 +48,10 @@ import (
 	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"github.com/erigontech/erigon/turbo/shards"
 
+	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
