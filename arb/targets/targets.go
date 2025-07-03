@@ -1,4 +1,4 @@
-package rawdb
+package targets
 
 import (
 	"bytes"
