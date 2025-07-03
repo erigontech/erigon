@@ -159,7 +159,7 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 			return req, peer.pid, uint64(len(peer.mask)), nil
 		}
 		// matching
-		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(req.Len()))
+		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](req.Len())
 		req.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, length int) bool {
 			identifier := cltypes.NewDataColumnsByRootIdentifier()
 			item.Columns.Range(func(_ int, column uint64, _ int) bool {
