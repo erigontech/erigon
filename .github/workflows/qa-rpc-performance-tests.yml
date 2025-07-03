@@ -21,7 +21,7 @@ jobs:
             backend: RpcSpecific
           #- chain: bor-mainnet
           #  backend: Polygon
-    runs-on: [ self-hosted, qa, long-running, "${{ matrix.backend }}" ]
+    runs-on: [ self-hosted, qa, rpc-performance, "${{ matrix.backend }}" ]
     env:
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
