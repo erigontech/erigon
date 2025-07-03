@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2024 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,13 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package p2p
+package chainspec
 
-import "github.com/erigontech/erigon-lib/common"
+const (
+	MainnetChainID = 1
+	HoleskyChainID = 17000
+	SepoliaChainID = 11155111
+	HoodiChainID   = 560048
+	GnosisChainID  = 100
+	ChiadoChainID  = 10200
+)
 
-type LookupBootnodeURLsFunc func(genesis common.Hash) []string
-
-// LookupDNSNetwork returns the address of a public DNS-based node list for the given
-// genesis hash and protocol. See https://github.com/ethereum/discv4-dns-lists for more
-// information.
-type LookupDNSNetworkFunc func(genesis common.Hash, protocol string) string
+var NetworkNameByID = make(map[uint64]string)

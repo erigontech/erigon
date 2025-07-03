@@ -38,10 +38,10 @@ import (
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/clique"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stages/mock"
-	"github.com/erigontech/erigon/params"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -420,7 +420,7 @@ func TestClique(t *testing.T) {
 			// Create the genesis block with the initial set of signers
 			genesis := &types.Genesis{
 				ExtraData: make([]byte, clique.ExtraVanity+length.Addr*len(signers)+clique.ExtraSeal),
-				Config:    params.AllCliqueProtocolChanges,
+				Config:    chainspec.AllCliqueProtocolChanges,
 			}
 			for j, signer := range signers {
 				copy(genesis.ExtraData[clique.ExtraVanity+j*length.Addr:], signer[:])
@@ -428,7 +428,7 @@ func TestClique(t *testing.T) {
 
 			// Assemble a chain of headers from the cast votes
 			var config chain.Config
-			copier.Copy(&config, params.AllCliqueProtocolChanges)
+			copier.Copy(&config, chainspec.AllCliqueProtocolChanges)
 			config.Clique = &chain.CliqueConfig{
 				Period: 1,
 				Epoch:  tt.epoch,
@@ -436,7 +436,7 @@ func TestClique(t *testing.T) {
 
 			cliqueDB := memdb.NewTestDB(t, kv.ConsensusDB)
 
-			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB, log.New())
+			engine := clique.New(&config, chainspec.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
 			checkStateRoot := true
 			// Create a pristine blockchain with the genesis injected

@@ -43,9 +43,9 @@ import (
 	"github.com/erigontech/erigon/eth/tracers"
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/tests"
 )
 
@@ -297,7 +297,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
-	signer := types.LatestSigner(params.MainnetChainConfig)
+	signer := types.LatestSigner(chainspec.MainnetChainConfig)
 	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
 		GasPrice: uint256.NewInt(0),
 		CommonTx: types.CommonTx{
@@ -337,7 +337,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 			Balance: big.NewInt(500000000000000),
 		},
 	}
-	rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time, 0)
+	rules := chainspec.MainnetChainConfig.Rules(context.BlockNumber, context.Time, 0)
 	m := mock.Mock(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
@@ -350,7 +350,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		t.Fatalf("failed to create call tracer: %v", err)
 	}
 	statedb.SetHooks(tracer.Hooks)
-	evm := vm.NewEVM(context, txContext, statedb, params.MainnetChainConfig, vm.Config{Tracer: tracer.Hooks})
+	evm := vm.NewEVM(context, txContext, statedb, chainspec.MainnetChainConfig, vm.Config{Tracer: tracer.Hooks})
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)

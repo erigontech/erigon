@@ -34,11 +34,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 var LatestStateFileName = "latest.ssz_snappy"
@@ -217,7 +217,7 @@ type NetworkConfig struct {
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
-	networkid.MainnetChainID: {
+	chainspec.MainnetChainID: {
 		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    MaxChunkSize,
@@ -236,7 +236,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		BootNodes:                       MainnetBootstrapNodes,
 	},
 
-	networkid.SepoliaChainID: {
+	chainspec.SepoliaChainID: {
 		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    15728640,
@@ -255,7 +255,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		BootNodes:                       SepoliaBootstrapNodes,
 	},
 
-	networkid.GnosisChainID: {
+	chainspec.GnosisChainID: {
 		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    15728640, // 15 MiB
@@ -274,7 +274,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		BootNodes:                       GnosisBootstrapNodes,
 	},
 
-	networkid.ChiadoChainID: {
+	chainspec.ChiadoChainID: {
 		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    15728640, // 15 MiB
@@ -293,7 +293,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
 
-	networkid.HoleskyChainID: {
+	chainspec.HoleskyChainID: {
 		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    15728640, // 15 MiB
@@ -312,7 +312,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		BootNodes:                       HoleskyBootstrapNodes,
 	},
 
-	networkid.HoodiChainID: {
+	chainspec.HoodiChainID: {
 		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    15728640, // 15 MiB
@@ -334,32 +334,32 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 
 // Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
 var CheckpointSyncEndpoints = map[NetworkType][]string{
-	networkid.MainnetChainID: {
+	chainspec.MainnetChainID: {
 		"https://sync.invis.tools/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
 		//"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 		"https://checkpointz.pietjepuk.net/eth/v2/debug/beacon/states/finalized",
 	},
-	networkid.SepoliaChainID: {
+	chainspec.SepoliaChainID: {
 		//"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
 		//"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
-	networkid.GnosisChainID: {
+	chainspec.GnosisChainID: {
 		//"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint.gnosischain.com/eth/v2/debug/beacon/states/finalized",
 	},
-	networkid.ChiadoChainID: {
+	chainspec.ChiadoChainID: {
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
 	},
-	networkid.HoleskyChainID: {
+	chainspec.HoleskyChainID: {
 		"https://holesky.beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
 		"https://beaconstate-holesky.chainsafe.io/eth/v2/debug/beacon/states/finalized",
 		"https://holesky.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint-sync.holesky.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
-	networkid.HoodiChainID: {
+	chainspec.HoodiChainID: {
 		"https://checkpoint-sync.hoodi.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 		"https://hoodi-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
 	},
@@ -981,7 +981,7 @@ func mainnetConfig() BeaconChainConfig {
 }
 
 func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
-	networkConfig, beaconCfg := GetConfigsByNetwork(networkid.MainnetChainID)
+	networkConfig, beaconCfg := GetConfigsByNetwork(chainspec.MainnetChainID)
 	b, err := os.ReadFile(configFile) // just pass the file name
 	if err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
@@ -1009,8 +1009,8 @@ func sepoliaConfig() BeaconChainConfig {
 
 	cfg.GenesisForkVersion = 0x90000069
 	cfg.SecondsPerETH1Block = 14
-	cfg.DepositChainID = networkid.SepoliaChainID
-	cfg.DepositNetworkID = networkid.SepoliaChainID
+	cfg.DepositChainID = chainspec.SepoliaChainID
+	cfg.DepositNetworkID = chainspec.SepoliaChainID
 	cfg.AltairForkEpoch = 50
 	cfg.AltairForkVersion = 0x90000070
 	cfg.BellatrixForkEpoch = 100
@@ -1038,8 +1038,8 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.GenesisDelay = 300
 	cfg.SecondsPerSlot = 12
 	cfg.Eth1FollowDistance = 2048
-	cfg.DepositChainID = networkid.HoleskyChainID
-	cfg.DepositNetworkID = networkid.HoleskyChainID
+	cfg.DepositChainID = chainspec.HoleskyChainID
+	cfg.DepositNetworkID = chainspec.HoleskyChainID
 
 	cfg.AltairForkEpoch = 0
 	cfg.AltairForkVersion = 0x02017000
@@ -1103,8 +1103,8 @@ func hoodiConfig() BeaconChainConfig {
 
 	// Deposit contract
 	cfg.DepositContractAddress = "0x00000000219ab540356cBB839Cbe05303d7705Fa"
-	cfg.DepositChainID = networkid.HoodiChainID
-	cfg.DepositNetworkID = networkid.HoodiChainID
+	cfg.DepositChainID = chainspec.HoodiChainID
+	cfg.DepositNetworkID = chainspec.HoodiChainID
 
 	cfg.MaxBlobsPerBlockElectra = 9
 	cfg.BlobSidecarSubnetCountElectra = 9
@@ -1130,8 +1130,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.ChurnLimitQuotient = 1 << 12
 	cfg.GenesisForkVersion = 0x00000064
 	cfg.SecondsPerETH1Block = 6
-	cfg.DepositChainID = networkid.GnosisChainID
-	cfg.DepositNetworkID = networkid.GnosisChainID
+	cfg.DepositChainID = chainspec.GnosisChainID
+	cfg.DepositNetworkID = chainspec.GnosisChainID
 	cfg.AltairForkEpoch = 512
 	cfg.AltairForkVersion = 0x01000064
 	cfg.BellatrixForkEpoch = 385536
@@ -1176,8 +1176,8 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.ChurnLimitQuotient = 1 << 12
 	cfg.GenesisForkVersion = 0x0000006f
 	cfg.SecondsPerETH1Block = 6
-	cfg.DepositChainID = networkid.ChiadoChainID
-	cfg.DepositNetworkID = networkid.ChiadoChainID
+	cfg.DepositChainID = chainspec.ChiadoChainID
+	cfg.DepositNetworkID = chainspec.ChiadoChainID
 	cfg.AltairForkEpoch = 90
 	cfg.AltairForkVersion = 0x0100006f
 	cfg.BellatrixForkEpoch = 180
@@ -1268,12 +1268,12 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 
 // Beacon configs
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
-	networkid.MainnetChainID: mainnetConfig(),
-	networkid.SepoliaChainID: sepoliaConfig(),
-	networkid.HoleskyChainID: holeskyConfig(),
-	networkid.HoodiChainID:   hoodiConfig(),
-	networkid.GnosisChainID:  gnosisConfig(),
-	networkid.ChiadoChainID:  chiadoConfig(),
+	chainspec.MainnetChainID: mainnetConfig(),
+	chainspec.SepoliaChainID: sepoliaConfig(),
+	chainspec.HoleskyChainID: holeskyConfig(),
+	chainspec.HoodiChainID:   hoodiConfig(),
+	chainspec.GnosisChainID:  gnosisConfig(),
+	chainspec.ChiadoChainID:  chiadoConfig(),
 }
 
 // Eth1DataVotesLength returns the maximum length of the votes on the Eth1 data,
@@ -1386,25 +1386,25 @@ func GetConfigsByNetwork(net NetworkType) (*NetworkConfig, *BeaconChainConfig) {
 func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, NetworkType, error) {
 	switch net {
 	case networkname.Mainnet:
-		networkCfg, beaconCfg := GetConfigsByNetwork(networkid.MainnetChainID)
-		return networkCfg, beaconCfg, networkid.MainnetChainID, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.MainnetChainID)
+		return networkCfg, beaconCfg, chainspec.MainnetChainID, nil
 	case networkname.Sepolia:
-		networkCfg, beaconCfg := GetConfigsByNetwork(networkid.SepoliaChainID)
-		return networkCfg, beaconCfg, networkid.SepoliaChainID, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.SepoliaChainID)
+		return networkCfg, beaconCfg, chainspec.SepoliaChainID, nil
 	case networkname.Gnosis:
-		networkCfg, beaconCfg := GetConfigsByNetwork(networkid.GnosisChainID)
-		return networkCfg, beaconCfg, networkid.GnosisChainID, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.GnosisChainID)
+		return networkCfg, beaconCfg, chainspec.GnosisChainID, nil
 	case networkname.Chiado:
-		networkCfg, beaconCfg := GetConfigsByNetwork(networkid.ChiadoChainID)
-		return networkCfg, beaconCfg, networkid.ChiadoChainID, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.ChiadoChainID)
+		return networkCfg, beaconCfg, chainspec.ChiadoChainID, nil
 	case networkname.Holesky:
-		networkCfg, beaconCfg := GetConfigsByNetwork(networkid.HoleskyChainID)
-		return networkCfg, beaconCfg, networkid.HoleskyChainID, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.HoleskyChainID)
+		return networkCfg, beaconCfg, chainspec.HoleskyChainID, nil
 	case networkname.Hoodi:
-		networkCfg, beaconCfg := GetConfigsByNetwork(networkid.HoodiChainID)
-		return networkCfg, beaconCfg, networkid.HoodiChainID, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.HoodiChainID)
+		return networkCfg, beaconCfg, chainspec.HoodiChainID, nil
 	default:
-		return nil, nil, networkid.MainnetChainID, errors.New("chain not found")
+		return nil, nil, chainspec.MainnetChainID, errors.New("chain not found")
 	}
 }
 func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
@@ -1458,21 +1458,21 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 
 // Check if chain with a specific ID is supported or not
 func EmbeddedSupported(id uint64) bool {
-	return id == networkid.MainnetChainID ||
-		id == networkid.HoleskyChainID ||
-		id == networkid.SepoliaChainID ||
-		id == networkid.GnosisChainID ||
-		id == networkid.ChiadoChainID ||
-		id == networkid.HoodiChainID
+	return id == chainspec.MainnetChainID ||
+		id == chainspec.HoleskyChainID ||
+		id == chainspec.SepoliaChainID ||
+		id == chainspec.GnosisChainID ||
+		id == chainspec.ChiadoChainID ||
+		id == chainspec.HoodiChainID
 }
 
 func SupportBackfilling(networkId uint64) bool {
-	return networkId == networkid.MainnetChainID ||
-		networkId == networkid.SepoliaChainID ||
-		networkId == networkid.GnosisChainID ||
-		networkId == networkid.ChiadoChainID ||
-		networkId == networkid.HoleskyChainID ||
-		networkId == networkid.HoodiChainID
+	return networkId == chainspec.MainnetChainID ||
+		networkId == chainspec.SepoliaChainID ||
+		networkId == chainspec.GnosisChainID ||
+		networkId == chainspec.ChiadoChainID ||
+		networkId == chainspec.HoleskyChainID ||
+		networkId == chainspec.HoodiChainID
 }
 
 func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {

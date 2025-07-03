@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/stages/mock"
 )
@@ -42,7 +43,7 @@ import (
 // does not change the state root.
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
-	genesis := core.GnosisGenesisBlock()
+	genesis := chainspec.GnosisGenesisBlock()
 	genesisBlock, _, err := core.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 
@@ -83,7 +84,7 @@ func TestEmptyBlock(t *testing.T) {
 
 func TestAuRaSkipGasLimit(t *testing.T) {
 	require := require.New(t)
-	genesis := core.GnosisGenesisBlock()
+	genesis := chainspec.GnosisGenesisBlock()
 	genesis.Config.TerminalTotalDifficultyPassed = false
 	genesis.Config.Aura.BlockGasLimitContractTransitions = map[uint64]common.Address{0: common.HexToAddress("0x4000000000000000000000000000000000000001")}
 
