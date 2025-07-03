@@ -16,16 +16,24 @@ on:
       - synchronize
       - ready_for_review
 
+
 jobs:
   bor-mainnet-rpc-integ-tests:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}', github.workflow, github.run_id) ||
+          format('{0}-{1}', github.workflow, github.ref)
+        }}
+      cancel-in-progress: true
     runs-on: [ self-hosted, qa, Polygon ]
-    timeout-minutes: 15
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
-      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       ERIGON_ASSERT: true
+      RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: bor-mainnet
 
     steps:
@@ -52,6 +60,13 @@ jobs:
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
+      - name: Save Erigon Chaindata Directory
+        id: save_chaindata_step
+        run: |
+          rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
+          echo "Backup chaindata"
+          cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
         run: |
@@ -62,6 +77,7 @@ jobs:
           RPC_DAEMON_PID=$!          
           RPC_DAEMON_EXIT_STATUS=$?
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
+          echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
           sleep 5
           tail erigon.log
@@ -122,10 +138,11 @@ jobs:
           fi
 
       - name: Stop Erigon RpcDaemon
+        if: always()
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           # Clean up rpcdaemon process if it's still running
-          if kill -0 $RPC_DAEMON_PID 2> /dev/null; then
+          if [ -n "$RPC_DAEMON_PID" ] && kill -0 $RPC_DAEMON_PID 2> /dev/null; then
             echo "RpcDaemon stopping..."
             kill $RPC_DAEMON_PID
             echo "RpcDaemon stopped"
@@ -133,7 +150,17 @@ jobs:
             echo "RpcDaemon has already terminated"
           fi
 
+      - name: Restore Erigon Chaindata Directory
+        if: ${{ always() }}
+        run: |
+          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
+          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+          echo "Restore chaindata"
+          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+          fi
+
       - name: Resume the Erigon instance dedicated to db maintenance
+        if: ${{ always() }}
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
@@ -161,10 +188,10 @@ jobs:
         if: failure()
         run: |
           if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
-            echo "::warning::Test not executed, workflow failed for infrastructure reasons"
+            echo "::error::Test not executed, workflow failed for infrastructure reasons"
           fi
-          #exit 1
-          
+          exit 1
+
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"

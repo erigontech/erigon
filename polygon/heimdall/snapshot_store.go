@@ -23,7 +23,7 @@ func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 	return &SnapshotStore{
 		Store:                       base,
 		checkpoints:                 NewCheckpointSnapshotStore(base.Checkpoints(), snapshots),
-		milestones:                  NewMilestoneSnapshotStore(base.Milestones(), snapshots),
+		milestones:                  base.Milestones(),
 		spans:                       NewSpanSnapshotStore(base.Spans(), snapshots),
 		spanBlockProducerSelections: base.SpanBlockProducerSelections(),
 	}
