@@ -51,9 +51,10 @@ import (
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
 var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 
+// Fail-back block gas limit. Better specify one in the chain config.
 const DefaultBlockGasLimit uint64 = 45_000_000
 
-func DefaultMinerGasLimitByChain(config *Config) uint64 {
+func DefaultBlockGasLimitByChain(config *Config) uint64 {
 	if config.Genesis == nil || config.Genesis.Config == nil || config.Genesis.Config.DefaultBlockGasLimit == nil {
 		return DefaultBlockGasLimit
 	}

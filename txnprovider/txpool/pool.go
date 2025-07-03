@@ -2583,11 +2583,9 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
 
 	if p.feeCalculator != nil {
-		if chainConfig, _ := ChainConfig(tx); chainConfig != nil {
-			pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(chainConfig, coreTx)
-			if err != nil {
-				return err
-			}
+		pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -2616,7 +2614,11 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 	}
 
 	if blockGasLimit == 0 {
-		blockGasLimit = ethconfig.DefaultBlockGasLimit
+		if p.chainConfig.DefaultBlockGasLimit != nil {
+			blockGasLimit = *p.chainConfig.DefaultBlockGasLimit
+		} else {
+			blockGasLimit = ethconfig.DefaultBlockGasLimit
+		}
 	}
 
 	err = p.senders.registerNewSenders(&txns, p.logger)

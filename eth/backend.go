@@ -1897,7 +1897,7 @@ func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Con
 
 func setDefaultMinerGasLimit(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
 	if config.Miner.GasLimit == nil {
-		gasLimit := ethconfig.DefaultMinerGasLimitByChain(config)
+		gasLimit := ethconfig.DefaultBlockGasLimitByChain(config)
 		config.Miner.GasLimit = &gasLimit
 	}
 }
