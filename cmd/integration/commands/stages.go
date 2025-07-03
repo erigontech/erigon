@@ -65,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/eth/integrity"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -83,6 +84,8 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 var cmdStageSnapshots = &cobra.Command{
@@ -1376,7 +1379,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 
 	var consensusConfig interface{}
 	if cc.Clique != nil {
-		consensusConfig = params.CliqueSnapshot
+		consensusConfig = chainspec.CliqueSnapshot
 	} else if cc.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
@@ -1393,7 +1396,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 }
 
 func readGenesis(chain string) *types.Genesis {
-	genesis := core.GenesisBlockByChainName(chain)
+	genesis := chainspec.GenesisBlockByChainName(chain)
 	if genesis == nil {
 		panic("genesis is nil. probably you passed wrong --chain")
 	}

@@ -69,5 +69,6 @@
     },
     "registrar": "0x6000000000000000000000000000000000000000",
     "withdrawalContractAddress": "0xb97036A26259B7147018913bD58a774cf91acf25"
-  }
+  },
+  "defaultBlockGasLimit" : 17000000
 }

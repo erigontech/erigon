@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
@@ -50,49 +51,14 @@ import (
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
 var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 
-var (
-	DefaultMinerGasLimitEthMainnet uint64 = 45_000_000
-	BorDefaultMinerGasLimit        uint64 = 45_000_000
-	DefaultMinerGasLimitSepolia    uint64 = 60_000_000
-	DefaultMinerGasLimitHolesky    uint64 = 60_000_000
-	DefaultMinerGasLimitHoodi      uint64 = 60_000_000
-	DefaultMinerGasLimitBorMainnet uint64 = 45_000_000
-	DefaultMinerGasLimitAmoy       uint64 = 45_000_000
-	DefaultMinerGasLimitGnosis     uint64 = 17_000_000
-	DefaultMinerGasLimitChiado     uint64 = 17_000_000
-)
+// Fail-back block gas limit. Better specify one in the chain config.
+const DefaultBlockGasLimit uint64 = 45_000_000
 
-func DefaultMinerGasLimitByChain(config *Config) uint64 {
-	if config.Genesis == nil {
-		return DefaultMinerGasLimitEthMainnet
+func DefaultBlockGasLimitByChain(config *Config) uint64 {
+	if config.Genesis == nil || config.Genesis.Config == nil || config.Genesis.Config.DefaultBlockGasLimit == nil {
+		return DefaultBlockGasLimit
 	}
-
-	switch config.NetworkID {
-	case params.MainnetChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitEthMainnet
-	case params.SepoliaChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitSepolia
-	case params.HoleskyChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitHolesky
-	case params.HoodiChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitHoodi
-	case params.BorMainnetChainConfig.ChainID.Uint64():
-		return BorDefaultMinerGasLimit
-	case params.AmoyChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitAmoy
-	case params.GnosisChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitGnosis
-	case params.ChiadoChainConfig.ChainID.Uint64():
-		return DefaultMinerGasLimitChiado
-	default:
-		if config.Genesis.Config == nil {
-			return DefaultMinerGasLimitEthMainnet
-		}
-		if config.Genesis.Config.Bor != nil {
-			return BorDefaultMinerGasLimit
-		}
-	}
-	return DefaultMinerGasLimitEthMainnet
+	return *config.Genesis.Config.DefaultBlockGasLimit
 }
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -250,7 +216,7 @@ type Config struct {
 	// Ethash options
 	Ethash ethashcfg.Config
 
-	Clique params.ConsensusSnapshotConfig
+	Clique chainspec.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
 
 	// Transaction pool options

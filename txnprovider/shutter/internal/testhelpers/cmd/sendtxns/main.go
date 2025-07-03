@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 )
@@ -78,7 +78,7 @@ func main() {
 }
 
 func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
-	chainId := params.ChainConfigByChainName(chain).ChainID
+	chainId := chainspec.ChainConfigByChainName(chain).ChainID
 	rpcClient := requests.NewRequestGenerator(url, logger)
 	transactor := testhelpers.NewTransactor(rpcClient, chainId)
 	amount, _ := new(big.Int).SetString(amountStr, 10)

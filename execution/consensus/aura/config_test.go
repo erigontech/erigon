@@ -23,11 +23,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func TestGnosisBlockRewardContractTransitions(t *testing.T) {
-	spec := params.GnosisChainConfig.Aura
+	spec := chainspec.GnosisChainConfig.Aura
 
 	param, err := FromJson(spec)
 	require.NoError(t, err)
@@ -40,7 +40,7 @@ func TestGnosisBlockRewardContractTransitions(t *testing.T) {
 }
 
 func TestInvalidBlockRewardContractTransition(t *testing.T) {
-	spec := *(params.GnosisChainConfig.Aura)
+	spec := *(chainspec.GnosisChainConfig.Aura)
 
 	// blockRewardContractTransition should be smaller than any block number in blockRewardContractTransitions
 	invalidTransition := uint64(10_000_000)

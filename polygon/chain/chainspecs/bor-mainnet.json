@@ -82,5 +82,6 @@
     "napoliBlock": 54876000,
     "ahmedabadBlock": 62278656,
     "bhilaiBlock": 73440256
-  }
+  },
+   "defaultBlockGasLimit" : 45000000
 }

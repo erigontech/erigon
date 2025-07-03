@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -296,7 +297,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	contractDeployerPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	contractDeployer := crypto.PubkeyToAddress(contractDeployerPrivKey.PublicKey)
-	shutterConfig := shuttercfg.ConfigByChainName(params.ChiadoChainConfig.ChainName)
+	shutterConfig := shuttercfg.ConfigByChainName(chainspec.ChiadoChainConfig.ChainName)
 	shutterConfig.Enabled = false // first we need to deploy the shutter smart contracts
 	shutterConfig.BootstrapNodes = []string{decryptionKeySenderPeerAddr}
 	shutterConfig.PrivateKey = nodeKey
@@ -335,14 +336,14 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	t.Cleanup(cleanNode(ethNode))
 
 	var chainConfig chain.Config
-	copier.Copy(&chainConfig, params.ChiadoChainConfig)
+	copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = chainId
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
 	chainConfig.ShanghaiTime = big.NewInt(0)
 	chainConfig.CancunTime = big.NewInt(0)
 	chainConfig.PragueTime = big.NewInt(0)
-	genesis := core.ChiadoGenesisBlock()
+	genesis := chainspec.ChiadoGenesisBlock()
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Config = &chainConfig
 	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
