@@ -1,4 +1,4 @@
-package chain
+package chainparams
 
 import (
 	"github.com/erigontech/erigon-lib/common"
