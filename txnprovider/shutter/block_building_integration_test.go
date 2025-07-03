@@ -366,6 +366,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	chainDB.Close()
 
+	// note we need to create jwt secret before calling ethBackend.Init to avoid race conditions
+	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
+	require.NoError(t, err)
 	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
 	require.NoError(t, err)
 	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
@@ -376,8 +379,6 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
 	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
 	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
-	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
-	require.NoError(t, err)
 	//goland:noinspection HttpUrlsUsage
 	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
 	engineApiClient, err := engineapi.DialJsonRpcClient(
