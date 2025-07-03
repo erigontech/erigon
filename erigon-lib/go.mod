@@ -13,7 +13,7 @@ replace (
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250502073210-6c1e7e3d5165
 	github.com/erigontech/interfaces v0.0.0-20250320135313-d644c7d43f43
-	github.com/erigontech/mdbx-go v0.39.8
+	github.com/erigontech/mdbx-go v0.38.6-0.20250205222432-e4dd01978d7f
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
