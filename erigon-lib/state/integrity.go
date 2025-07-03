@@ -14,6 +14,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"golang.org/x/sync/errgroup"
 )
 
 // search key in all files of all domains and print file names
@@ -141,11 +143,16 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+
+	eg := errgroup.Group{}
+	eg.SetLimit(estimate.AlmostAllCPUs())
+
 	fromTxNum := fromStep * iit.ii.aggregationStep
 	iterStep := func(item visibleFile) error {
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)
 		defer item.src.decompressor.EnableReadAhead().DisableReadAhead()
+		i := 0
 
 		for g.HasNext() {
 			k, _ := g.NextUncompressed()
@@ -171,13 +178,16 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 					log.Warn(err.Error())
 				}
 			}
+			i++
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[integrity] InvertedIndex: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
-			default:
+			if i%1000 == 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[integrity] InvertedIndex: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
+				default:
+				}
 			}
 		}
 		return nil
@@ -190,10 +200,12 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 		if item.endTxNum <= fromTxNum {
 			continue
 		}
-		if err := iterStep(item); err != nil {
-			return err
-		}
-		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
+		eg.Go(func() error {
+			return iterStep(item)
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 	return nil
 }
