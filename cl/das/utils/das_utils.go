@@ -39,7 +39,8 @@ func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 	for uint64(len(custodyGroups)) < custodyGroupCount {
 		// Hash current ID and take first 8 bytes
 		idBytes := currentID.Bytes32()
-		// reverse the bytes to little endian
+		// Reverse the bytes to convert from big-endian to little-endian.
+		// This ensures compatibility with the hashing process that follows.
 		for i := 0; i < len(idBytes)/2; i++ {
 			idBytes[i], idBytes[len(idBytes)-i-1] = idBytes[len(idBytes)-i-1], idBytes[i]
 		}
