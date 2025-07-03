@@ -121,13 +121,13 @@ func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeSto
 		}
 	}
 
-	if heimdall.CheckpointsEnabled() && !unwindCfg.KeepCheckpoints {
+	if heimdall.WaypointsEnabled() && !unwindCfg.KeepCheckpoints {
 		if err := UnwindCheckpoints(ctx, heimdallStore, tx, unwindPoint); err != nil {
 			return err
 		}
 	}
 
-	if heimdall.MilestonesEnabled() && !unwindCfg.KeepMilestones {
+	if heimdall.WaypointsEnabled() && !unwindCfg.KeepMilestones {
 		if err := UnwindMilestones(ctx, heimdallStore, tx, unwindPoint); err != nil {
 			return err
 		}
@@ -220,7 +220,7 @@ func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStor
 		return deleted, err
 	}
 
-	if heimdall.CheckpointsEnabled() {
+	if heimdall.WaypointsEnabled() {
 		checkpointStore := heimdallStore.Checkpoints()
 
 		if tx != nil {
@@ -240,7 +240,7 @@ func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStor
 		}
 	}
 
-	if heimdall.MilestonesEnabled() {
+	if heimdall.WaypointsEnabled() {
 		milestoneStore := heimdallStore.Milestones()
 
 		if tx != nil {

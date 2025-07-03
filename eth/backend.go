@@ -615,6 +615,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				EventFetcher: heimdallClient,
 			})
 
+			if err := heimdallStore.Milestones().Prepare(ctx); err != nil {
+				return nil, err
+			}
+
+			_, err := heimdallStore.Milestones().DeleteFromBlockNum(ctx, 0)
+			if err != nil {
+				return nil, err
+			}
+
 			heimdallService = heimdall.NewService(heimdall.ServiceConfig{
 				Store:     heimdallStore,
 				BorConfig: borConfig,
