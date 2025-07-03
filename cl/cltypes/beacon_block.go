@@ -412,6 +412,10 @@ func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 	return append(branch, kzgCommitmentsProof...), nil
 }
 
+func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
+	return merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
+}
+
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	var (
 		maxAttSlashing = MaxAttesterSlashings
