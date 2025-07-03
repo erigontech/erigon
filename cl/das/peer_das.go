@@ -258,21 +258,13 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				d.recoveringMutex.Unlock()
 				continue
 			}
-			d.isRecovering[toRecover.blockRoot] = true
 			d.recoveringMutex.Unlock()
 
 			// check if the blobs are already recovered
-			if d.IsBlobAlreadyRecovered(toRecover.blockRoot) {
-				// already recovered, skip
-				d.recoveringMutex.Lock()
-				delete(d.isRecovering, toRecover.blockRoot)
-				d.recoveringMutex.Unlock()
-				continue
+			if !d.IsBlobAlreadyRecovered(toRecover.blockRoot) {
+				// recover the blobs
+				recover(toRecover)
 			}
-
-			// recover the blobs
-			recover(toRecover)
-
 			// remove the block from the recovering map
 			d.recoveringMutex.Lock()
 			delete(d.isRecovering, toRecover.blockRoot)
@@ -293,6 +285,7 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 		d.recoveringMutex.Unlock()
 		return nil
 	}
+	d.isRecovering[blockRoot] = true
 	d.recoveringMutex.Unlock()
 
 	// schedule
@@ -605,7 +598,7 @@ func (d *downloadRequest) removeColumn(blockRoot common.Hash, columnIndex uint64
 	defer d.mutex.Unlock()
 	delete(d.downloadTable[blockRoot], columnIndex)
 	if len(d.downloadTable[blockRoot]) == 0 {
-		d.removeBlock(blockRoot)
+		delete(d.downloadTable, blockRoot)
 	}
 	d.cacheRequest = nil
 }
