@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/lru"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/arb/lru"
 )
 
 // Config represents the configuration of the filter system.
