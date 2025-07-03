@@ -131,6 +131,7 @@ type TxPool struct {
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
 	started                 atomic.Bool
+	cacheExpiryTime			atomic.Uint64
 	pendingBaseFee          atomic.Uint64
 	pendingBlobFee          atomic.Uint64 // For gas accounting for blobs, which has its own dimension
 	blockGasLimit           atomic.Uint64
@@ -247,6 +248,7 @@ func New(
 			txnHash common.Hash
 		}),
 	}
+	res.cacheExpiryTime.Store(uint64(time.Now().Add(60*time.Minute).Unix()))
 
 	if chainConfig.ShanghaiTime != nil {
 		if !chainConfig.ShanghaiTime.IsUint64() {
