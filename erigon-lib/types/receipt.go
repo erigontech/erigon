@@ -69,6 +69,9 @@ type Receipt struct {
 	ContractAddress common.Address `json:"contractAddress"`
 	GasUsed         uint64         `json:"gasUsed" gencodec:"required"`
 
+	GasUsedForL1      uint64   `json:"gasUsedForL1"`      // Arbitrum L1 specific field, different from GasUsed (?)
+	EffectiveGasPrice *big.Int `json:"effectiveGasPrice"` // Arbitrum required, but tag omitted for backwards compatibility
+
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
 	BlockHash        common.Hash `json:"blockHash,omitempty"`
@@ -76,6 +79,10 @@ type Receipt struct {
 	TransactionIndex uint        `json:"transactionIndex"`
 
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
+}
+
+func (r *Receipt) GasUsedForL2() uint64 {
+	return r.GasUsed - r.GasUsedForL1
 }
 
 type receiptMarshaling struct {

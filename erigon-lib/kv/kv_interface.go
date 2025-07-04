@@ -228,6 +228,9 @@ const (
 	PolygonBridgeDB = "polygon-bridge"
 	CaplinDB        = "caplin"
 	TemporaryDB     = "temporary"
+	ArbitrumDB      = "arbitrum"
+	ArbWasmDB       = "arb-wasm" // ArbWasmDB - is a separate DB for arbitrum Wasm cod
+	ArbClassicDB    = "arb-classic"
 )
 
 type GetPut interface {

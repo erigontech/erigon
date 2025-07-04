@@ -69,6 +69,14 @@ type Contract struct {
 
 	Gas   uint64
 	value *uint256.Int
+
+	// Arbitrum
+	delegateOrCallcode bool
+}
+
+// arbitrum
+func (c *Contract) IsDelegateOrCallcode() bool {
+	return c.delegateOrCallcode
 }
 
 type JumpDestCache struct {
@@ -246,4 +254,8 @@ func (c *Contract) SetCodeOptionalHash(addr *common.Address, codeAndHash *codeAn
 	c.Code = codeAndHash.code
 	c.CodeHash = codeAndHash.hash
 	c.CodeAddr = addr
+}
+
+func (c *Contract) JumpDest() *JumpDestCache {
+	return c.jumpdests
 }

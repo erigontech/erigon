@@ -144,7 +144,7 @@ func TestEIP2200(t *testing.T) {
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(chain.AllProtocolChanges.Rules(0, 0), w)
+			_ = s.CommitBlock(chain.AllProtocolChanges.Rules(0, 0, 0), w)
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
@@ -202,7 +202,7 @@ func TestCreateGas(t *testing.T) {
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code))
-		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0), stateWriter)
+		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },

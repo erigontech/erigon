@@ -54,6 +54,15 @@ const (
 	BlobTxType
 	SetCodeTxType
 	AccountAbstractionTxType
+
+	// Arbitrum transaction types
+	ArbitrumDepositTxType         byte = 0x64
+	ArbitrumUnsignedTxType        byte = 0x65
+	ArbitrumContractTxType        byte = 0x66
+	ArbitrumRetryTxType           byte = 0x68
+	ArbitrumSubmitRetryableTxType byte = 0x69
+	ArbitrumInternalTxType        byte = 0x6A
+	ArbitrumLegacyTxType          byte = 0x78
 )
 
 // Transaction is an Ethereum transaction.
@@ -201,6 +210,18 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		t = &SetCodeTransaction{}
 	case AccountAbstractionTxType:
 		t = &AccountAbstractionTransaction{}
+	case ArbitrumDepositTxType:
+		t = &ArbitrumDepositTx{}
+	case ArbitrumUnsignedTxType:
+		t = &ArbitrumUnsignedTx{}
+	case ArbitrumContractTxType:
+		t = &ArbitrumContractTx{}
+	case ArbitrumRetryTxType:
+		t = &ArbitrumRetryTx{}
+	case ArbitrumSubmitRetryableTxType:
+		t = &ArbitrumSubmitRetryableTx{}
+	case ArbitrumInternalTxType:
+		t = &ArbitrumInternalTx{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
@@ -372,11 +393,40 @@ type Message struct {
 	maxFeePerBlobGas uint256.Int
 	data             []byte
 	accessList       AccessList
-	checkNonce       bool
+	checkNonce       bool // if true, skip checking of the nonce, code hash etc
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+
+	// Arbitrum
+	// L1 charging is disabled when SkipL1Charging is true.
+	// This field might be set to true for operations like RPC eth_call.
+	SkipAccountChecks bool // same as checkNonce
+	SkipL1Charging    bool
+	TxRunMode         MessageRunMode // deprecated (shoudl be)
+	Tx                Transaction
 }
+
+// Arbitrum
+func (msg *Message) SetGasPrice(f *uint256.Int) { msg.gasPrice.Set(f) }
+func (msg *Message) SetFeeCap(f *uint256.Int)   { msg.feeCap.Set(f) }
+func (msg *Message) SetTip(f *uint256.Int)      { msg.tipCap.Set(f) }
+
+type MessageRunMode uint8
+
+const (
+	MessageCommitMode MessageRunMode = iota
+	MessageGasEstimationMode
+	MessageEthcallMode
+	MessageReplayMode
+)
+
+// these message modes are executed onchain so cannot make any gas shortcuts
+func (m MessageRunMode) ExecutedOnChain() bool { // can use isFree for that??
+	return m == MessageCommitMode || m == MessageReplayMode
+}
+
+// eof arbitrum
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,

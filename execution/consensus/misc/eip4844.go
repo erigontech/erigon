@@ -47,7 +47,8 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 	if parent.BlobGasUsed != nil {
 		parentBlobGasUsed = *parent.BlobGasUsed
 	}
-	target := config.GetTargetBlobsPerBlock(currentHeaderTime)
+	arbOsVersion := types.GetArbOSVersion(parent, config)
+	target := config.GetTargetBlobsPerBlock(currentHeaderTime, arbOsVersion)
 	targetBlobGas := target * params.GasPerBlob
 
 	if parentExcessBlobGas+parentBlobGasUsed < targetBlobGas {
@@ -55,7 +56,7 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 	}
 	if config.IsOsaka(currentHeaderTime) {
 		// EIP-7918: Blob base fee bounded by execution cost
-		max := config.GetMaxBlobsPerBlock(currentHeaderTime)
+		max := config.GetMaxBlobsPerBlock(currentHeaderTime, arbOsVersion)
 		parentBlobBaseFee, err := GetBlobGasPrice(config, parentExcessBlobGas, parent.Time)
 		if err != nil {
 			panic(err) // should never happen assuming the parent is valid
@@ -124,7 +125,7 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 }
 
 func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (*uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime)), excessBlobGas)
+	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime, 0)), excessBlobGas)
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {
