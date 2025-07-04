@@ -613,6 +613,7 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash libcommon.Hash, block
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
+	r.Bloom = CreateBloom(Receipts{r})
 }
 
 // TODO: maybe make it more prettier (only for debug purposes)
