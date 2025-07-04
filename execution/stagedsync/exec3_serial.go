@@ -121,9 +121,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			if receipt != nil {
 				logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(txTask.Logs))
 			}
-			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, logIndexAfterTx, se.blobGasUsed, txTask.TxNum); err != nil {
-				return false, err
-			}
 		} else {
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
 				// get last receipt and store the last log index + 1
