@@ -79,9 +79,8 @@ type EngineBlockDownloader struct {
 	logger log.Logger
 
 	// V2 downloader
-	v2                bool
-	p2pGatewayV2      p2pGateway
-	headerCollectorV2 *etl.Collector
+	v2           bool
+	p2pGatewayV2 p2pGateway
 }
 
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,

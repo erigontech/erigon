@@ -25,6 +25,8 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/etl"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
@@ -235,19 +237,23 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 	// 3. Download the header chain backwards in an etl collector until we connect it to a known local header.
 	//    Note we do this for all peers to so that we can build an availability map that can be later on
 	//    used for downloading bodies (i.e., to know which peers may have our bodies).
+	sortableBuffer := etl.NewSortableBuffer(etl.BufferOptimalSize)
+	headerCollector := etl.NewCollector("EngineBlockDownloader", e.tmpdir, sortableBuffer, e.logger)
+	defer headerCollector.Close()
 	headerRlpBuf := make([]byte, 0, 512)
 	err := initialHeader.EncodeRLP(bytes.NewBuffer(headerRlpBuf))
 	if err != nil {
 		return err
 	}
-	err = e.headerCollectorV2.Collect(dbutils.HeaderKey(initialHeader.Number.Uint64(), initialHeader.Hash()), headerRlpBuf)
+	err = headerCollector.Collect(dbutils.HeaderKey(initialHeader.Number.Uint64(), initialHeader.Hash()), headerRlpBuf)
 	if err != nil {
 		return err
 	}
 
+	chainLen := 1
+	lastHeader := initialHeader
 	var connectionPoint *types.Header
 	var peersConnectionPoints []*types.Header
-	lastHeader := initialHeader
 	for connectionPoint == nil && lastHeader.Number.Uint64() > 0 {
 		peersConnectionPoints = make([]*types.Header, len(peers))
 		peersHeadersResponses = make([][]*types.Header, len(peers))
@@ -384,23 +390,43 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 			if err != nil {
 				return err
 			}
-			err = e.headerCollectorV2.Collect(dbutils.HeaderKey(headerNum, header.Hash()), w.Bytes())
+			err = headerCollector.Collect(dbutils.HeaderKey(headerNum, header.Hash()), w.Bytes())
 			if err != nil {
 				return err
 			}
+			chainLen++
 			lastHeader = header
 		}
 	}
 	if connectionPoint == nil {
 		return fmt.Errorf("connection point not found: hash=%s, height=%d", initialHeader.Hash(), initialHeader.Number.Uint64())
 	}
+	if req.Trigger == NewPayloadTrigger && chainLen > dbg.MaxReorgDepth {
+		return fmt.Errorf(
+			"new payload side chain too long - ignore until fcu confirms it: hash=%s, height=%d, len=%d",
+			initialHeader.Hash(),
+			initialHeader.Number.Uint64(),
+			chainLen,
+		)
+	}
+	if req.Trigger == SegmentRecoveryTrigger && chainLen > dbg.MaxReorgDepth {
+		return fmt.Errorf(
+			"segment recovery chain too long - ignoring download request: hash=%s, height=%d, len=%d",
+			initialHeader.Hash(),
+			initialHeader.Number.Uint64(),
+			chainLen,
+		)
+	}
 
 	// 4. Start downloading the bodies from 1 random peer at a time
-	//
-	// TODO
-	//
+	headerCollectorLoadFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		//
+		// TODO
+		//
+		return nil
+	}
 
-	return nil
+	return headerCollector.Load(nil, "", headerCollectorLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
 }
 
 // StartDownloading triggers the download process and returns true if the process started or false if it could not.
