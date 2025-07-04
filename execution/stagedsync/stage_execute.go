@@ -424,7 +424,17 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
+
+	// on chain-tip:
+	//  - can prune only between blocks (without blocking blocks processing)
+	//  - need also leave some time to prune blocks
+	//  - need keep "fsync" time of db fast
+	// Means - the best is:
+	//  - stop prune when `tx.SpaceDirty()` is big
+	//  - and set ~500ms timeout
+	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
 	quickPruneTimeout := 250 * time.Millisecond
+
 	if s.ForwardProgress > uint64(dbg.MaxReorgDepth) && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
@@ -459,14 +469,6 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
 
-	// on chain-tip:
-	//  - can prune only between blocks (without blocking blocks processing)
-	//  - need also leave some time to prune blocks
-	//  - need keep "fsync" time of db fast
-	// Means - the best is:
-	//  - stop prune when `tx.SpaceDirty()` is big
-	//  - and set ~500ms timeout
-	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
 	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
