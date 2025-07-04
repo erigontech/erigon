@@ -170,12 +170,12 @@ func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReade
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	earliestTxNum := r.StateHistoryStartFrom()
-	if txNum < earliestTxNum {
-		// data available only starting from earliestTxNum, throw error to avoid unintended
-		// consequences of using this StateReader
-		return r, state.PrunedError
-	}
+	//earliestTxNum := r.StateHistoryStartFrom()
+	//if txNum < earliestTxNum {
+	// data available only starting from earliestTxNum, throw error to avoid unintended
+	// consequences of using this StateReader
+	//	return r, state.PrunedError
+	//}
 	r.SetTxNum(txNum)
 	return r, nil
 }
