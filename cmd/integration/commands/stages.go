@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -59,12 +60,12 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/eth/integrity"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -85,6 +86,9 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+
+	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 var cmdStageSnapshots = &cobra.Command{
@@ -1382,7 +1386,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 
 	var consensusConfig interface{}
 	if cc.Clique != nil {
-		consensusConfig = params.CliqueSnapshot
+		consensusConfig = chainspec.CliqueSnapshot
 	} else if cc.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
@@ -1399,7 +1403,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 }
 
 func readGenesis(chain string) *types.Genesis {
-	genesis := core.GenesisBlockByChainName(chain)
+	genesis := chainspec.GenesisBlockByChainName(chain)
 	if genesis == nil {
 		panic("genesis is nil. probably you passed wrong --chain")
 	}
