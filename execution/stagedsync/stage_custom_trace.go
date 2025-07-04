@@ -328,7 +328,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			}
 
 			doms.SetTxNum(txTask.TxNum)
-			//fmt.Println("running custom trace for tx", txTask.TxNum, "in block", txTask.BlockNum)
 
 			if produce.ReceiptDomain {
 				var receipt *types.Receipt

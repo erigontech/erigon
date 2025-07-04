@@ -124,9 +124,6 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 	if err != nil {
 		return err
 	}
-	// if fromTxNum < 2 {
-	// 	fromTxNum = 2 //i don't remember why need this
-	// }
 
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)

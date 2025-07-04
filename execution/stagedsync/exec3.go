@@ -287,8 +287,6 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	fmt.Println("[exec] blockNum", blockNum, "maxBlockNum", maxBlockNum, "txNumInDB", txNumInDB, "inputTxNum", inputTxNum, "maxBlockNum", maxBlockNum, "applyTx", useExternalTx, "inMemExec", inMemExec)
-
 	if maxBlockNum < blockNum {
 		return nil
 	}

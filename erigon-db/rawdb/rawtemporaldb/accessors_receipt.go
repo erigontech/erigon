@@ -12,6 +12,19 @@ var (
 	LogIndexAfterTxKey              = []byte{0x2}
 )
 
+/**
+logIndexAfterTx- log index to be used by next transaction's first log.
+
+rationale:
+
+1. before this firstLogIdx was used -- but for scenario where execution begins from middle of a block,
+   it was difficult to find the logIdx to use for the first executing tx. (ReceiptDomain doesn't have logs,
+   so can't find prevTx.FirstLogIdx + len(logs)).
+
+2. lastLogIndex (of current tx) was considered -- but it's tricky to handle the case where tx has no logs.
+   i.e. should the next tx's first log be lastLogIdx+1 or lastLogIdx?
+**/
+
 func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasused uint64, logIndexAfterTx uint32, err error) {
 	var v []byte
 	var ok bool
