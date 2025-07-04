@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 var PoolChainConfigKey = []byte("chain_config")
@@ -101,6 +102,18 @@ func PutChainConfig(tx kv.Putter, cc *chain.Config, buf []byte) error {
 	return nil
 }
 
+func initBor(cc *chain.Config) *chain.Config {
+	if cc.Bor == nil && cc.BorJSON != nil {
+		borConfig := &borcfg.BorConfig{}
+		err := json.Unmarshal(cc.BorJSON, borConfig)
+		if err != nil {
+			panic(fmt.Sprintf("Could not parse 'bor' chainspec for %s: %v", filename, err))
+		}
+		cc.Bor = borConfig
+	}
+	return cc
+}
+
 func SaveChainConfigIfNeed(
 	ctx context.Context,
 	coreDB kv.RoDB,
@@ -121,11 +134,12 @@ func SaveChainConfigIfNeed(
 	}); err != nil {
 		return nil, 0, err
 	}
+
 	if cc != nil && !force {
 		if cc.ChainID.Uint64() == 0 {
 			return nil, 0, errors.New("wrong chain config")
 		}
-		return cc, blockNum, nil
+		return initBor(cc), blockNum, nil
 	}
 
 	for {
@@ -168,5 +182,5 @@ func SaveChainConfigIfNeed(
 	if cc.ChainID.Uint64() == 0 {
 		return nil, 0, errors.New("wrong chain config")
 	}
-	return cc, blockNum, nil
+	return initBor(cc), blockNum, nil
 }
