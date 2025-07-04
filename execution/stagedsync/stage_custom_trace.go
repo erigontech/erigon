@@ -333,12 +333,14 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			if produce.ReceiptDomain {
 				var receipt *types.Receipt
 				var logIndexAfterTx uint32
+				var cumGasUsed uint64
 				if !txTask.Final {
 					if txTask.TxIndex >= 0 {
 						receipt = txTask.BlockReceipts[txTask.TxIndex]
 					}
 					if receipt != nil {
 						logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(txTask.Logs))
+						cumGasUsed = receipt.CumulativeGasUsed
 					}
 				}
 
@@ -356,11 +358,12 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 								FirstLogIndexWithinBlock: uint32(firstIndex),
 							}
 							logIndexAfterTx = uint32(firstIndex) + uint32(len(txTask.Logs))
+							cumGasUsed = lastReceipt.CumulativeGasUsed
 						}
 					}
 				}
 
-				if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, logIndexAfterTx, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
+				if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
 				if txTask.Final { // block changed

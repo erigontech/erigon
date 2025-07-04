@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
 )
 
 var (
@@ -43,12 +42,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	return
 }
 
-func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, logIndexAfterTx uint32, cumBlobGasUsed uint64, txNum uint64) error {
-	var cumGasUsedInBlock uint64
-	if receipt != nil {
-		cumGasUsedInBlock = receipt.CumulativeGasUsed
-	}
-
+func AppendReceipt(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
 	{
 		var buf [binary.MaxVarintLen64]byte
 		i := binary.PutUvarint(buf[:], cumGasUsedInBlock)
