@@ -36,7 +36,7 @@ type PeerDas interface {
 }
 
 var (
-	numOfBlobRecoveryWorkers = 4
+	numOfBlobRecoveryWorkers = 16
 )
 
 type peerdas struct {
@@ -258,6 +258,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				d.recoveringMutex.Unlock()
 				continue
 			}
+			d.isRecovering[toRecover.blockRoot] = true
 			d.recoveringMutex.Unlock()
 
 			// check if the blobs are already recovered
@@ -285,7 +286,6 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 		d.recoveringMutex.Unlock()
 		return nil
 	}
-	d.isRecovering[blockRoot] = true
 	d.recoveringMutex.Unlock()
 
 	// schedule
