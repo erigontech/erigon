@@ -19,13 +19,17 @@ package jsonrpc
 import (
 	"context"
 	"math/big"
+	"reflect"
+	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -247,6 +251,59 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	}
 	return (*hexutil.Big)(misc.CalcBaseFee(config, header)), nil
 }
+
+type EthHardForkConfig struct {
+	ActivationTime hexutil.Uint
+	BlobsSchedule  map[string]params.BlobConfig
+	ChainId        hexutil.Uint
+	Precompiles    map[common.Address]string
+	SystemContracts map[string]common.Address
+}
+
+func (api *APIImpl) Config(ctx context.Context) (*EthHardForkConfig, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	// ret :=
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	config, err := api.BaseAPI.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	tt := time.Now().UnixMilli()/1000
+
+	
+
+	ret := &EthHardForkConfig{}
+	switch {
+	case config.IsPrague(uint64(tt)):
+		ret.ActivationTime = hexutil.Uint(config.PragueTime.Uint64())
+		ret.BlobsSchedule = make(map[string]params.BlobConfig)
+		for k, v := range config.BlobSchedule {
+			ret.BlobsSchedule[k] = *v
+		}
+		ret.ChainId = hexutil.Uint(config.ChainID.Uint64())
+		// for sc := range 
+		ret.SystemContracts = make(map[string]common.Address)
+		ret.SystemContracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
+		ret.SystemContracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
+		ret.SystemContracts["DEPOSIT_CONTRACT_ADDRESS"] = config.DepositContract
+		ret.SystemContracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
+		ret.SystemContracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
+
+		ret.Precompiles = make(map[common.Address]string)
+		for k, v := range vm.PrecompiledContractsPrague {
+			ret.Precompiles[k] = reflect.TypeOf(v).Elem().Name()
+		}
+	default:
+	}
+	return ret, nil
+}
+
+
+
 
 type GasPriceOracleBackend struct {
 	tx      kv.TemporalTx
