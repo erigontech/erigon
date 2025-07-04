@@ -17,6 +17,7 @@
 package engine_block_downloader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -25,10 +26,13 @@ import (
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/polygon/p2p"
 )
 
@@ -43,7 +47,8 @@ func (e *EngineBlockDownloader) download(
 	trigger Trigger,
 ) {
 	if e.v2 {
-		e.downloadV2(ctx, hashToDownload, trigger)
+		req := BackwardDownloadRequest{MissingHash: hashToDownload, Trigger: trigger, ValidateChainTip: chainTip}
+		e.downloadV2(ctx, req)
 		return
 	}
 	/* Start download process*/
@@ -164,7 +169,17 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 
 func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req BackwardDownloadRequest) error {
 	// 1. Get all peers
-	peers := e.p2pGateway.ListPeers()
+	peers := e.p2pGatewayV2.ListPeers()
+	if len(peers) == 0 {
+		return fmt.Errorf("no peers")
+	}
+
+	peerIdToIndex := make(map[p2p.PeerId]int, len(peers))
+	peerIndexToId := make(map[int]p2p.PeerId, len(peers))
+	for i, peer := range peers {
+		peerIdToIndex[*peer] = i
+		peerIndexToId[i] = *peer
+	}
 
 	// 2. Check which peers have the header and terminate if none have seen it
 	type headerKey struct {
@@ -176,33 +191,221 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 		to   headerKey
 	}
 
-	hash := req.MissingHash
-	peerAvailability := make(map[p2p.PeerId]*headerAvailability, len(peers))
-	var eg errgroup.Group
+	peerAvailability := make([]*headerAvailability, len(peers))
+	exhaustedPeers := make([]bool, len(peers))
+	eg := errgroup.Group{}
 	for _, peer := range peers {
 		eg.Go(func() error {
-			resp, err := e.p2pGateway.FetchHeadersBackwards(ctx, hash, 1, peer)
+			peerIndex := peerIdToIndex[*peer]
+			resp, err := e.p2pGatewayV2.FetchHeadersBackwards(ctx, req.MissingHash, 1, peer)
 			if err != nil {
-				e.logger.Trace("[EngineBlockDownloader] peer does not have header", "peer", peer, "hash", hash, "err", err)
+				e.logger.Debug(
+					"[EngineBlockDownloader] peer does not have initial header",
+					"peer", peer,
+					"hash", req.MissingHash,
+					"err", err,
+				)
+				exhaustedPeers[peerIndex] = true
 				return nil
 			}
 
-			key := headerKey{hash: hash, height: resp.Data[0].Number.Uint64()}
-			peerAvailability[*peer] = &headerAvailability{from: key, to: key}
+			key := headerKey{hash: req.MissingHash, height: resp.Data[0].Number.Uint64()}
+			peerAvailability[peerIndex] = &headerAvailability{from: key, to: key}
 			return nil
 		})
 	}
 	if err := eg.Wait(); err != nil {
 		panic(err) // err not expected since we don't return any errors in the above goroutines
 	}
-	if len(peerAvailability) == 0 {
-		return fmt.Errorf("no peers have block hash for backward download: %s", hash)
+	// find the first non-nil availability - non-nil ones should be all the same since we fetch only 1 header
+	var initialAvailability *headerAvailability
+	for peerIndex, availability := range peerAvailability {
+		peerId := peerIndexToId[peerIndex]
+		if availability == nil {
+			if !exhaustedPeers[peerIndex] {
+				return fmt.Errorf(
+					"missing initial availability but non-exhausted peer: peerId=%s, peerIndex=%d",
+					peerId,
+					peerIndex,
+				)
+			}
+			continue
+		}
+
+		if initialAvailability == nil {
+			initialAvailability = availability
+			continue
+		}
+
+		if initialAvailability.from != availability.from || initialAvailability.to != availability.to {
+			return fmt.Errorf(
+				"initial peer availability mismatch: %v != %v, peerId=%s, peerIndex=%d",
+				initialAvailability,
+				availability,
+				peerId,
+				peerIndex,
+			)
+		}
+	}
+	if initialAvailability == nil {
+		return fmt.Errorf("no peers have block hash for backward download: %s", req.MissingHash)
 	}
 
 	// 3. Download the header chain backwards in an etl collector until we connect it to a known local header.
 	//    Note we do this for all peers to so that we can build an availability map that can be later on
 	//    used for downloading bodies (i.e., to know which peers may have our bodies).
+	tmpDb, err := mdbx.NewUnboundedTemporaryMdbx(ctx, e.tmpdir)
+	if err != nil {
+		return err
+	}
 
+	defer tmpDb.Close()
+	tmpTx, err := tmpDb.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer tmpTx.Rollback()
+	peersConnectionPoints := make([]*types.Header, len(peers))
+	peersHeaderResponses := make([][]*types.Header, len(peers))
+	currentHeader := initialAvailability.to
+	var connectionPoint *types.Header
+	for connectionPoint == nil {
+		currentHash := currentHeader.hash
+		currentHeight := currentHeader.height
+		amount := min(currentHeight, eth.MaxHeadersServe)
+		allExhausted := true
+		eg = errgroup.Group{}
+		for _, peerId := range peers {
+			peerIndex := peerIdToIndex[*peerId]
+			exhausted := exhaustedPeers[peerIndex]
+			if exhausted {
+				continue
+			}
+
+			allExhausted = false
+			availability := peerAvailability[peerIndex]
+			eg.Go(func() error {
+				resp, err := e.p2pGatewayV2.FetchHeadersBackwards(ctx, currentHash, amount, peerId)
+				if err != nil {
+					e.logger.Debug(
+						"[EngineBlockDownloader] could not fetch headers batch",
+						"hash", currentHash,
+						"height", currentHeight,
+						"amount", amount,
+						"peerId", peerId,
+						"err", err,
+					)
+					exhaustedPeers[peerIndex] = true
+					return nil
+				}
+
+				headers := resp.Data
+				var peerConnectionPoint *types.Header
+				err = e.db.View(ctx, func(tx kv.Tx) error {
+					for i := len(headers) - 1; i >= 0; i-- {
+						newHeader := headers[i]
+						h, err := e.blockReader.Header(ctx, tx, newHeader.Hash(), newHeader.Number.Uint64())
+						if err != nil {
+							return err
+						}
+						if h != nil {
+							peerConnectionPoint = h
+							break
+						}
+					}
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+				if peerConnectionPoint != nil {
+					availability.to = headerKey{
+						hash:   peerConnectionPoint.Hash(),
+						height: peerConnectionPoint.Number.Uint64(),
+					}
+				} else {
+					availability.to = headerKey{
+						hash:   headers[0].Hash(),
+						height: headers[0].Number.Uint64(),
+					}
+				}
+
+				peersConnectionPoints[peerIndex] = peerConnectionPoint
+				peersHeaderResponses[peerIndex] = headers
+				return nil
+			})
+		}
+		if err := eg.Wait(); err != nil {
+			return err
+		}
+		if allExhausted {
+			return fmt.Errorf(
+				"all peers exhausted before reaching connection point: hash=%s, height=%d",
+				currentHash,
+				currentHeight,
+			)
+		}
+
+		// find the first connection point if any from the peers
+		var connectionPointHeight uint64
+		for _, peerConnectionPoint := range peersConnectionPoints {
+			if peerConnectionPoint != nil {
+				connectionPoint = peerConnectionPoint
+				connectionPointHeight = peerConnectionPoint.Number.Uint64()
+				break
+			}
+		}
+
+		// find the first complete headers batch if any from the peers
+		var headersBatch []*types.Header
+		for _, headers := range peersHeaderResponses {
+			if uint64(len(headers)) == amount {
+				headersBatch = headers
+				break
+			}
+		}
+		if headersBatch == nil {
+			return fmt.Errorf("no peers have complete headers batch: hash=%s, height=%d, amount=%d",
+				currentHash,
+				currentHeight,
+				amount,
+			)
+		}
+
+		var connectionPointContainedInBatch bool
+		buf := make([]byte, 512)
+		for _, header := range headersBatch {
+			headerNum := header.Number.Uint64()
+			if headerNum < connectionPointHeight {
+				continue
+			}
+			if headerNum == connectionPointHeight {
+				connectionPointContainedInBatch = true
+				continue
+			}
+			w := bytes.NewBuffer(buf[:0])
+			err = header.EncodeRLP(w)
+			if err != nil {
+				return err
+			}
+			err = e.headerCollectorV2.Collect(dbutils.HeaderKey(headerNum, header.Hash()), w.Bytes())
+			if err != nil {
+				return err
+			}
+		}
+		if !connectionPointContainedInBatch {
+			return fmt.Errorf(
+				"connection point not contained in headers batch: hash=%s, height=%d, amount=%d, connectionHeight=%d",
+				currentHash,
+				currentHeight,
+				amount,
+				connectionPointHeight,
+			)
+		}
+	}
+
+	// 4. Start downloading the bodies from 1 random peer at a time
 	//
 	// TODO
 	//
