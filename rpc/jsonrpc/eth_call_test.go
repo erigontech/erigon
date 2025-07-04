@@ -73,10 +73,13 @@ func TestEthCallNonCanonical(t *testing.T) {
 	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
+	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true), nil); err != nil {
+	}, blockNumberOrHashRef, nil); err != nil {
 		if fmt.Sprintf("%v", err) != "hash 3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b is not currently canonical" {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -94,11 +97,14 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
 
+	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber)
+	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
 		To:   &contractAddress,
 		Data: &callDataBytes,
-	}, rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber), nil); err != nil {
+	}, blockNumberOrHashRef, nil); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
