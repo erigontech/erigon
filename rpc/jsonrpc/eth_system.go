@@ -400,7 +400,7 @@ func fillCancunForkConfig(ret *EthHardForkConfig, config *chain.Config) {
 func checkSumConfig(ehfc *EthHardForkConfig) string {
 	ms, err := json.Marshal(ehfc)
 	if err != nil {
-		log.Error("checkSumConfig: Error occurred while json Marshalling config", err)
+		log.Error("checkSumConfig: Error occurred while json Marshalling config", "err", err)
 		return ""
 	}
 	cs := crc32.ChecksumIEEE(ms)
