@@ -559,6 +559,10 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				toRemove[res.Path] = res
 			}
 		}
+	} else {
+		for _, res := range files {
+			toRemove[res.Path] = res
+		}
 	}
 
 	var removed uint64
