@@ -107,7 +107,7 @@ func initBor(cc *chain.Config) *chain.Config {
 		borConfig := &borcfg.BorConfig{}
 		err := json.Unmarshal(cc.BorJSON, borConfig)
 		if err != nil {
-			panic(fmt.Sprintf("Could not parse 'bor' chainspec for %s: %v", filename, err))
+			panic(fmt.Sprintf("Could not parse 'bor' chainspec: %w", err))
 		}
 		cc.Bor = borConfig
 	}
