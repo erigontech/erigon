@@ -170,12 +170,19 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 }
 
 func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+	defer eventSegment.Src().MadvNormal().DisableReadAhead()
+
 	g := eventSegment.Src().MakeGetter()
 
 	word := make([]byte, 0, 4096)
 
 	var prevBlock, prevBlockStartId uint64
 	var prevEventTime *time.Time
+
+	var logChan <-chan time.Time
+	if logEvery != nil {
+		logChan = logEvery.C
+	}
 
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
@@ -237,12 +244,6 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 
 		prevEventId = eventId
 		prevBlock = block
-
-		var logChan <-chan time.Time
-
-		if logEvery != nil {
-			logChan = logEvery.C
-		}
 
 		select {
 		case <-ctx.Done():
