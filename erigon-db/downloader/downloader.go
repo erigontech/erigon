@@ -102,7 +102,7 @@ type Downloader struct {
 	requiredTorrents map[*torrent.Torrent]struct{}
 	// The "name" or file path of a torrent is used throughout as a unique identifier for the
 	// torrent. Make it explicit rather than fold it into DisplayName or guess at the name at
-	// various points. This might change if multifile torrents are used.
+	// various points. This might change if multi-file torrents are used.
 	torrentsByName map[string]*torrent.Torrent
 	stats          AggStats
 }

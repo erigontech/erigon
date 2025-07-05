@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -34,8 +33,6 @@ import (
 
 	analog "github.com/anacrolix/log"
 
-	"github.com/anacrolix/dht/v2"
-	"github.com/c2h5oh/datasize"
 	"golang.org/x/time/rate"
 
 	"github.com/anacrolix/torrent"
@@ -57,20 +54,22 @@ const DefaultPieceSize = 2 * 1024 * 1024
 const DefaultNetworkChunkSize = 256 << 10
 
 type Cfg struct {
-	ClientConfig *torrent.ClientConfig
-
+	Dirs datadir.Dirs
+	// Options when adding webseeds to torrents added to the Downloader.
+	AddWebseedOpts []torrent.AddWebSeedsOpt
 	// These are WebSeed URLs conforming to the requirements in anacrolix/torrent.
-	WebSeedUrls    []string
-	SnapshotConfig *snapcfg.Cfg
-	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: Remove this.
-	// Check with @mh0lt for best way to do this. I couldn't find the GitHub issue for cleaning up
-	// the Downloader API and responsibilities.
-	AddTorrentsFromDisk bool
+	WebSeedUrls []string
 
 	// TODO: Can we get rid of this?
 	ChainName string
 
-	Dirs datadir.Dirs
+	ClientConfig   *torrent.ClientConfig
+	SnapshotConfig *snapcfg.Cfg
+
+	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: Remove this.
+	// Check with @mh0lt for best way to do this. I couldn't find the GitHub issue for cleaning up
+	// the Downloader API and responsibilities.
+	AddTorrentsFromDisk bool
 
 	MdbxWriteMap bool
 	// Don't trust any existing piece completion. Revalidate all pieces when added.
@@ -112,8 +111,11 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 // annoys you.
 type NewCfgOpts struct {
 	// If set, clobber the default torrent config value.
-	DisableTrackers g.Option[bool]
-	Verify          bool
+	DisableTrackers          g.Option[bool]
+	Verify                   bool
+	UploadRateLimit          g.Option[rate.Limit]
+	DownloadRateLimit        g.Option[rate.Limit]
+	WebseedDownloadRateLimit g.Option[rate.Limit]
 }
 
 func New(
@@ -121,9 +123,8 @@ func New(
 	dirs datadir.Dirs,
 	version string,
 	verbosity log.Lvl,
-	downloadRate, uploadRate datasize.ByteSize,
 	port, connsPerFile int,
-	staticPeers, webseeds []string,
+	webseeds []string,
 	chainName string,
 	mdbxWriteMap bool,
 	opts NewCfgOpts,
@@ -146,8 +147,12 @@ func New(
 	// check if ipv6 is enabled
 	torrentConfig.DisableIPv6 = !getIpv6Enabled()
 
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 0)
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), 0)
+	if opts.UploadRateLimit.Ok {
+		torrentConfig.UploadRateLimiter = rate.NewLimiter(opts.UploadRateLimit.Value, 0)
+	}
+	if opts.DownloadRateLimit.Ok {
+		torrentConfig.DownloadRateLimiter = rate.NewLimiter(opts.DownloadRateLimit.Value, 0)
+	}
 
 	var analogLevel analog.Level
 	analogLevel, torrentConfig.Debug, err = erigonToAnalogLevel(verbosity)
@@ -212,61 +217,13 @@ func New(
 		// This should be the one applied to more modern logging in anacrolix/torrent.
 		"slog", slogLevel)
 
-	// TODO: This doesn't look right. Enabling DHT only for static peers will introduce very
-	// different runtime behaviour. Is it assumed those peers are torrent client endpoints and we
-	// want to force connecting to them? PEX might be more suited here. DHT should eventually be
-	// enabled regardless, but then this code would make more sense.
-	if len(staticPeers) > 0 && false {
-		torrentConfig.NoDHT = false
-		//defaultNodes := torrentConfig.DhtStartingNodes
-		torrentConfig.DhtStartingNodes = func(network string) dht.StartingNodesGetter {
-			return func() ([]dht.Addr, error) {
-				addrs, err := dht.GlobalBootstrapAddrs(network)
-				if err != nil {
-					return nil, err
-				}
-
-				for _, seed := range staticPeers {
-					if network == "udp" {
-						var addr *net.UDPAddr
-						addr, err := net.ResolveUDPAddr(network, seed)
-						if err != nil {
-							log.Warn("[downloader] Cannot UDP resolve address", "network", network, "addr", seed)
-							continue
-						}
-						addrs = append(addrs, dht.NewAddr(addr))
-					}
-					if network == "tcp" {
-						var addr *net.TCPAddr
-						addr, err := net.ResolveTCPAddr(network, seed)
-						if err != nil {
-							log.Warn("[downloader] Cannot TCP resolve address", "network", network, "addr", seed)
-							continue
-						}
-						addrs = append(addrs, dht.NewAddr(addr))
-					}
-				}
-				return addrs, nil
-			}
-		}
-		//staticPeers
-	}
-
 	webseedUrlsOrFiles := webseeds
 	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
-	webseedFileProviders := make([]string, 0, len(webseedUrlsOrFiles))
 	for _, webseed := range webseedUrlsOrFiles {
 		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
 			uri, err := url.ParseRequestURI(webseed)
 			if err != nil {
-				exists, err := dir.FileExist(webseed)
-				if err != nil {
-					log.Warn("[webseed] FileExist error", "err", err)
-					continue
-				}
-				if strings.HasSuffix(webseed, ".toml") && exists {
-					webseedFileProviders = append(webseedFileProviders, webseed)
-				}
+				log.Warn("[webseed]", "can't parse url", "err", err, "url", webseed)
 				continue
 			}
 			webseedHttpProviders = append(webseedHttpProviders, uri)
@@ -288,22 +245,9 @@ func New(
 			continue
 		}
 	}
-	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
-	exists, err := dir.FileExist(localCfgFile)
-	if err != nil {
-		log.Error("[webseed] FileExist error", "err", err)
-		return nil, err
-	}
-	if exists {
-		webseedFileProviders = append(webseedFileProviders, localCfgFile)
-	}
-
-	// TODO: What do webseed file providers do? Linter warned it was unused, and it appears to be
-	// pointless.
 
 	log.Info("processed webseed configuration",
 		"webseedHttpProviders", webseedHttpProviders,
-		"webseedFileProviders", webseedFileProviders,
 		"webseedUrlsOrFiles", webseedUrlsOrFiles)
 
 	// TODO: constructor must not do http requests
@@ -326,6 +270,14 @@ func New(
 		// name.
 		cfg.WebSeedUrls = append(cfg.WebSeedUrls, s.String()+"/")
 	}
+
+	if opts.WebseedDownloadRateLimit.Ok {
+		cfg.AddWebseedOpts = append(
+			cfg.AddWebseedOpts,
+			torrent.WebSeedResponseBodyRateLimiter(rate.NewLimiter(opts.WebseedDownloadRateLimit.Value, 0)),
+		)
+	}
+
 	return &cfg, nil
 }
 
