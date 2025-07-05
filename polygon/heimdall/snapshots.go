@@ -179,11 +179,6 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 	var prevBlock, prevBlockStartId uint64
 	var prevEventTime *time.Time
 
-	var logChan <-chan time.Time
-	if logEvery != nil {
-		logChan = logEvery.C
-	}
-
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 
@@ -248,7 +243,7 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 		select {
 		case <-ctx.Done():
 			return prevEventId, ctx.Err()
-		case <-logChan:
+		case <-logEvery.C:
 			log.Info("[integrity] NoGapsInBorEvents", "blockNum", fmt.Sprintf("%dK/%dK", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum])/1000, maxBlockNum/1000))
 		default:
 		}
