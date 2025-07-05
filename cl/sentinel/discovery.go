@@ -126,7 +126,7 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 		s.pidToEnr.Store(peerInfo.ID, node.String())
-
+		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
 		// Skip Peer if IP was private.
 		if node.IP().IsPrivate() {
 			continue

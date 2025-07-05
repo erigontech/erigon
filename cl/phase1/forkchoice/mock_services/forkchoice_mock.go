@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/das/mock_services"
+	peerdasstatemock "github.com/erigontech/erigon/cl/das/state/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -33,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
-	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
@@ -67,22 +68,9 @@ type ForkChoiceStorageMock struct {
 	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
-}
 
-type MockPeerDas struct{}
-
-func (m *MockPeerDas) InitLocalNodeId(nodeId enode.ID) {}
-func (m *MockPeerDas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
-	return nil
-}
-func (m *MockPeerDas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
-	return true, nil
-}
-func (m *MockPeerDas) CustodyGroupCount() uint64 {
-	return 0
-}
-func (m *MockPeerDas) DataRecoverAndPrune(ctx context.Context) error {
-	return nil
+	// Mock for PeerDas
+	MockPeerDas *mock_services.MockPeerDas
 }
 
 func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {
@@ -137,6 +125,49 @@ func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContr
 }
 
 func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
+	ctrl := gomock.NewController(t)
+	mockPeerDas := mock_services.NewMockPeerDas(ctrl)
+	mockPeerDasStateReader := peerdasstatemock.NewMockPeerDasStateReader(ctrl)
+
+	// Set up default expectations for the mock
+	mockPeerDas.EXPECT().
+		DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).
+		Return(nil).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		IsDataAvailable(gomock.Any(), gomock.Any()).
+		Return(true, nil).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		Prune(gomock.Any()).
+		Return(nil).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		UpdateValidatorsCustody(gomock.Any()).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		TryScheduleRecover(gomock.Any(), gomock.Any()).
+		Return(nil).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		StateReader().
+		Return(mockPeerDasStateReader).
+		AnyTimes()
+
+	// Set up default expectations for the PeerDasStateReader mock
+	mockPeerDasStateReader.EXPECT().
+		GetEarliestAvailableSlot().
+		Return(uint64(0)).
+		AnyTimes()
+	mockPeerDasStateReader.EXPECT().
+		GetRealCgc().
+		Return(uint64(0)).
+		AnyTimes()
+	mockPeerDasStateReader.EXPECT().
+		GetAdvertisedCgc().
+		Return(uint64(0)).
+		AnyTimes()
+
 	return &ForkChoiceStorageMock{
 		Ancestors:                 make(map[uint64]common.Hash),
 		AnchorSlotVal:             0,
@@ -158,11 +189,12 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
 		GetBeaconCommitteeMock:    nil,
 		SyncContributionPool:      makeSyncContributionPoolMock(t),
+		MockPeerDas:               mockPeerDas,
 	}
 }
 
 func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
-	return &MockPeerDas{}
+	return f.MockPeerDas
 }
 
 func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) common.Hash {

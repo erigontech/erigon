@@ -16,6 +16,7 @@ import (
 const (
 	KzgCommitmentsInclusionProofDepth = 4
 	BytesPerCell                      = 2048
+	BytesPerBlob                      = BytesPerCell * 64
 )
 
 var (
@@ -134,6 +135,12 @@ func (c *Cell) UnmarshalJSON(in []byte) error {
 	return hexutil.UnmarshalFixedJSON(cellType, in, c[:])
 }
 
+// CellsAndKZGProofs is a struct that contains a list of cells and a list of KZG proofs
+type CellsAndKZGProofs struct {
+	Blobs  []Cell
+	Proofs []KZGProof
+}
+
 type MatrixEntry struct {
 	Cell        Cell        `json:"cell"`
 	KzgProof    KZGProof    `json:"kzg_proof"`
@@ -216,6 +223,12 @@ func (c *ColumnSidecarsByRangeRequest) Static() bool {
 type DataColumnsByRootIdentifier struct {
 	BlockRoot common.Hash
 	Columns   solid.Uint64ListSSZ
+}
+
+func NewDataColumnsByRootIdentifier() *DataColumnsByRootIdentifier {
+	d := &DataColumnsByRootIdentifier{}
+	d.tryInit()
+	return d
 }
 
 func (d *DataColumnsByRootIdentifier) tryInit() {

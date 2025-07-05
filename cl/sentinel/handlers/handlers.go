@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
@@ -73,6 +74,7 @@ type ConsensusHandlers struct {
 	netCfg             *clparams.NetworkConfig
 	blobsStorage       blob_storage.BlobStorage
 	dataColumnStorage  blob_storage.DataColumnStorage
+	peerdasStateReader peerdasstate.PeerDasStateReader
 	enableBlocks       bool
 }
 
@@ -96,6 +98,7 @@ func NewConsensusHandlers(
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	blobsStorage blob_storage.BlobStorage,
 	dataColumnStorage blob_storage.DataColumnStorage,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 	enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
@@ -112,12 +115,14 @@ func NewConsensusHandlers(
 		netCfg:             netCfg,
 		blobsStorage:       blobsStorage,
 		dataColumnStorage:  dataColumnStorage,
+		peerdasStateReader: peerDasStateReader,
 	}
 
 	hm := map[string]func(s network.Stream) error{
 		communication.PingProtocolV1:                        c.pingHandler,
 		communication.GoodbyeProtocolV1:                     c.goodbyeHandler,
 		communication.StatusProtocolV1:                      c.statusHandler,
+		communication.StatusProtocolV2:                      c.statusHandler,
 		communication.MetadataProtocolV1:                    c.metadataV1Handler,
 		communication.MetadataProtocolV2:                    c.metadataV2Handler,
 		communication.MetadataProtocolV3:                    c.metadataV3Handler,

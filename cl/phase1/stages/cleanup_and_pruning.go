@@ -25,5 +25,7 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return cfg.blobStore.Prune()
+	cfg.blobStore.Prune()
+	cfg.peerDas.Prune(pruneDistance)
+	return nil
 }

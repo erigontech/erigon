@@ -177,3 +177,20 @@ func QueueExcessActiveBalance(s abstract.BeaconState, vindex uint64, validator *
 	}
 	return nil
 }
+
+func GetValidatorsCustodyRequirement(s abstract.BeaconState, validatorIndices []uint64) uint64 {
+	totalNodeBalance := uint64(0)
+	for _, index := range validatorIndices {
+		effectiveBalance, err := s.ValidatorEffectiveBalance(int(index))
+		if err != nil {
+			continue
+		}
+		totalNodeBalance += effectiveBalance
+	}
+
+	count := totalNodeBalance / s.BeaconConfig().BalancePerAdditionalCustodyGroup
+	return min(
+		max(count, s.BeaconConfig().ValidatorCustodyRequirement),
+		s.BeaconConfig().NumberOfCustodyGroups,
+	)
+}
