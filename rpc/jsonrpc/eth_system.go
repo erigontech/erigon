@@ -19,10 +19,10 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"hash/crc32"
 	"math/big"
 	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -403,8 +403,8 @@ func checkSumConfig(ehfc *EthHardForkConfig) string {
 		log.Error("checkSumConfig: Error occurred while json Marshalling config", "err", err)
 		return ""
 	}
-	cs := crc32.ChecksumIEEE(ms)
-	return fmt.Sprintf("%x", cs)
+	cs := uint64(crc32.ChecksumIEEE(ms))
+	return strconv.FormatUint(cs, 16)
 }
 
 func makeSystemContractsConfigMap(contracts []common.Address, depositContract *common.Address) map[string]common.Address {
