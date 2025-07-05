@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stages/mock"
 )
 
@@ -78,7 +79,7 @@ func TestEthConfig(t *testing.T) {
 	// Currently only testing current fork (as returned by time.Now in the API)
 	t.Run("eth_config mainnet", func(t *testing.T) {
 		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		m := mock.MockWithGenesis(t, core.MainnetGenesisBlock(), key, false)
+		m := mock.MockWithGenesis(t, chainspec.MainnetGenesisBlock(), key, false)
 		defer m.DB.Close()
 		eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000, ethconfig.Defaults.RPCTxFeeCap, 10_000, false, 10_000, 128, log.New())
 
