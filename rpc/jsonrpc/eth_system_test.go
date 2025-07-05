@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -74,22 +75,20 @@ func TestGasPrice(t *testing.T) {
 }
 
 func TestEthConfig(t *testing.T) {
-		t.Run("Eth_Config", func(t *testing.T) {
-			m := mock.MockWithGenesis(t, core.MainnetGenesisBlock(), nil, false)
-			defer m.DB.Close()
-			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000, ethconfig.Defaults.RPCTxFeeCap, 10_000, false, 10_000, 128, log.New())
+	// Currently only testing current fork (as returned by time.Now in the API)
+	t.Run("eth_config mainnet", func(t *testing.T) {
+		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		m := mock.MockWithGenesis(t, core.MainnetGenesisBlock(), key, false)
+		defer m.DB.Close()
+		eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000, ethconfig.Defaults.RPCTxFeeCap, 10_000, false, 10_000, 128, log.New())
 
-			ctx := context.Background()
-			result, err := eth.Config(ctx)
-			if err != nil {
-				t.Fatalf("error getting gas price: %s", err)
-			}
-			println(result)
-		})
+		ctx := context.Background()
+		result, err := eth.Config(ctx)
+		require.NoError(t, err)
+		require.Equal(t, result.CurrentHash, "8ea4635f")
+	})
 
 }
-
-
 
 func createGasPriceTestKV(t *testing.T, chainSize int) *mock.MockSentry {
 	var (
