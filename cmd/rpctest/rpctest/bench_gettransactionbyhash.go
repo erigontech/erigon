@@ -80,20 +80,27 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 	defer logEvery.Stop()
 
 	teeToGetTxs := make(chan string, 1000)
-	defer close(teeToGetTxs)
 	g := errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
 	g.Go(func() error {
-		for txnHash := range teeToGetTxs {
-			var request string
-			request = reqGen.getTransactionByHash(txnHash)
-			errCtx := fmt.Sprintf(" hash=%s", txnHash)
-			if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, teeToVegeta,
-				/* insertOnlyIfSuccess */ false); err != nil {
-				return err
+		for {
+			select {
+			case txnHash, ok := <-teeToGetTxs:
+				if !ok {
+					return nil
+				}
+				var request string
+				request = reqGen.getTransactionByHash(txnHash)
+				log.Info("[dbg] BenchEthGetTransactionByHash request", "request", request)
+				errCtx := fmt.Sprintf(" hash=%s", txnHash)
+				if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, teeToVegeta,
+					/* insertOnlyIfSuccess */ false); err != nil {
+					return err
+				}
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
-		return nil
 	})
 
 	for bn := blockFrom; bn <= blockTo; bn++ {
@@ -130,8 +137,11 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 		}
 
 		nTransactions += len(b.Result.Transactions)
-
+		log.Info("b.Result", "b.Result", b.Result)
 		for _, txn := range b.Result.Transactions {
+			if txn.Hash == "" {
+				panic(1)
+			}
 			select {
 			case teeToGetTxs <- txn.Hash:
 			case <-ctx.Done():
