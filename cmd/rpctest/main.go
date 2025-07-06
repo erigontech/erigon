@@ -39,6 +39,9 @@ func main() {
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			logger = debug.SetupCobra(cmd, "rpctest")
 		},
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			debug.Exit()
+		},
 	}
 
 	var (
