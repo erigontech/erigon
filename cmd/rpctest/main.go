@@ -23,16 +23,23 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	logger := logging.SetupLogger("rpctest")
+	var logger log.Logger
+	var rootCmd = &cobra.Command{
+		Use: "test",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			logger = debug.SetupCobra(cmd, "rpctest")
+		},
+	}
 
 	var (
 		needCompare      bool
@@ -510,7 +517,6 @@ func main() {
 	compareAccountRange.Flags().StringVar(&tmpDataDir, "tmpdir", "/media/b00ris/nvme/accrange1", "dir for tmp db")
 	compareAccountRange.Flags().StringVar(&tmpDataDirOrig, "gethtmpdir", "/media/b00ris/nvme/accrangeorig1", "dir for tmp db")
 
-	var rootCmd = &cobra.Command{Use: "test"}
 	rootCmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")
 	rootCmd.Flags().StringVar(&gethURL, "gethUrl", "http://localhost:8546", "geth rpc url")
 	rootCmd.Flags().Uint64Var(&blockFrom, "blockFrom", 2000000, "Block number to start test generation from")
@@ -551,7 +557,9 @@ func main() {
 		benchOtsGetBlockTransactions,
 		replayCmd,
 	)
-	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
+	ctx := rootContext()
+	mem.LogMemStats(ctx, log.New())
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
