@@ -19,6 +19,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -34,6 +35,7 @@ import (
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
+	startTime := time.Now()
 	var logger log.Logger
 	var rootCmd = &cobra.Command{
 		Use: "test",
@@ -41,6 +43,7 @@ func main() {
 			logger = debug.SetupCobra(cmd, "rpctest")
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			log.Info(cmd.Name(), "took", time.Since(startTime))
 			debug.Exit()
 		},
 	}
@@ -149,7 +152,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetTransactionByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			err := rpctest.BenchEthGetTransactionByHash(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 			if err != nil {
 				logger.Error(err.Error())
 			}

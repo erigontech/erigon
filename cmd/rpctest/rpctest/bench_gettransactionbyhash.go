@@ -18,8 +18,12 @@ package rpctest
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
+	"time"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // BenchEthGetTransactionByHash compares response of Erigon with Geth
@@ -32,7 +36,7 @@ import (
 // recordFile stores all eth_GetTransactionByHash returned with success
 //
 //	errorFile stores information when erigon and geth doesn't return same data
-func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
 
 	var rec *bufio.Writer
@@ -69,8 +73,10 @@ func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, b
 
 	reqGen := &RequestGenerator{}
 
-	for bn := blockFrom; bn <= blockTo; bn++ {
+	logEvery, lastLoggedNTxs, lastLoggedTime := time.NewTicker(20*time.Second), 0, time.Now()
+	defer logEvery.Stop()
 
+	for bn := blockFrom; bn <= blockTo; bn++ {
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
@@ -102,9 +108,6 @@ func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, b
 		}
 
 		for _, txn := range b.Result.Transactions {
-
-			nTransactions = nTransactions + 1
-
 			var request string
 			request = reqGen.getTransactionByHash(txn.Hash)
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
@@ -114,8 +117,22 @@ func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, b
 				return err
 			}
 		}
+		nTransactions += len(b.Result.Transactions)
 
-		fmt.Println("\nProcessed Transactions: ", nTransactions)
+		select {
+		case <-logEvery.C:
+			txsProcessed := nTransactions - lastLoggedNTxs
+			tps := int(float64(txsProcessed) / time.Since(lastLoggedTime).Seconds())
+
+			lastLoggedNTxs = nTransactions
+			lastLoggedTime = time.Now()
+
+			log.Info("[BenchEthGetTransactionByHash]", "block_num", fmt.Sprintf("%.2fm", float64(bn)/1_000_000), "txs", fmt.Sprintf("%.2fm", float64(nTransactions)/1_000_000),
+				"txs/s", tps)
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 	return nil
 }
