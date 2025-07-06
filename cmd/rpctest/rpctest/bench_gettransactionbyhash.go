@@ -74,7 +74,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 
 	reqGen := &RequestGenerator{}
 
-	logEvery, lastLoggedNTxs, lastLoggedTime := time.NewTicker(20*time.Second), 0, time.Now()
+	logEvery, lastLoggedNTxs, lastLoggedTime := time.NewTicker(10*time.Second), 0, time.Now()
 	defer logEvery.Stop()
 
 	teeToGetTxs := make(chan string, 1000)
