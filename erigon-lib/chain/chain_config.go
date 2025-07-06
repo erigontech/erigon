@@ -19,6 +19,7 @@ package chain
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"sync"
 	"time"
@@ -94,6 +95,8 @@ type Config struct {
 	// (Optional) deposit contract of PoS chains
 	// See also EIP-6110: Supply validator deposits on chain
 	DepositContract common.Address `json:"depositContractAddress,omitempty"`
+
+	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -421,6 +424,13 @@ func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
 	return c.getBlobConfig(time).BaseFeeUpdateFraction
+}
+
+func (c *Config) GetMaxRlpBlockSize(time uint64) int {
+	if c.IsOsaka(time) {
+		return params.MaxRlpBlockSize
+	}
+	return math.MaxInt
 }
 
 func (c *Config) SecondsPerSlot() uint64 {

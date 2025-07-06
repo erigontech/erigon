@@ -41,8 +41,8 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stages/mock"
-	"github.com/erigontech/erigon/params"
 )
 
 // Tests block header storage and retrieval operations.
@@ -107,7 +107,7 @@ func TestBodyStorage(t *testing.T) {
 	}
 
 	// prepare db so it works with our test
-	signer1 := types.MakeSigner(params.MainnetChainConfig, 1, 0)
+	signer1 := types.MakeSigner(chainspec.MainnetChainConfig, 1, 0)
 	body := &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(types.NewTransaction(1, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
@@ -499,7 +499,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 		TransactionIndex: 0,
 	}
-	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
+	receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
 	receipt2 := &types.Receipt{
 		PostState:         common.Hash{2}.Bytes(),
@@ -515,7 +515,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		BlockHash:        header.Hash(),
 		TransactionIndex: 1,
 	}
-	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
+	receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
 	receipts := types.Receipts{receipt1, receipt2}
 
 	// Check that no receipt entries are in a pristine database
@@ -794,7 +794,7 @@ func TestBadBlocks(t *testing.T) {
 
 	putBlock := func(number uint64) common.Hash {
 		// prepare db so it works with our test
-		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		signer1 := types.MakeSigner(chainspec.MainnetChainConfig, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
 				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),

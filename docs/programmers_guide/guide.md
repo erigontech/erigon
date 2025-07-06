@@ -550,7 +550,7 @@ demand. It looks up the state at the point just before the transaction in questi
 re-executes transaction, and re-generates the receipt. This can only work if the history of the state is available for
 the period of time including the transaction.
 
-[See more about blocks and transactions processing here](../../eth/stagedsync/README.md)
+[See more about blocks and transactions processing here](/docs/readthedocs/source/stagedsync.rst)
 
 
 Dev Net with Geth nodes

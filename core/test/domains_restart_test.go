@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/accounts"
 	state2 "github.com/erigontech/erigon/core/state"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
@@ -414,7 +414,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		rh, err := domains.ComputeCommitment(ctx, false, blockNum, txNum, "")
 		require.NoError(t, err)
-		require.Equal(t, params.TestGenesisStateRoot, common.BytesToHash(rh))
+		require.Equal(t, chainspec.TestGenesisStateRoot, common.BytesToHash(rh))
 		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 		//common.BytesToHash(rh))
 

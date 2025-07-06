@@ -17,6 +17,7 @@
 package seg
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"hash/crc32"
@@ -80,7 +81,7 @@ func checksum(file string) uint32 {
 	return hasher.Sum32()
 }
 
-func prepareDict(t *testing.T) *Decompressor {
+func prepareDict(t *testing.T, multiplier int) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -93,17 +94,19 @@ func prepareDict(t *testing.T) *Decompressor {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	k := bytes.Repeat([]byte("long"), multiplier)
+	v := bytes.Repeat([]byte("word"), multiplier)
 	for i := 0; i < 100; i++ {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
-		if err = c.AddWord([]byte("long")); err != nil {
+		if err = c.AddWord(k); err != nil {
 			t.Fatal(err)
 		}
-		if err = c.AddWord([]byte("word")); err != nil {
+		if err = c.AddWord(v); err != nil {
 			t.Fatal(err)
 		}
-		if err = c.AddWord([]byte(fmt.Sprintf("%d longlongword %d", i, i))); err != nil {
+		if err = c.AddWord(bytes.Repeat([]byte(fmt.Sprintf("%d longlongword %d", i, i)), multiplier)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -118,7 +121,7 @@ func prepareDict(t *testing.T) *Decompressor {
 }
 
 func TestCompressDict1(t *testing.T) {
-	d := prepareDict(t)
+	d := prepareDict(t, 1)
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
@@ -184,7 +187,7 @@ func TestCompressDict1(t *testing.T) {
 }
 
 func TestCompressDictCmp(t *testing.T) {
-	d := prepareDict(t)
+	d := prepareDict(t, 1)
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0

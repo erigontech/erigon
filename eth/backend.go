@@ -98,6 +98,7 @@ import (
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/ethstats"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/clique"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -117,7 +118,6 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/finality/flags"
@@ -138,6 +138,8 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -493,8 +495,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return res
 		}
 
-		p2pConfig.LookupBootnodeURLs = params.BootnodeURLsByGenesisHash
-		p2pConfig.LookupDNSNetwork = params.KnownDNSNetwork
 		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)
@@ -628,6 +628,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				BorConfig:    borConfig,
 				EventFetcher: heimdallClient,
 			})
+
+			if err := heimdallStore.Milestones().Prepare(ctx); err != nil {
+				return nil, err
+			}
+
+			_, err := heimdallStore.Milestones().DeleteFromBlockNum(ctx, 0)
+			if err != nil {
+				return nil, err
+			}
 
 			heimdallService = heimdall.NewService(heimdall.ServiceConfig{
 				Store:     heimdallStore,
@@ -1630,7 +1639,7 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
-	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
+	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
@@ -1888,7 +1897,7 @@ func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Con
 
 func setDefaultMinerGasLimit(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
 	if config.Miner.GasLimit == nil {
-		gasLimit := ethconfig.DefaultMinerGasLimitByChain(config)
+		gasLimit := ethconfig.DefaultBlockGasLimitByChain(config)
 		config.Miner.GasLimit = &gasLimit
 	}
 }

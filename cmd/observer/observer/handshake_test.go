@@ -25,8 +25,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/params"
 )
 
 func TestHandshake(t *testing.T) {
@@ -34,7 +34,7 @@ func TestHandshake(t *testing.T) {
 
 	// grep 'self=enode' the log, and paste it here
 	// url := "enode://..."
-	url := params.MainnetBootnodes[0]
+	url := chainspec.MainnetBootnodes[0]
 	node := enode.MustParseV4(url)
 	myPrivateKey, _ := crypto.GenerateKey()
 

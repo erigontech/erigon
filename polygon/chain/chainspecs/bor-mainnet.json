@@ -12,7 +12,6 @@
   "muirGlacierBlock": 3395000,
   "berlinBlock": 14750000,
   "londonBlock": 23850000,
-  "bhilaiBlock": 73440256,
   "burntContract": {
     "23850000": "0x70bca57f4579f58670ab2d18ef16e02c17553c38",
     "50523000": "0x7A8ed27F4C30512326878652d20fC85727401854"
@@ -81,6 +80,8 @@
     "indoreBlock": 44934656,
     "agraBlock": 50523000,
     "napoliBlock": 54876000,
-    "ahmedabadBlock": 62278656
-  }
+    "ahmedabadBlock": 62278656,
+    "bhilaiBlock": 73440256
+  },
+   "defaultBlockGasLimit" : 45000000
 }

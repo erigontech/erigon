@@ -32,9 +32,9 @@ import (
 	"github.com/erigontech/erigon/cmd/observer/observer/node_utils"
 	"github.com/erigontech/erigon/cmd/observer/observer/sentry_candidates"
 	"github.com/erigontech/erigon/cmd/observer/utils"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
-	"github.com/erigontech/erigon/params"
 )
 
 type Crawler struct {
@@ -87,8 +87,8 @@ func NewCrawler(
 	saveQueue := utils.NewTaskQueue("Crawler.saveQueue", config.ConcurrencyLimit*2, saveQueueLogFuncProvider)
 
 	chain := config.Chain
-	chainConfig := params.ChainConfigByChainName(chain)
-	genesisHash := params.GenesisHashByChainName(chain)
+	chainConfig := chainspec.ChainConfigByChainName(chain)
+	genesisHash := chainspec.GenesisHashByChainName(chain)
 	if (chainConfig == nil) || (genesisHash == nil) {
 		return nil, fmt.Errorf("unknown chain %s", chain)
 	}

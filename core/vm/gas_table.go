@@ -312,7 +312,7 @@ func gasCreate2(_ *EVM, contract *Contract, stack *Stack, mem *Memory, memorySiz
 	return gas, nil
 }
 
-func gasCreateEip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasCreateEip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -321,7 +321,7 @@ func gasCreateEip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, mem
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > params.MaxInitCodeSize {
+	if size > uint64(params.MaxInitCodeSize) {
 		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
 	}
 	numWords := ToWordSize(size)
@@ -334,7 +334,7 @@ func gasCreateEip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, mem
 	return gas, nil
 }
 
-func gasCreate2Eip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasCreateEIP7907(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -343,11 +343,55 @@ func gasCreate2Eip3860(_ *EVM, contract *Contract, stack *Stack, mem *Memory, me
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > params.MaxInitCodeSize {
+	if size > uint64(params.MaxInitCodeSizeEip7907) {
+		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	}
+	numWords := ToWordSize(size)
+	// Since size <= params.MaxInitCodeSizeEip7907, this multiplication cannot overflow
+	wordGas := params.InitCodeWordGas * numWords
+	gas, overflow = math.SafeAdd(gas, wordGas)
+	if overflow {
+		return 0, ErrGasUintOverflow
+	}
+	return gas, nil
+}
+
+func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	gas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	size, overflow := stack.Back(2).Uint64WithOverflow()
+	if overflow {
+		return 0, ErrGasUintOverflow
+	}
+	if size > uint64(params.MaxInitCodeSize) {
 		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
 	}
 	numWords := ToWordSize(size)
 	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
+	gas, overflow = math.SafeAdd(gas, wordGas)
+	if overflow {
+		return 0, ErrGasUintOverflow
+	}
+	return gas, nil
+}
+
+func gasCreate2EIP7907(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	gas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	size, overflow := stack.Back(2).Uint64WithOverflow()
+	if overflow {
+		return 0, ErrGasUintOverflow
+	}
+	if size > uint64(params.MaxInitCodeSizeEip7907) {
+		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	}
+	numWords := ToWordSize(size)
+	// Since size <= params.MaxInitCodeSizeEip7907, this multiplication cannot overflow
 	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {

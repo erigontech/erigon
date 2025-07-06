@@ -48,8 +48,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -178,9 +178,9 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
 	ChainConfig    *chain.Config
-	config         *chain.CliqueConfig             // Consensus engine configuration parameters
-	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
-	DB             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
+	config         *chain.CliqueConfig                // Consensus engine configuration parameters
+	snapshotConfig *chainspec.ConsensusSnapshotConfig // Consensus engine configuration parameters
+	DB             kv.RwDB                            // Database to store and retrieve snapshot checkpoints
 
 	signatures *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
 	recents    *lru.ARCCache[common.Hash, *Snapshot]      // Snapshots for recent block to speed up reorgs
@@ -200,7 +200,7 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB, logger log.Logger) *Clique {
+func New(cfg *chain.Config, snapshotConfig *chainspec.ConsensusSnapshotConfig, cliqueDB kv.RwDB, logger log.Logger) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults
@@ -379,17 +379,17 @@ func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, un
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
-) (types.Transactions, types.Receipts, types.FlatRequests, error) {
-	return txs, r, nil, nil
+) (types.FlatRequests, error) {
+	return nil, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
+) (*types.Block, types.FlatRequests, error) {
 	// Assemble and return the final block for sealing
-	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), txs, receipts, nil, nil
+	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), nil, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
