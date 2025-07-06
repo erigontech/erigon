@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"golang.org/x/sync/errgroup"
 )
 
 // BenchEthGetTransactionByHash compares response of Erigon with Geth
@@ -41,7 +42,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 
 	var rec *bufio.Writer
 	var errs *bufio.Writer
-	var resultsCh chan CallResult = nil
+	var teeToVegeta chan CallResult = nil
 	var nTransactions = 0
 
 	if errorFileName != "" {
@@ -65,9 +66,9 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 	}
 
 	if !needCompare {
-		resultsCh = make(chan CallResult, 1000)
-		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getTransactionByHash"}, resultsCh)
+		teeToVegeta = make(chan CallResult, 1000)
+		defer close(teeToVegeta)
+		go vegetaWrite(true, []string{"eth_getTransactionByHash"}, teeToVegeta)
 	}
 	var res CallResult
 
@@ -75,6 +76,23 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 
 	logEvery, lastLoggedNTxs, lastLoggedTime := time.NewTicker(20*time.Second), 0, time.Now()
 	defer logEvery.Stop()
+
+	teeToGetTxs := make(chan string, 1000)
+	defer close(teeToGetTxs)
+	g := errgroup.Group{}
+	g.SetLimit(1)
+	g.Go(func() error {
+		for txnHash := range teeToGetTxs {
+			var request string
+			request = reqGen.getTransactionByHash(txnHash)
+			errCtx := fmt.Sprintf(" hash=%s", txnHash)
+			if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, teeToVegeta,
+				/* insertOnlyIfSuccess */ false); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		var b EthBlockByNumber
@@ -107,17 +125,15 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 			}
 		}
 
-		for _, txn := range b.Result.Transactions {
-			var request string
-			request = reqGen.getTransactionByHash(txn.Hash)
-			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
+		nTransactions += len(b.Result.Transactions)
 
-			if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh,
-				/* insertOnlyIfSuccess */ false); err != nil {
-				return err
+		for _, txn := range b.Result.Transactions {
+			select {
+			case teeToGetTxs <- txn.Hash:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
-		nTransactions += len(b.Result.Transactions)
 
 		select {
 		case <-logEvery.C:
@@ -135,6 +151,10 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 			return ctx.Err()
 		default:
 		}
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	return nil
 }
