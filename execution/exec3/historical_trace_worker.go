@@ -379,10 +379,24 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		}()
 		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, out, logger)
 	})
+	// deadlock - need move logging inside `map` goroutine
+	//g.Go(func() (err error) {
+	//	logEvery := time.NewTicker(20 * time.Second)
+	//	defer logEvery.Stop()
+	//	for outputTxNum.Load() <= toTxNum {
+	//		select {
+	//		case <-ctx.Done():
+	//			return ctx.Err()
+	//		case <-logEvery.C:
+	//			log.Debug("[map_reduce] ", "in.len", in.Len(), "in.cap", in.Capacity(), "out.len", out.Len(), "out.cap", out.Capacity(), "out.chanLen", out.ChanLen(), "out.chanCap", out.ChanCapacity())
+	//		}
+	//	}
+	//	return nil
+	//})
 	return g
 }
 
-func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue, logger log.Logger) error {
+func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, out *state.ResultsQueue, logger log.Logger) error {
 	tx, err := cfg.ChainDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -399,16 +413,16 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 	for outputTxNum.Load() <= toTxNum {
 		//select {
 		//case <-logEvery.C:
-		//	log.Info("[dbg] out", "chanLen", rws.ChanLen(), "chanCapacity", rws.ChanCapacity(), "heapLen", rws.Len(), "heapCapacity", rws.Capacity())
+		//	log.Info("[dbg] out", "chanLen", out.ChanLen(), "chanCapacity", out.ChanCapacity(), "heapLen", out.Len(), "heapCapacity", out.Capacity())
 		//default:
 		//}
 
-		err = rws.DrainNonBlocking(ctx)
+		err = out.DrainNonBlocking(ctx)
 		if err != nil {
 			return err
 		}
 
-		processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), tx, true, applyWorker)
+		processedTxNum, _, err := processResultQueueHistorical(consumer, out, outputTxNum.Load(), tx, true, applyWorker)
 		if err != nil {
 			return fmt.Errorf("processResultQueueHistorical: %w", err)
 		}
