@@ -36,7 +36,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 		name = "accounts"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
-			BtIndex().Existence().
+			BtIndex().Existence(dirs.SnapDomain, ExistenceExtensionKvei).
 			Build()
 
 		return name, schema
@@ -146,7 +146,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
 			BtIndex().
-			Existence().
+			Existence(dirs.SnapDomain, ExistenceExtensionKvei).
 			Build()
 
 		return name, schema
@@ -192,7 +192,7 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
 			BtIndex().
-			Existence().
+			Existence(dirs.SnapDomain, ExistenceExtensionKvei).
 			Build()
 		return name, schema
 	})
@@ -245,7 +245,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 		name = "accounts"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
-			BtIndex().Existence().
+			BtIndex().Existence(dirs.SnapDomain, ExistenceExtensionKvei).
 			Build()
 		return name, schema
 	})
@@ -321,7 +321,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 		name = "accounts"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
-			BtIndex().Existence().
+			BtIndex().Existence(dirs.SnapDomain, ExistenceExtensionKvei).
 			Build()
 		return name, schema
 	})
@@ -436,7 +436,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
 			BtIndex().
-			Existence().
+			Existence(dirs.SnapDomain, ExistenceExtensionKvei).
 			Build()
 		return name, schema
 	})
@@ -682,8 +682,8 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			return
 		}
 
-		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := existence.NewFilter(0, filename)
+		if strings.HasSuffix(filename, ".kvei") || strings.HasSuffix(filename, ".efei") {
+			filter, err := existence.NewFilter(0, filename, strings.HasSuffix(filename, ".efei"))
 			require.NoError(t, err)
 			filter.DisableFsync()
 			require.NoError(t, filter.Build())

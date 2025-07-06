@@ -29,8 +29,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/version"
-
+	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -47,6 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (
@@ -448,7 +448,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 							//return false
 						}
 					}
-					if item.existence, err = existence.OpenFilter(fPath); err != nil {
+					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -739,6 +739,24 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if !ok {
 			return nil, false, 0, nil
 		}
+		//if dt.d.Accessors.Has(AccessorExistence) {
+		//	hi, lo := dt.ht.iit.hashKey(filekey)
+		//	if dt.files[i].src.existence != nil {
+		//		ok = dt.files[i].src.existence.ContainsHash(hi)
+		//		if !ok {
+		//			return nil, false, 0, nil
+		//		}
+		//	}
+		//	offset, ok = reader.LookupHash(hi, lo)
+		//	if !ok {
+		//		return nil, false, 0, nil
+		//	}
+		//} else {
+		//	offset, ok = reader.TwoLayerLookup(filekey)
+		//	if !ok {
+		//		return nil, false, 0, nil
+		//	}
+		//}
 		g := dt.reusableReader(i)
 		g.Reset(offset)
 
@@ -1032,10 +1050,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 type StaticFiles struct {
 	HistoryFiles
-	valuesDecomp *seg.Decompressor
-	valuesIdx    *recsplit.Index
-	valuesBt     *BtIndex
-	bloom        *existence.Filter
+	valuesDecomp    *seg.Decompressor
+	valuesIdx       *recsplit.Index
+	valuesBt        *BtIndex
+	existenceFilter *existence.Filter
 }
 
 // CleanupOnError - call it on collation fail. It closing all files
@@ -1049,8 +1067,8 @@ func (sf StaticFiles) CleanupOnError() {
 	if sf.valuesBt != nil {
 		sf.valuesBt.Close()
 	}
-	if sf.bloom != nil {
-		sf.bloom.Close()
+	if sf.existenceFilter != nil {
+		sf.existenceFilter.Close()
 	}
 	sf.HistoryFiles.CleanupOnError()
 }
@@ -1137,7 +1155,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath, false)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1145,10 +1163,10 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 	}
 	closeComp = false
 	return StaticFiles{
-		valuesDecomp: valuesDecomp,
-		valuesIdx:    valuesIdx,
-		valuesBt:     bt,
-		bloom:        bloom,
+		valuesDecomp:    valuesDecomp,
+		valuesIdx:       valuesIdx,
+		valuesBt:        bt,
+		existenceFilter: bloom,
 	}, nil
 }
 
@@ -1239,7 +1257,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath, false)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1247,11 +1265,11 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 	closeComp = false
 	return StaticFiles{
-		HistoryFiles: hStaticFiles,
-		valuesDecomp: valuesDecomp,
-		valuesIdx:    valuesIdx,
-		valuesBt:     bt,
-		bloom:        bloom,
+		HistoryFiles:    hStaticFiles,
+		valuesDecomp:    valuesDecomp,
+		valuesIdx:       valuesIdx,
+		valuesBt:        bt,
+		existenceFilter: bloom,
 	}, nil
 }
 
@@ -1295,6 +1313,14 @@ func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		return []string{d.kviAccessorFilePath(fromStep, toStep)}
 	})
+	//return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep, toStep uint64) []string {
+	//	var files []string
+	//	if d.Accessors.Has(AccessorHashMap) {
+	//		files = append(files, d.kviAccessorFilePath(fromStep, toStep))
+	//		files = append(files, d.kvExistenceIdxFilePath(fromStep, toStep))
+	//	}
+	//	return files
+	//})
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -1401,10 +1427,50 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 	return nil
 }
 
+func buildExistanceFilter(ctx context.Context, g *seg.Reader, useFuse bool, idxPath string, salt uint32, ps *background.ProgressSet) error {
+	_, fileName := filepath.Split(idxPath)
+	count := g.Count() / 2
+	p := ps.AddNew(fileName, uint64(count))
+	defer ps.Delete(p)
+
+	defer g.MadvNormal().DisableReadAhead()
+
+	existenceFilter, err := existence.NewFilter(uint64(count), idxPath, useFuse)
+	if err != nil {
+		return err
+	}
+	defer existenceFilter.Close()
+	//if noFsync {
+	//	existenceFilter.DisableFsync()
+	//}
+
+	key := make([]byte, 0, 64)
+	g.Reset(0)
+	if count == 0 && g.HasNext() {
+		panic("assert: count == 0 but g.HasNext() is true: " + fileName)
+	}
+	for g.HasNext() {
+		key, _ = g.Next(key[:0])
+		hi, _ := murmur3.Sum128WithSeed(key, salt)
+		existenceFilter.AddHash(hi)
+		_, _ = g.Skip()
+
+		p.Processed.Add(1)
+	}
+	if err = existenceFilter.Build(); err != nil {
+		return fmt.Errorf("build idx: %w", err)
+	}
+	return nil
+}
+
 func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	if d.disable {
 		return
 	}
+	if txNumFrom == txNumTo {
+		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
+	}
+
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
@@ -1412,7 +1478,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
-	fi.existence = sf.bloom
+	fi.existence = sf.existenceFilter
 	d.dirtyFiles.Set(fi)
 }
 
