@@ -1278,7 +1278,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
-func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
+func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64, w *bytes.Buffer) error {
 	var toWrite []byte
 
 	if receipt != nil {
@@ -1288,10 +1288,12 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 
 		var err error
 		storageReceipt := (*types.ReceiptForStorage)(receipt)
-		toWrite, err = rlp.EncodeToBytes(storageReceipt)
+		w.Reset()
+		err = rlp.Encode(w, storageReceipt)
 		if err != nil {
 			return fmt.Errorf("WriteReceiptCache: %w", err)
 		}
+		toWrite = w.Bytes()
 		if dbg.AssertEnabled {
 			storageReceipt2 := &types.ReceiptForStorage{}
 			rlp.DecodeBytes(toWrite, storageReceipt2)
