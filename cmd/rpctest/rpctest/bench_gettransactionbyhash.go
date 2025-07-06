@@ -91,7 +91,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 				}
 				var request string
 				request = reqGen.getTransactionByHash(txnHash)
-				errCtx := fmt.Sprintf(" hash=%s", txnHash)
+				errCtx := fmt.Sprintf(" hash=%s", txnHash) //nolint:perfsprint
 				if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, teeToVegeta,
 					/* insertOnlyIfSuccess */ false); err != nil {
 					return err
