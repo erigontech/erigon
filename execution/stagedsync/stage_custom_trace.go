@@ -17,7 +17,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -316,8 +315,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 	txNumsReader := cfg.BlockReader.TxnumReader(ctx)
 	fromTxNum, _ := txNumsReader.Min(tx, fromBlock)
 	prevTxNumLog := fromTxNum
-
-	wBuffer := bytes.NewBuffer(nil)
 
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
