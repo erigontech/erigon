@@ -566,7 +566,7 @@ func main() {
 	)
 
 	rootCtx, _ := common.RootContext()
-	mem.LogMemStats(rootCtx, logger)
+	go mem.LogMemStats(rootCtx, logger)
 	if err := rootCmd.ExecuteContext(rootCtx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
