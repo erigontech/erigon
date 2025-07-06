@@ -23,6 +23,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"golang.org/x/sync/errgroup"
 )
@@ -80,7 +81,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 	teeToGetTxs := make(chan string, 1000)
 	defer close(teeToGetTxs)
 	g := errgroup.Group{}
-	g.SetLimit(1)
+	g.SetLimit(estimate.AlmostAllCPUs())
 	g.Go(func() error {
 		for txnHash := range teeToGetTxs {
 			var request string
