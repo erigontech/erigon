@@ -103,7 +103,7 @@ type storedReceiptRLP struct {
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
 
-	Logs []*LogForStorage
+	Logs []*Log
 
 	TransactionIndex uint
 	ContractAddress  common.Address
@@ -375,17 +375,13 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		r.FirstLogIndexWithinBlock = uint32(r.Logs[0].Index)
 	}
 
-	logsForStorage := make([]*LogForStorage, len(r.Logs))
-	for i, l := range r.Logs {
-		logsForStorage[i] = (*LogForStorage)(l)
-	}
 	return rlp.Encode(w, &storedReceiptRLP{
 		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		FirstLogIndex:     r.FirstLogIndexWithinBlock,
 
-		Logs:             logsForStorage,
+		Logs:             r.Logs,
 		GasUsed:          r.GasUsed,
 		ContractAddress:  r.ContractAddress,
 		TransactionIndex: r.TransactionIndex,
