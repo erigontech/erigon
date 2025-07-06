@@ -379,19 +379,6 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		}()
 		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, out, logger)
 	})
-	//g.Go(func() (err error) {
-	//	logEvery := time.NewTicker(20 * time.Second)
-	//	defer logEvery.Stop()
-	//	for outputTxNum.Load() <= toTxNum {
-	//		select {
-	//		case <-ctx.Done():
-	//			return ctx.Err()
-	//		case <-logEvery.C:
-	//			log.Debug("[map_reduce] ", "in.len", in.Len(), "in.cap", in.Capacity(), "out.len", out.Len(), "out.cap", out.Capacity(), "out.chanLen", out.ChanLen(), "out.chanCap", out.ChanCapacity())
-	//		}
-	//	}
-	//	return nil
-	//})
 	return g
 }
 
@@ -435,14 +422,14 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 	//}
 	return nil
 }
-func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.Logger) error {
+func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, out *state.ResultsQueue, logger log.Logger) error {
 	workers := make([]*HistoricalTraceWorker, workerCount)
 	mapGroup, ctx := errgroup.WithContext(ctx)
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
 	for i := 0; i < workerCount; i++ {
 		i := i
-		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
+		workers[i] = NewHistoricalTraceWorker(consumer, in, out, true, ctx, cfg, logger)
 		mapGroup.Go(func() error {
 			return workers[i].Run()
 		})
