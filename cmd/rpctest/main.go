@@ -21,15 +21,15 @@ import (
 	"os"
 	"time"
 
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func main() {
@@ -46,6 +46,7 @@ func main() {
 			debug.Exit()
 		},
 	}
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	var (
 		needCompare      bool
@@ -566,7 +567,6 @@ func main() {
 
 	rootCtx, _ := common.RootContext()
 	mem.LogMemStats(rootCtx, logger)
-	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 	if err := rootCmd.ExecuteContext(rootCtx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
