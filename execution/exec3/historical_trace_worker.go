@@ -388,7 +388,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				log.Debug("[map_reduce] ", "in.len", in.Len(), "in.cap", in.Capacity(), "out.len", out.Len(), "out.cap", out.Capacity())
+				log.Debug("[map_reduce] ", "in.len", in.Len(), "in.cap", in.Capacity(), "out.len", out.Len(), "out.cap", out.Capacity(), "out.chanLen", out.ChanLen(), "out.chanCap", out.ChanCapacity())
 			}
 		}
 	})
