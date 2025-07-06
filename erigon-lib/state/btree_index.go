@@ -360,17 +360,17 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 	defer ps.Delete(p)
 
 	defer kv.MadvNormal().DisableReadAhead()
-	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
+	existenceFilterPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
-	var bloom *existence.Filter
+	var existenceFilter *existence.Filter
 	if accessors.Has(AccessorExistence) {
 		var err error
-		bloom, err = existence.NewFilter(uint64(kv.Count()/2), bloomPath)
+		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath)
 		if err != nil {
 			return err
 		}
 		if noFsync {
-			bloom.DisableFsync()
+			existenceFilter.DisableFsync()
 		}
 	}
 
@@ -404,8 +404,8 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 			return err
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
-		if bloom != nil {
-			bloom.AddHash(hi)
+		if existenceFilter != nil {
+			existenceFilter.AddHash(hi)
 		}
 		pos, _ = kv.Skip()
 
@@ -416,8 +416,8 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 		return err
 	}
 
-	if bloom != nil {
-		if err := bloom.Build(); err != nil {
+	if existenceFilter != nil {
+		if err := existenceFilter.Build(); err != nil {
 			return err
 		}
 	}
