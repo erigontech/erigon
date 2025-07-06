@@ -127,8 +127,9 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 			lastLoggedNTxs = nTransactions
 			lastLoggedTime = time.Now()
 
-			fmt.Printf("%d txs processed\n", nTransactions)
-			log.Info("[BenchEthGetTransactionByHash]", "block_num", fmt.Sprintf("%.2fm", float64(bn)/1_000_000), "txs", fmt.Sprintf("%.2fm", float64(nTransactions)/1_000_000),
+			log.Info("[BenchEthGetTransactionByHash]",
+				"block_num", fmt.Sprintf("%.2fm", float64(bn)/1_000_000),
+				"txs", fmt.Sprintf("%.2fm", float64(nTransactions)/1_000_000),
 				"txs/s", tps)
 		case <-ctx.Done():
 			return ctx.Err()
