@@ -21,10 +21,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -38,9 +38,9 @@ func main() {
 	var rootCmd = &cobra.Command{
 		Use: "test",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			go mem.LogMemStats(cmd.Context(), logger)
 			log.Info(cmd.Name() + " starting")
 			logger = debug.SetupCobra(cmd, "rpctest")
+			go mem.LogMemStats(cmd.Context(), logger)
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
 			log.Info(cmd.Name(), "took", time.Since(startTime))
