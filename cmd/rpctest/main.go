@@ -38,6 +38,7 @@ func main() {
 	var rootCmd = &cobra.Command{
 		Use: "test",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			log.Info(cmd.Name() + " starting")
 			logger = debug.SetupCobra(cmd, "rpctest")
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
