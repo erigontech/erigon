@@ -361,7 +361,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
 	resultChannelLimit := workerCount * 128
 	heapLimit := workerCount * 128
-	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
+	out := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
 
 	g.Go(func() (err error) {
 		defer func() {
@@ -369,8 +369,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
-		defer rws.Close()
-		return doHistoryMap(consumer, cfg, ctx, in, workerCount, rws, logger)
+		defer out.Close()
+		return doHistoryMap(consumer, cfg, ctx, in, workerCount, out, logger)
 	})
 	g.Go(func() (err error) {
 		defer func() {
@@ -378,7 +378,19 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
-		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, rws, logger)
+		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, out, logger)
+	})
+	g.Go(func() (err error) {
+		logEvery := time.NewTicker(20 * time.Second)
+		defer logEvery.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Debug("[map_reduce] ", "in.len", in.Len(), "in.cap", in.Capacity(), "out.len", out.Len(), "out.cap", out.Capacity())
+			}
+		}
 	})
 	return g
 }
@@ -561,8 +573,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	if err != nil {
 		return err
 	}
-	logEvery := time.NewTicker(1 * time.Second)
-	defer logEvery.Stop()
 	for blockNum := fromBlock; blockNum <= toBlock && !workersExited.Load(); blockNum++ {
 		select {
 		case readAhead <- blockNum:
@@ -624,12 +634,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			}
 			in.Add(ctx, txTask)
 			inputTxNum++
-
-			//select {
-			//case <-logEvery.C:
-			//	log.Info("[dbg] in", "len", in.Len(), "cap", in.Capacity())
-			//default:
-			//}
 		}
 
 		// run heavy computation in current goroutine - because it's not a bottleneck
