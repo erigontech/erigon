@@ -15,6 +15,19 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 )
 
+func signedBeaconBlocksToSignedBlindedBeaconBlocks(blocks []*cltypes.SignedBeaconBlock) []*cltypes.SignedBlindedBeaconBlock {
+	blindedBlocks := make([]*cltypes.SignedBlindedBeaconBlock, len(blocks))
+	var err error
+	for i, block := range blocks {
+		blindedBlocks[i], err = block.Blinded()
+		if err != nil {
+			log.Crit("failed to convert signed beacon block to blinded beacon block", "err", err)
+			return nil
+		}
+	}
+	return blindedBlocks
+}
+
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.
 // It periodically checks the readiness of the execution client and returns true if the client is ready before
 // the timeout occurs. If the context is canceled or a timeout occurs, it returns false with the corresponding error.
@@ -88,7 +101,7 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 
 	if len(fuluBlocks) > 0 {
 		// download missing column data for the fulu blocks
-		if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
+		if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, signedBeaconBlocksToSignedBlindedBeaconBlocks(fuluBlocks)); err != nil {
 			log.Warn("[chainTipSync] failed to download columns and recover blobs", "err", err)
 			return nil, err
 		}

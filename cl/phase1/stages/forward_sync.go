@@ -127,7 +127,7 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 	}
 
 	if len(fuluBlocks) > 0 && canDownloadColumnData(fuluBlocks, cfg) {
-		if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
+		if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, signedBeaconBlocksToSignedBlindedBeaconBlocks(fuluBlocks)); err != nil {
 			logger.Trace("[Caplin] Failed to download missing columns", "err", err)
 			return err
 		}
