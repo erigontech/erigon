@@ -455,7 +455,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		stopedAtBlockEnd = txTask.Final
 
 		if txTask.Final { // `Final` system txn must be executed in reducer, because `consensus.Finalize` requires "all receipts of block" to be available
-			applyWorker.RunTxTaskNoLock(txTask.Reset())
+			applyWorker.RunTxTaskNoLock(txTask)
 		}
 
 		//hooks := txTask.Tracer.TracingHooks()
@@ -591,9 +591,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			return f(n)
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
-
 		blockReceipts := make(types.Receipts, len(txs))
-		rules := chainConfig.Rules(blockNum, b.Time())
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -601,7 +599,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				Header:          header,
 				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
-				Rules:           rules,
+				Rules:           chainConfig.Rules(blockNum, b.Time()),
 				Txs:             txs,
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
@@ -632,6 +630,12 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			//	log.Info("[dbg] in", "len", in.Len(), "cap", in.Capacity())
 			//default:
 			//}
+		}
+
+		// run heavy computation in current goroutine - because it's not a bottleneck
+		// it will speed up `processResultQueueHistorical` goroutine
+		for _, t := range b.Transactions() {
+			t.Hash()
 		}
 	}
 	in.Close() //no more work. no retries in map-reduce. means can close here.
