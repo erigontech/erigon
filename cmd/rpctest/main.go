@@ -17,12 +17,10 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common/mem"
@@ -33,6 +31,7 @@ import (
 
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
 	var logger log.Logger
 	var rootCmd = &cobra.Command{
 		Use: "test",
@@ -560,28 +559,11 @@ func main() {
 		benchOtsGetBlockTransactions,
 		replayCmd,
 	)
-	ctx := rootContext()
-	mem.LogMemStats(ctx, log.New())
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+
+	rootCtx, _ := common.RootContext()
+	mem.LogMemStats(rootCtx, logger)
+	if err := rootCmd.ExecuteContext(rootCtx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-}
-
-func rootContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-
-		select {
-		case <-ch:
-			log.Info("Got interrupt, shutting down...")
-		case <-ctx.Done():
-		}
-
-		cancel()
-	}()
-	return ctx
 }
