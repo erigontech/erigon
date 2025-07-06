@@ -1278,7 +1278,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
-func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64, w *bytes.Buffer) error {
+func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var toWrite []byte
 
 	if receipt != nil {
@@ -1288,17 +1288,18 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 
 		var err error
 		storageReceipt := (*types.ReceiptForStorage)(receipt)
-		w.Reset()
-		err = rlp.Encode(w, storageReceipt)
+		toWrite, err = rlp.EncodeToBytes(storageReceipt)
 		if err != nil {
 			return fmt.Errorf("WriteReceiptCache: %w", err)
 		}
-		toWrite = w.Bytes()
 		if dbg.AssertEnabled {
 			storageReceipt2 := &types.ReceiptForStorage{}
 			rlp.DecodeBytes(toWrite, storageReceipt2)
 			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
 				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
+			}
+			if storageReceipt.FirstLogIndexWithinBlock != storageReceipt2.FirstLogIndexWithinBlock {
+				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.FirstLogIndexWithinBlock, storageReceipt2.FirstLogIndexWithinBlock))
 			}
 		}
 	} else {
