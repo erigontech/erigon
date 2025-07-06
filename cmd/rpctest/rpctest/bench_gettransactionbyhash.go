@@ -153,6 +153,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 		default:
 		}
 	}
+	close(teeToGetTxs)
 
 	if err := g.Wait(); err != nil {
 		return err
