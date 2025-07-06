@@ -189,7 +189,7 @@ func (idx *Index) init() (err error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return fmt.Errorf("file %s %w. offset is: %d which is below zero", IncompatibleErr, offset)
+		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, IncompatibleErr, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
