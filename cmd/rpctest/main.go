@@ -33,8 +33,6 @@ import (
 )
 
 func main() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-
 	startTime := time.Now()
 	var logger log.Logger
 	var rootCmd = &cobra.Command{
