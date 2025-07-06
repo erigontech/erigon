@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -380,18 +379,19 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		}()
 		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, out, logger)
 	})
-	g.Go(func() (err error) {
-		logEvery := time.NewTicker(20 * time.Second)
-		defer logEvery.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Debug("[map_reduce] ", "in.len", in.Len(), "in.cap", in.Capacity(), "out.len", out.Len(), "out.cap", out.Capacity(), "out.chanLen", out.ChanLen(), "out.chanCap", out.ChanCapacity())
-			}
-		}
-	})
+	//g.Go(func() (err error) {
+	//	logEvery := time.NewTicker(20 * time.Second)
+	//	defer logEvery.Stop()
+	//	for outputTxNum.Load() <= toTxNum {
+	//		select {
+	//		case <-ctx.Done():
+	//			return ctx.Err()
+	//		case <-logEvery.C:
+	//			log.Debug("[map_reduce] ", "in.len", in.Len(), "in.cap", in.Capacity(), "out.len", out.Len(), "out.cap", out.Capacity(), "out.chanLen", out.ChanLen(), "out.chanCap", out.ChanCapacity())
+	//		}
+	//	}
+	//	return nil
+	//})
 	return g
 }
 
