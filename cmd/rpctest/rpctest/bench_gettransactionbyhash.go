@@ -23,9 +23,10 @@ import (
 	"os"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"golang.org/x/sync/errgroup"
 )
 
 // BenchEthGetTransactionByHash compares response of Erigon with Geth
@@ -43,7 +44,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 
 	var rec *bufio.Writer
 	var errs *bufio.Writer
-	var teeToVegeta chan CallResult = nil
+	var teeToVegeta chan CallResult
 	var nTransactions = 0
 
 	if errorFileName != "" {
@@ -101,9 +102,11 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 		if res.Err != nil {
 			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 		}
-
 		if b.Error != nil {
 			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+		}
+		if b.Result == nil {
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 		}
 
 		if needCompare {
