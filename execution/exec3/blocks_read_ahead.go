@@ -35,7 +35,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine consen
 					return gCtx.Err()
 				}
 
-				if i%100 == 0 {
+				if i%1_000 == 0 {
 					if tx != nil {
 						tx.Rollback()
 					}
