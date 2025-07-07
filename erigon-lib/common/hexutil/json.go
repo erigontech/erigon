@@ -24,10 +24,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/holiman/uint256"
 	"math/big"
 	"reflect"
 	"strconv"
+
+	"github.com/holiman/uint256"
 )
 
 var (
