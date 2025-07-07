@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/debugprint"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"github.com/erigontech/erigon/turbo/shards"
 
 	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
