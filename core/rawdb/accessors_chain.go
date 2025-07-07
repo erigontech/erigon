@@ -1348,6 +1348,9 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
 				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
 			}
+			if storageReceipt.FirstLogIndexWithinBlock != storageReceipt2.FirstLogIndexWithinBlock {
+				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.FirstLogIndexWithinBlock, storageReceipt2.FirstLogIndexWithinBlock))
+			}
 		}
 	} else {
 		toWrite = []byte{}
