@@ -110,9 +110,11 @@ jobs:
 
           echo "[DEBUG] Making run_rpc_tests.sh executable..."
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
+          set +e # Disable exit on error for test run
           echo "[DEBUG] Running run_rpc_tests.sh..."
           ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh ${{ runner.workspace }} $TEST_RESULT_DIR
           echo "[DEBUG] run_rpc_tests.sh finished."
+          set -e # Re-enable exit on error after test run
           
           echo "[DEBUG] Capturing test runner script exit status..."
           test_exit_status=$?
