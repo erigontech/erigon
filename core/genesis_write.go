@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math"
 	"math/big"
 	"os"
 	"slices"
@@ -69,16 +68,16 @@ import (
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil, tmpDir, logger)
+	return CommitGenesisBlockWithOverride(db, genesis, nil, nil, nil, nil, tmpDir, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overridePragueTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overridePragueTime, overrideNormalcyBlock, overrideLondonBlock, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overridePragueTime, tmpDir, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, overridePragueTime, overrideNormalcyBlock, overrideLondonBlock, overrideShanghaiTime, tmpDir, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -89,7 +88,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime, overrideNormalcyBlock, overrideLondonBlock, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
 	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
@@ -103,6 +102,15 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 	applyOverrides := func(config *chain.Config) {
 		if overridePragueTime != nil {
 			config.PragueTime = overridePragueTime
+		}
+		if overrideNormalcyBlock != nil {
+			config.NormalcyBlock = overrideNormalcyBlock
+		}
+		if overrideLondonBlock != nil {
+			config.LondonBlock = overrideLondonBlock
+		}
+		if overrideShanghaiTime != nil {
+			config.ShanghaiTime = overrideShanghaiTime
 		}
 	}
 
@@ -188,15 +196,6 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 	}
 	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
-	}
-
-	// set unwanted forks block to max number, so they are not activated
-	if newCfg.NormalcyBlock != nil && newCfg.NormalcyBlock.Cmp(big.NewInt(0)) != 0 {
-		maxInt := new(big.Int).SetUint64(math.MaxUint64)
-		newCfg.LondonBlock = maxInt
-		newCfg.ShanghaiTime = maxInt
-		newCfg.CancunTime = maxInt
-		newCfg.PragueTime = maxInt
 	}
 
 	return newCfg, storedBlock, nil

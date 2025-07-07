@@ -17,6 +17,7 @@
 package chain
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -81,4 +82,66 @@ func TestNilBlobSchedule(t *testing.T) {
 	assert.Equal(t, uint64(6), b.TargetBlobsPerBlock(isPrague))
 	assert.Equal(t, uint64(9), b.MaxBlobsPerBlock(isPrague))
 	assert.Equal(t, uint64(5007716), b.BaseFeeUpdateFraction(isPrague))
+}
+
+func TestIsForked(t *testing.T) {
+	tests := map[string]struct {
+		s        *big.Int
+		head     uint64
+		expected bool
+	}{
+		"nil fork block": {
+			s:        nil,
+			head:     100,
+			expected: false,
+		},
+		"fork at block 0": {
+			s:        big.NewInt(0),
+			head:     100,
+			expected: true,
+		},
+		"fork at block 50, head at 100": {
+			s:        big.NewInt(50),
+			head:     100,
+			expected: true,
+		},
+		"fork at block 150, head at 100": {
+			s:        big.NewInt(150),
+			head:     100,
+			expected: false,
+		},
+		"fork at max uint64": {
+			s:        new(big.Int).SetUint64(^uint64(0)),
+			head:     100,
+			expected: false,
+		},
+		"fork at max uint64, head at max uint64": {
+			s:        new(big.Int).SetUint64(^uint64(0)),
+			head:     ^uint64(0),
+			expected: true,
+		},
+		"fork at value larger than max uint64": {
+			s:        new(big.Int).Mul(new(big.Int).SetUint64(^uint64(0)), big.NewInt(2)),
+			head:     100,
+			expected: false,
+		},
+		"fork at extremely large value (like in hermez-dev.json)": {
+			s: func() *big.Int {
+				n := new(big.Int)
+				n.SetString("9999999999999999999999999999999999999999999999999", 10)
+				return n
+			}(),
+			head:     1,
+			expected: false,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := isForked(tt.s, tt.head)
+			if result != tt.expected {
+				t.Errorf("isForked(%v, %d) = %v, want %v", tt.s, tt.head, result, tt.expected)
+			}
+		})
+	}
 }

@@ -45,6 +45,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"math"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -142,7 +144,6 @@ import (
 	"github.com/erigontech/erigon/zk/witness"
 	"github.com/erigontech/erigon/zkevm/etherman"
 	"github.com/hashicorp/golang-lru/v2/expirable"
-	"math"
 )
 
 var dataStreamServerFactory = server.NewZkEVMDataStreamServerFactory()
@@ -334,7 +335,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverridePragueTime, tmpdir, logger)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverridePragueTime, config.OverrideNormalcyBlock, config.OverrideLondonBlock, config.OverrideShanghaiTime, tmpdir, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}

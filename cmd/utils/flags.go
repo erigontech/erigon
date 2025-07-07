@@ -117,6 +117,18 @@ var (
 		Name:  "override.prague",
 		Usage: "Manually specify the Prague fork time, overriding the bundled setting",
 	}
+	OverrideNormalcyBlockFlag = flags.BigFlag{
+		Name:  "override.normalcyblock",
+		Usage: "Manually specify the NormalcyBlock fork block, overriding the bundled setting",
+	}
+	OverrideShanghaiTimeFlag = flags.BigFlag{
+		Name:  "override.shanghaitime",
+		Usage: "Manually specify the time for shanghai fork",
+	}
+	OverrideLondonBlockFlag = flags.BigFlag{
+		Name:  "override.londonblock",
+		Usage: "Manually specify the block for london fork",
+	}
 	TrustedSetupFile = cli.StringFlag{
 		Name:  "trusted-setup-file",
 		Usage: "Absolute path to trusted_setup.json file",
@@ -2509,6 +2521,15 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(OverridePragueFlag.Name) {
 		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
 		cfg.TxPool.OverridePragueTime = cfg.OverridePragueTime
+	}
+	if ctx.IsSet(OverrideNormalcyBlockFlag.Name) {
+		cfg.OverrideNormalcyBlock = flags.GlobalBig(ctx, OverrideNormalcyBlockFlag.Name)
+	}
+	if ctx.IsSet(OverrideLondonBlockFlag.Name) {
+		cfg.OverrideLondonBlock = flags.GlobalBig(ctx, OverrideLondonBlockFlag.Name)
+	}
+	if ctx.IsSet(OverrideShanghaiTimeFlag.Name) {
+		cfg.OverrideShanghaiTime = flags.GlobalBig(ctx, OverrideShanghaiTimeFlag.Name)
 	}
 
 	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedSupported(cfg.NetworkID) {

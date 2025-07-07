@@ -173,6 +173,9 @@ var DefaultFlags = []cli.Flag{
 	&utils.PolygonSyncFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
+	&utils.OverrideNormalcyBlockFlag,
+	&utils.OverrideLondonBlockFlag,
+	&utils.OverrideShanghaiTimeFlag,
 
 	&utils.LightClientDiscoveryAddrFlag,
 	&utils.LightClientDiscoveryPortFlag,
