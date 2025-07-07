@@ -3,6 +3,7 @@ package das
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -362,6 +363,8 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	loop:
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-stopChan:
 				break loop
 			case <-ticker.C:
@@ -380,6 +383,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 						return true
 					})
 					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
+					fmt.Println(s)
 					select {
 					case resultChan <- resultData{
 						sidecars:  s,
@@ -568,7 +572,7 @@ func initializeDownloadRequest(blocks []*cltypes.SignedBlindedBeaconBlock, beaco
 
 		if _, ok := downloadTable[blockRoot]; !ok {
 			table := make(map[uint64]bool)
-			for i := range beaconConfig.NumberOfColumns / 16 { // try download all columns for now
+			for i := range beaconConfig.NumberOfColumns { // try download all columns for now
 				if !existingColumnsMap[i] {
 					table[i] = true
 				}
