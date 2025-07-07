@@ -105,7 +105,7 @@ func (d *peerdas) IsColumnOverHalf(blockRoot common.Hash) bool {
 		log.Warn("failed to get saved column index", "err", err, "blockRoot", blockRoot)
 		return false
 	}
-	return len(existingColumns) >= int(d.beaconConfig.NumberOfColumns+1)/2
+	return len(existingColumns) >= 8
 }
 
 type recoverBlobsRequest struct {
