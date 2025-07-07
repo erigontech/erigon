@@ -568,7 +568,7 @@ func initializeDownloadRequest(blocks []*cltypes.SignedBlindedBeaconBlock, beaco
 
 		if _, ok := downloadTable[blockRoot]; !ok {
 			table := make(map[uint64]bool)
-			for i := range beaconConfig.NumberOfColumns { // try download all columns for now
+			for i := range beaconConfig.NumberOfColumns / 16 { // try download all columns for now
 				if !existingColumnsMap[i] {
 					table[i] = true
 				}
