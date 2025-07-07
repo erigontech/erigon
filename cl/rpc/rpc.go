@@ -122,6 +122,8 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	if err != nil {
 		return nil, pid, 0, err
 	}
+
+	filteredReq.Cut(1)
 	// print the filtered request for debugging purposes
 	fmt.Println("Filtered request:", filteredReq.Len())
 	for i := 0; i < filteredReq.Len(); i++ {
