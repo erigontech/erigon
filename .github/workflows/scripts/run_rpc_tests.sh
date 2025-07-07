@@ -71,7 +71,7 @@ disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 # Run the RPC integration tests
 set +e # Disable exit on error for test run
 
-python3 ./run_tests.py --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff --exclude-api-list "$disabled_test_list"
+python3 -u ./run_tests.py --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff --exclude-api-list "$disabled_test_list"
 RUN_TESTS_EXIT_CODE=$?
 
 set -e # Re-enable exit on error after test run
