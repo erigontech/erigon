@@ -190,7 +190,10 @@ func (b *BeaconRpcP2P) TestSendColumnSidecarsByRangeReqV1(
 	req.Columns.Append(1)
 
 	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
+
+	reqs := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](100)
+	reqs.Append(req)
+	if err := ssz_snappy.EncodeAndWrite(&buffer, reqs); err != nil {
 		return nil, "", err
 	}
 
