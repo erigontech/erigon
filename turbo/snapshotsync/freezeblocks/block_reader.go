@@ -1166,15 +1166,14 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 			continue
 		}
 		buf, _ = gg.Next(buf[:0])
-		senderByte, txnRlp := buf[1:1+20], buf[1+20:]
-		sender := (common.Address)(senderByte)
+		sender, txnRlp := buf[1:1+20], buf[1+20:]
 
 		txn, err := types.DecodeTransaction(txnRlp)
 		if err != nil {
 			return nil, 0, 0, false, err
 		}
 
-		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+		txn.SetSender((common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
 		blockNum, ok := reader2.Lookup(txnHash[:])

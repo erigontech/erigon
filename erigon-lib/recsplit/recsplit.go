@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -65,11 +66,15 @@ func remix(z uint64) uint64 {
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
 	// v=0 falsePositeves=true - as array of hashedKeys[0]. Requires `enum=true`. Problem: requires key number - which recsplit has but expensive to encode (~5bytes/key)
+	// v=1 falsePositeves=true - as fuse filter (%9 bits/key). Doesn't require `enum=true`
 	version uint8
 
 	//v0 fields
 	existenceFV0 *os.File
 	existenceWV0 *bufio.Writer
+
+	//v1 fields
+	existenceFV1 *fusefilter.WriterStateless
 
 	offsetCollector *etl.Collector // Collector that sorts by offsets
 
@@ -154,7 +159,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	if args.BaseDataID >= math.MaxUint64/2 {
 		return nil, fmt.Errorf("baseDataID %d is too large, must be less than %d", args.BaseDataID, math.MaxUint64/2)
 	}
-	const version uint8 = 0
+	const version uint8 = 1
 
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
 	rs := &RecSplit{
@@ -177,6 +182,10 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			if rs.existenceFV0 != nil {
 				rs.existenceFV0.Close()
 				os.Remove(rs.existenceFV0.Name())
+			}
+
+			if rs.existenceFV1 != nil {
+				rs.existenceFV1.Close()
 			}
 		}
 	}()
@@ -216,6 +225,12 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		}
 
 	}
+	if args.KeyCount > 0 && rs.lessFalsePositives && rs.version >= 1 {
+		rs.existenceFV1, err = fusefilter.NewWriterStateless(rs.tmpFilePath)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -241,8 +256,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	return rs, nil
 }
 
-func (rs *RecSplit) FileName() string { return rs.indexFileName }
-func (rs *RecSplit) Salt() uint32     { return rs.salt }
+func (rs *RecSplit) FileName() string    { return rs.indexFileName }
+func (rs *RecSplit) MajorVersion() uint8 { return rs.version }
+func (rs *RecSplit) Salt() uint32        { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		rs.indexF.Close()
@@ -407,14 +423,22 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
+		if rs.lessFalsePositives {
+			if rs.version == 0 {
+				//1 byte from each hashed key
+				if err := rs.existenceWV0.WriteByte(byte(hi)); err != nil {
+					return err
+				}
+			}
+		}
 	} else {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
 	}
-	if rs.version == 0 && rs.lessFalsePositives && rs.enums {
-		//1 byte from each hashed key
-		if err := rs.existenceWV0.WriteByte(byte(hi)); err != nil {
+
+	if rs.lessFalsePositives && rs.version >= 1 {
+		if err := rs.existenceFV1.AddHash(hi); err != nil {
 			return err
 		}
 	}
@@ -719,9 +743,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	var features Features
 	if rs.enums {
 		features |= Enums
-		if rs.lessFalsePositives {
-			features |= LessFalsePositives
-		}
+	}
+	if rs.lessFalsePositives {
+		features |= LessFalsePositives
 	}
 	if err := rs.indexW.WriteByte(byte(features)); err != nil {
 		return fmt.Errorf("writing enums = true: %w", err)
@@ -786,6 +810,13 @@ func (rs *RecSplit) flushExistenceFilter() error {
 			return err
 		}
 		if _, err := io.CopyN(rs.indexW, rs.existenceFV0, int64(rs.keysAdded)); err != nil {
+			return err
+		}
+	}
+
+	if rs.version >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
+		_, err := rs.existenceFV1.BuildTo(rs.indexW)
+		if err != nil {
 			return err
 		}
 	}
