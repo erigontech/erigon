@@ -137,10 +137,6 @@ type Writer struct {
 }
 
 func NewWriter(filePath string) (*Writer, error) {
-	if !IsLittleEndian {
-		return nil, fmt.Errorf("TODO: on BigEndian machine - store in file LittleEndian-encoded `data`. Then on reader side convert it to BigEndian and store to new `.be` file - and mmap it instead of original file")
-	}
-
 	_, fileName := filepath.Split(filePath)
 	w, err := NewWriterOffHeap(filePath)
 	if err != nil {
