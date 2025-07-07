@@ -14,7 +14,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 )
 
-// WriterOffHeap does build `fusefilter` in off-heap memory, using temporary mmap file
+// WriterOffHeap does write all keys to temporary mmap file - and using it as a source for `fusefilter` building
 type WriterOffHeap struct {
 	count    int
 	page     [512]uint64
