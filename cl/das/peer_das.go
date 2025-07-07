@@ -3,7 +3,6 @@ package das
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -357,7 +356,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	requestColumnSidecars := func(req *downloadRequest) {
 		// send the request in a loop with a ticker to avoid overwhelming the peer
 		// keep trying until the request is done
-		ticker := time.NewTicker(10 * time.Millisecond)
+		ticker := time.NewTicker(50 * time.Millisecond)
 		defer ticker.Stop()
 		wg := sync.WaitGroup{}
 	loop:
@@ -382,10 +381,10 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 						reqLength += id.Columns.Length()
 						return true
 					})
-					for i := 0; i < ids.Len(); i++ {
-						fmt.Println("requesting column sidecar for block root", ids.Get(i).BlockRoot)
-						fmt.Println("requesting column sidecar for block root - len", ids.Get(i).Columns.Length())
-					}
+					// for i := 0; i < ids.Len(); i++ {
+					// 	fmt.Println("requesting column sidecar for block root", ids.Get(i).BlockRoot)
+					// 	fmt.Println("requesting column sidecar for block root - len", ids.Get(i).Columns.Length())
+					// }
 
 					//fmt.Println(d.rpc.TestSendColumnSidecarsByRangeReqV1(cctx))
 					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
