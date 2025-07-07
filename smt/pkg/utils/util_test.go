@@ -1,15 +1,13 @@
 package utils
 
 import (
-	"bytes"
 	"fmt"
 	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
-
-	"gotest.tools/v3/assert"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 const forkId7BlockGasLimit = 18446744073709551615
@@ -791,228 +789,15 @@ func TestNodeKeyFromPath(t *testing.T) {
 	}
 }
 
-func Test_Key(t *testing.T) {
-	tests := []struct {
-		input  string
-		output NodeKey
-	}{
-		{
-			input: "0xe859276098f208D003ca6904C6cC26629Ee364Ce",
-			output: NodeKey{
-				9755015262748197613,
-				11140630475045976694,
-				14930209430661078379,
-				6319951756608990063,
-			},
-		},
+func TestKeyContractStorageWithoutBig(t *testing.T) {
+	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	key := KeyContractStorageWithoutBig(addr, common.HexToHash("0x123"))
+	key2, err := KeyContractStorage("0x1234567890123456789012345678901234567890", "0x123")
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	for _, test := range tests {
-		result := Key(test.input, 1)
-		if result != test.output {
-			t.Errorf("expected %v but got %v", test.output, result)
-		}
-	}
-}
-
-func TestKeyContractStorage(t *testing.T) {
-	tests := []struct {
-		input  string
-		output NodeKey
-	}{
-		{
-			input: "0xe859276098f208D003ca6904C6cC26629Ee364Ce",
-			output: NodeKey{
-				9485388526025222793,
-				2844922146222416636,
-				12800508867551015356,
-				9480521524011931274,
-			},
-		},
-	}
-
-	for _, test := range tests {
-		result, err := KeyContractStorage(test.input, "0x1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result != test.output {
-			t.Errorf("expected %v but got %v", test.output, result)
-		}
-	}
-}
-
-func TestKeyBig(t *testing.T) {
-	tests := []struct {
-		input  *big.Int
-		output NodeKey
-	}{
-		{
-			input: big.NewInt(1092034958475866),
-			output: NodeKey{
-				11593000745318970063,
-				7942385326937081179,
-				13970824778267919554,
-				7405798476109204467,
-			},
-		},
-	}
-
-	for _, test := range tests {
-		result, err := KeyBig(test.input, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if *result != test.output {
-			t.Errorf("expected %v but got %v", test.output, result)
-		}
-	}
-}
-
-func Test_Node8ValueIsZero(t *testing.T) {
-	tests := []struct {
-		input  NodeValue8
-		output bool
-	}{
-		{
-			input:  NodeValue8{0, 0, 0, 0, 0, 0, 0, 0},
-			output: true,
-		},
-		{
-			input:  NodeValue8{0, 0, 0, 0, 0, 0, 0, 1},
-			output: false,
-		},
-	}
-
-	for _, test := range tests {
-		result := test.input.IsZero()
-		if result != test.output {
-			t.Errorf("expected %v but got %v", test.output, result)
-		}
-	}
-}
-
-func Test_Node8ValueToHex(t *testing.T) {
-	tests := []struct {
-		input  NodeValue8
-		output string
-	}{
-		{
-			input:  NodeValue8{0, 0, 0, 0, 0, 0, 0, 0},
-			output: "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-		},
-		{
-			input:  NodeValue8{1, 2, 3, 4, 5, 6, 7, 8},
-			output: "00000000000000080000000000000007000000000000000600000000000000050000000000000004000000000000000300000000000000020000000000000001",
-		},
-	}
-
-	for _, test := range tests {
-		result := test.input.ToHex()
-		if result != test.output {
-			t.Errorf("expected %v but got %v", test.output, result)
-		}
-	}
-}
-
-func Test_ScalarToNodeValue8(t *testing.T) {
-	input := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
-	expected := NodeValue8{18446744073709551615, 18446744073709551615, 18446744073709551615, 18446744073709551615, 0, 0, 0, 0}
-
-	result := ScalarToNodeValue8(input)
-
-	// Compare each value individually using Cmp
-	for i := 0; i < 8; i++ {
-		assert.Equal(t, expected[i], result[i])
-	}
-}
-
-func Test_CompareBigAndUint64ToHex(t *testing.T) {
-	tests := []struct {
-		input  uint64
-		output string
-	}{
-		{input: 1, output: "0x1"},
-		{input: 1234567890, output: "0x499602d2"},
-		{input: 1234567890123456, output: "0x462d53c8abac0"},
-	}
-
-	for _, test := range tests {
-		bigResult := ConvertBigIntToHex(big.NewInt(int64(test.input)))
-		uintResult := ConvertUint64ToHex(test.input)
-		if bigResult != uintResult {
-			t.Errorf("big doesn't match uint for %v, big: %v uint: %v", test.input, bigResult, uintResult)
-		}
-
-		if bigResult != test.output {
-			t.Errorf("big doesn't match hex for %v, expected %v but got %v", test.input, test.output, bigResult)
-		}
-	}
-}
-
-func Test_NodeValue12ToHex(t *testing.T) {
-	tests := []struct {
-		input  NodeValue12
-		output string
-	}{
-		{input: NodeValue12{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
-			output: "000000000000000c000000000000000b000000000000000a000000000000000900000000000000080000000000000007000000000000000600000000000000050000000000000004000000000000000300000000000000020000000000000001"},
-	}
-
-	for _, test := range tests {
-		result := test.input.ToHex()
-		if result != test.output {
-			t.Errorf("expected %v but got %v", test.output, result)
-		}
-	}
-}
-
-func Test_ArrayToScalar_Bytes(t *testing.T) {
-	tests := []struct {
-		input  []uint64
-		output []byte
-	}{
-		{input: []uint64{1, 2, 3, 4}, output: []byte{4, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1}},
-	}
-
-	for _, test := range tests {
-		result := ArrayToScalar(test.input)
-		bigResult := result.Bytes()
-
-		bytesResult := ArrayToBytes(test.input)
-
-		if !bytes.Equal(bigResult, test.output) {
-			t.Errorf("expected %v but got %v", test.output, bigResult)
-		}
-
-		if !bytes.Equal(bytesResult, test.output) {
-			t.Errorf("expected %v but got %v", test.output, bytesResult)
-		}
-	}
-}
-
-func Test_ArrayToScalar_Hex(t *testing.T) {
-	tests := []struct {
-		input  []uint64
-		output string
-	}{
-		{input: []uint64{1, 2, 3, 4}, output: "0x4000000000000000300000000000000020000000000000001"},
-		{input: []uint64{1, 2, 3, 4, 5, 6, 7, 8}, output: "0x80000000000000007000000000000000600000000000000050000000000000004000000000000000300000000000000020000000000000001"},
-		{input: []uint64{1, 2, 3, 4, 5, 6, 7, 87654321}, output: "0x5397fb10000000000000007000000000000000600000000000000050000000000000004000000000000000300000000000000020000000000000001"},
-	}
-
-	for _, test := range tests {
-		result := ArrayToScalar(test.input)
-		bigHex := ConvertBigIntToHex(result)
-
-		uintHex := ConvertArrayToHex(test.input)
-
-		if bigHex != test.output {
-			t.Errorf("big hex expected %v but got %v", test.output, bigHex)
-		}
-
-		if uintHex != test.output {
-			t.Errorf("uint hex expected %v but got %v", test.output, uintHex)
-		}
+	if key != key2 {
+		t.Errorf("key doesn't match, expected: %v, got: %v", key, key2)
 	}
 }

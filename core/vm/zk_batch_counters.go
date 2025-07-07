@@ -219,6 +219,9 @@ func (bcc *BatchCounterCollector) NewCounters() Counters {
 // rlp level counters and execution level counters
 func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Counters, error) {
 	// combine all the counters we have so far
+	if bcc.unlimitedCounters {
+		return Counters{}, nil
+	}
 
 	// if we have external coutners use them, otherwise create new
 	// this is used when sequencer starts mid batch and we need the already comulated counters
@@ -275,8 +278,21 @@ func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Cou
 // this one returns the counters as they are so far, without adding processBatchLevelData, processChangeL2Block and decodeChangeL2BlockTx
 // used to save batch counter progress without adding the said counters twice
 func (bcc *BatchCounterCollector) CombineCollectorsNoChanges() Counters {
-	// combine all the counters we have so far
+	// unlimited counters won't overflow so we don't need to combine anything
+	if bcc.unlimitedCounters {
+		return Counters{
+			SHA: &Counter{used: 0},
+			A:   &Counter{used: 0},
+			B:   &Counter{used: 0},
+			K:   &Counter{used: 0},
+			M:   &Counter{used: 0},
+			P:   &Counter{used: 0},
+			S:   &Counter{used: 0},
+			D:   &Counter{used: 0},
+		}
+	}
 
+	// combine all the counters we have so far
 	// if we have external coutners use them, otherwise create new
 	// this is used when sequencer starts mid batch and we need the already comulated counters
 	combined := bcc.NewCounters()

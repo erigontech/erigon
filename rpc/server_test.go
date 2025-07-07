@@ -18,12 +18,12 @@ package rpc
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -154,7 +154,7 @@ func TestServerShortLivedConn(t *testing.T) {
 
 	var (
 		request  = `{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}` + "\n"
-		wantResp = `{"jsonrpc":"2.0","id":1,"result":{"nftest":"1.0","rpc":"1.0","test":"1.0"}}` + "\n"
+		wantResp = `{"jsonrpc":"2.0","id":1,"result":{"test":"1.0","nftest":"1.0","rpc":"1.0"}}`
 		deadline = time.Now().Add(10 * time.Second)
 	)
 	for i := 0; i < 20; i++ {
@@ -173,8 +173,15 @@ func TestServerShortLivedConn(t *testing.T) {
 		if err != nil {
 			t.Fatal("read error:", err)
 		}
-		if !bytes.Equal(buf[:n], []byte(wantResp)) {
-			t.Fatalf("wrong response: %s", buf[:n])
+		var got, want interface{}
+		if err := json.Unmarshal(buf[:n], &got); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+		if err := json.Unmarshal([]byte(wantResp), &want); err != nil {
+			t.Fatalf("failed to unmarshal wantResp: %v", err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("wrong response:\ngot:  %v\nwant: %v", got, want)
 		}
 	}
 }

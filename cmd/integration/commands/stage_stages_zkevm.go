@@ -73,6 +73,7 @@ func init() {
 	withDataDirCompare(stateStagesZk)
 	withUnwind(stateStagesZk)
 	withUnwindBatchNo(stateStagesZk) // populates package global flag unwindBatchNo
+	withOnlySmtV2(stateStagesZk)
 	rootCmd.AddCommand(stateStagesZk)
 }
 

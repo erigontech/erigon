@@ -581,6 +581,20 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		utils.Fatalf("Invalid state.cache value provided")
 	}
 
+	err = c.SpuriousPayloadSize.UnmarshalText([]byte(ctx.String(utils.SpuriousPayloadSize.Name)))
+	if err != nil {
+		utils.Fatalf("Invalid rpc.spurious-payload-size value provided")
+	}
+
+	c.BatchMethodForbiddenList = map[string]struct{}{}
+	batchForbiddenCsv := ctx.String(utils.BatchMethodForbiddenList.Name)
+	if batchForbiddenCsv != "" {
+		splitBannedBatchMethods := strings.Split(batchForbiddenCsv, ",")
+		for _, method := range splitBannedBatchMethods {
+			c.BatchMethodForbiddenList[method] = struct{}{}
+		}
+	}
+
 	/*
 		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
 		rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", node.DefaultGRPCHost, "GRPC server listening interface")

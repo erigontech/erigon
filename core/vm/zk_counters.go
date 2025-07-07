@@ -112,6 +112,10 @@ func (c Counters) UsedAsArray() []int {
 }
 
 func (c Counters) UsedAsMap() map[string]int {
+	// unlimited counters will not build this map
+	if len(c) == 0 {
+		return map[string]int{}
+	}
 	return map[string]int{
 		string(CounterKeyNames[S]):   c[S].used,
 		string(CounterKeyNames[A]):   c[A].used,

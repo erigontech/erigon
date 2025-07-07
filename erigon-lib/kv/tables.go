@@ -554,6 +554,9 @@ const (
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
+
+	// Hermez SMT v2
+	TableSmtIntermediateHashes = "HermezSmtIntermediateHashes"
 )
 
 // Keys
@@ -791,6 +794,7 @@ var ChaindataTables = []string{
 	TableSmt,
 	TableStats,
 	TableAccountValues,
+	TableSmtIntermediateHashes,
 	TableMetadata,
 	TableHashKey,
 	TablePoolLimbo,

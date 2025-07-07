@@ -3,12 +3,12 @@ package httpcfg
 import (
 	"time"
 
-	"github.com/erigontech/erigon/turbo/rpchelper"
-
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 type HttpCfg struct {
@@ -104,4 +104,6 @@ type HttpCfg struct {
 	DataStreamInactivityTimeout       time.Duration
 	DataStreamInactivityCheckInterval time.Duration
 	L2RpcUrl                          string
+	SpuriousPayloadSize               datasize.ByteSize
+	BatchMethodForbiddenList          map[string]struct{}
 }

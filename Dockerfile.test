@@ -1,4 +1,4 @@
-FROM golang:1.19 AS base
+FROM golang:1.23 AS base
 
 RUN apt-get update \
 && apt-get -y install make openssh-client ca-certificates && update-ca-certificates
@@ -12,5 +12,14 @@ ADD go.sum go.sum
 
 RUN go mod download
 ADD . .
+
+# Setup user and group
+#
+# from the perspective of the container, uid=1000, gid=1000 is a sensible choice
+# (mimicking Ubuntu Server), but if caller creates a .env (example in repo root),
+# these defaults will get overridden when make calls docker-compose
+ARG UID=1000
+RUN adduser --uid $UID erigon
+USER erigon
 
 ENTRYPOINT ["go", "run", "/app/zk/datastream/test/test.go"]

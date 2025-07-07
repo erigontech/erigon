@@ -59,7 +59,8 @@ type Config struct {
 	MdbxDBSizeLimit datasize.ByteSize
 	MdbxGrowthStep  datasize.ByteSize
 
-	NoGossip bool // this mode doesn't broadcast any txs, and if receive remote-txn - skip it
+	NoGossip      bool // this mode doesn't broadcast any txs, and if receive remote-txn - skip it
+	EnableTimsort bool
 
 	PurgeDistance time.Duration
 }
@@ -83,7 +84,8 @@ var DefaultConfig = Config{
 	PriceBump:          10,  // Price bump percentage to replace an already existing transaction
 	BlobPriceBump:      100,
 
-	NoGossip: true, // centralised sequencing for [zkevm] doesn't need tx gossiping
+	NoGossip:      true, // centralised sequencing for [zkevm] doesn't need tx gossiping
+	EnableTimsort: true,
 
 	OverrideShanghaiTime: nil,
 }

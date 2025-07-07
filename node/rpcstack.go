@@ -17,7 +17,6 @@
 package node
 
 import (
-	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -27,11 +26,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/rs/cors"
+	"github.com/klauspost/compress/gzip"
 )
 
 // httpConfig is the JSON-RPC/HTTP configuration.
@@ -125,7 +126,7 @@ func (h *httpServer) start() error {
 	}
 
 	// Initialize the server.
-	h.server = &http.Server{Handler: h} // nolint
+	h.server = &http.Server{Handler: h, ReadTimeout: 5 * time.Second, ReadHeaderTimeout: 5 * time.Second} // nolint
 	if h.timeouts != (rpccfg.HTTPTimeouts{}) {
 		CheckTimeouts(&h.timeouts)
 		h.server.ReadTimeout = h.timeouts.ReadTimeout
@@ -413,13 +414,6 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "invalid host specified", http.StatusForbidden)
 }
 
-var gzPool = sync.Pool{
-	New: func() interface{} {
-		w := gzip.NewWriter(io.Discard)
-		return w
-	},
-}
-
 type gzipResponseWriter struct {
 	io.Writer
 	http.ResponseWriter
@@ -443,11 +437,16 @@ func newGzipHandler(next http.Handler) http.Handler {
 
 		w.Header().Set("Content-Encoding", "gzip")
 
-		gz := gzPool.Get().(*gzip.Writer)
-		defer gzPool.Put(gz)
+		gz, err := gzip.NewWriterLevel(w, gzip.StatelessCompression)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-		gz.Reset(w)
-		defer gz.Close()
+		defer func() {
+			gz.Close()
+			gz.Reset(io.Discard)
+		}()
 
 		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
 	})

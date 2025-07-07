@@ -70,6 +70,7 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Genesis = core.GenesisBlockByChainName(chain)
 	cfg.Dirs = datadir.New(datadirCli)
+	cfg.Zk.OnlySmtV2 = onlySmtV2
 
 	logger := log.New()
 	br, _ := blocksIO(db, logger)

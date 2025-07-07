@@ -228,7 +228,7 @@ func TestMedianTimeMetrics(t *testing.T) {
 			search:           &metaTx{Tx: &types.TxSlot{}},
 			senderIDTxnCount: map[uint64]int{},
 		},
-		pending: NewPendingSubPool(PendingSubPool, 100),
+		pending: NewPendingSubPool(PendingSubPool, 100, false),
 		baseFee: NewSubPool(BaseFeeSubPool, 100),
 		queued:  NewSubPool(QueuedSubPool, 100),
 		metrics: &Metrics{},

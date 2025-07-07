@@ -119,11 +119,47 @@ func (tf *AtomicTorrentFS) createFromMetaInfo(fPath string, mi *metainfo.MetaInf
 	return nil
 }
 
+// sanitizePath ensures a path component is safe by removing any path separators and special characters
+func sanitizePath(path string) string {
+	// Remove any path separators and replace with underscores
+	path = strings.ReplaceAll(path, string(filepath.Separator), "_")
+	path = strings.ReplaceAll(path, "/", "_")
+	path = strings.ReplaceAll(path, "\\", "_")
+	// Remove any other potentially dangerous characters
+	path = strings.Map(func(r rune) rune {
+		if r <= 31 || r == ':' || r == '*' || r == '?' || r == '"' || r == '<' || r == '>' || r == '|' {
+			return '_'
+		}
+		return r
+	}, path)
+	return path
+}
+
 func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMetaInfo *metainfo.MetaInfo) (created bool, err error) {
 	name := info.Name
+
+	name = sanitizePath(name)
+
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
+
+	targetLocation := filepath.Join(tf.dir, name)
+	targetLocation = filepath.Clean(targetLocation)
+	targetLocation, err = filepath.EvalSymlinks(targetLocation)
+	if err != nil {
+		return false, fmt.Errorf("failed to evaluate symlinks for data dir: %w", err)
+	}
+
+	// Add protection against path traversal
+	baseDir, err := filepath.EvalSymlinks(tf.dir)
+	if err != nil {
+		return false, fmt.Errorf("failed to evaluate symlinks for base dir: %w", err)
+	}
+	if !strings.HasPrefix(targetLocation, baseDir) {
+		return false, fmt.Errorf("invalid path for torrent file: %s", targetLocation)
+	}
+
 	mi, err := CreateMetaInfo(info, additionalMetaInfo)
 	if err != nil {
 		return false, err
@@ -135,7 +171,7 @@ func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMet
 	if tf.exists(name) {
 		return false, nil
 	}
-	if err = tf.createFromMetaInfo(filepath.Join(tf.dir, name), mi); err != nil {
+	if err = tf.createFromMetaInfo(targetLocation, mi); err != nil {
 		return false, err
 	}
 	return true, nil

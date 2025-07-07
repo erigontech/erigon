@@ -45,6 +45,8 @@ var (
 
 	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
+
+	onlySmtV2 bool
 )
 
 func must(err error) {

@@ -131,6 +131,10 @@ type Zk struct {
 	Hardfork   Hardfork
 	Commitment Commitment
 	InjectGers bool
+
+	SkipSmt                        bool
+	OnlySmtV2                      bool
+	SequencerBlockGasLimit         uint64
 }
 
 type Hardfork string

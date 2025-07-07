@@ -39,16 +39,18 @@ func BuildBlockInfoTree(
 		return nil, err
 	}
 
-	log.Trace("info-tree-header",
-		"blockNumber", blockNumber,
-		"previousStateRoot", previousStateRoot.String(),
-		"coinbase", coinbase.String(),
-		"blockGasLimit", blockGasLimit,
-		"blockGasUsed", blockGasUsed,
-		"blockTime", blockTime,
-		"ger", ger.String(),
-		"l1BlockHash", l1BlockHash.String(),
-	)
+	// useful to keep around for debugging
+	// log.Trace("info-tree-header",
+	// 	"blockNumber", blockNumber,
+	// 	"previousStateRoot", previousStateRoot.String(),
+	// 	"coinbase", coinbase.String(),
+	// 	"blockGasLimit", blockGasLimit,
+	// 	"blockGasUsed", blockGasUsed,
+	// 	"blockTime", blockTime,
+	// 	"ger", ger.String(),
+	// 	"l1BlockHash", l1BlockHash.String(),
+	// )
+
 	var logIndex int64 = 0
 	for i, txInfo := range *transactionInfos {
 		receipt := txInfo.Receipt

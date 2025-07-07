@@ -170,9 +170,8 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		return false, 0, nil
 	}
 
-	isShanghai := p.isShanghai()
 	isLondon := p.isLondon()
-	_ = isLondon
+	isShanghai := p.isShanghai()
 	best := p.pending.best
 
 	txs.Resize(uint(cmp.Min(int(n), len(best.ms))))
@@ -188,7 +187,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		}
 
 		mt := best.ms[i]
-		p.Trace("Processing transaction", "txID", mt.Tx.IDHash)
+		// p.Trace("Processing transaction", "txID", mt.Tx.IDHash)
 
 		if !isLondon && mt.Tx.Type == 0x2 {
 			// remove ldn txs when not in london
@@ -200,7 +199,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		if mt.Tx.Gas > transactionGasLimit {
 			// Skip transactions with very large gas limit, these shouldn't enter the pool at all
 			log.Debug("found a transaction in the pending pool with too high gas for tx - clear the tx pool")
-			p.Trace("Skipping transaction with too high gas", "txID", mt.Tx.IDHash, "gas", mt.Tx.Gas)
+			// p.Trace("Skipping transaction with too high gas", "txID", mt.Tx.IDHash, "gas", mt.Tx.Gas)
 			continue
 		}
 		rlpTx, sender, isLocal, err := p.getRlpLocked(tx, mt.Tx.IDHash[:])
@@ -372,4 +371,39 @@ func (p *TxPool) PreYield() {
 
 func (p *TxPool) PostYield() {
 	p.flushMtx.Unlock()
+}
+
+// MoveFromPendingToQueued moves specific transactions from the pending pool to the queued pool
+// this is mainly designed to be used by the sequencer to heal cases where a transaction slips
+// through the cracks and ends up with a nonce too high message.
+func (p *TxPool) MoveFromPendingToQueued(toMove map[common.Address][]uint64) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	sendersToUpdate := make(map[uint64][]uint64)
+	for sender, nonces := range toMove {
+		if id, ok := p.senders.senderIDs[sender]; ok {
+			sendersToUpdate[id] = nonces
+		}
+	}
+
+	for senderID, nonces := range sendersToUpdate {
+		// find the lowest nonce in the list
+		lowestNonce := nonces[0]
+		for _, nonce := range nonces {
+			if nonce < lowestNonce {
+				lowestNonce = nonce
+			}
+		}
+		log.Info("[txpool] Moving from pending to queued", "senderID", senderID, "lowestNonce", lowestNonce)
+		p.all.ascend(senderID, func(mt *metaTx) bool {
+			if mt.currentSubPool == PendingSubPool {
+				if mt.Tx.Nonce >= lowestNonce {
+					p.pending.Remove(mt)
+					p.queued.Add(mt)
+				}
+			}
+			return true
+		})
+	}
 }

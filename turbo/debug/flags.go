@@ -23,6 +23,7 @@ import (
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
@@ -247,8 +248,10 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 		pprofServer := &http.Server{
-			Addr:    address,
-			Handler: pprofMux,
+			Addr:              address,
+			Handler:           pprofMux,
+			ReadTimeout:       5 * time.Second,
+			ReadHeaderTimeout: 5 * time.Second,
 		}
 
 		go func() {

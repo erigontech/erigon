@@ -46,6 +46,10 @@ func SpawnSequencingStage(
 	}
 	defer roTx.Rollback()
 
+	if err := checkSmtMigration(ctx, cfg, roTx, s); err != nil {
+		return err
+	}
+
 	hermezDb := hermez_db.NewHermezDbReader(roTx)
 	lastSequence, err := hermezDb.GetLatestSequence()
 	if err != nil {
@@ -394,8 +398,10 @@ func sequencingBatchStep(
 		innerBreak := false
 		emptyBlockOverflow := false
 		sendersToTriggerStatechanges := make(map[common.Address]struct{})
+		nonceTooHighSenders := make(map[common.Address][]uint64)
 		yieldedSomething := false
 		badTxHashes := make([]common.Hash, 0)
+		gasUsed := uint64(0)
 
 	OuterLoopTransactions:
 		for {
@@ -483,6 +489,12 @@ func sequencingBatchStep(
 				default:
 				}
 
+				if cfg.zk.SequencerBlockGasLimit > 0 && gasUsed >= cfg.zk.SequencerBlockGasLimit {
+					log.Info(fmt.Sprintf("[%s] Block gas limit reached. Stopping.", logPrefix), "blockNumber", blockNumber, "gasUsed", gasUsed, "gasLimit", cfg.zk.SequencerBlockGasLimit)
+					innerBreak = true
+					break InnerLoopTransactions
+				}
+
 				txHash := transaction.Hash()
 
 				txSender, ok := transaction.GetSender()
@@ -503,6 +515,10 @@ func sequencingBatchStep(
 				}
 
 				if _, found := sendersToSkip[txSender]; found {
+					continue
+				}
+
+				if _, found := nonceTooHighSenders[txSender]; found {
 					continue
 				}
 
@@ -536,14 +552,18 @@ func sequencingBatchStep(
 						continue
 					}
 
-					if errors.Is(err, core.ErrNonceTooHigh) || errors.Is(err, core.ErrNonceTooLow) {
-						// here we have a case where some situation has caused a nonce issue to find its way into the pending pool
-						// we want to skip transactions for this sender in this batch for now and ask the pool to trigger a sender
-						// state change for this sender.  This will cause the pool to skip any transactions from this sender until
-						// the sender's nonce is corrected in the pending pool
-						log.Info(fmt.Sprintf("[%s] nonce issue detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
-						sendersToSkip[txSender] = struct{}{}
+					if errors.Is(err, core.ErrNonceTooLow) {
+						log.Info(fmt.Sprintf("[%s] nonce too low detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
 						sendersToTriggerStatechanges[txSender] = struct{}{}
+						badTxHashes = append(badTxHashes, txHash)
+						continue
+					}
+
+					if errors.Is(err, core.ErrNonceTooHigh) {
+						log.Info(fmt.Sprintf("[%s] nonce too high detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
+						nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
+						sendersToTriggerStatechanges[txSender] = struct{}{}
+						badTxHashes = append(badTxHashes, txHash)
 						continue
 					}
 
@@ -638,6 +658,7 @@ func sequencingBatchStep(
 					batchState.onAddedTransaction(transaction, receipt, execResult, effectiveGas)
 					minedTxHashes = append(minedTxHashes, txHash)
 					yielder.AddMined(txHash)
+					gasUsed += execResult.UsedGas
 				}
 
 				// We will only update the processed index in resequence job if there isn't overflow
@@ -676,6 +697,18 @@ func sequencingBatchStep(
 			if batchState.isLimboRecovery() {
 				runLoopBlocks = false
 				break OuterLoopTransactions
+			}
+		}
+
+		// nonce too high transactions need moving straight to the queued pool
+		if len(nonceTooHighSenders) > 0 {
+			cfg.txPool.MoveFromPendingToQueued(nonceTooHighSenders)
+		}
+
+		// now trigger sender state changes in the pool where we encountered nonce issues during execution
+		if len(sendersToTriggerStatechanges) > 0 {
+			if err := cfg.txPool.TriggerSenderStateChanges(ctx, sdb.tx, header.GasLimit, sendersToTriggerStatechanges); err != nil {
+				return err
 			}
 		}
 
@@ -723,23 +756,9 @@ func sequencingBatchStep(
 			cfg.decodedTxCache.Remove(txHash)
 		}
 
-		// now trigger sender state changes in the pool where we encountered nonce issues during execution
-		if err := cfg.txPool.TriggerSenderStateChanges(ctx, sdb.tx, header.GasLimit, sendersToTriggerStatechanges); err != nil {
-			return err
-		}
-
 		t.LogTimer()
-		gasPerSecond := float64(0)
-		elapsedSeconds := t.Elapsed().Seconds()
-		if elapsedSeconds != 0 {
-			gasPerSecond = float64(block.GasUsed()) / elapsedSeconds
-		}
 
-		if gasPerSecond != 0 {
-			log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions... (%d gas/s)", logPrefix, blockNumber, len(batchState.blockState.builtBlockElements.transactions), int(gasPerSecond)), "info-tree-index", infoTreeIndexProgress, "taken", time.Since(startTime))
-		} else {
-			log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions...", logPrefix, blockNumber, len(batchState.blockState.builtBlockElements.transactions)), "info-tree-index", infoTreeIndexProgress, "taken", time.Since(startTime))
-		}
+		logBlockFinished(logPrefix, blockNumber, block.GasUsed(), len(batchState.blockState.builtBlockElements.transactions), infoTreeIndexProgress, startTime)
 
 		// do not use remote executor in l1recovery mode
 		// if we need remote executor in l1 recovery then we must allow commit/start DB transactions
@@ -794,6 +813,29 @@ func sequencingBatchStep(
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", batchContext.s.LogPrefix(), batchState.batchNumber))
 
 	return sdb.tx.Commit()
+}
+
+func logBlockFinished(logPrefix string, blockNumber, gas uint64, txAmount int, infoTreeIndexProgress uint64, startTime time.Time) {
+	taken := time.Since(startTime)
+	mGasPerSecond := float64(0)
+	mGas := float64(gas) / 1_000_000
+	elapsedSeconds := taken.Seconds()
+	if elapsedSeconds != 0 {
+		mGasPerSecond = mGas / elapsedSeconds
+	}
+
+	if mGasPerSecond != 0 {
+		log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions... (%.1f MGas/s)", logPrefix, blockNumber, txAmount, mGasPerSecond), "gas", gas, "info-tree-index", infoTreeIndexProgress, "taken", time.Since(startTime))
+	} else {
+		log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions...", logPrefix, blockNumber, txAmount), "gas", gas, "info-tree-index", infoTreeIndexProgress, "taken", time.Since(startTime))
+	}
+}
+
+func removeInclusionTransaction(orig []types.Transaction, index int) []types.Transaction {
+	if index < 0 || index >= len(orig) {
+		return orig
+	}
+	return append(orig[:index], orig[index+1:]...)
 }
 
 func handleBadTxHashCounter(hermezDb *hermez_db.HermezDb, txHash common.Hash) (uint64, error) {

@@ -258,6 +258,13 @@ Metrics and pprof configuration flags:
 - Node syncing status: `curl -X POST --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' {{node url}}` - returns stages process or false
 - Health check: GET request with header `X-ERIGON-HEALTHCHECK: synced` - returns 200 response if OK
 
+## Nix Development Environment
+
+If you're not using [NixOS](https://nixos.org/), start by installing the [nix package manager](https://nixos.org/download/).
+
+Once that's set up:
+- If you have [direnv](https://github.com/direnv/direnv) installed, it will automatically load the required development packages for you.
+- If not, you can manually run `nix develop` in the project directory to achieve the same effect.
 
 ## Additional Resources
 

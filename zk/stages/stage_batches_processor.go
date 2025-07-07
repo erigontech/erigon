@@ -310,7 +310,7 @@ func (p *BatchesProcessor) processFullBlock(blockEntry *types.FullL2Block) (endL
 	// if we're above StepAfter, and we're at a step, move the stages on
 	if p.debugStep > 0 && p.debugStepAfter > 0 && blockEntry.L2BlockNumber > p.debugStepAfter {
 		if blockEntry.L2BlockNumber%p.debugStep == 0 {
-			log.Info(fmt.Sprintf("[%s] Debug step reached, stopping stage\n", p.logPrefix))
+			// log.Info(fmt.Sprintf("[%s] Debug step reached, stopping stage\n", p.logPrefix))
 			endLoop = true
 		}
 	}

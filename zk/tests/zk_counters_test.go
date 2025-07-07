@@ -508,3 +508,25 @@ func testVirtualCounters(v vector, batchCollector *vm.BatchCounterCollector, sho
 
 	return errors, nil
 }
+
+func Test_CombineCollectors_DoesNothingIfUnlimitedCounters(t *testing.T) {
+	batchCollector := vm.NewBatchCounterCollector(10, 1, 0.6, false, nil)
+	batchCollector.StartNewBlock(false)
+	combined, err := batchCollector.CombineCollectors(false)
+	if err != nil {
+		t.Fatalf("could not combine collectors: %v", err)
+	}
+	if len(combined) == 0 {
+		t.Fatalf("expected some counters, got %v", len(combined))
+	}
+
+	batchCollector = vm.NewBatchCounterCollector(10, 1, 0.6, true, nil)
+	batchCollector.StartNewBlock(false)
+	combined, err = batchCollector.CombineCollectors(false)
+	if err != nil {
+		t.Fatalf("could not combine collectors: %v", err)
+	}
+	if len(combined) != 0 {
+		t.Fatalf("expected 0 counters, got %v", len(combined))
+	}
+}

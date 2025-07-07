@@ -23,7 +23,8 @@ jobs:
     steps:
       - name: configure Pagefile
         if: matrix.os == 'windows-2022'
-        uses: al-cheb/configure-pagefile-action@v1.3
+        # pinned at v1.3
+        uses: al-cheb/configure-pagefile-action@86589fd789a4de3e62ba628dda2cb10027b66d67
         with:
           minimum-size: 8GB
       - uses: actions/checkout@v3
@@ -46,7 +47,8 @@ jobs:
 
       - name: Lint
         if: matrix.os == 'ubuntu-20.04'
-        uses: golangci/golangci-lint-action@v4
+        # pinned at v4
+        uses: golangci/golangci-lint-action@d6238b002a20823d52840fda27e2d4891c5952dc
         with:
           version: v1.57.2
           skip-build-cache: true

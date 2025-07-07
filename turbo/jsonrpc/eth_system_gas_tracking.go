@@ -91,6 +91,10 @@ func (t *RecurringL1GasPriceTracker) getLowestPrice() *big.Int {
 	t.lowestMtx.Lock()
 	defer t.lowestMtx.Unlock()
 
+	if t.lowestPrice == nil {
+		return big.NewInt(0).SetUint64(t.defaultGasPrice)
+	}
+
 	return t.lowestPrice
 }
 

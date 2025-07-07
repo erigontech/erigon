@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/psilva261/timsort/v2"
 )
 
 var (
@@ -408,7 +409,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		discardReasonsLRU:       discardHistory,
 		all:                     byNonce,
 		recentlyConnectedPeers:  &recentlyConnectedPeers{},
-		pending:                 NewPendingSubPool(PendingSubPool, cfg.PendingSubPoolLimit),
+		pending:                 NewPendingSubPool(PendingSubPool, cfg.PendingSubPoolLimit, cfg.EnableTimsort),
 		baseFee:                 NewSubPool(BaseFeeSubPool, cfg.BaseFeeSubPoolLimit),
 		queued:                  NewSubPool(QueuedSubPool, cfg.QueuedSubPoolLimit),
 		newPendingTxs:           newTxs,
@@ -2671,15 +2672,16 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTx) *metaTx {
 // It's more expensive to maintain "slice sort" invariant, but it allow do cheap copy of
 // pending.best slice for mining (because we consider txs and metaTx are immutable)
 type PendingPool struct {
-	sorted bool // means `PendingPool.best` is sorted or not
-	best   *bestSlice
-	worst  *WorstQueue
-	limit  int
-	t      SubPoolType
+	sorted        bool // means `PendingPool.best` is sorted or not
+	best          *bestSlice
+	worst         *WorstQueue
+	limit         int
+	t             SubPoolType
+	enableTimsort bool
 }
 
-func NewPendingSubPool(t SubPoolType, limit int) *PendingPool {
-	return &PendingPool{limit: limit, t: t, best: &bestSlice{ms: []*metaTx{}, senderPriorities: nil}, worst: &WorstQueue{ms: []*metaTx{}}}
+func NewPendingSubPool(t SubPoolType, limit int, enableTimsort bool) *PendingPool {
+	return &PendingPool{limit: limit, t: t, best: &bestSlice{ms: []*metaTx{}, senderPriorities: nil}, worst: &WorstQueue{ms: []*metaTx{}}, enableTimsort: enableTimsort}
 }
 
 // bestSlice - is similar to best queue, but with O(n log n) complexity and
@@ -2746,8 +2748,11 @@ func (p *PendingPool) EnforceWorstInvariants() {
 }
 func (p *PendingPool) EnforceBestInvariants() {
 	if !p.sorted {
-		// Sort with priority senders consideration (handled in bestSlice.Less method)
-		sort.Sort(p.best)
+		if p.enableTimsort {
+			timsort.TimSort(p.best)
+		} else {
+			sort.Sort(p.best)
+		}
 		p.sorted = true
 	}
 }

@@ -269,10 +269,36 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
 	var stream *jsoniter.Stream
+	var reqs []*jsonrpcMessage
+	var isBatch bool
+	var err error
 	if !s.disableStreaming {
-		stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+		trackingWriter := &trackingWriter{ResponseWriter: w}
+		stream = jsoniter.NewStream(jsoniter.ConfigDefault, trackingWriter, 4096)
+
+		defer func() {
+			// log if this request returned a spurious payload size
+			consumed := trackingWriter.bytesWritten
+			if s.spuriousPayloadSize > 0 && consumed > s.spuriousPayloadSize.Bytes() {
+				s.logger.Info("rpc.Server.ServeHTTP: request returned a spurious payload", "bytes", consumed, "isBatch", isBatch, "req", reqs)
+			}
+		}()
 	}
-	s.serveSingleRequest(ctx, codec, stream)
+	reqs, isBatch, err = s.serveSingleRequest(ctx, codec, stream)
+	if err != nil {
+		s.logger.Error("rpc.Server.ServeHTTP: failed to serve single request", "err", err)
+	}
+}
+
+type trackingWriter struct {
+	http.ResponseWriter
+	bytesWritten uint64
+}
+
+func (w *trackingWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	w.bytesWritten += uint64(n)
+	return n, err
 }
 
 // validateRequest returns a non-zero response code and error message if the

@@ -174,6 +174,11 @@ test-unwind:
 	./zk/tests/unwinds/unwind.sh
 
 
+test-bali-unwind:
+	make cdk-erigon
+	./zk/tests/unwinds/unwind-bali.sh
+
+
 test-erigon-lib:
 	@cd erigon-lib && $(MAKE) test
 

@@ -8,6 +8,7 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -57,21 +58,60 @@ type NodeArgs struct {
 	NodeKeyHex string            `arg:"--nodekeyhex" json:"nodekeyhex,omitempty"`
 }
 
+// sanitizePath ensures a path component is safe by removing any path separators and special characters
+func sanitizePath(path string) string {
+	// Remove any path separators and replace with underscores
+	path = strings.ReplaceAll(path, string(filepath.Separator), "_")
+	path = strings.ReplaceAll(path, "/", "_")
+	path = strings.ReplaceAll(path, "\\", "_")
+	// Remove any other potentially dangerous characters
+	path = strings.Map(func(r rune) rune {
+		if r <= 31 || r == ':' || r == '*' || r == '?' || r == '"' || r == '<' || r == '>' || r == '|' {
+			return '_'
+		}
+		return r
+	}, path)
+	return path
+}
+
 func (node *NodeArgs) Configure(base NodeArgs, nodeNumber int) error {
+	// Sanitize the chain name to prevent path traversal
+	base.Chain = sanitizePath(base.Chain)
+	if len(base.Chain) == 0 {
+		return fmt.Errorf("invalid chain name: cannot be empty")
+	}
+
 	if len(node.Name) == 0 {
 		node.Name = fmt.Sprintf("%s-%d", base.Chain, nodeNumber)
 	}
+	// Sanitize the node name as well
+	node.Name = sanitizePath(node.Name)
 
-	node.DataDir = filepath.Join(base.DataDir, node.Name)
+	var err error
+	// First clean and resolve the base directory
+	baseDir, err := filepath.EvalSymlinks(filepath.Clean(base.DataDir))
+	if err != nil {
+		return fmt.Errorf("failed to evaluate base data dir: %w", err)
+	}
 
-	node.LogDirPath = filepath.Join(base.DataDir, "logs")
+	// Create the target path and clean it
+	targetDataDir := filepath.Join(baseDir, node.Name)
+	targetDataDir = filepath.Clean(targetDataDir)
+
+	// Verify the target path is still within the base directory
+	if !isSubPath(baseDir, targetDataDir) {
+		return fmt.Errorf("invalid data directory path: would escape base directory")
+	}
+
+	node.DataDir = targetDataDir
+
+	node.LogDirPath = filepath.Join(baseDir, "logs")
 	node.LogDirPrefix = node.Name
 
 	node.Chain = base.Chain
 
 	node.StaticPeers = base.StaticPeers
 
-	var err error
 	node.NodeKey, err = crypto.GenerateKey()
 	if err != nil {
 		return err
@@ -213,4 +253,14 @@ func portFromBase(baseAddr string, increment int, portCount int) (string, int, e
 	portNo += (increment * portCount)
 
 	return fmt.Sprintf("%s:%d", apiHost, portNo), portNo, nil
+}
+
+func isSubPath(baseDir, targetPath string) bool {
+	rel, err := filepath.Rel(baseDir, targetPath)
+	if err != nil {
+		return false
+	}
+	// Check if the relative path starts with ".." which would indicate
+	// the target path is outside the base directory
+	return !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
 }

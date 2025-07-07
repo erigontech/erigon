@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/zk/utils"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/erigontech/erigon/zk/sequencer"
+	db2 "github.com/erigontech/erigon/smt/pkg/db"
+	"github.com/erigontech/erigon/smt/pkg/smt"
 )
 
 const (
@@ -92,6 +94,8 @@ type SequenceBlockCfg struct {
 
 	decodedTxCache *expirable.LRU[common.Hash, *types.Transaction]
 	doneHook       DoneHook
+
+	interHashesCfg ZkInterHashesCfg
 	txYielder      TxYielder
 }
 
@@ -123,6 +127,7 @@ func StageSequenceBlocksCfg(
 	yieldSize uint16,
 	infoTreeUpdater *l1infotree.Updater,
 	doneHook DoneHook,
+	interHashesCfg ZkInterHashesCfg,
 	txYielder *sequencer.PoolTransactionYielder,
 ) SequenceBlockCfg {
 
@@ -155,6 +160,7 @@ func StageSequenceBlocksCfg(
 		infoTreeUpdater:  infoTreeUpdater,
 		decodedTxCache:   decodedTxCache,
 		doneHook:         doneHook,
+		interHashesCfg:   interHashesCfg,
 		txYielder:        txYielder,
 	}
 }
@@ -605,4 +611,46 @@ func (bdc *BlockDataChecker) AddTransactionData(txL2Data []byte) bool {
 	bdc.counter += encodedLen
 
 	return false
+}
+
+func checkSmtMigration(ctx context.Context, cfg SequenceBlockCfg, roTx kv.Tx, s *stagedsync.StageState) error {
+	// 1 - have we started a completely fresh node here? Return if so as we'll update the table in the next step
+	if s.BlockNumber == 0 {
+		return nil
+	}
+
+	smtCursor, err := roTx.Cursor(kv.TableSmtIntermediateHashes)
+	if err != nil {
+		return err
+	}
+	defer smtCursor.Close()
+
+	k, _, err := smtCursor.First()
+	if err != nil {
+		return err
+	}
+
+	if len(k) == 0 {
+		tx, err := cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err := sequencerRegenIntermediateHashes(ctx, s, tx, cfg); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func sequencerRegenIntermediateHashes(ctx context.Context, s *stagedsync.StageState, tx kv.RwTx, cfg SequenceBlockCfg) error {
+	log.Info(fmt.Sprintf("[%s] Migrating to the latest SMT", s.LogPrefix()))
+	eridb := db2.NewEriDb(tx)
+	smt := smt.NewSMT(eridb, false)
+	to := s.BlockNumber
+	if _, err := regenerateIntermediateHashes(ctx, s.LogPrefix(), cfg.interHashesCfg, tx, eridb, smt, to); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

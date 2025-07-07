@@ -129,7 +129,8 @@ jobs:
         run: ls -ltr packaging/deb/ | grep cdk-erigon
 
       - name: Release erigon Packages
-        uses: softprops/action-gh-release@v1
+      # pinned at v1 tag
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
         with:
           tag_name: ${{ env.GIT_TAG }}
           prerelease: true

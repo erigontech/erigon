@@ -397,7 +397,12 @@ func (h *Heimdall) Start(ctx context.Context) error {
 	// if this is a restart
 	h.unsubscribe()
 
-	server := &http.Server{Addr: h.listenAddr, Handler: makeHeimdallRouter(ctx, h)}
+	server := &http.Server{
+		Addr:              h.listenAddr,
+		Handler:           makeHeimdallRouter(ctx, h),
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	return startHTTPServer(ctx, server, "devnet Heimdall service", h.logger)
 }
 

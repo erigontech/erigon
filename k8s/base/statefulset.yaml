@@ -17,6 +17,10 @@ spec:
       labels:
         app: erigon
     spec:
+      securityContext:
+        capabilities:
+          drop:
+            - NET_RAW
       containers:
         - args: []
           command:
@@ -56,9 +60,13 @@ spec:
               cpu: 2462m
               memory: 16Gi
           securityContext:
+            readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             runAsGroup: 1000
             runAsUser: 1000
+            capabilities:
+              drop:
+                - NET_RAW
           volumeMounts: []
       initContainers: []
       volumes: []

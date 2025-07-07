@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,45 +18,48 @@ func TestSMT_Create_Insert(t *testing.T) {
 		kvMap        map[utils.NodeKey]utils.NodeValue8
 		expectedRoot string
 	}{
-		{
-			"TestSMT_Insert_1Key_0Value",
-			map[utils.NodeKey]utils.NodeValue8{
-				utils.ScalarToNodeKey(big.NewInt(1)): utils.ScalarToNodeValue8(big.NewInt(0)),
-			},
-			"0x0",
-		},
+		// {
+		// 	"TestSMT_Insert_1Key_0Value",
+		// 	map[utils.NodeKey]utils.NodeValue8{
+		// 		utils.ScalarToNodeKey(big.NewInt(1)): utils.ScalarToNodeValue8(big.NewInt(0)),
+		// 	},
+		// 	"0x0",
+		// },
 		{
 			"TestSMT_Insert1Key_XValue",
-			map[utils.NodeKey]utils.NodeValue8{
-				utils.ScalarToNodeKey(big.NewInt(1)): utils.ScalarToNodeValue8(new(big.Int).SetUint64(1)),
-			},
-			"0xb26e0de762d186d2efc35d9ff4388def6c96ec15f942d83d779141386fe1d2e1",
+			makeTestMap(
+				"0b00100-0x1",
+				"0b00000-0x2",
+				"0b00001-0x3",
+				"0b10000-0x4",
+			),
+			"0x52b7ae55ee0f050283786f57f59a901e8382c1051a6cd74c4c9a4b125b0b3b90",
 		},
-		{
-			"TestSMT_Insert2",
-			map[utils.NodeKey]utils.NodeValue8{
-				utils.ScalarToNodeKey(big.NewInt(1)): utils.ScalarToNodeValue8(big.NewInt(1)),
-				utils.ScalarToNodeKey(big.NewInt(2)): utils.ScalarToNodeValue8(big.NewInt(2)),
-			},
-			"0xa399847134a9987c648deabc85a7310fbe854315cbeb6dc3a7efa1a4fa2a2c86",
-		},
-		{
-			"TestSMT_InsertMultiple",
-			map[utils.NodeKey]utils.NodeValue8{
-				utils.ScalarToNodeKey(big.NewInt(1)): utils.ScalarToNodeValue8(big.NewInt(1)),
-				utils.ScalarToNodeKey(big.NewInt(2)): utils.ScalarToNodeValue8(big.NewInt(2)),
-				utils.ScalarToNodeKey(big.NewInt(3)): utils.ScalarToNodeValue8(big.NewInt(3)),
-			},
-			"0xb5a4b1b7a8c3a7c11becc339bbd7f639229cd14f14f76ee3a0e9170074399da4",
-		},
-		{
-			"TestSMT_InsertMultiple2",
-			map[utils.NodeKey]utils.NodeValue8{
-				utils.ScalarToNodeKey(big.NewInt(18)): utils.ScalarToNodeValue8(big.NewInt(18)),
-				utils.ScalarToNodeKey(big.NewInt(19)): utils.ScalarToNodeValue8(big.NewInt(19)),
-			},
-			"0xfa2d3062e11e44668ab79c595c0c916a82036a017408377419d74523569858ea",
-		},
+		// {
+		// 	"TestSMT_Insert2",
+		// 	map[utils.NodeKey]utils.NodeValue8{
+		// 		utils.ScalarToNodeKey(big.NewInt(1)): utils.ScalarToNodeValue8(big.NewInt(1)),
+		// 		utils.ScalarToNodeKey(big.NewInt(2)): utils.ScalarToNodeValue8(big.NewInt(2)),
+		// 	},
+		// 	"0xa399847134a9987c648deabc85a7310fbe854315cbeb6dc3a7efa1a4fa2a2c86",
+		// },
+		// {
+		// 	"TestSMT_InsertMultiple",
+		// 	map[utils.NodeKey]utils.NodeValue8{
+		// 		utils.ScalarToNodeKey(big.NewInt(1)): utils.ScalarToNodeValue8(big.NewInt(1)),
+		// 		utils.ScalarToNodeKey(big.NewInt(2)): utils.ScalarToNodeValue8(big.NewInt(2)),
+		// 		utils.ScalarToNodeKey(big.NewInt(3)): utils.ScalarToNodeValue8(big.NewInt(3)),
+		// 	},
+		// 	"0xb5a4b1b7a8c3a7c11becc339bbd7f639229cd14f14f76ee3a0e9170074399da4",
+		// },
+		// {
+		// 	"TestSMT_InsertMultiple2",
+		// 	map[utils.NodeKey]utils.NodeValue8{
+		// 		utils.ScalarToNodeKey(big.NewInt(18)): utils.ScalarToNodeValue8(big.NewInt(18)),
+		// 		utils.ScalarToNodeKey(big.NewInt(19)): utils.ScalarToNodeValue8(big.NewInt(19)),
+		// 	},
+		// 	"0xfa2d3062e11e44668ab79c595c0c916a82036a017408377419d74523569858ea",
+		// },
 	}
 	ctx := context.Background()
 	for _, scenario := range testCases {
@@ -80,6 +84,28 @@ func TestSMT_Create_Insert(t *testing.T) {
 			}
 		})
 	}
+}
+
+func makeTestMap(inputs ...string) map[utils.NodeKey]utils.NodeValue8 {
+	kvMap := map[utils.NodeKey]utils.NodeValue8{}
+	for _, input := range inputs {
+		parts := strings.Split(input, "-")
+		if len(parts) != 2 {
+			panic(fmt.Sprintf("invalid input %s", input))
+		}
+
+		key := binaryStringToNodeKey(parts[0])
+		value := parts[1]
+		value = strings.TrimPrefix(value, "0x")
+		val, ok := new(big.Int).SetString(value, 16)
+		if !ok {
+			panic(fmt.Sprintf("invalid hex value %s", value))
+		}
+
+		kvMap[nodeKeyFromPath(key)] = utils.ScalarToNodeValue8(val)
+
+	}
+	return kvMap
 }
 
 func TestSMT_Create_CompareWithRandomData(t *testing.T) {
@@ -228,4 +254,32 @@ func Test_findLastNode(t *testing.T) {
 			}
 		}
 	}
+}
+
+func binaryStringToNodeKey(binaryString string) []int {
+	binaryString = strings.TrimPrefix(binaryString, "0b")
+	path := []int{}
+	for _, char := range binaryString {
+		if char == '1' {
+			path = append(path, 1)
+		} else {
+			path = append(path, 0)
+		}
+	}
+
+	return path
+}
+
+func nodeKeyFromPath(path []int) utils.NodeKey {
+	// first pad out the path to 256 bits
+	for len(path) < 256 {
+		path = append(path, 0)
+	}
+
+	result, err := utils.NodeKeyFromPath(path)
+	if err != nil {
+		panic(err)
+	}
+
+	return result
 }

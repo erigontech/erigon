@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/goccy/go-json"
+	"github.com/c2h5oh/datasize"
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
@@ -76,6 +77,8 @@ type handler struct {
 	//slow requests
 	slowLogThreshold time.Duration
 	slowLogBlacklist []string
+
+	spuriousPayloadSize datasize.ByteSize
 }
 
 type callProc struct {
@@ -185,6 +188,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		defer close(boundedConcurrency)
 		wg := sync.WaitGroup{}
 		wg.Add(len(msgs))
+		totalBytes := uint64(0)
 		for i := range calls {
 			boundedConcurrency <- struct{}{}
 			go func(i int) {
@@ -203,14 +207,26 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
 					answersWithNils[i] = res
+					totalBytes += uint64(len(res.Result))
+					if len(res.Result) > int(h.spuriousPayloadSize.Bytes()) {
+						h.logger.Info("rpc.handler.handleBatch: request returned a spurious payload", "bytes", len(res.Result), "isBatch", true, "req", calls[i])
+					}
 				}
 				_ = stream.Flush()
 				if buf.Len() > 0 && answersWithNils[i] == nil {
-					answersWithNils[i] = json.RawMessage(buf.Bytes())
+					bytes := buf.Bytes()
+					totalBytes += uint64(len(bytes))
+					answersWithNils[i] = json.RawMessage(bytes)
+					if len(bytes) > int(h.spuriousPayloadSize.Bytes()) {
+						h.logger.Info("rpc.handler.handleBatch: request returned a spurious payload", "bytes", len(bytes), "isBatch", true, "req", calls[i])
+					}
 				}
 			}(i)
 		}
 		wg.Wait()
+		if totalBytes > h.spuriousPayloadSize.Bytes() {
+			h.logger.Info("rpc.handler.handleBatch: whole batch returned a spurious payload", "bytes", totalBytes, "req", calls)
+		}
 		answers := make([]interface{}, 0, len(msgs))
 		for _, answer := range answersWithNils {
 			if answer != nil {

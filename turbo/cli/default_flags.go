@@ -31,6 +31,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolCommitEveryFlag,
 	&utils.TxpoolPurgeEveryFlag,
 	&utils.TxpoolPurgeDistanceFlag,
+	&utils.TxPoolEnableTimsort,
 	&PruneFlag,
 	&PruneHistoryFlag,
 	&PruneReceiptFlag,
@@ -338,4 +339,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.Hardfork,
 	&utils.Commitment,
 	&utils.InjectGers,
+	&utils.SkipSmt,
+	&utils.OnlySmtV2,
+	&utils.SequencerBlockGasLimit,
 }

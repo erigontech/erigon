@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	mapset "github.com/deckarep/golang-set"
 	"github.com/erigontech/erigon-lib/log/v3"
 	jsoniter "github.com/json-iterator/go"
@@ -45,11 +46,12 @@ const (
 
 // Server is an RPC server.
 type Server struct {
-	services        serviceRegistry
-	methodAllowList AllowList
-	idgen           func() ID
-	run             int32
-	codecs          mapset.Set // mapset.Set[ServerCodec] requires go 1.21
+	services                 serviceRegistry
+	methodAllowList          AllowList
+	batchMethodForbiddenList ForbiddenList
+	idgen                    func() ID
+	run                      int32
+	codecs                   mapset.Set // mapset.Set[ServerCodec] requires go 1.21
 
 	batchConcurrency    uint
 	disableStreaming    bool
@@ -58,6 +60,7 @@ type Server struct {
 	batchLimit          int  // Maximum number of requests in a batch
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
+	spuriousPayloadSize datasize.ByteSize
 }
 
 // NewServer creates a new server instance with no registered handlers.
@@ -71,9 +74,17 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	return server
 }
 
+func (s *Server) SetSpuriousPayloadSize(size datasize.ByteSize) {
+	s.spuriousPayloadSize = size
+}
+
 // SetAllowList sets the allow list for methods that are handled by this server
 func (s *Server) SetAllowList(allowList AllowList) {
 	s.methodAllowList = allowList
+}
+
+func (s *Server) SetBatchMethodForbiddenList(forbiddenList ForbiddenList) {
+	s.batchMethodForbiddenList = forbiddenList
 }
 
 // SetBatchLimit sets limit of number of requests in a batch
@@ -114,14 +125,15 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
 // is used to serve HTTP connections. Subscriptions and reverse calls are not allowed in
 // this mode.
-func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream *jsoniter.Stream) {
+func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream *jsoniter.Stream) ([]*jsonrpcMessage, bool, error) {
 	// Don't serve if server is stopped.
 	if atomic.LoadInt32(&s.run) == 0 {
-		return
+		return nil, false, nil
 	}
 
 	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 	h.allowSubscribe = false
+	h.spuriousPayloadSize = s.spuriousPayloadSize
 	defer h.close(io.EOF, nil)
 
 	reqs, batch, err := codec.ReadBatch()
@@ -129,9 +141,18 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		if err != io.EOF {
 			codec.WriteJSON(ctx, errorMessage(&invalidMessageError{"parse error"}))
 		}
-		return
+		return nil, false, err
 	}
 	if batch {
+		// check if any of the requests in the batch are not allowed.  We make this restriction because some requests like eth_getLogs can have really large return sizes and because we're in a batch we
+		// cannot use streaming for these so end up with huge allocations leading to OOM.
+		for _, req := range reqs {
+			if _, ok := s.batchMethodForbiddenList[req.Method]; ok {
+				codec.WriteJSON(ctx, errorMessage(fmt.Errorf("method %s not allowed in a batch request", req.Method)))
+				return reqs, batch, nil
+			}
+		}
+
 		if s.batchLimit > 0 && len(reqs) > s.batchLimit {
 			codec.WriteJSON(ctx, errorMessage(fmt.Errorf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", s.batchLimit, len(reqs))))
 		} else {
@@ -140,6 +161,8 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 	} else {
 		h.handleMsg(reqs[0], stream)
 	}
+
+	return reqs, batch, nil
 }
 
 // Stop stops reading new requests, waits for stopPendingRequestTimeout to allow pending

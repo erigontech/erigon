@@ -57,7 +57,8 @@ var (
 	priceBump          uint64
 	blobPriceBump      uint64
 
-	noTxGossip bool
+	noTxGossip    bool
+	enableTimsort bool
 
 	commitEvery   time.Duration
 	purgeEvery    time.Duration
@@ -90,6 +91,7 @@ func init() {
 	rootCmd.PersistentFlags().DurationVar(&purgeEvery, utils.TxpoolPurgeEveryFlag.Name, utils.TxpoolPurgeEveryFlag.Value, utils.TxpoolPurgeEveryFlag.Usage)
 	rootCmd.PersistentFlags().DurationVar(&purgeDistance, utils.TxpoolPurgeDistanceFlag.Name, utils.TxpoolPurgeDistanceFlag.Value, utils.TxpoolPurgeDistanceFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&noTxGossip, utils.TxPoolGossipDisableFlag.Name, utils.TxPoolGossipDisableFlag.Value, utils.TxPoolGossipDisableFlag.Usage)
+	rootCmd.PersistentFlags().BoolVar(&enableTimsort, utils.TxPoolEnableTimsort.Name, utils.TxPoolEnableTimsort.Value, utils.TxPoolEnableTimsort.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 }
 
@@ -160,6 +162,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.PriceBump = priceBump
 	cfg.BlobPriceBump = blobPriceBump
 	cfg.NoGossip = noTxGossip
+	cfg.EnableTimsort = enableTimsort
 
 	cacheConfig := kvcache.DefaultCoherentConfig
 	cacheConfig.MetricsLabel = "txpool"

@@ -42,7 +42,7 @@ const (
 	BufIOSize = 128 * 4096
 )
 
-var BufferOptimalSize = 256 * datasize.MB /*  var because we want to sometimes change it from tests or command-line flags */
+var BufferOptimalSize = 1 * datasize.GB /*  var because we want to sometimes change it from tests or command-line flags */
 
 type Buffer interface {
 	Put(k, v []byte)

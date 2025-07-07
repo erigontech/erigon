@@ -2,6 +2,7 @@ package stages
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -19,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/zk/hermez_db"
 	zktypes "github.com/erigontech/erigon/zk/types"
 	"github.com/erigontech/secp256k1"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func handleStateForNewBlockStarting(
@@ -187,7 +189,8 @@ func finaliseBlock(
 	quit := batchContext.ctx.Done()
 	batchContext.sdb.eridb.OpenBatch(quit)
 	// this is actually the interhashes stage
-	newRoot, err := zkIncrementIntermediateHashes(batchContext.ctx, batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, batchContext.sdb.eridb, batchContext.sdb.smt, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
+	now := time.Now()
+	newRoot, err := zkIncrementIntermediateHashes_v2_Forwards(batchContext.ctx, batchContext.cfg.dirs.Tmp, batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
 	if err != nil {
 		batchContext.sdb.eridb.RollbackBatch()
 		return nil, err
@@ -196,6 +199,8 @@ func finaliseBlock(
 	if err = batchContext.sdb.eridb.CommitBatch(); err != nil {
 		return nil, err
 	}
+	elapsed := time.Since(now)
+	log.Info(fmt.Sprintf("[%s]: zkIncrementIntermediateHashes_v2_Forwards took %s", batchContext.s.LogPrefix(), elapsed))
 
 	finalHeader := finalBlock.HeaderNoCopy()
 	finalHeader.Root = newRoot

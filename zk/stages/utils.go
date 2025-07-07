@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"math/big"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"net/url"
@@ -17,6 +16,7 @@ import (
 	db2 "github.com/erigontech/erigon/smt/pkg/db"
 	jsonClient "github.com/erigontech/erigon/zkevm/jsonrpc/client"
 	jsonTypes "github.com/erigontech/erigon/zkevm/jsonrpc/types"
+	"strconv"
 )
 
 const (

@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/prometheus/client_golang/prometheus"
@@ -20,8 +21,10 @@ func Setup(address string, logger log.Logger) *http.ServeMux {
 	prometheusMux.Handle("/debug/metrics/prometheus", promhttp.Handler())
 
 	promServer := &http.Server{
-		Addr:    address,
-		Handler: prometheusMux,
+		Addr:              address,
+		Handler:           prometheusMux,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	go func() {

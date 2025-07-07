@@ -259,6 +259,11 @@ var (
 		Usage: "Transactions older than this distance will be purged",
 		Value: txpoolcfg.DefaultConfig.PurgeDistance,
 	}
+	TxPoolEnableTimsort = cli.BoolFlag{
+		Name:  "txpool.enabletimsort",
+		Usage: "Enable timsort for the txpool",
+		Value: true,
+	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
 		Name:  "mine",
@@ -945,6 +950,21 @@ var (
 		Usage: "Inject L1 information into the scalable contract and ger manager. Default true.",
 		Value: true,
 	}
+	SkipSmt = cli.BoolFlag{
+		Name:  "zkevm.skip-smt",
+		Usage: "Skip the SMT verification",
+		Value: false,
+	}
+	OnlySmtV2 = cli.BoolFlag{
+		Name:  "zkevm.only-smt-v2",
+		Usage: "Only use SMT v2 for state changes",
+		Value: true,
+	}
+	SequencerBlockGasLimit = cli.Uint64Flag{
+		Name:  "zkevm.sequencer-block-gas-limit",
+		Usage: "The gas limit of the sequencer block.  Default (0) means no limit.",
+		Value: 0,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",
@@ -1034,6 +1054,16 @@ var (
 		Name:  "rpc.gascap",
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
 		Value: 50000000,
+	}
+	SpuriousPayloadSize = cli.StringFlag{
+		Name:  "rpc.spurious-payload-size",
+		Usage: "Sets the point at which we log a payload as 'spurious'",
+		Value: "100MB",
+	}
+	BatchMethodForbiddenList = cli.StringFlag{
+		Name:  "rpc.batch-method-forbidden",
+		Usage: "Specify granular (method-by-method) API forbidden list for batch requests as CSV, these requests won't be allowed in a batch request as they can lead to OOM",
+		Value: "eth_getLogs,debug_traceTransaction,trace_transaction",
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{
 		Name:  "trace.compat",
@@ -2056,6 +2086,9 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	cfg := &fullCfg.DeprecatedTxPool
 	if ctx.IsSet(TxPoolDisableFlag.Name) {
 		cfg.Disable = ctx.Bool(TxPoolDisableFlag.Name)
+	}
+	if ctx.IsSet(TxPoolEnableTimsort.Name) {
+		cfg.EnableTimsort = ctx.Bool(TxPoolEnableTimsort.Name)
 	}
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {
 		locals := libcommon.CliString2Array(ctx.String(TxPoolLocalsFlag.Name))

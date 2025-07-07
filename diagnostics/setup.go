@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/urfave/cli/v2"
 
@@ -95,8 +96,10 @@ func SetupDiagnosticsEndpoint(metricsMux *http.ServeMux, addres string) *http.Se
 		SetupMiddleMuxHandler(diagMux, middleMux, "/debug/diag")
 
 		diagServer := &http.Server{
-			Addr:    addres,
-			Handler: middleMux,
+			Addr:              addres,
+			Handler:           middleMux,
+			ReadTimeout:       5 * time.Second,
+			ReadHeaderTimeout: 5 * time.Second,
 		}
 
 		go func() {

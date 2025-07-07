@@ -67,7 +67,8 @@ jobs:
         run: make test
       
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+      # pinned to v5 commit
+        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8
         if: ${{ matrix.os == 'ubuntu-20.04' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
@@ -105,7 +106,7 @@ jobs:
       - name: Monitor verified batches
         working-directory: ./kurtosis-cdk
         shell: bash
-        run: timeout 900s .github/scripts/monitor-verified-batches.sh --enclave zdk-v1 --rpc-url $(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc) --target 20 --timeout 900
+        run: timeout 900s .github/scripts/monitor-verified-batches.sh --enclave cdk-v1 --rpc-url $(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc) --target 20 --timeout 900
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
