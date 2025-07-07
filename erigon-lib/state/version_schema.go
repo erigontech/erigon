@@ -31,7 +31,7 @@ func InitSchemas() {
 	Schema.CodeDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
 	Schema.CommitmentDomain.version.DataKV = version.V1_0_standart
-	Schema.CommitmentDomain.version.AccessorKVI = version.V1_0_standart
+	Schema.CommitmentDomain.version.AccessorKVI = version.V2_0_standart
 	Schema.CommitmentDomain.hist.version.DataV = version.V1_0_standart
 	Schema.CommitmentDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.CommitmentDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
@@ -46,7 +46,7 @@ func InitSchemas() {
 	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
 	Schema.RCacheDomain.version.DataKV = version.V1_0_standart
-	Schema.RCacheDomain.version.AccessorKVI = version.V1_0_standart
+	Schema.RCacheDomain.version.AccessorKVI = version.V2_0_standart
 	Schema.RCacheDomain.hist.version.DataV = version.V1_0_standart
 	Schema.RCacheDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.RCacheDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
