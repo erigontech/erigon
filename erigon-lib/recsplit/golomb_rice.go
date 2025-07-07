@@ -31,7 +31,7 @@ var bijMemo = []uint32{0, 0, 0, 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15, 16, 18, 19
 // GolombRice can build up the golomb-rice encoding of the sequeuce of numbers, as well as read the numbers back from it.
 type GolombRice struct {
 	data     []uint64 // Present in the builder and in the reader
-	bitCount int      // Speficic to the builder - number of bits added to the encoding so far
+	bitCount int      // Specific to the builder - number of bits added to the encoding so far
 }
 
 // appendUnaryAll adds the unary encoding of specified sequence of numbers to the end of the
@@ -56,8 +56,8 @@ func (g *GolombRice) appendUnaryAll(unary []uint64) {
 }
 
 // appendFixed encodes the next value using specified Golomb parameter. Since we are using Golomb-Rice encoding,
-// all Golomb parameters are powers of two. Therefore we input log2 of golomb parameter, rather than golomn paramter itself,
-// for convinience
+// all Golomb parameters are powers of two. Therefore we input log2 of the Golomb parameter rather than the Golomb parameter itself,
+// for convenience
 func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 	if log2golomb == 0 {
 		return

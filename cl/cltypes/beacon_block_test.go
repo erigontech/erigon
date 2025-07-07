@@ -26,11 +26,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 //go:embed testdata/block_test_gnosis_deneb.json
@@ -114,7 +114,7 @@ func TestBeaconBody(t *testing.T) {
 }
 
 func TestBeaconBlockJson(t *testing.T) {
-	_, bc := clparams.GetConfigsByNetwork(networkid.GnosisChainID)
+	_, bc := clparams.GetConfigsByNetwork(chainspec.GnosisChainID)
 	block := NewSignedBeaconBlock(bc, clparams.DenebVersion)
 	block.Block.Body.Version = clparams.DenebVersion
 	err := json.Unmarshal(beaconBodyJSON, block)

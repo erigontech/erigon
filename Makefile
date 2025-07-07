@@ -149,7 +149,6 @@ COMMANDS += rpctest
 COMMANDS += sentry
 COMMANDS += state
 COMMANDS += txpool
-COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin

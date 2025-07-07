@@ -245,14 +245,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 
 	var limitedBigJump bool
+	limitedBigJumpPadding := uint64(2)
 	if e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore {
 		// note fcuHeader.Number.Uint64() may be < finishProgressBefore - protect from underflow by checking it is >
-		extraPadding := uint64(2)
-		limitedBigJump = (fcuHeader.Number.Uint64()-finishProgressBefore)+extraPadding > uint64(e.syncCfg.LoopBlockLimit)
-		e.logger.Info("[sync] limited big jump", "from", finishProgressBefore, "to", fcuHeader.Number.Uint64(), "amount", uint64(e.syncCfg.LoopBlockLimit), "padding", extraPadding)
+		limitedBigJump = (fcuHeader.Number.Uint64()-finishProgressBefore)+limitedBigJumpPadding > uint64(e.syncCfg.LoopBlockLimit)
 	}
 
-	isSynced := !limitedBigJump && finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	if limitedBigJump {
+		isSynced = false
+		e.logger.Info("[sync] limited big jump", "from", finishProgressBefore, "to", fcuHeader.Number.Uint64(), "amount", uint64(e.syncCfg.LoopBlockLimit), "padding", limitedBigJumpPadding)
+	}
 
 	canonicalHash, err := e.canonicalHash(ctx, tx, fcuHeader.Number.Uint64())
 	if err != nil {

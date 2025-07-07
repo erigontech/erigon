@@ -18,6 +18,7 @@ package recsplit
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -52,7 +53,7 @@ const (
 	//   Problem is "nature of false-positives" - they are randomly/smashed across .seg files.
 	//   It makes .seg files "warm" - which is bad because they are big and
 	//      data-locality of touches is bad (and maybe need visit a lot of shards to find key).
-	//   Can add build-in "existence filter" (like bloom/cucko/ribbon/xor-filter/fuse-filter) it will improve
+	//   Can add a built-in "existence filter" (like bloom/cuckoo/ribbon/xor-filter/fuse-filter); it will improve
 	//      data-locality - filters are small-enough and existance-chekcs will be co-located on disk.
 	//   But there are 2 additional properties we have in our data:
 	//      "keys are known", "keys are hashed" (.idx works on murmur3), ".idx can calc key-number by key".
@@ -76,16 +77,18 @@ type Index struct {
 	mmapHandle2        *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	filePath, fileName string
 
-	grData             []uint64
-	data               []byte // slice of correct size for the index to work with
+	grData      []uint64
+	data        []byte // slice of correct size for the index to work with
+	mmapHandle1 []byte // mmap handle for unix (this is used to close mmap)
+	golombRice  []uint32
+
+	version            uint8
 	startSeed          []uint64
-	golombRice         []uint32
-	mmapHandle1        []byte // mmap handle for unix (this is used to close mmap)
 	ef                 eliasfano16.DoubleEliasFano
 	bucketSize         int
 	size               int64
 	modTime            time.Time
-	baseDataID         uint64 // Index internaly organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
+	baseDataID         uint64 // Index internally organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
 	bucketCount        uint64 // Number of buckets
 	keyCount           uint64
 	recMask            uint64
@@ -97,7 +100,7 @@ type Index struct {
 	enums              bool
 
 	lessFalsePositives bool
-	existence          []byte
+	existenceV0        []byte
 
 	readers         *sync.Pool
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
@@ -112,24 +115,11 @@ func MustOpen(indexFile string) *Index {
 }
 
 func OpenIndex(indexFilePath string) (idx *Index, err error) {
-	var validationPassed = false
 	_, fName := filepath.Split(indexFilePath)
 	idx = &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
-
-	defer func() {
-		// recover from panic if one occurred. Set err to nil if no panic
-		if rec := recover(); rec != nil {
-			// do r with only the stack trace
-			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", indexFilePath, rec, dbg.Stack())
-		}
-		if err != nil || !validationPassed {
-			idx.Close()
-			idx = nil
-		}
-	}()
 
 	idx.f, err = os.Open(indexFilePath)
 	if err != nil {
@@ -145,17 +135,61 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
+
+	if err := idx.init(); err != nil {
+		return nil, err
+	}
+
+	// dontt know how to madv part of file in golang yet
+	//if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
+	//	if len(idx.existence) > 0 {
+	//		if err := mmap.MadviseWillNeed(idx.existence); err != nil {
+	//			panic(err)
+	//		}
+	//	}
+	//	pos := 1 + 8 + idx.bytesPerRec*int(idx.keyCount)
+	//	if err := mmap.MadviseWillNeed(idx.data[:pos]); err != nil {
+	//		panic(err)
+	//	}
+	//}
+
+	idx.readers = &sync.Pool{
+		New: func() interface{} {
+			return NewIndexReader(idx)
+		},
+	}
+	return idx, nil
+}
+
+func (idx *Index) init() (err error) {
+	var validationPassed = false
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if rec := recover(); rec != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", idx.fileName, rec, dbg.Stack())
+		}
+		if err != nil || !validationPassed {
+			idx.Close()
+			idx = nil
+		}
+	}()
+
 	defer idx.MadvSequential().DisableReadAhead()
 
-	// Read number of keys and bytes per record
-	idx.baseDataID = binary.BigEndian.Uint64(idx.data[:8])
-	idx.keyCount = binary.BigEndian.Uint64(idx.data[8:16])
+	// 1 byte: version, 7 bytes: app-specific minimal dataID (of current shard)
+	idx.version = idx.data[0]
+	baseDataBytes := bytes.Clone(idx.data[:8])
+	baseDataBytes[0] = 0
+	idx.baseDataID = binary.BigEndian.Uint64(baseDataBytes)
+
+	idx.keyCount = binary.BigEndian.Uint64(idx.data[8:])
 	idx.bytesPerRec = int(idx.data[16])
 	idx.recMask = (uint64(1) << (8 * idx.bytesPerRec)) - 1
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return nil, fmt.Errorf("file %s %w. offset is: %d which is below zero", fName, IncompatibleErr, offset)
+		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, IncompatibleErr, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -184,7 +218,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	}
 	features := Features(idx.data[offset])
 	if err := onlyKnownFeatures(features); err != nil {
-		return nil, fmt.Errorf("file %s %w", fName, err)
+		return fmt.Errorf("file %s %w", idx.fileName, err)
 	}
 
 	idx.enums = features&Enums != No
@@ -194,17 +228,17 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 		var size int
 		idx.offsetEf, size = eliasfano32.ReadEliasFano(idx.data[offset:])
 		offset += size
-
-		if idx.lessFalsePositives {
-			arrSz := binary.BigEndian.Uint64(idx.data[offset:])
-			offset += 8
-			if arrSz != idx.keyCount {
-				return nil, fmt.Errorf("%w. size of existence filter %d != keys count %d", IncompatibleErr, arrSz, idx.keyCount)
-			}
-			idx.existence = idx.data[offset : offset+int(arrSz)]
-			offset += int(arrSz)
-		}
 	}
+	if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
+		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
+		offset += 8
+		if arrSz != idx.keyCount {
+			return fmt.Errorf("%w. size of existence filter %d != keys count %d", IncompatibleErr, arrSz, idx.keyCount)
+		}
+		idx.existenceV0 = idx.data[offset : offset+int(arrSz)]
+		offset += int(arrSz)
+	}
+
 	// Size of golomb rice params
 	golombParamSize := binary.BigEndian.Uint16(idx.data[offset:])
 	offset += 4
@@ -225,14 +259,8 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	idx.grData = p[:l]
 	offset += 8 * int(l)
 	idx.ef.Read(idx.data[offset:])
-
-	idx.readers = &sync.Pool{
-		New: func() interface{} {
-			return NewIndexReader(idx)
-		},
-	}
 	validationPassed = true
-	return idx, nil
+	return nil
 }
 
 func onlyKnownFeatures(features Features) error {
@@ -258,7 +286,7 @@ func (idx *Index) Sizes() (total, offsets, ef, golombRice, existence, layer1 dat
 	}
 	ef = idx.ef.Size()
 	golombRice = datasize.ByteSize(len(idx.grData) * 8)
-	existence = datasize.ByteSize(len(idx.existence))
+	existence = datasize.ByteSize(len(idx.existenceV0))
 	layer1 = total - offsets - golombRice - existence
 	return
 }
@@ -349,6 +377,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		}
 		level++
 	}
+
 	if m > idx.leafSize {
 		d := gr.ReadNext(idx.golombParam(m))
 		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
@@ -370,8 +399,8 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
-	if idx.lessFalsePositives {
-		return found, idx.existence[found] == byte(bucketHash)
+	if idx.version == 0 && idx.lessFalsePositives {
+		return found, idx.existenceV0[found] == byte(bucketHash)
 	}
 	return found, true
 }
@@ -385,7 +414,7 @@ func (idx *Index) OrdinalLookup(i uint64) uint64 {
 
 func (idx *Index) Has(bucketHash, i uint64) bool {
 	if idx.lessFalsePositives {
-		return idx.existence[i] == byte(bucketHash)
+		return idx.existenceV0[i] == byte(bucketHash)
 	}
 	return true
 }

@@ -64,15 +64,19 @@ func remix(z uint64) uint64 {
 // Recsplit: Minimal perfect hashing via recursive splitting. In 2020 Proceedings of the Symposium on Algorithm Engineering and Experiments (ALENEX),
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
+	// v=0 falsePositeves=true - as array of hashedKeys[0]. Requires `enum=true`. Problem: requires key number - which recsplit has but expensive to encode (~5bytes/key)
+	version uint8
+
+	//v0 fields
+	existenceFV0 *os.File
+	existenceWV0 *bufio.Writer
+
 	offsetCollector *etl.Collector // Collector that sorts by offsets
 
 	indexW          *bufio.Writer
 	indexF          *os.File
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
-
-	existenceF *os.File
-	existenceW *bufio.Writer
 
 	indexFileName          string
 	indexFile, tmpFilePath string
@@ -127,7 +131,7 @@ type RecSplitArgs struct {
 
 	IndexFile  string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir     string
-	StartSeed  []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
+	StartSeed  []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accommodate all the levels
 	KeyCount   int
 	BucketSize int
 	BaseDataID uint64
@@ -137,7 +141,7 @@ type RecSplitArgs struct {
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
-// DefaultLeafSize - LeafSize=8 and BucketSize=100, use abount 1.8 bits per key. Increasing the leaf and bucket
+// DefaultLeafSize - LeafSize=8 and BucketSize=100, use about 1.8 bits per key. Increasing the leaf and bucket
 // sizes gives more compact structures (1.56 bits per key), at the	price of a slower construction time
 const DefaultLeafSize = 8
 const DefaultBucketSize = 100 // typical from 100 to 2000, with smaller buckets giving slightly larger but faster function
@@ -147,8 +151,17 @@ const DefaultBucketSize = 100 // typical from 100 to 2000, with smaller buckets 
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
 func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
+	if args.BaseDataID >= math.MaxUint64/2 {
+		return nil, fmt.Errorf("baseDataID %d is too large, must be less than %d", args.BaseDataID, math.MaxUint64/2)
+	}
+	const version uint8 = 0
+
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
-	rs := &RecSplit{bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount), lvl: log.LvlDebug, logger: logger}
+	rs := &RecSplit{
+		version:    version,
+		bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
+		lvl: log.LvlDebug, logger: logger,
+	}
 	if len(args.StartSeed) == 0 {
 		args.StartSeed = []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
@@ -161,9 +174,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 				rs.indexF.Close()
 				os.Remove(rs.indexF.Name())
 			}
-			if rs.existenceF != nil {
-				rs.existenceF.Close()
-				os.Remove(rs.existenceF.Name())
+			if rs.existenceFV0 != nil {
+				rs.existenceFV0.Close()
+				os.Remove(rs.existenceFV0.Name())
 			}
 		}
 	}()
@@ -192,14 +205,18 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.lessFalsePositives = args.LessFalsePositives
+	var err error
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
-		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
-		if err != nil {
-			return nil, err
+		if rs.version == 0 {
+			rs.existenceFV0, err = os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
+			if err != nil {
+				return nil, err
+			}
+			rs.existenceWV0 = bufio.NewWriter(rs.existenceFV0)
 		}
-		rs.existenceF = bufferFile
-		rs.existenceW = bufio.NewWriter(rs.existenceF)
+
 	}
+
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
 	rs.maxOffset = 0
@@ -232,10 +249,10 @@ func (rs *RecSplit) Close() {
 		_ = os.Remove(rs.indexF.Name())
 		rs.indexF = nil
 	}
-	if rs.existenceF != nil {
-		rs.existenceF.Close()
-		_ = os.Remove(rs.existenceF.Name())
-		rs.existenceF = nil
+	if rs.existenceFV0 != nil {
+		rs.existenceFV0.Close()
+		_ = os.Remove(rs.existenceFV0.Name())
+		rs.existenceFV0 = nil
 	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
@@ -362,7 +379,7 @@ func (rs *RecSplit) golombParam(m uint16) int {
 }
 
 // Add key to the RecSplit. There can be many more keys than what fits in RAM, and RecSplit
-// spills data onto disk to accomodate that. The key gets copied by the collector, therefore
+// spills data onto disk to accommodate that. The key gets copied by the collector, therefore
 // the slice underlying key is not getting accessed by RecSplit after this invocation.
 func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	if rs.built {
@@ -390,17 +407,18 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
-		if rs.lessFalsePositives {
-			//1 byte from each hashed key
-			if err := rs.existenceW.WriteByte(byte(hi)); err != nil {
-				return err
-			}
-		}
 	} else {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
 	}
+	if rs.version == 0 && rs.lessFalsePositives && rs.enums {
+		//1 byte from each hashed key
+		if err := rs.existenceWV0.WriteByte(byte(hi)); err != nil {
+			return err
+		}
+	}
+
 	rs.keysAdded++
 	rs.prevOffset = offset
 	return nil
@@ -417,7 +435,7 @@ func (rs *RecSplit) AddOffset(offset uint64) error {
 }
 
 func (rs *RecSplit) recsplitCurrentBucket() error {
-	// Extend rs.bucketSizeAcc to accomodate current bucket index + 1
+	// Extend rs.bucketSizeAcc to accommodate the current bucket index + 1
 	for len(rs.bucketSizeAcc) <= int(rs.currentBucketIdx)+1 {
 		rs.bucketSizeAcc = append(rs.bucketSizeAcc, rs.bucketSizeAcc[len(rs.bucketSizeAcc)-1])
 	}
@@ -456,7 +474,7 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 			}
 		}
 	}
-	// Extend rs.bucketPosAcc to accomodate current bucket index + 1
+	// Extend rs.bucketPosAcc to accommodate the current bucket index + 1
 	for len(rs.bucketPosAcc) <= int(rs.currentBucketIdx)+1 {
 		rs.bucketPosAcc = append(rs.bucketPosAcc, rs.bucketPosAcc[len(rs.bucketPosAcc)-1])
 	}
@@ -609,8 +627,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
-	// Write minimal app-specific dataID in this index file
+	// 1 byte: version, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
+	rs.numBuf[0] = rs.version
 	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
@@ -750,26 +769,25 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 }
 
 func (rs *RecSplit) flushExistenceFilter() error {
-	if !rs.enums || rs.keysAdded == 0 || !rs.lessFalsePositives {
-		return nil
-	}
-	defer rs.existenceF.Close()
+	if rs.version == 0 && rs.enums && rs.keysAdded > 0 && rs.lessFalsePositives {
+		defer rs.existenceFV0.Close()
 
-	//Write len of array
-	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
-		return err
-	}
+		//Write len of array
+		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+		if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+			return err
+		}
 
-	// flush bufio and rewind before io.Copy, but no reason to fsync the file - it temporary
-	if err := rs.existenceW.Flush(); err != nil {
-		return err
-	}
-	if _, err := rs.existenceF.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	if _, err := io.CopyN(rs.indexW, rs.existenceF, int64(rs.keysAdded)); err != nil {
-		return err
+		// flush bufio and rewind before io.Copy, but no reason to fsync the file - it temporary
+		if err := rs.existenceWV0.Flush(); err != nil {
+			return err
+		}
+		if _, err := rs.existenceFV0.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		if _, err := io.CopyN(rs.indexW, rs.existenceFV0, int64(rs.keysAdded)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
