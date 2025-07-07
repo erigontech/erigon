@@ -558,7 +558,7 @@ func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
 	return db.agg.BuildMissedAccessors(ctx, workers)
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
-	db.agg.EnableReadAhead()
+	db.agg.MadvNormal()
 	return db
 }
 
