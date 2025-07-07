@@ -194,7 +194,7 @@ func (b *BeaconRpcP2P) TestSendColumnSidecarsByRangeReqV1(
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes())
+	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRootProtocolV1, buffer.Bytes())
 	if err != nil {
 		return nil, pid, err
 	}
