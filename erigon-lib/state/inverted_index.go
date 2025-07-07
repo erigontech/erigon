@@ -234,6 +234,8 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 			ii.dirtyFiles.Set(dirtyFile)
 		}
 	}
+	fmt.Printf("[dbg] openDirtyFiles0: %s, %d, %d\n", ii.name, len(dirtyFiles), ii.dirtyFiles.Len())
+
 }
 
 func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
@@ -307,6 +309,8 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 func (ii *InvertedIndex) openDirtyFiles() error {
 	var invalidFileItems []*FilesItem
 	invalidFileItemsLock := sync.Mutex{}
+	fmt.Printf("[dbg] openDirtyFiles0: %s, %d\n", ii.name, ii.dirtyFiles.Len())
+
 	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			item := item
