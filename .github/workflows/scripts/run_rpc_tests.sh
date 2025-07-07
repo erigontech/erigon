@@ -16,10 +16,31 @@ git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://g
 echo "[DEBUG] Clone complete."
 
 # Always create and activate a Python virtual environment
-apt-get install python3-venv
-python3 -m venv .venv
-source .venv/bin/activate
-pip3 install -r requirements.txt
+cd "$WORKSPACE/rpc-tests"
+echo "[DEBUG] Creating Python virtual environment..."
+
+# Try different methods to create virtual environment
+if python3 -m venv .venv 2>/dev/null; then
+  echo "[DEBUG] Created venv using python3 -m venv"
+elif python3 -m virtualenv .venv 2>/dev/null; then
+  echo "[DEBUG] Created venv using python3 -m virtualenv"
+elif virtualenv .venv 2>/dev/null; then
+  echo "[DEBUG] Created venv using virtualenv"
+else
+  echo "[ERROR] Could not create virtual environment. Trying to install packages globally..."
+  # Fallback: install packages globally (not ideal but works)
+  pip3 install -r requirements.txt
+  echo "[DEBUG] Installed packages globally"
+fi
+
+# Activate virtual environment if it was created
+if [ -f ".venv/bin/activate" ]; then
+  source .venv/bin/activate
+  echo "[DEBUG] Virtual environment activated"
+  pip3 install -r requirements.txt
+else
+  echo "[DEBUG] Using global Python environment"
+fi
 
 # Remove the local results directory if any
 cd "$WORKSPACE/rpc-tests/integration"
@@ -80,6 +101,11 @@ fi
 
 # Always deactivate the Python virtual environment at the end
 cd "$WORKSPACE/rpc-tests"
-deactivate 2>/dev/null || echo "No active virtualenv"
+if [ -f ".venv/bin/activate" ]; then
+  deactivate 2>/dev/null || echo "No active virtualenv"
+  echo "[DEBUG] Virtual environment deactivated"
+else
+  echo "[DEBUG] No virtual environment to deactivate"
+fi
 
 exit $RUN_TESTS_EXIT_CODE
