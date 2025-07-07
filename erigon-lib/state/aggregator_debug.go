@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -214,6 +215,8 @@ func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 }
 
 func (f *iiDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorIIFiles) {
+	fmt.Printf("[dbg] FilesWithMissedAccessors: %s, %s, ----- %s\n", f.ii.name, f.files, f.ii.missedMapAccessors(f.files))
+
 	return &MissedAccessorIIFiles{
 		files: map[Accessors][]*FilesItem{
 			AccessorHashMap: f.ii.missedMapAccessors(f.files),
