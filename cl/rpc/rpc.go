@@ -128,6 +128,10 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	fmt.Println("Filtered request:", filteredReq.Len())
 	for i := 0; i < filteredReq.Len(); i++ {
 		fmt.Println("  ", filteredReq.Get(i).Columns.Length(), filteredReq.Get(i).BlockRoot.Hex())
+		// print all columns in the request
+		for j := 0; j < filteredReq.Get(i).Columns.Length(); j++ {
+			fmt.Println("    Column:", filteredReq.Get(i).Columns.Get(j))
+		}
 	}
 
 	var buffer buffer.Buffer
