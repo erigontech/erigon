@@ -19,10 +19,18 @@ if [ ! -d "$WORKSPACE/rpc-tests" ]; then
 else
   cd "$WORKSPACE/rpc-tests"
   echo "[DEBUG] Fetching $RPC_VERSION from origin..."
-  git fetch origin $RPC_VERSION > /dev/null 2>&1
+  git fetch origin $RPC_VERSION
   echo "[DEBUG] Fetch complete. Checking out $RPC_VERSION..."
-  git checkout -f $RPC_VERSION > /dev/null 2>&1 || git checkout -f tags/$RPC_VERSION > /dev/null 2>&1
-  echo "[DEBUG] Checkout complete."
+  if git checkout -f $RPC_VERSION; then
+    echo "[DEBUG] Checkout complete (as branch)."
+  elif git checkout -f tags/$RPC_VERSION; then
+    echo "[DEBUG] Checkout complete (as tag)."
+  else
+    echo "[ERROR] Failed to checkout $RPC_VERSION as either branch or tag"
+    echo "[ERROR] Available tags:"
+    git tag --list | head -10
+    exit 1
+  fi
   # Check for local changes
   if [ -n "$(git status --porcelain)" ]; then
     echo "WARNING: Local changes detected in $WORKSPACE/rpc-tests after checking out $RPC_VERSION:" >&2
