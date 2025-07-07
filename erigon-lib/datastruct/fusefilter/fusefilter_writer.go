@@ -150,9 +150,9 @@ func (w *Writer) FileName() string       { return w.fileName }
 func (w *Writer) AddHash(k uint64) error { return w.data.AddHash(k) }
 
 func (w *Writer) Build() error {
-	defer os.Remove(w.filePath + ".tmp")
-
-	f, err := os.Create(w.filePath + ".tmp")
+	tmpResultFilePath := w.filePath + ".tmp"
+	defer os.Remove(tmpResultFilePath)
+	f, err := os.Create(tmpResultFilePath)
 	if err != nil {
 		return fmt.Errorf("%s %w", w.filePath, err)
 	}
@@ -161,30 +161,23 @@ func (w *Writer) Build() error {
 	fw := bufio.NewWriter(f)
 	defer fw.Flush()
 
-	_, err = w.data.BuildTo(fw)
-	if err != nil {
+	if _, err = w.data.BuildTo(fw); err != nil {
 		return fmt.Errorf("%s %w", w.filePath, err)
 	}
-
-	err = fw.Flush()
-	if err != nil {
+	if err = fw.Flush(); err != nil {
 		return err
 	}
-
-	err = f.Sync()
-	if err != nil {
+	if !w.noFsync {
+		if err = f.Sync(); err != nil {
+			return err
+		}
+	}
+	if err = f.Close(); err != nil {
 		return err
 	}
-
-	err = f.Close()
-	if err != nil {
+	if err = os.Rename(tmpResultFilePath, w.filePath); err != nil {
 		return err
 	}
-	err = os.Rename(w.filePath+".tmp", w.filePath)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
