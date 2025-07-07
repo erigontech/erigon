@@ -290,7 +290,7 @@ func ChainSpecByName(chainName string) Spec {
 	spec, ok := supportedChains[chainName]
 	if !ok || spec.IsEmpty() {
 		panic("spec not found for chain: " + chainName)
-		return Spec{}
+		//return Spec{}
 	}
 	return spec
 }
@@ -318,10 +318,10 @@ func init() {
 			continue
 		}
 		if spec.GenesisHash == (common.Hash{}) {
-			panic(fmt.Sprintf("Genesis hash is not set for chain %s", spec.Name))
+			panic("Genesis hash is not set for chain " + spec.Name)
 		}
 		if spec.Config == nil {
-			panic(fmt.Sprintf("Chain config is not set for chain %s", spec.Name))
+			panic("Chain config is not set for chain " + spec.Name)
 		}
 		if spec.GenesisStateRoot == (common.Hash{}) {
 			spec.GenesisStateRoot = empty.RootHash

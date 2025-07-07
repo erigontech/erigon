@@ -84,8 +84,8 @@ func genesisFromFile(genesisPath string) *types.Genesis {
 }
 
 func getChainGenesisAndConfig() (genesis *types.Genesis, chainConfig *chain2.Config) {
-	name := ""
-	if chain == "" {
+	name := chain
+	if name == "" {
 		name = networkname.Mainnet
 	}
 	spec := chainspec.ChainSpecByName(name)
