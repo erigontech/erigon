@@ -3,7 +3,6 @@ package das
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -382,7 +381,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 						reqLength += id.Columns.Length()
 						return true
 					})
-					fmt.Println(d.rpc.TestSendColumnSidecarsByRangeReqV1(cctx))
+					//fmt.Println(d.rpc.TestSendColumnSidecarsByRangeReqV1(cctx))
 					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
 					select {
 					case resultChan <- resultData{
