@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -x
 
 # Accept WORKSPACE as the first argument, default to /tmp directory if not provided
 WORKSPACE="${1:-/tmp}"
@@ -7,13 +8,19 @@ WORKSPACE="${1:-/tmp}"
 RESULT_DIR="$2"
 
 # Ensure rpc-tests repo is present and on the correct branch
+echo "[DEBUG] Checking for $WORKSPACE/rpc-tests directory..."
 if [ ! -d "$WORKSPACE/rpc-tests" ]; then
+  echo "[DEBUG] Cloning rpc-tests repo (branch v1.66.0) into $WORKSPACE/rpc-tests..."
   git -c advice.detachedHead=false clone --depth 1 --branch v1.66.0 https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests"
+  echo "[DEBUG] Clone complete."
   cd "$WORKSPACE/rpc-tests"
 else
   cd "$WORKSPACE/rpc-tests"
+  echo "[DEBUG] Fetching v1.66.0 from origin..."
   git fetch origin v1.66.0 > /dev/null 2>&1
-  git checkout v1.66.0 > /dev/null 2>&1
+  echo "[DEBUG] Fetch complete. Checking out v1.66.0..."
+  git checkout v1.66.0 > /dev/null
+  echo "[DEBUG] Checkout complete."
   # Check for local changes
   if [ -n "$(git status --porcelain)" ]; then
     echo "WARNING: Local changes detected in $WORKSPACE/rpc-tests after checking out v1.66.0:" >&2
@@ -24,7 +31,6 @@ fi
 # Always create and activate a Python virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
-pip3 install --upgrade pip > /dev/null
 pip3 install -r requirements.txt > /dev/null
 
 # Remove the local results directory if any
@@ -71,7 +77,7 @@ disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 # Run the RPC integration tests
 set +e # Disable exit on error for test run
 
-python3 -u ./run_tests.py --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff --exclude-api-list "$disabled_test_list"
+python3 ./run_tests.py --port 8545 --engine-port 8545 --continue -f --json-diff -x "$disabled_test_list"
 RUN_TESTS_EXIT_CODE=$?
 
 set -e # Re-enable exit on error after test run
