@@ -183,7 +183,7 @@ var (
 		Enums.Transactions,
 		"transactions",
 		snaptype.Versions{
-			Current:      version.V1_0, //2,
+			Current:      version.V2_0, //2,
 			MinSupported: version.V1_0,
 		},
 		nil,

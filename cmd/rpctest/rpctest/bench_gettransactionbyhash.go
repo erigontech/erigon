@@ -36,7 +36,7 @@ import (
 //
 //	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 //
-// recordFile stores all eth_GetTransactionByHash returned with success
+// recordFile stores all eth_GetTransactioneHash returned with success
 //
 //	errorFile stores information when erigon and geth doesn't return same data
 func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
@@ -81,7 +81,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 
 	teeToGetTxs := make(chan string, 1000)
 	g := errgroup.Group{}
-	g.SetLimit(estimate.AlmostAllCPUs())
+	g.SetLimit(estimate.AlmostAllCPUs() * 2)
 	g.Go(func() error {
 		for {
 			select {
