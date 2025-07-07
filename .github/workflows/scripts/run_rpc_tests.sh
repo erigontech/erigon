@@ -26,8 +26,7 @@ else
   elif git checkout -f tags/$RPC_VERSION; then
     echo "[DEBUG] Checkout complete (as tag)."
   else
-    echo "[ERROR] Failed to checkout $RPC_VERSION as either branch or tag"
-    echo "[ERROR] Available tags:"
+    echo "[ERROR] Failed to checkout $RPC_VERSION as either branch or tag. Available tags:"
     git tag --list | head -10
     exit 1
   fi
