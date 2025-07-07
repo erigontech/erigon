@@ -1281,14 +1281,13 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer clean()
 
+	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+		return err
+	}
 	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil); err != nil {
 		return err
 	}
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
-		return err
-	}
-	err = agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers())
-	if err != nil {
 		return err
 	}
 
