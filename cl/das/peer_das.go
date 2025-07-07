@@ -387,19 +387,21 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 						fmt.Println("requesting column sidecar for block root - len", ids.Get(i).Columns.Length())
 					}
 
-					//fmt.Println(d.rpc.TestSendColumnSidecarsByRangeReqV1(cctx))
-					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
-					select {
-					case resultChan <- resultData{
-						sidecars:  s,
-						pid:       pid,
-						cgc:       cgc,
-						reqLength: reqLength,
-						err:       err,
-					}:
-					default:
-						// just drop it if the channel is full
-					}
+					go func() {
+						//fmt.Println(d.rpc.TestSendColumnSidecarsByRangeReqV1(cctx))
+						s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
+						select {
+						case resultChan <- resultData{
+							sidecars:  s,
+							pid:       pid,
+							cgc:       cgc,
+							reqLength: reqLength,
+							err:       err,
+						}:
+						default:
+							// just drop it if the channel is full
+						}
+					}()
 				}()
 			}
 		}
