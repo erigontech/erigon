@@ -256,9 +256,9 @@ func TestValidation(t *testing.T) {
 		// fork) at block 7279999, before Petersburg. Local is incompatible.
 		{7279999, ID{Hash: ChecksumToBytes(0xa00bc324), Next: 7279999}, ErrLocalIncompatibleOrStale},
 	}
-	heightForks, timeForks := GatherForks(chainspec.MainnetChainConfig, 0 /* genesisTime */)
+	heightForks, timeForks := GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
 	for i, tt := range tests {
-		filter := newFilter(heightForks, timeForks, chainspec.MainnetGenesisHash, tt.head, 0)
+		filter := newFilter(heightForks, timeForks, chainspec.Mainnet.GenesisHash, tt.head, 0)
 		if err := filter(tt.id); err != tt.err {
 			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}

@@ -77,8 +77,8 @@ func TestGenesisBlockRoots(t *testing.T) {
 
 	block, _, err := core.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
-	if block.Hash() != chainspec.MainnetGenesisHash {
-		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), chainspec.MainnetGenesisHash)
+	if block.Hash() != chainspec.Mainnet.GenesisHash {
+		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), chainspec.Mainnet.GenesisHash)
 	}
 	for _, netw := range []string{
 		networkname.Gnosis,

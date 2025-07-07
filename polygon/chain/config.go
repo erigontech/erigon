@@ -28,10 +28,16 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
+func init() {
+	chainspec.RegisterChainSpec(networkname.Amoy, Amoy)
+	chainspec.RegisterChainSpec(networkname.BorMainnet, BorMainnet)
+	chainspec.RegisterChainSpec(networkname.BorDevnet, BorDevnet)
+}
+
 //go:embed chainspecs
 var chainspecs embed.FS
 
-func readChainSpec(filename string) *chain.Config {
+func readBorChainSpec(filename string) *chain.Config {
 	spec := chainspec.ReadChainConfig(chainspecs, filename)
 	if spec.BorJSON != nil {
 		borConfig := &borcfg.BorConfig{}
@@ -44,41 +50,25 @@ func readChainSpec(filename string) *chain.Config {
 }
 
 var (
-	AmoyGenesisHash       = common.HexToHash("0x7202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697")
-	BorMainnetGenesisHash = common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
-	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
-
-	AmoyChainConfig       = readChainSpec("chainspecs/amoy.json")
-	BorMainnetChainConfig = readChainSpec("chainspecs/bor-mainnet.json")
-	BorDevnetChainConfig  = readChainSpec("chainspecs/bor-devnet.json")
-)
-
-var (
 	Amoy = chainspec.Spec{
 		Name:        networkname.Amoy,
-		GenesisHash: AmoyGenesisHash,
-		Config:      AmoyChainConfig,
+		GenesisHash: common.HexToHash("0x7202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697"),
+		Config:      readBorChainSpec("chainspecs/amoy.json"),
 		Genesis:     AmoyGenesisBlock(),
-		Bootnodes:   AmoyBootnodes,
+		Bootnodes:   amoyBootnodes,
 	}
 	BorMainnet = chainspec.Spec{
 		Name:        networkname.BorMainnet,
-		GenesisHash: BorMainnetGenesisHash,
-		Config:      BorMainnetChainConfig,
-		Bootnodes:   BorMainnetBootnodes,
+		GenesisHash: common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b"),
+		Config:      readBorChainSpec("chainspecs/bor-mainnet.json"),
+		Bootnodes:   borMainnetBootnodes,
 		Genesis:     BorMainnetGenesisBlock(),
 		DNSNetwork:  "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io",
 	}
 	BorDevnet = chainspec.Spec{
 		Name:        networkname.BorDevnet,
-		GenesisHash: BorDevnetGenesisHash,
-		Config:      BorDevnetChainConfig,
+		GenesisHash: common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87"),
+		Config:      readBorChainSpec("chainspecs/bor-devnet.json"),
 		Genesis:     BorDevnetGenesisBlock(),
 	}
 )
-
-func init() {
-	chainspec.RegisterChainSpec(networkname.Amoy, Amoy)
-	chainspec.RegisterChainSpec(networkname.BorMainnet, BorMainnet)
-	chainspec.RegisterChainSpec(networkname.BorDevnet, BorDevnet)
-}

@@ -25,15 +25,54 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
-	"path"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/types"
 )
+
+func init() {
+	//RegisterChainSpec(networkname.Dev, )
+
+	RegisterChainSpec(networkname.Mainnet, Mainnet)
+	RegisterChainSpec(networkname.Sepolia, Sepolia)
+	RegisterChainSpec(networkname.Hoodi, Hoodi)
+	RegisterChainSpec(networkname.Holesky, Holesky)
+	RegisterChainSpec(networkname.Gnosis, Gnosis)
+	RegisterChainSpec(networkname.Chiado, Chiado)
+	RegisterChainSpec(networkname.Test, Test)
+
+	// verify registered chains
+	for _, spec := range registeredChainsByName {
+		if spec.IsEmpty() {
+			panic("chain spec is empty for chain " + spec.Name)
+		}
+		if spec.GenesisHash == (common.Hash{}) {
+			panic("genesis hash is not set for chain " + spec.Name)
+		}
+		if spec.Genesis == nil {
+			panic("genesis is not set for chain " + spec.Name)
+		}
+		if spec.GenesisStateRoot == (common.Hash{}) {
+			spec.GenesisStateRoot = empty.RootHash
+		}
+		spec.Config = spec.Genesis.Config
+		if spec.Config == nil {
+			panic("chain config is not set for chain " + spec.Name)
+		}
+		//spec.Genesis.Config = spec.Config // for testing networks
+
+		registeredChainsByName[spec.Name] = spec
+		registeredChainsByGenesisHash[spec.GenesisHash] = spec
+	}
+
+	for _, name := range chainNamesPoS {
+		s := ChainSpecByName(name)
+		chainIdsPoS = append(chainIdsPoS, s.Config.ChainID)
+	}
+}
 
 //go:embed chainspecs
 var chainspecs embed.FS
@@ -55,6 +94,36 @@ func ReadChainConfig(fileSys fs.FS, filename string) *chain.Config {
 	return spec
 }
 
+// ChainSpecByName returns the chain spec for the given chain name
+func ChainSpecByName(chainName string) Spec {
+	spec, ok := registeredChainsByName[chainName]
+	if !ok || spec.IsEmpty() {
+		panic("spec not found for chain: " + chainName)
+		//return Spec{}
+	}
+	return spec
+}
+
+// ChainSpecByGenesisHash returns the chain spec for the given genesis hash
+func ChainSpecByGenesisHash(genesisHash common.Hash) Spec {
+	spec, ok := registeredChainsByGenesisHash[genesisHash]
+	if !ok || spec.IsEmpty() {
+		return Spec{}
+	}
+	return spec
+}
+
+// RegisterChainSpec registers a new chain spec with the given name and spec.
+// If the name already exists, it will be overwritten.
+func RegisterChainSpec(name string, spec Spec) {
+	registeredChainsByName[name] = spec
+	NetworkNameByID[spec.Config.ChainID.Uint64()] = name
+
+	if spec.GenesisHash != (common.Hash{}) {
+		registeredChainsByGenesisHash[spec.GenesisHash] = spec
+	}
+}
+
 type Spec struct {
 	Name             string      // normalized chain name, e.g. "mainnet", "sepolia", etc. Never empty.
 	GenesisHash      common.Hash // block hash of the genesis block
@@ -69,11 +138,22 @@ func (cs Spec) IsEmpty() bool {
 	return cs.Name == "" && cs.GenesisHash == (common.Hash{}) && cs.Config == nil && len(cs.Bootnodes) == 0
 }
 
+var ( // listings filled by init()
+	// mapping of chain genesis hashes to chain specs.
+	registeredChainsByGenesisHash = map[common.Hash]Spec{}
+
+	// mapping of chain names to chain specs.
+	registeredChainsByName = map[string]Spec{}
+
+	// list of chain IDs that are considered Proof of Stake (PoS) chains
+	chainIdsPoS = []*big.Int{}
+)
+
 var (
 	Mainnet = Spec{
 		Name:        networkname.Mainnet,
 		GenesisHash: common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"),
-		Bootnodes:   MainnetBootnodes,
+		Bootnodes:   mainnetBootnodes,
 		Config:      ReadChainConfig(chainspecs, "chainspecs/mainnet.json"),
 		Genesis:     MainnetGenesisBlock(),
 		DNSNetwork:  dnsPrefix + "all.mainnet.ethdisco.net",
@@ -82,7 +162,7 @@ var (
 	Holesky = Spec{
 		Name:        networkname.Holesky,
 		GenesisHash: common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"),
-		Bootnodes:   HoleskyBootnodes,
+		Bootnodes:   holeskyBootnodes,
 		Config:      ReadChainConfig(chainspecs, "chainspecs/holesky.json"),
 		Genesis:     HoleskyGenesisBlock(),
 		DNSNetwork:  dnsPrefix + "all.holesky.ethdisco.net",
@@ -91,7 +171,7 @@ var (
 	Sepolia = Spec{
 		Name:        networkname.Sepolia,
 		GenesisHash: common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"),
-		Bootnodes:   SepoliaBootnodes,
+		Bootnodes:   sepoliaBootnodes,
 		Config:      ReadChainConfig(chainspecs, "chainspecs/sepolia.json"),
 		Genesis:     SepoliaGenesisBlock(),
 		DNSNetwork:  dnsPrefix + "all.sepolia.ethdisco.net",
@@ -101,7 +181,7 @@ var (
 		Name:        networkname.Hoodi,
 		GenesisHash: common.HexToHash("0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b"),
 		Config:      ReadChainConfig(chainspecs, "chainspecs/hoodi.json"),
-		Bootnodes:   HoodiBootnodes,
+		Bootnodes:   hoodiBootnodes,
 		Genesis:     HoodiGenesisBlock(),
 		DNSNetwork:  dnsPrefix + "all.hoodi.ethdisco.net",
 	}
@@ -111,7 +191,7 @@ var (
 		GenesisHash:      common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756"),
 		GenesisStateRoot: common.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b"),
 		Config:           ReadChainConfig(chainspecs, "chainspecs/gnosis.json"),
-		Bootnodes:        GnosisBootnodes,
+		Bootnodes:        gnosisBootnodes,
 		Genesis:          GnosisGenesisBlock(),
 	}
 
@@ -120,7 +200,7 @@ var (
 		GenesisHash:      common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a"),
 		GenesisStateRoot: common.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31"),
 		Config:           ReadChainConfig(chainspecs, "chainspecs/chiado.json"),
-		Bootnodes:        ChiadoBootnodes,
+		Bootnodes:        chiadoBootnodes,
 		Genesis:          ChiadoGenesisBlock(),
 	}
 
@@ -134,121 +214,13 @@ var (
 	}
 )
 
-// Filled by init(); mapping of chain genesis hashes to chain specs.
-var supportedChainGenesisHashes = map[common.Hash]Spec{}
-
-// mapping of chain names to chain specs.
-var supportedChains = map[string]Spec{
-	//networkname.Mainnet: Mainnet,
-	//networkname.Holesky: Holesky,
-	//networkname.Sepolia: Sepolia,
-	//networkname.Hoodi:   Hoodi,
-	//networkname.Gnosis:  Gnosis,
-	//networkname.Chiado:  Chiado,
-	//networkname.Test:    Test,
-
-	"all-clique-protocol-changes": {
-		// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
-		// and accepted by the Ethereum core developers into the Clique consensus.
-		Name:        "all-clique-protocol-changes",
-		GenesisHash: empty.RootHash,
-		Config: &chain.Config{
-			ChainID:               big.NewInt(1337),
-			Consensus:             chain.CliqueConsensus,
-			HomesteadBlock:        big.NewInt(0),
-			TangerineWhistleBlock: big.NewInt(0),
-			SpuriousDragonBlock:   big.NewInt(0),
-			ByzantiumBlock:        big.NewInt(0),
-			ConstantinopleBlock:   big.NewInt(0),
-			PetersburgBlock:       big.NewInt(0),
-			IstanbulBlock:         big.NewInt(0),
-			MuirGlacierBlock:      big.NewInt(0),
-			BerlinBlock:           big.NewInt(0),
-			LondonBlock:           big.NewInt(0),
-			Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
-		},
-		Genesis: &types.Genesis{},
-	},
-}
-
-// Genesis hashes to enforce below configs on.
-var (
-	MainnetGenesisHash = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
-	HoleskyGenesisHash = common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
-	SepoliaGenesisHash = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	HoodiGenesisHash   = common.HexToHash("0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b")
-	GnosisGenesisHash  = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
-	ChiadoGenesisHash  = common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
-)
-
-var (
-	// MainnetChainConfig is the chain parameters to run a node on the main network.
-	MainnetChainConfig = ReadChainConfig(chainspecs, "chainspecs/mainnet.json")
-
-	// HoleskyChainConfi contains the chain parameters to run a node on the Holesky test network.
-	HoleskyChainConfig = ReadChainConfig(chainspecs, "chainspecs/holesky.json")
-
-	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
-	SepoliaChainConfig = ReadChainConfig(chainspecs, "chainspecs/sepolia.json")
-
-	// HoodiChainConfig contains the chain parameters to run a node on the Hoodi test network.
-	HoodiChainConfig = ReadChainConfig(chainspecs, "chainspecs/hoodi.json")
-
-	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
-	// and accepted by the Ethereum core developers into the Clique consensus.
-	AllCliqueProtocolChanges = &chain.Config{
-		ChainID:               big.NewInt(1337),
-		Consensus:             chain.CliqueConsensus,
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
-	}
-
-	GnosisChainConfig = ReadChainConfig(chainspecs, "chainspecs/gnosis.json")
-
-	ChiadoChainConfig = ReadChainConfig(chainspecs, "chainspecs/chiado.json")
-
-	CliqueSnapshot = NewConsensusSnapshotConfig(10, 1024, 16384, true, "")
-)
-
-type ConsensusSnapshotConfig struct {
-	CheckpointInterval uint64 // Number of blocks after which to save the vote snapshot to the database
-	InmemorySnapshots  int    // Number of recent vote snapshots to keep in memory
-	InmemorySignatures int    // Number of recent block signatures to keep in memory
-	DBPath             string
-	InMemory           bool
-}
-
-const cliquePath = "clique"
-
-func NewConsensusSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *ConsensusSnapshotConfig {
-	if len(dbPath) == 0 {
-		dbPath = paths.DefaultDataDir()
-	}
-
-	return &ConsensusSnapshotConfig{
-		checkpointInterval,
-		inmemorySnapshots,
-		inmemorySignatures,
-		path.Join(dbPath, cliquePath),
-		inmemory,
-	}
-}
-
-func NetworkIDByChainName(chain string) uint64 {
-	spec := ChainSpecByName(chain)
-	if spec.IsEmpty() {
-		return 0
-	}
-	return spec.Config.ChainID.Uint64()
+var chainNamesPoS = []string{
+	networkname.Mainnet,
+	networkname.Holesky,
+	networkname.Sepolia,
+	networkname.Hoodi,
+	networkname.Gnosis,
+	networkname.Chiado,
 }
 
 func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
@@ -256,15 +228,7 @@ func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bo
 }
 
 func isChainIDPoS(chainID *big.Int) bool {
-	ids := []*big.Int{
-		MainnetChainConfig.ChainID,
-		HoleskyChainConfig.ChainID,
-		SepoliaChainConfig.ChainID,
-		HoodiChainConfig.ChainID,
-		GnosisChainConfig.ChainID,
-		ChiadoChainConfig.ChainID,
-	}
-	for _, id := range ids {
+	for _, id := range chainIdsPoS {
 		if id.Cmp(chainID) == 0 {
 			return true
 		}
@@ -285,73 +249,3 @@ func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func(
 	currentTD := currentTDProvider()
 	return (currentTD != nil) && (terminalTD.Cmp(currentTD) <= 0)
 }
-
-func ChainSpecByName(chainName string) Spec {
-	spec, ok := supportedChains[chainName]
-	if !ok || spec.IsEmpty() {
-		panic("spec not found for chain: " + chainName)
-		//return Spec{}
-	}
-	return spec
-}
-
-func ChainSpecByGenesisHash(genesisHash common.Hash) Spec {
-	spec, ok := supportedChainGenesisHashes[genesisHash]
-	if !ok || spec.IsEmpty() {
-		return Spec{}
-	}
-	return spec
-}
-
-func RegisterChainSpec(name string, spec Spec) {
-	supportedChains[name] = spec
-	NetworkNameByID[spec.Config.ChainID.Uint64()] = name
-
-	if spec.GenesisHash != (common.Hash{}) {
-		supportedChainGenesisHashes[spec.GenesisHash] = spec
-	}
-}
-
-func init() {
-	for _, spec := range supportedChains {
-		if spec.IsEmpty() {
-			continue
-		}
-		if spec.GenesisHash == (common.Hash{}) {
-			panic("Genesis hash is not set for chain " + spec.Name)
-		}
-		if spec.Config == nil {
-			panic("Chain config is not set for chain " + spec.Name)
-		}
-		if spec.GenesisStateRoot == (common.Hash{}) {
-			spec.GenesisStateRoot = empty.RootHash
-		}
-		spec.Genesis.Config = spec.Config // for testing networks
-
-		supportedChains[spec.Name] = spec
-		supportedChainGenesisHashes[spec.GenesisHash] = spec
-	}
-
-	chainConfigByName[networkname.Dev] = AllCliqueProtocolChanges
-
-	RegisterChainSpec(networkname.Mainnet, Mainnet)
-	RegisterChainSpec(networkname.Sepolia, Sepolia)
-	RegisterChainSpec(networkname.Hoodi, Hoodi)
-	RegisterChainSpec(networkname.Holesky, Holesky)
-	RegisterChainSpec(networkname.Gnosis, Gnosis)
-	RegisterChainSpec(networkname.Chiado, Chiado)
-	RegisterChainSpec(networkname.Test, Test)
-}
-
-var chainConfigByName = make(map[string]*chain.Config)
-
-//networkname.Dev
-//developer := cfg.Miner.Etherbase
-//if developer == (common.Address{}) {
-//Fatalf("Please specify developer account address using --miner.etherbase")
-//}
-//logger.Info("Using developer account", "address", developer)
-//
-//// Create a new developer genesis block or reuse existing one
-//cfg.Genesis = chainspec.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
-//logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
