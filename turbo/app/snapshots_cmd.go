@@ -759,6 +759,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
 				return err
 			}
+		case integrity.RCacheNoDups:
+			if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
