@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -32,7 +32,7 @@ import (
 var chainspecs embed.FS
 
 func readChainSpec(filename string) *chain.Config {
-	spec := chainspec.ReadChainSpec(chainspecs, filename)
+	spec := chainspec.ReadChainConfig(chainspecs, filename)
 	if spec.BorJSON != nil {
 		borConfig := &borcfg.BorConfig{}
 		if err := json.Unmarshal(spec.BorJSON, borConfig); err != nil {
@@ -53,9 +53,32 @@ var (
 	BorDevnetChainConfig  = readChainSpec("chainspecs/bor-devnet.json")
 )
 
+var (
+	Amoy = chainspec.Spec{
+		Name:        networkname.Amoy,
+		GenesisHash: AmoyGenesisHash,
+		Config:      AmoyChainConfig,
+		Genesis:     AmoyGenesisBlock(),
+		Bootnodes:   AmoyBootnodes,
+	}
+	BorMainnet = chainspec.Spec{
+		Name:        networkname.BorMainnet,
+		GenesisHash: BorMainnetGenesisHash,
+		Config:      BorMainnetChainConfig,
+		Bootnodes:   BorMainnetBootnodes,
+		Genesis:     BorMainnetGenesisBlock(),
+		DNSNetwork:  "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io",
+	}
+	BorDevnet = chainspec.Spec{
+		Name:        networkname.BorDevnet,
+		GenesisHash: BorDevnetGenesisHash,
+		Config:      BorDevnetChainConfig,
+		Genesis:     BorDevnetGenesisBlock(),
+	}
+)
+
 func init() {
-	chainspec.RegisterChain(networkname.Amoy, AmoyChainConfig, AmoyGenesisBlock(), AmoyGenesisHash, AmoyBootnodes, "")
-	chainspec.RegisterChain(networkname.BorDevnet, BorDevnetChainConfig, BorDevnetGenesisBlock(), BorDevnetGenesisHash, nil, "")
-	chainspec.RegisterChain(networkname.BorMainnet, BorMainnetChainConfig, BorMainnetGenesisBlock(), BorMainnetGenesisHash, BorMainnetBootnodes,
-		"enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io")
+	chainspec.RegisterChainSpec(networkname.Amoy, Amoy)
+	chainspec.RegisterChainSpec(networkname.BorMainnet, BorMainnet)
+	chainspec.RegisterChainSpec(networkname.BorDevnet, BorDevnet)
 }

@@ -78,7 +78,9 @@ func main() {
 }
 
 func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
-	chainId := chainspec.ChainConfigByChainName(chain).ChainID
+	spec := chainspec.ChainSpecByName(chain)
+	chainId := spec.Config.ChainID
+
 	rpcClient := requests.NewRequestGenerator(url, logger)
 	transactor := testhelpers.NewTransactor(rpcClient, chainId)
 	amount, _ := new(big.Int).SetString(amountStr, 10)

@@ -21,7 +21,6 @@ package chainspec
 
 import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/common"
 )
 
 // MainnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
@@ -123,26 +122,6 @@ var ChiadoBootnodes = []string{
 }
 
 const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
-
-var knownDNSNetwork = make(map[common.Hash]string)
-
-// KnownDNSNetwork returns the address of a public DNS-based node list for the given
-// genesis hash. See https://github.com/ethereum/discv4-dns-lists for more information.
-func KnownDNSNetwork(genesis common.Hash) string {
-	return knownDNSNetwork[genesis]
-}
-
-var bootNodeURLsByGenesisHash = make(map[common.Hash][]string)
-
-func BootnodeURLsByGenesisHash(genesis common.Hash) []string {
-	return bootNodeURLsByGenesisHash[genesis]
-}
-
-var bootNodeURLsByChainName = make(map[string][]string)
-
-func BootnodeURLsOfChain(chain string) []string {
-	return bootNodeURLsByChainName[chain]
-}
 
 func StaticPeerURLsOfChain(chain string) []string {
 	switch chain {

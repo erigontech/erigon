@@ -145,9 +145,3 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis 
 		Alloc:      ReadPrealloc(allocs, "allocs/dev.json"),
 	}
 }
-
-var genesisBlockByChainName = make(map[string]*types.Genesis)
-
-func GenesisBlockByChainName(chain string) *types.Genesis {
-	return genesisBlockByChainName[chain]
-}
