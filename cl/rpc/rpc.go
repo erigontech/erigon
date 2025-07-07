@@ -123,25 +123,13 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 		return nil, pid, 0, err
 	}
 
-	// filteredReq.Truncate(1)
-
-	// // print the filtered request for debugging purposes
-	// fmt.Println("Filtered request:", filteredReq.Len())
-	// for i := 0; i < filteredReq.Len(); i++ {
-	// 	fmt.Println("  ", filteredReq.Get(i).Columns.Length(), filteredReq.Get(i).BlockRoot.Hex())
-	// 	// print all columns in the request
-	// 	for j := 0; j < filteredReq.Get(i).Columns.Length(); j++ {
-	// 		fmt.Println("    Column:", filteredReq.Get(i).Columns.Get(j))
-	// 	}
-	// }
-
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
 		return nil, "", 0, err
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
+	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRootProtocolV1, data)
 	if err != nil {
 		return nil, pid, 0, err
 	}
