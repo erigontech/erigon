@@ -490,7 +490,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 		gas = modExpMultComplexityEip7883(gas /*max_length */)
 
 		gas.Mul(gas, adjExpLen)
-		gas.Div(gas, big3)
+		//gas.Div(gas, big3)
 		if gas.BitLen() > 64 {
 			return math.MaxUint64
 		}
