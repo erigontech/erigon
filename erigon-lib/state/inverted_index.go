@@ -314,7 +314,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
-				fmt.Printf("[dbg] scanDirtyFiles: %s, %s, %s, %s\n", ii.name, fPathPattern, fPath, err)
+				fmt.Printf("[dbg] openDirtyFiles: %s, %s, %s, %s\n", ii.name, fPathPattern, fPath, err)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
