@@ -357,7 +357,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	requestColumnSidecars := func(req *downloadRequest) {
 		// send the request in a loop with a ticker to avoid overwhelming the peer
 		// keep trying until the request is done
-		ticker := time.NewTicker(300 * time.Millisecond)
+		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		wg := sync.WaitGroup{}
 	loop:
@@ -386,26 +386,25 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 						fmt.Println("requesting column sidecar for block root", ids.Get(i).BlockRoot)
 						fmt.Println("requesting column sidecar for block root - len", ids.Get(i).Columns.Length())
 					}
-					go func() {
-						//fmt.Println(d.rpc.TestSendColumnSidecarsByRangeReqV1(cctx))
-						s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
-						select {
-						case resultChan <- resultData{
-							sidecars:  s,
-							pid:       pid,
-							cgc:       cgc,
-							reqLength: reqLength,
-							err:       err,
-						}:
-						default:
-							// just drop it if the channel is full
-						}
-					}()
+
+					//fmt.Println(d.rpc.TestSendColumnSidecarsByRangeReqV1(cctx))
+					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
+					select {
+					case resultChan <- resultData{
+						sidecars:  s,
+						pid:       pid,
+						cgc:       cgc,
+						reqLength: reqLength,
+						err:       err,
+					}:
+					default:
+						// just drop it if the channel is full
+					}
 				}()
 			}
 		}
 		wg.Wait()
-		//close(resultChan)
+		close(resultChan)
 	}
 
 	// send the request
