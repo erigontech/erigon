@@ -74,7 +74,7 @@ type RecSplit struct {
 	existenceWV0 *bufio.Writer
 
 	//v1 fields
-	existenceFV1 *fusefilter.WriterStateless
+	existenceFV1 *fusefilter.WriterOffHeap
 
 	offsetCollector *etl.Collector // Collector that sorts by offsets
 
@@ -226,7 +226,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 
 	}
 	if args.KeyCount > 0 && rs.lessFalsePositives && rs.version >= 1 {
-		rs.existenceFV1, err = fusefilter.NewWriterStateless(rs.tmpFilePath)
+		rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.tmpFilePath)
 		if err != nil {
 			return nil, err
 		}

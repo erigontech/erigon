@@ -14,7 +14,8 @@ import (
 	"github.com/edsrzf/mmap-go"
 )
 
-type WriterStateless struct {
+// WriterOffHeap does build `fusefilter` in off-heap memory, using temporary mmap file
+type WriterOffHeap struct {
 	count    int
 	page     [512]uint64
 	features Features
@@ -23,7 +24,7 @@ type WriterStateless struct {
 	fPath   string
 }
 
-func NewWriterStateless(filePath string) (*WriterStateless, error) {
+func NewWriterOffHeap(filePath string) (*WriterOffHeap, error) {
 	tmpFilePath := filePath + ".existence.tmp"
 	f, err := os.Create(tmpFilePath)
 	if err != nil {
@@ -33,17 +34,17 @@ func NewWriterStateless(filePath string) (*WriterStateless, error) {
 	if IsLittleEndian {
 		features |= IsLittleEndianFeature
 	}
-	return &WriterStateless{tmpFile: f, features: features, fPath: tmpFilePath}, nil
+	return &WriterOffHeap{tmpFile: f, features: features, fPath: tmpFilePath}, nil
 }
 
-func (w *WriterStateless) Close() {
+func (w *WriterOffHeap) Close() {
 	if w.tmpFile != nil {
 		w.tmpFile.Close()
 		os.Remove(w.fPath)
 	}
 }
 
-func (w *WriterStateless) build() (*xorfilter.BinaryFuse[uint8], error) {
+func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
 	defer os.Remove(w.fPath)
 	if w.count%len(w.page) != 0 {
 		_, err := w.tmpFile.Write(castToBytes(w.page[:w.count%len(w.page)]))
@@ -78,7 +79,7 @@ func (w *WriterStateless) build() (*xorfilter.BinaryFuse[uint8], error) {
 	return filter, nil
 }
 
-func (w *WriterStateless) write(filter *xorfilter.BinaryFuse[uint8], fw io.Writer) (int, error) {
+func (w *WriterOffHeap) write(filter *xorfilter.BinaryFuse[uint8], fw io.Writer) (int, error) {
 	if filter.SegmentCount > math.MaxUint32/2 {
 		return 0, fmt.Errorf("SegmentCount=%d cannot be greater than u32/2", filter.SegmentCount)
 	}
@@ -107,7 +108,7 @@ func (w *WriterStateless) write(filter *xorfilter.BinaryFuse[uint8], fw io.Write
 	return headerSize + len(filter.Fingerprints), nil
 }
 
-func (w *WriterStateless) AddHash(k uint64) error {
+func (w *WriterOffHeap) AddHash(k uint64) error {
 	w.page[w.count%len(w.page)] = k
 	w.count++
 	if w.count%len(w.page) == 0 {
@@ -119,7 +120,7 @@ func (w *WriterStateless) AddHash(k uint64) error {
 	return nil
 }
 
-func (w *WriterStateless) BuildTo(to io.Writer) (int, error) {
+func (w *WriterOffHeap) BuildTo(to io.Writer) (int, error) {
 	filter, err := w.build()
 	if err != nil {
 		return 0, fmt.Errorf("%s %w", w.fPath, err)
@@ -132,7 +133,7 @@ type Writer struct {
 	fileName string
 	noFsync  bool
 
-	data *WriterStateless
+	data *WriterOffHeap
 }
 
 func NewWriter(filePath string) (*Writer, error) {
@@ -141,7 +142,7 @@ func NewWriter(filePath string) (*Writer, error) {
 	}
 
 	_, fileName := filepath.Split(filePath)
-	w, err := NewWriterStateless(filePath)
+	w, err := NewWriterOffHeap(filePath)
 	if err != nil {
 		return nil, err
 	}
