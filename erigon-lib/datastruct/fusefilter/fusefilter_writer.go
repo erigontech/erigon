@@ -95,12 +95,11 @@ func (w *WriterOffHeap) write(filter *xorfilter.BinaryFuse[uint8], fw io.Writer)
 	binary.BigEndian.PutUint32(header[4+4+4+8:], filter.SegmentLength)
 	binary.BigEndian.PutUint32(header[4+4+4+8+4:], filter.SegmentLengthMask)
 	binary.BigEndian.PutUint64(header[4+4+4+8+4+4:], uint64(len(filter.Fingerprints)))
-	_, err := fw.Write(header[:]) //nolint:gocritic
-	if err != nil {
+
+	if _, err := fw.Write(header[:]); err != nil { //nolint:gocritic
 		return 0, err
 	}
-	_, err = fw.Write(filter.Fingerprints)
-	if err != nil {
+	if _, err := fw.Write(filter.Fingerprints); err != nil {
 		return 0, err
 	}
 	return headerSize + len(filter.Fingerprints), nil
