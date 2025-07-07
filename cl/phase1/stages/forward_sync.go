@@ -128,8 +128,8 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 
 	if len(fuluBlocks) > 0 && canDownloadColumnData(fuluBlocks, cfg) {
 		// do 4 blocks at a time
-		for i := 0; i < len(fuluBlocks); i += 4 {
-			end := i + 4
+		for i := 0; i < len(fuluBlocks); i += 1 {
+			end := i + 1
 			if end > len(fuluBlocks) {
 				end = len(fuluBlocks)
 			}
