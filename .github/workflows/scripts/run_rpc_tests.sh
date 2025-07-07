@@ -1,21 +1,35 @@
 #!/bin/bash
+set -e
 
-set +e # Disable exit on error
+# Accept WORKSPACE as the first argument, default to /tmp directory if not provided
+WORKSPACE="${1:-/tmp}"
+# Accept RESULT_DIR as the second argument, do not set a default
+RESULT_DIR="$2"
 
-manual=false
-for arg in "$@"; do
-  if [[ $arg == "--manual" ]]; then
-    manual=true
+# Ensure rpc-tests repo is present and on the correct branch
+if [ ! -d "$WORKSPACE/rpc-tests" ]; then
+  git -c advice.detachedHead=false clone --depth 1 --branch v1.66.0 https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests"
+  cd "$WORKSPACE/rpc-tests"
+else
+  cd "$WORKSPACE/rpc-tests"
+  git fetch origin v1.66.0 > /dev/null 2>&1
+  git checkout v1.66.0 > /dev/null 2>&1
+  # Check for local changes
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "WARNING: Local changes detected in $WORKSPACE/rpc-tests after checking out v1.66.0:" >&2
+    git status --porcelain
   fi
-done
-
-if $manual; then
-  echo "Running manual setup…"
-  python3 -m venv .venv
-  source .venv/bin/activate
-  pip3 install -r ../requirements.txt
-  echo "Manual setup complete."
 fi
+
+# Always create and activate a Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+pip3 install --upgrade pip > /dev/null
+pip3 install -r requirements.txt > /dev/null
+
+# Remove the local results directory if any
+cd "$WORKSPACE/rpc-tests/integration"
+rm -rf ./mainnet/results/
 
 # Array of disabled tests
 disabled_tests=(
@@ -54,11 +68,24 @@ disabled_tests=(
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
-python3 ./run_tests.py --port 8545 --engine-port 8545 --continue -f --json-diff -x "$disabled_test_list"
+# Run the RPC integration tests
+set +e # Disable exit on error for test run
+
+python3 ./run_tests.py --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff --exclude-api-list "$disabled_test_list"
 RUN_TESTS_EXIT_CODE=$?
-if $manual; then
-  echo "deactivating…"
-  deactivate 2>/dev/null || echo "No active virtualenv"
-  echo "deactivating complete."
+
+set -e # Re-enable exit on error after test run
+
+# Save any failed results to the requested result directory if provided
+if [ $RUN_TESTS_EXIT_CODE -ne 0 ] && [ -n "$RESULT_DIR" ]; then
+  # Copy the results to the requested result directory
+  cp -r "$WORKSPACE/rpc-tests/integration/mainnet/results/" "$RESULT_DIR"
+  # Clean up the local result directory
+  rm -rf "$WORKSPACE/rpc-tests/integration/mainnet/results/"
 fi
+
+# Always deactivate the Python virtual environment at the end
+cd "$WORKSPACE/rpc-tests"
+deactivate 2>/dev/null || echo "No active virtualenv"
+
 exit $RUN_TESTS_EXIT_CODE
