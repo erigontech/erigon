@@ -113,7 +113,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, err := io.ReadFull(stream, code)
 		if err != nil {
-			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n), http.StatusBadRequest)
+			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n)+", peerID="+peerIdBase58, http.StatusBadRequest)
 			return
 		}
 		// this is not necessary, but seems like the right thing to do
