@@ -187,7 +187,9 @@ func (b *BeaconRpcP2P) TestSendColumnSidecarsByRangeReqV1(
 		BlockRoot: common.HexToHash("0x30f7d463e46398ec0cd7e91ceac838b6f74740f3d804942a3e44feda592a3d9e"),
 		Columns:   solid.NewUint64ListSSZ(int(b.beaconConfig.NumberOfColumns)),
 	}
-	req.Columns.Append(1)
+	for i := uint64(0); i < b.beaconConfig.NumberOfColumns; i++ {
+		req.Columns.Append(i)
+	}
 
 	var buffer buffer.Buffer
 
