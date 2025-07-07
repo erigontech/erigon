@@ -101,26 +101,35 @@ jobs:
       - name: Run RPC Integration Tests
         id: test_step
         run: |
+          echo "[DEBUG] Getting commit hash..."
           commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
+          echo "[DEBUG] Commit hash: $commit"
           TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
+          echo "[DEBUG] TEST_RESULT_DIR set to $TEST_RESULT_DIR"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
+          echo "[DEBUG] Making run_rpc_tests.sh executable..."
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
+          echo "[DEBUG] Running run_rpc_tests.sh..."
           set +e # Disable exit on error for test run
           ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh ${{ runner.workspace }} $TEST_RESULT_DIR 2>&1 | tee run_rpc_tests.log
+          echo "[DEBUG] run_rpc_tests.sh finished."
           # Capture test runner script exit status
           test_exit_status=${PIPESTATUS[0]}
+          echo "[DEBUG] test_exit_status: $test_exit_status"
           set -e # Re-enable exit on error after test run
 
-          # Save the subsection reached status
+          echo "[DEBUG] Setting test_executed output..."
           echo "test_executed=true" >> $GITHUB_OUTPUT
 
-          # Check test runner exit status
+          echo "[DEBUG] Checking test runner exit status..."
           if [ $test_exit_status -eq 0 ]; then
             echo "tests completed successfully"
+            echo "[DEBUG] TEST_RESULT=success"
             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
             echo "error detected during tests"
+            echo "[DEBUG] TEST_RESULT=failure"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           fi
 
