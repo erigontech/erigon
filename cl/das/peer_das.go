@@ -312,7 +312,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 			block.Block.Body.BlobKzgCommitments.Len() == 0 {
 			continue
 		}
-		root, err := block.HashSSZ()
+		root, err := block.Block.HashSSZ()
 		if err != nil {
 			log.Warn("failed to get block root", "err", err)
 			continue
@@ -553,7 +553,7 @@ func initializeDownloadRequest(blocks []*cltypes.SignedBlindedBeaconBlock, beaco
 			continue
 		}
 
-		blockRoot, err := block.HashSSZ()
+		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
 			return nil, err
 		}
