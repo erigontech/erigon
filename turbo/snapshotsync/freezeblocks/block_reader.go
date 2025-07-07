@@ -969,11 +969,10 @@ func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *snapshotsyn
 	}
 
 	reader := recsplit.NewIndexReader(index)
-	localID, ok := reader.Lookup(hash[:])
+	headerOffset, ok := reader.TwoLayerLookup(hash[:])
 	if !ok {
 		return nil, nil
 	}
-	headerOffset := index.OrdinalLookup(localID)
 
 	gg := sn.Src().MakeGetter()
 	gg.Reset(headerOffset)
