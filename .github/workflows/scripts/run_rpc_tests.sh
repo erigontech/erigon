@@ -16,9 +16,10 @@ git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://g
 echo "[DEBUG] Clone complete."
 
 # Always create and activate a Python virtual environment
+sudo apt-get install python3-venv
 python3 -m venv .venv
 source .venv/bin/activate
-pip3 install -r requirements.txt > /dev/null
+pip3 install -r requirements.txt
 
 # Remove the local results directory if any
 cd "$WORKSPACE/rpc-tests/integration"
