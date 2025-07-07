@@ -122,6 +122,11 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	if err != nil {
 		return nil, pid, 0, err
 	}
+	// print the filtered request for debugging purposes
+	fmt.Println("Filtered request:", filteredReq.Len())
+	for i := 0; i < filteredReq.Len(); i++ {
+		fmt.Println("  ", filteredReq.Get(i).Columns.Length(), filteredReq.Get(i).BlockRoot.String())
+	}
 
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
