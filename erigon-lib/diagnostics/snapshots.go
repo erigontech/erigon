@@ -58,11 +58,22 @@ func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
 
 				totalTimeString := time.Duration(info.TimeElapsed) * time.Second
 
+				var progress string
+				if info.Stage.Total > 0 {
+					progress = fmt.Sprintf("%d%%", (info.Stage.Current*100)/info.Stage.Total)
+				} else {
+					progress = "0%"
+					log.Warn("[Diagnostics] Fill DB stage has zero total",
+						"stage", info.Stage.StageName,
+						"current", info.Stage.Current)
+				}
+
 				d.UpdateSnapshotStageStats(SyncStageStats{
 					TimeElapsed: totalTimeString.String(),
 					TimeLeft:    "unknown",
-					Progress:    fmt.Sprintf("%d%%", (info.Stage.Current*100)/info.Stage.Total),
+					Progress:    progress,
 				}, "Fill DB from snapshots")
+
 				d.SaveSnapshotStageStatsToDB()
 			}
 		}
