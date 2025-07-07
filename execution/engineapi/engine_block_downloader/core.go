@@ -19,6 +19,7 @@ package engine_block_downloader
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"golang.org/x/sync/errgroup"
@@ -177,21 +178,14 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 	}
 
 	peerIdToIndex := make(map[p2p.PeerId]int, len(peers))
+	peerIndexToId := make(map[int]p2p.PeerId, len(peers))
 	for i, peer := range peers {
 		peerIdToIndex[*peer] = i
+		peerIndexToId[i] = *peer
 	}
 
-	// 2. Check which peers have the header and terminate if none have seen it
-	type headerKey struct {
-		hash   common.Hash
-		height uint64
-	}
-	type headerAvailability struct {
-		from headerKey
-		to   headerKey
-	}
-
-	peerAvailability := make([]*headerAvailability, len(peers))
+	// 2. Check which peers have the header to build knowledge of which peers we can use for syncing
+	//    and terminate early if none have seen it
 	exhaustedPeers := make([]bool, len(peers))
 	peersHeadersResponses := make([][]*types.Header, len(peers))
 	eg := errgroup.Group{}
@@ -211,8 +205,6 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 			}
 
 			header := resp.Data[0]
-			key := headerKey{hash: header.Hash(), height: header.Number.Uint64()}
-			peerAvailability[peerIndex] = &headerAvailability{from: key, to: key}
 			peersHeadersResponses[peerIndex] = []*types.Header{header}
 			return nil
 		})
@@ -235,8 +227,8 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 	}
 
 	// 3. Download the header chain backwards in an etl collector until we connect it to a known local header.
-	//    Note we do this for all peers to so that we can build an availability map that can be later on
-	//    used for downloading bodies (i.e., to know which peers may have our bodies).
+	//    Note we fetch headers in batches of 1024 max from 1 peer and send every following request to
+	//    the next available peer (in rotating fashion) to distribute the requests across all peers.
 	sortableBuffer := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	headerCollector := etl.NewCollector("EngineBlockDownloader", e.tmpdir, sortableBuffer, e.logger)
 	defer headerCollector.Close()
@@ -250,13 +242,42 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 		return err
 	}
 
+	var nextAvailablePeerIdx int
+	nextAvailablePeer := func() (p2p.PeerId, error) {
+		var iterations int
+		for !exhaustedPeers[nextAvailablePeerIdx] {
+			nextAvailablePeerIdx++
+			nextAvailablePeerIdx %= len(peers)
+			if iterations == len(peers) {
+				return p2p.PeerId{}, errors.New("all peers exhausted")
+			}
+			iterations++
+		}
+		return peerIndexToId[nextAvailablePeerIdx], nil
+	}
+
 	chainLen := 1
 	lastHeader := initialHeader
 	var connectionPoint *types.Header
-	var peersConnectionPoints []*types.Header
 	for connectionPoint == nil && lastHeader.Number.Uint64() > 0 {
-		peersConnectionPoints = make([]*types.Header, len(peers))
-		peersHeadersResponses = make([][]*types.Header, len(peers))
+		if req.Trigger == NewPayloadTrigger && chainLen > dbg.MaxReorgDepth {
+			return fmt.Errorf(
+				"new payload side chain too long - ignore until fcu confirms it: hash=%s, height=%d, len=%d",
+				initialHeader.Hash(),
+				initialHeader.Number.Uint64(),
+				chainLen,
+			)
+		}
+
+		if req.Trigger == SegmentRecoveryTrigger && chainLen > dbg.MaxReorgDepth {
+			return fmt.Errorf(
+				"segment recovery chain too long - ignoring download request: hash=%s, height=%d, len=%d",
+				initialHeader.Hash(),
+				initialHeader.Number.Uint64(),
+				chainLen,
+			)
+		}
+
 		parentHash := lastHeader.ParentHash
 		parentHeight := lastHeader.Number.Uint64() - 1
 		amount := min(parentHeight, eth.MaxHeadersServe)
@@ -278,109 +299,59 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 			break
 		}
 
-		allExhausted := true
-		eg = errgroup.Group{}
-		for _, peerId := range peers {
-			peerIndex := peerIdToIndex[*peerId]
-			exhausted := exhaustedPeers[peerIndex]
-			if exhausted {
-				continue
-			}
+		peerId, err := nextAvailablePeer()
+		if err != nil {
+			return fmt.Errorf(
+				"no peers available before reaching connection point hash=%s, height=%d: %w",
+				parentHash,
+				parentHeight,
+				err,
+			)
+		}
 
-			allExhausted = false
-			availability := peerAvailability[peerIndex]
-			eg.Go(func() error {
-				resp, err := e.p2pGatewayV2.FetchHeadersBackwards(ctx, parentHash, amount, peerId)
-				if err != nil {
-					e.logger.Debug(
-						"[EngineBlockDownloader] could not fetch headers batch",
-						"hash", parentHash,
-						"height", parentHeight,
-						"amount", amount,
-						"peerId", peerId,
-						"err", err,
-					)
-					exhaustedPeers[peerIndex] = true
+		peerIndex := peerIdToIndex[peerId]
+		resp, err := e.p2pGatewayV2.FetchHeadersBackwards(ctx, parentHash, amount, &peerId)
+		if err != nil {
+			e.logger.Debug(
+				"[EngineBlockDownloader] could not fetch headers batch",
+				"hash", parentHash,
+				"height", parentHeight,
+				"amount", amount,
+				"peerId", peerId,
+				"err", err,
+			)
+			exhaustedPeers[peerIndex] = true
+			return nil
+		}
+
+		headers := resp.Data
+		connectionPointHeight := uint64(0)
+		err = e.db.View(ctx, func(tx kv.Tx) error {
+			for i := len(headers) - 1; i >= 0; i-- {
+				newHeader := headers[i]
+				newHeaderNum := newHeader.Number.Uint64()
+				if newHeaderNum == 0 {
 					return nil
 				}
-
-				headers := resp.Data
-				var peerConnectionPoint *types.Header
-				err = e.db.View(ctx, func(tx kv.Tx) error {
-					for i := len(headers) - 1; i >= 0; i-- {
-						newHeader := headers[i]
-						newHeaderNum := newHeader.Number.Uint64()
-						if newHeaderNum == 0 {
-							return nil
-						}
-						h, err := e.blockReader.Header(ctx, tx, newHeader.ParentHash, newHeaderNum-1)
-						if err != nil {
-							return err
-						}
-						if h != nil {
-							peerConnectionPoint = newHeader
-							break
-						}
-					}
-					return nil
-				})
+				h, err := e.blockReader.Header(ctx, tx, newHeader.ParentHash, newHeaderNum-1)
 				if err != nil {
 					return err
 				}
-				if peerConnectionPoint != nil {
-					availability.to = headerKey{
-						hash:   peerConnectionPoint.Hash(),
-						height: peerConnectionPoint.Number.Uint64(),
-					}
-				} else {
-					availability.to = headerKey{
-						hash:   headers[0].Hash(),
-						height: headers[0].Number.Uint64(),
-					}
+				if h != nil {
+					connectionPoint = newHeader
+					connectionPointHeight = newHeader.Number.Uint64()
+					break
 				}
-
-				peersConnectionPoints[peerIndex] = peerConnectionPoint
-				peersHeadersResponses[peerIndex] = headers
-				return nil
-			})
-		}
-		if err := eg.Wait(); err != nil {
+			}
+			return nil
+		})
+		if err != nil {
 			return err
 		}
-		if allExhausted {
-			return fmt.Errorf(
-				"all peers exhausted before reaching connection point: hash=%s, height=%d",
-				parentHash,
-				parentHeight,
-			)
-		}
-		// find the first connection point if any from the peers
-		var connectionPointHeight uint64
-		for _, peerConnectionPoint := range peersConnectionPoints {
-			if peerConnectionPoint != nil {
-				connectionPoint = peerConnectionPoint
-				connectionPointHeight = peerConnectionPoint.Number.Uint64()
-				break
-			}
-		}
-		// find the first complete headers batch if any from the peers
-		var headersBatch []*types.Header
-		for _, headers := range peersHeadersResponses {
-			if uint64(len(headers)) == amount {
-				headersBatch = headers
-				break
-			}
-		}
-		if headersBatch == nil {
-			return fmt.Errorf("no peers have complete headers batch: hash=%s, height=%d, amount=%d",
-				parentHash,
-				parentHeight,
-				amount,
-			)
-		}
+
 		// collect the headers batch into the etl
-		for i := len(headersBatch) - 1; i >= 0; i-- {
-			header := headersBatch[i]
+		for i := len(headers) - 1; i >= 0; i-- {
+			header := headers[i]
 			headerNum := header.Number.Uint64()
 			if headerNum < connectionPointHeight {
 				break
@@ -400,22 +371,6 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 	}
 	if connectionPoint == nil {
 		return fmt.Errorf("connection point not found: hash=%s, height=%d", initialHeader.Hash(), initialHeader.Number.Uint64())
-	}
-	if req.Trigger == NewPayloadTrigger && chainLen > dbg.MaxReorgDepth {
-		return fmt.Errorf(
-			"new payload side chain too long - ignore until fcu confirms it: hash=%s, height=%d, len=%d",
-			initialHeader.Hash(),
-			initialHeader.Number.Uint64(),
-			chainLen,
-		)
-	}
-	if req.Trigger == SegmentRecoveryTrigger && chainLen > dbg.MaxReorgDepth {
-		return fmt.Errorf(
-			"segment recovery chain too long - ignoring download request: hash=%s, height=%d, len=%d",
-			initialHeader.Hash(),
-			initialHeader.Number.Uint64(),
-			chainLen,
-		)
 	}
 
 	// 4. Start downloading the bodies from 1 random peer at a time
