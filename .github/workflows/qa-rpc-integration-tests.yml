@@ -112,10 +112,10 @@ jobs:
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
           echo "[DEBUG] Running run_rpc_tests.sh..."
           set +e # Disable exit on error for test run
-          script -q -f /dev/null bash --noprofile --norc -c '${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh ${{ runner.workspace }} $TEST_RESULT_DIR'
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh ${{ runner.workspace }} $TEST_RESULT_DIR
           echo "[DEBUG] run_rpc_tests.sh finished."
           # Capture test runner script exit status
-          test_exit_status=${PIPESTATUS[0]}
+          test_exit_status=$?
           echo "[DEBUG] test_exit_status: $test_exit_status"
           set -e # Re-enable exit on error after test run
 
