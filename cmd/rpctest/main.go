@@ -278,7 +278,7 @@ func main() {
 			}
 		},
 	}
-	with(benchEthGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withFailFast)
+	with(benchEthGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
 	var ethGetLogsInvariantsCmd = &cobra.Command{
 		Use:   "invariantsEthGetLogs",
@@ -291,7 +291,7 @@ func main() {
 			}
 		},
 	}
-	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withFailFast)
 
 	var benchOverlayGetLogsCmd = &cobra.Command{
 		Use:   "benchOverlayGetLogs",
