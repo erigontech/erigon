@@ -127,10 +127,19 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 	}
 
 	if len(fuluBlocks) > 0 && canDownloadColumnData(fuluBlocks, cfg) {
-		if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, signedBeaconBlocksToSignedBlindedBeaconBlocks(fuluBlocks)); err != nil {
-			logger.Trace("[Caplin] Failed to download missing columns", "err", err)
-			return err
+
+		// do 4 blocks at a time
+		for i := 0; i < len(fuluBlocks); i += 4 {
+			end := i + 4
+			if end > len(fuluBlocks) {
+				end = len(fuluBlocks)
+			}
+			if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, signedBeaconBlocksToSignedBlindedBeaconBlocks(fuluBlocks[i:end])); err != nil {
+				logger.Trace("[Caplin] Failed to download columns and recover blobs", "err", err)
+				return fmt.Errorf("failed to download columns and recover blobs: %w", err)
+			}
 		}
+
 	}
 
 	return nil
