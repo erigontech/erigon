@@ -54,9 +54,10 @@ disabled_tests=(
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
 python3 ./run_tests.py -p 8545 --continue -f --json-diff -x "$disabled_test_list"
+RUN_TESTS_EXIT_CODE=$?
 if $manual; then
   echo "deactivating…"
   deactivate 2>/dev/null || echo "No active virtualenv"
   echo "deactivating complete."
 fi
-exit $?
+exit $RUN_TESTS_EXIT_CODE
