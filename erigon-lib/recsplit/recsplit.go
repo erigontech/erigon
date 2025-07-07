@@ -133,6 +133,7 @@ type RecSplitArgs struct {
 	// if Enum=true:  must have sorted values (can have duplicates) - monotonically growing sequence
 	Enums              bool
 	LessFalsePositives bool
+	Version            uint8
 
 	IndexFile  string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir     string
@@ -159,16 +160,15 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	if args.BaseDataID >= math.MaxUint64/2 {
 		return nil, fmt.Errorf("baseDataID %d is too large, must be less than %d", args.BaseDataID, math.MaxUint64/2)
 	}
-	const version uint8 = 1
 
 	if len(args.StartSeed) == 0 {
-		args.StartSeed = []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+		args.StartSeed = []uint64{0x106393c187cae2a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
 	rs := &RecSplit{
-		version:    version,
+		version:    args.Version,
 		bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
 		tmpDir: args.TmpDir, filePath: args.IndexFile, tmpFilePath: args.IndexFile + ".tmp",
 		enums:              args.Enums,

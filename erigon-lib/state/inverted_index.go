@@ -1280,6 +1280,10 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		IndexFile:  idxPath,
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
+
+		Version:            1,
+		Enums:              true,
+		LessFalsePositives: true,
 	}
 
 	// Design decision: `why Enum=true and LessFalsePositives=true`?
@@ -1308,9 +1312,6 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	// It happens because: EVM does read much non-existing keys, like "create storage key if it doesn't exists". And
 	// each such non-existing key read `MPH` transforms to random
 	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
-
-	cfg.Enums = true // can't disable yet - because of `g.BinarySearch(hi.from, n, idx.OrdinalLookup)`
-	cfg.LessFalsePositives = true
 
 	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger); err != nil {
 		return err
