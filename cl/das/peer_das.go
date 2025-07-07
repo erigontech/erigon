@@ -382,7 +382,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 						reqLength += id.Columns.Length()
 						return true
 					})
-					fmt.Println(ids.Get(0).Columns.Get(1), ids.Get(0).Columns.Length())
+					fmt.Println(d.rpc.TestSendColumnSidecarsByRangeReqV1(cctx))
 					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
 					select {
 					case resultChan <- resultData{

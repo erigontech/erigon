@@ -118,18 +118,18 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, uint64, error) {
-	// filteredReq, pid, cgc, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
-	// if err != nil {
-	// 	return nil, pid, 0, err
-	// }
+	filteredReq, pid, cgc, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	if err != nil {
+		return nil, pid, 0, err
+	}
 
 	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
 		return nil, "", 0, err
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRootProtocolV1, data)
+	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
 	if err != nil {
 		return nil, pid, 0, err
 	}
@@ -143,7 +143,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
 
-	return ColumnSidecars, pid, 1, nil
+	return ColumnSidecars, pid, cgc, nil
 }
 
 func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
@@ -159,6 +159,37 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
 	for _, column := range columns {
 		req.Columns.Append(column)
 	}
+	var buffer buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
+		return nil, "", err
+	}
+
+	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes())
+	if err != nil {
+		return nil, pid, err
+	}
+
+	ColumnSidecars := []*cltypes.DataColumnSidecar{}
+	for _, data := range responsePacket {
+		columnSidecar := &cltypes.DataColumnSidecar{}
+		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
+			return nil, pid, err
+		}
+		ColumnSidecars = append(ColumnSidecars, columnSidecar)
+	}
+	return ColumnSidecars, pid, nil
+}
+
+func (b *BeaconRpcP2P) TestSendColumnSidecarsByRangeReqV1(
+	ctx context.Context,
+) ([]*cltypes.DataColumnSidecar, string, error) {
+	req := &cltypes.ColumnSidecarsByRangeRequest{
+		StartSlot: 80590,
+		Count:     2,
+		Columns:   solid.NewUint64ListSSZ(int(b.beaconConfig.NumberOfColumns)),
+	}
+	req.Columns.Append(1)
+
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err
