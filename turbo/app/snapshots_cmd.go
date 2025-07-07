@@ -295,6 +295,13 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name:   "analyse",
+			Action: analyseIdxKeys,
+			// Flags: joinFlags([]cli.Flag{
+			// 	&utils.DataDirFlag,
+			// }),
+		},
+		{
 			Name:   "sqeeze",
 			Action: doSqueeze,
 			Flags: joinFlags([]cli.Flag{
@@ -670,6 +677,54 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.IntegirtyInvertedIndexKey(domain, key); err != nil {
 		return err
 	}
+	return nil
+}
+
+func analyseIdxKeys(cliCtx *cli.Context) error {
+	// logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	// if err != nil {
+	// 	return err
+	// }
+	// ctx := cliCtx.Context
+	// dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	// chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	// defer chainDB.Close()
+
+	// chainConfig := fromdb.ChainConfig(chainDB)
+	// cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	// _, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	// if err != nil {
+	// 	return err
+	// }
+	// defer clean()
+
+	file := "/Users/moskud/oss/datadir/mainnet_fk2/snapshots/idx/v2.0-accounts.1832-1834.ef"
+	decompressor, err := seg.NewDecompressor(file)
+	if err != nil {
+		return err
+	}
+
+	getter := decompressor.MakeGetter()
+	var buf []byte
+	t := NewTrie(3)
+	count := 0
+	stats := NewPrefixStats(4)
+
+	for getter.HasNext() {
+		buf, _ = getter.Next(buf[:0])
+		t.Insert(buf)
+		//fmt.Println(common.Bytes2Hex(buf))
+		stats.Add(buf)
+		getter.Skip()
+		count++
+	}
+
+	fmt.Println()
+	fmt.Println("count:", count)
+	stats.Print()
+	//t.SaveGraphviz("/Users/moskud/oss/erigon/trie.graph")
+
 	return nil
 }
 
