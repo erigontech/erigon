@@ -1866,26 +1866,6 @@ func (a *Aggregator) DisableReadAhead() {
 		}
 	}
 }
-func (a *Aggregator) EnableReadAhead() {
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	for _, d := range a.d {
-		for _, f := range d.dirtyFiles.Items() {
-			f.EnableReadAhead()
-		}
-		for _, f := range d.History.dirtyFiles.Items() {
-			f.EnableReadAhead()
-		}
-		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
-			f.EnableReadAhead()
-		}
-	}
-	for _, ii := range a.iis {
-		for _, f := range ii.dirtyFiles.Items() {
-			f.EnableReadAhead()
-		}
-	}
-}
 
 func (at *AggregatorRoTx) Close() {
 	if at == nil || at.a == nil { // invariant: it's safe to call Close multiple times
