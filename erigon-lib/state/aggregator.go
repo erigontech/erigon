@@ -513,7 +513,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 	defer rotx.Close()
 
 	missedFilesItems := rotx.FilesWithMissedAccessors()
-	fmt.Printf("[dbg] missedFilesItems: %s\n", missedFilesItems.domain)
+	fmt.Printf("[dbg] missedFilesItems: %t, %s\n", missedFilesItems.IsEmpty(), missedFilesItems.domain)
 	if !missedFilesItems.IsEmpty() {
 		defer a.onFilesChange(nil)
 	}
