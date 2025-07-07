@@ -406,7 +406,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 			}
 		}
 		wg.Wait()
-		close(resultChan)
+		//close(resultChan)
 	}
 
 	// send the request
