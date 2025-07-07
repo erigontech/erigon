@@ -21,15 +21,8 @@ else
   echo "[DEBUG] Fetching $RPC_VERSION from origin..."
   git fetch origin $RPC_VERSION
   echo "[DEBUG] Fetch complete. Checking out $RPC_VERSION..."
-  if git checkout -f $RPC_VERSION; then
-    echo "[DEBUG] Checkout complete (as branch)."
-  elif git checkout -f tags/$RPC_VERSION; then
-    echo "[DEBUG] Checkout complete (as tag)."
-  else
-    echo "[ERROR] Failed to checkout $RPC_VERSION as either branch or tag. Available tags:"
-    git tag --list | head -10
-    exit 1
-  fi
+  git checkout $RPC_VERSION
+  echo "[DEBUG] Checkout complete as tag."
   # Check for local changes
   if [ -n "$(git status --porcelain)" ]; then
     echo "WARNING: Local changes detected in $WORKSPACE/rpc-tests after checking out $RPC_VERSION:" >&2
