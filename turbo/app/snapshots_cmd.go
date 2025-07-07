@@ -1884,13 +1884,19 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
+	debugMux := metricsMux
+
+	if debugMux == nil {
+		debugMux = pprofMux
+	}
+
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)
 	if err != nil {
 		return err
 	}
