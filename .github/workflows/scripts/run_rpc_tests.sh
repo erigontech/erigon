@@ -7,23 +7,25 @@ WORKSPACE="${1:-/tmp}"
 # Accept RESULT_DIR as the second argument, do not set a default
 RESULT_DIR="$2"
 
+RPC_VERSION="v1.66.0"
+
 # Ensure rpc-tests repo is present and on the correct branch
 echo "[DEBUG] Checking for $WORKSPACE/rpc-tests directory..."
 if [ ! -d "$WORKSPACE/rpc-tests" ]; then
-  echo "[DEBUG] Cloning rpc-tests repo (branch v1.66.0) into $WORKSPACE/rpc-tests..."
-  git -c advice.detachedHead=false clone --depth 1 --branch v1.66.0 https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests"
+  echo "[DEBUG] Cloning rpc-tests repo (branch $RPC_VERSION) into $WORKSPACE/rpc-tests..."
+  git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests"
   echo "[DEBUG] Clone complete."
   cd "$WORKSPACE/rpc-tests"
 else
   cd "$WORKSPACE/rpc-tests"
-  echo "[DEBUG] Fetching v1.66.0 from origin..."
-  git fetch origin v1.66.0 > /dev/null 2>&1
-  echo "[DEBUG] Fetch complete. Checking out v1.66.0..."
-  git checkout v1.66.0 > /dev/null
+  echo "[DEBUG] Fetching $RPC_VERSION from origin..."
+  git fetch origin $RPC_VERSION > /dev/null 2>&1
+  echo "[DEBUG] Fetch complete. Checking out $RPC_VERSION..."
+  git checkout -f $RPC_VERSION > /dev/null 2>&1 || git checkout -f tags/$RPC_VERSION > /dev/null 2>&1
   echo "[DEBUG] Checkout complete."
   # Check for local changes
   if [ -n "$(git status --porcelain)" ]; then
-    echo "WARNING: Local changes detected in $WORKSPACE/rpc-tests after checking out v1.66.0:" >&2
+    echo "WARNING: Local changes detected in $WORKSPACE/rpc-tests after checking out $RPC_VERSION:" >&2
     git status --porcelain
   fi
 fi
