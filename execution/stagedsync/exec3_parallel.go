@@ -1324,12 +1324,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 					chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 					if pe.isMining {
-						_, txTask.Txs, blockReceipts, _, err =
+						_, _, err =
 							pe.cfg.engine.FinalizeAndAssemble(
 								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
 								txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
 					} else {
-						_, _, _, err =
+						_, err =
 							pe.cfg.engine.Finalize(
 								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
 								txTask.Withdrawals, chainReader, syscall, false, pe.logger)

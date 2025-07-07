@@ -144,11 +144,11 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
 
 				if se.isMining {
-					_, txTask.Txs, blockReceipts, _, err = se.cfg.engine.FinalizeAndAssemble(
+					_, _, err = se.cfg.engine.FinalizeAndAssemble(
 						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
 				} else {
-					_, _, _, err = se.cfg.engine.Finalize(
+					_, err = se.cfg.engine.Finalize(
 						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 				}

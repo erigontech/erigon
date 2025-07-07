@@ -23,8 +23,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -495,7 +495,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	pe := &parallelExecutor{
 		txExecutor: txExecutor{
 			cfg: ExecuteBlockCfg{
-				chainConfig: params.MainnetChainConfig,
+				chainConfig: chainspec.MainnetChainConfig,
 				db:          db,
 			},
 			doms:   domains,
@@ -608,7 +608,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	pe := &parallelExecutor{
 		txExecutor: txExecutor{
 			cfg: ExecuteBlockCfg{
-				chainConfig: params.MainnetChainConfig,
+				chainConfig: chainspec.MainnetChainConfig,
 				db:          db,
 			},
 			doms:   domains,
