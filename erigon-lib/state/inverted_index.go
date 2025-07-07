@@ -255,13 +255,11 @@ func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
 }
 
 func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
-	if !ii.Accessors.Has(AccessorHashMap) {
-		return nil
-	}
-	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
-		return []string{
-			ii.efAccessorFilePath(fromStep, toStep),
+	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) (l []string) {
+		if ii.Accessors.Has(AccessorHashMap) {
+			l = append(l, ii.efAccessorFilePath(fromStep, toStep))
 		}
+		return l
 	})
 }
 
