@@ -316,7 +316,7 @@ func (api *APIImpl) Config(ctx context.Context) (*EthConfigResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	tt := uint64(time.Now().UnixMilli()) / 1000
+	tt := uint64(time.Now().Unix())
 
 	ret := &EthConfigResp{
 		Current: &EthHardForkConfig{},
