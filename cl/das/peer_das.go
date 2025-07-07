@@ -386,7 +386,6 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 						fmt.Println("requesting column sidecar for block root", ids.Get(i).BlockRoot)
 						fmt.Println("requesting column sidecar for block root - len", ids.Get(i).Columns.Length())
 					}
-
 					go func() {
 						//fmt.Println(d.rpc.TestSendColumnSidecarsByRangeReqV1(cctx))
 						s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
