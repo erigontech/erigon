@@ -47,8 +47,7 @@ func (w *WriterOffHeap) Close() {
 func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
 	defer os.Remove(w.fPath)
 	if w.count%len(w.page) != 0 {
-		_, err := w.tmpFile.Write(castToBytes(w.page[:w.count%len(w.page)]))
-		if err != nil {
+		if _, err := w.tmpFile.Write(castToBytes(w.page[:w.count%len(w.page)])); err != nil {
 			return nil, err
 		}
 	}
@@ -71,8 +70,7 @@ func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
 		return nil, fmt.Errorf("%s %w", w.fPath, err)
 	}
 	if w.count%len(w.page) != 0 {
-		_, err := w.tmpFile.Write(castToBytes(w.page[:w.count%len(w.page)]))
-		if err != nil {
+		if _, err := w.tmpFile.Write(castToBytes(w.page[:w.count%len(w.page)])); err != nil {
 			return nil, err
 		}
 	}
