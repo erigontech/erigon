@@ -3,6 +3,7 @@ package das
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -25,7 +26,7 @@ import (
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
-	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
+	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error
 	IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error)
 	Prune(keepSlotDistance uint64) error
 	UpdateValidatorsCustody(cgc uint64)
@@ -303,16 +304,16 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	return nil
 }
 
-func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
 	// filter out blocks that don't need to be processed
-	blocksToProcess := []*cltypes.SignedBeaconBlock{}
+	blocksToProcess := []*cltypes.SignedBlindedBeaconBlock{}
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion ||
 			block.Block.Body.BlobKzgCommitments == nil ||
 			block.Block.Body.BlobKzgCommitments.Len() == 0 {
 			continue
 		}
-		root, err := block.Block.HashSSZ()
+		root, err := block.HashSSZ()
 		if err != nil {
 			log.Warn("failed to get block root", "err", err)
 			continue
@@ -362,6 +363,8 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	loop:
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-stopChan:
 				break loop
 			case <-ticker.C:
@@ -380,6 +383,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 						return true
 					})
 					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
+					fmt.Println(s)
 					select {
 					case resultChan <- resultData{
 						sidecars:  s,
@@ -534,14 +538,14 @@ func (d *peerdas) getExpectedColumnIndex(
 type downloadRequest struct {
 	beaconConfig           *clparams.BeaconChainConfig
 	mutex                  sync.RWMutex
-	blockRootToBeaconBlock map[common.Hash]*cltypes.SignedBeaconBlock
+	blockRootToBeaconBlock map[common.Hash]*cltypes.SignedBlindedBeaconBlock
 	downloadTable          map[common.Hash]map[uint64]bool
 	cacheRequest           *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]
 }
 
-func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig *clparams.BeaconChainConfig, columnStorage blob_storage.DataColumnStorage) (*downloadRequest, error) {
+func initializeDownloadRequest(blocks []*cltypes.SignedBlindedBeaconBlock, beaconConfig *clparams.BeaconChainConfig, columnStorage blob_storage.DataColumnStorage) (*downloadRequest, error) {
 	downloadTable := make(map[common.Hash]map[uint64]bool)
-	blockRootToBeaconBlock := make(map[common.Hash]*cltypes.SignedBeaconBlock)
+	blockRootToBeaconBlock := make(map[common.Hash]*cltypes.SignedBlindedBeaconBlock)
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion {
 			continue
@@ -550,7 +554,7 @@ func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig
 			continue
 		}
 
-		blockRoot, err := block.Block.HashSSZ()
+		blockRoot, err := block.HashSSZ()
 		if err != nil {
 			return nil, err
 		}
@@ -568,7 +572,7 @@ func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig
 
 		if _, ok := downloadTable[blockRoot]; !ok {
 			table := make(map[uint64]bool)
-			for i := range beaconConfig.NumberOfColumns { // try download all columns for now
+			for i := range beaconConfig.NumberOfColumns / 128 { // try download all columns for now
 				if !existingColumnsMap[i] {
 					table[i] = true
 				}
