@@ -9,26 +9,10 @@ RESULT_DIR="$2"
 
 RPC_VERSION="v1.66.0"
 
-# Ensure rpc-tests repo is present and on the correct branch
-echo "[DEBUG] Checking for $WORKSPACE/rpc-tests directory..."
-if [ ! -d "$WORKSPACE/rpc-tests" ]; then
-  echo "[DEBUG] Cloning rpc-tests repo (branch $RPC_VERSION) into $WORKSPACE/rpc-tests..."
-  git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests"
-  echo "[DEBUG] Clone complete."
-  cd "$WORKSPACE/rpc-tests"
-else
-  cd "$WORKSPACE/rpc-tests"
-  echo "[DEBUG] Fetching $RPC_VERSION from origin..."
-  git fetch origin $RPC_VERSION
-  echo "[DEBUG] Fetch complete. Checking out $RPC_VERSION..."
-  git checkout $RPC_VERSION
-  echo "[DEBUG] Checkout complete as tag."
-  # Check for local changes
-  if [ -n "$(git status --porcelain)" ]; then
-    echo "WARNING: Local changes detected in $WORKSPACE/rpc-tests after checking out $RPC_VERSION:" >&2
-    git status --porcelain
-  fi
-fi
+# Clone rpc-tests repository at specific tag/branch
+echo "[DEBUG] Cloning rpc-tests repo (branch $RPC_VERSION) into $WORKSPACE/rpc-tests..."
+git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests"
+echo "[DEBUG] Clone complete."
 
 # Always create and activate a Python virtual environment
 python3 -m venv .venv
