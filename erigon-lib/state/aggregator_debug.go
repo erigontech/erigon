@@ -201,6 +201,8 @@ func (f *historyDirtyFilesRoTx) Close() {
 
 func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 	var files []*FilesItem
+	fmt.Printf("[dbg] DebugBeginDirtyFilesRo: %s, %d\n", ii.name, ii.dirtyFiles.Len())
+
 	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		files = append(files, items...)
 		for _, item := range items {
@@ -216,7 +218,6 @@ func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 
 func (f *iiDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorIIFiles) {
 	fmt.Printf("[dbg] FilesWithMissedAccessors: %s, %s, ----- %s\n", f.ii.name, f.files, f.ii.missedMapAccessors(f.files))
-
 	return &MissedAccessorIIFiles{
 		files: map[Accessors][]*FilesItem{
 			AccessorHashMap: f.ii.missedMapAccessors(f.files),
