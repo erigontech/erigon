@@ -1888,6 +1888,8 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 
 	if debugMux == nil {
 		debugMux = pprofMux
+	} else {
+		debugMux = http.DefaultServeMux
 	}
 
 	// initializing the node and providing the current git commit there

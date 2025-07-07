@@ -177,8 +177,10 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 
 	debugMux := metricsMux
 
-	if debugMux==nil {
-		debugMux=pprofMux
+	if debugMux == nil {
+		debugMux = pprofMux
+	} else {
+		debugMux = http.DefaultServeMux
 	}
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
