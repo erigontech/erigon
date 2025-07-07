@@ -455,10 +455,11 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 		if len(fuluBlocks) > 0 {
-			if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
-				logger.Debug("[Blobs-Downloader] Error downloading columns and recovering blobs", "err", err)
-				continue
-			}
+			// if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
+			// 	logger.Debug("[Blobs-Downloader] Error downloading columns and recovering blobs", "err", err)
+			// 	continue
+			// }
+			time.Sleep(100000 * time.Second)
 		}
 	}
 	if shouldLog {
