@@ -100,8 +100,13 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	}
 
 	if len(fuluBlocks) > 0 {
-		if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, signedBeaconBlocksToSignedBlindedBeaconBlocks(fuluBlocks)); err != nil {
-			return nil, fmt.Errorf("failed to download columns and recover blobs: %w", err)
+		// if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, signedBeaconBlocksToSignedBlindedBeaconBlocks(fuluBlocks)); err != nil {
+		// 	return nil, fmt.Errorf("failed to download columns and recover blobs: %w", err)
+		// }
+		for i := 0; i < len(fuluBlocks); i++ {
+			if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, signedBeaconBlocksToSignedBlindedBeaconBlocks(fuluBlocks[i:i+1])); err != nil {
+				return nil, fmt.Errorf("failed to download columns and recover blobs: %w", err)
+			}
 		}
 	}
 
