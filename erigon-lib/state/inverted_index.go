@@ -227,7 +227,9 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	if ii.aggregationStep == 0 {
 		panic("assert: empty `aggregationStep`")
 	}
-	for _, dirtyFile := range scanDirtyFiles(fileNames, ii.aggregationStep, ii.filenameBase, "ef", ii.logger) {
+	dirtyFiles := scanDirtyFiles(fileNames, ii.aggregationStep, ii.filenameBase, "ef", ii.logger)
+	for _, dirtyFile := range dirtyFiles {
+		fmt.Printf("[dbg] scanDirtyFiles: %s, %s\n", ii.name, dirtyFile)
 		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {
 			ii.dirtyFiles.Set(dirtyFile)
 		}
@@ -312,6 +314,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				fmt.Printf("[dbg] scanDirtyFiles: %s, %s, %s, %s\n", ii.name, fPathPattern, fPath, err)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
