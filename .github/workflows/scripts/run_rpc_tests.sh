@@ -8,6 +8,8 @@ RESULT_DIR="$2"
 
 RPC_VERSION="v1.66.0"
 
+echo "Setup the test execution environment..."
+
 # Clone rpc-tests repository at specific tag/branch
 rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
 git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
