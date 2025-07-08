@@ -124,13 +124,13 @@ func New(stateReader StateReader) *IntraBlockState {
 		balanceInc:        map[common.Address]*BalanceIncrease{},
 		txIndex:           0,
 		trace:             false,
+		dep:               -1,
 	}
 }
 
 func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockState {
 	ibs := New(stateReader)
 	ibs.versionMap = mvhm
-	ibs.dep = -1
 	return ibs
 }
 
@@ -189,6 +189,10 @@ func (sdb *IntraBlockState) StorageReadCount() int64 {
 
 func (sdb *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	sdb.versionMap = versionMap
+}
+
+func (sdb *IntraBlockState) IsVersioned() bool {
+	return sdb.versionMap != nil
 }
 
 func (sdb *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
