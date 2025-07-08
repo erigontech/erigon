@@ -231,7 +231,7 @@ func (idx *Index) init() (err error) {
 		idx.offsetEf, size = eliasfano32.ReadEliasFano(idx.data[offset:])
 		offset += size
 	}
-	if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 1 {
+	if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
 		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 		if arrSz != idx.keyCount {
