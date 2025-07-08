@@ -212,8 +212,9 @@ func buildBlackListForPruning(
 			if !ok {
 				continue
 			}
+
 			to = s.To
-			if blockPrune < to {
+			if blockPrune <= to {
 				continue
 			}
 			blackList[name] = struct{}{}
