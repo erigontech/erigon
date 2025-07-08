@@ -67,7 +67,12 @@ func (bbd BackwardBlockDownloader) fetchBlocksBackwardsByHash(
 ) error {
 	config := applyOptions(opts...)
 	// 1. Get all peers
-	peers := bbd.peerTracker.ListPeers()
+	var peers []*p2p.PeerId
+	if config.peerId != nil {
+		peers = []*p2p.PeerId{config.peerId}
+	} else {
+		peers = bbd.peerTracker.ListPeers()
+	}
 	if len(peers) == 0 {
 		return errors.New("no peers")
 	}
