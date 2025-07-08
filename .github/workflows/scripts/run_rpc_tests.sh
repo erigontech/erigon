@@ -9,16 +9,17 @@ RESULT_DIR="$2"
 RPC_VERSION="v1.66.0"
 
 # Clone rpc-tests repository at specific tag/branch
-rm -rf "$WORKSPACE/rpc-tests" > /dev/null 2>&1
+rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
 git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests"
 cd "$WORKSPACE/rpc-tests"
 
 # Try to create and activate a Python virtual environment or install packages globally if it fails (not ideal but works)
-if python3 -m venv .venv 2>/dev/null; then :
-elif python3 -m virtualenv .venv 2>/dev/null; then :
-elif virtualenv .venv 2>/dev/null; then :
+if python3 -m venv .venv >/dev/null 2>&1; then :
+elif python3 -m virtualenv .venv >/dev/null 2>&1; then :
+elif virtualenv .venv >/dev/null 2>&1; then :
 else
-  pip3 install -r requirements.txt
+  echo "Failed to create a virtual environment, installing packages globally."
+  pip3 install -r requirements.txt 1>/dev/null
 fi
 
 # Activate virtual environment if it was created
