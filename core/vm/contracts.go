@@ -557,14 +557,8 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		return []byte{}, nil
 	}
 	// Retrieve the operands and execute the exponentiation
-	var (
-		base = gmp.NewInt().SetBytes(getData(input, 0, baseLen))
-		exp  = gmp.NewInt().SetBytes(getData(input, baseLen, expLen))
-		mod  = gmp.NewInt().SetBytes(getData(input, baseLen+expLen, modLen))
-	)
-
-	output := gmp.NewInt().ExpMod(base, exp, mod)
-	return common.LeftPadBytes(output.Bytes(), int(modLen)), nil
+	output, _ := gmp.ModExpBytesPooled(getData(input, 0, baseLen), getData(input, baseLen, expLen), getData(input, baseLen+expLen, modLen))
+	return common.LeftPadBytes(output, int(modLen)), nil
 }
 
 // newCurvePoint unmarshals a binary blob into a bn256 elliptic curve point,
