@@ -29,8 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/version"
-
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -47,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (
@@ -448,7 +447,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 							//return false
 						}
 					}
-					if item.existence, err = existence.OpenFilter(fPath); err != nil {
+					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -1137,7 +1136,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			existenceFilter, err = existence.OpenFilter(fPath)
+			existenceFilter, err = existence.OpenFilter(fPath, false)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1239,7 +1238,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath, false)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1258,7 +1257,8 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums:              true,
+		Version:            1,
+		Enums:              false,
 		LessFalsePositives: true,
 
 		BucketSize: recsplit.DefaultBucketSize,
@@ -1295,6 +1295,14 @@ func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		return []string{d.kviAccessorFilePath(fromStep, toStep)}
 	})
+	//return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep, toStep uint64) []string {
+	//	var files []string
+	//	if d.Accessors.Has(AccessorHashMap) {
+	//		files = append(files, d.kviAccessorFilePath(fromStep, toStep))
+	//		files = append(files, d.kvExistenceIdxFilePath(fromStep, toStep))
+	//	}
+	//	return files
+	//})
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -1405,6 +1413,10 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	if d.disable {
 		return
 	}
+	if txNumFrom == txNumTo {
+		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
+	}
+
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
