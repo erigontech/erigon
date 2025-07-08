@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -65,11 +66,15 @@ func remix(z uint64) uint64 {
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
 	// v=0 falsePositeves=true - as array of hashedKeys[0]. Requires `enum=true`. Problem: requires key number - which recsplit has but expensive to encode (~5bytes/key)
+	// v=1 falsePositeves=true - as fuse filter (%9 bits/key). Doesn't require `enum=true`
 	version uint8
 
 	//v0 fields
 	existenceFV0 *os.File
 	existenceWV0 *bufio.Writer
+
+	//v1 fields
+	existenceFV1 *fusefilter.WriterOffHeap
 
 	offsetCollector *etl.Collector // Collector that sorts by offsets
 
@@ -78,8 +83,8 @@ type RecSplit struct {
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
 
-	indexFileName          string
-	indexFile, tmpFilePath string
+	fileName              string
+	filePath, tmpFilePath string
 
 	tmpDir            string
 	gr                GolombRice // Helper object to encode the tree of hash function salts using Golomb-Rice code.
@@ -128,6 +133,7 @@ type RecSplitArgs struct {
 	// if Enum=true:  must have sorted values (can have duplicates) - monotonically growing sequence
 	Enums              bool
 	LessFalsePositives bool
+	Version            uint8
 
 	IndexFile  string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir     string
@@ -154,38 +160,31 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	if args.BaseDataID >= math.MaxUint64/2 {
 		return nil, fmt.Errorf("baseDataID %d is too large, must be less than %d", args.BaseDataID, math.MaxUint64/2)
 	}
-	const version uint8 = 0
 
-	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
-	rs := &RecSplit{
-		version:    version,
-		bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
-		lvl: log.LvlDebug, logger: logger,
-	}
 	if len(args.StartSeed) == 0 {
-		args.StartSeed = []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+		args.StartSeed = []uint64{0x106393c187cae2a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
+	}
+	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
+	rs := &RecSplit{
+		version:    args.Version,
+		bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
+		tmpDir: args.TmpDir, filePath: args.IndexFile, tmpFilePath: args.IndexFile + ".tmp",
+		enums:              args.Enums,
+		baseDataID:         args.BaseDataID,
+		lessFalsePositives: args.LessFalsePositives,
+		startSeed:          args.StartSeed,
+		lvl:                log.LvlDebug, logger: logger,
 	}
 	closeFiles := true
 	defer func() {
 		if closeFiles {
-			if rs.indexF != nil {
-				rs.indexF.Close()
-				os.Remove(rs.indexF.Name())
-			}
-			if rs.existenceFV0 != nil {
-				rs.existenceFV0.Close()
-				os.Remove(rs.existenceFV0.Name())
-			}
+			rs.Close()
 		}
 	}()
-	rs.tmpDir = args.TmpDir
-	rs.indexFile = args.IndexFile
-	rs.tmpFilePath = args.IndexFile + ".tmp"
-	_, fname := filepath.Split(rs.indexFile)
-	rs.indexFileName = fname
-	rs.baseDataID = args.BaseDataID
+	_, fname := filepath.Split(rs.filePath)
+	rs.fileName = fname
 	if args.Salt == nil {
 		seedBytes := make([]byte, 4)
 		if _, err := rand.Read(seedBytes); err != nil {
@@ -198,13 +197,11 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
 	rs.bucketCollector.SortAndFlushInBackground(true)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
-	rs.enums = args.Enums
 	if args.Enums {
 		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
 		rs.bucketCollector.SortAndFlushInBackground(true)
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
-	rs.lessFalsePositives = args.LessFalsePositives
 	var err error
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
 		if rs.version == 0 {
@@ -216,10 +213,15 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		}
 
 	}
+	if args.KeyCount > 0 && rs.lessFalsePositives && rs.version >= 1 {
+		rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
-	rs.maxOffset = 0
 	rs.bucketSizeAcc = make([]uint64, 1, bucketCount+1)
 	rs.bucketPosAcc = make([]uint64, 1, bucketCount+1)
 	if args.LeafSize > MaxLeafSize {
@@ -232,7 +234,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	} else {
 		rs.secondaryAggrBound = rs.primaryAggrBound * uint16(math.Ceil(0.21*float64(rs.leafSize)+9./10.))
 	}
-	rs.startSeed = args.StartSeed
 	rs.count = make([]uint16, rs.secondaryAggrBound)
 	if args.NoFsync {
 		rs.DisableFsync()
@@ -241,8 +242,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	return rs, nil
 }
 
-func (rs *RecSplit) FileName() string { return rs.indexFileName }
-func (rs *RecSplit) Salt() uint32     { return rs.salt }
+func (rs *RecSplit) FileName() string    { return rs.fileName }
+func (rs *RecSplit) MajorVersion() uint8 { return rs.version }
+func (rs *RecSplit) Salt() uint32        { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		rs.indexF.Close()
@@ -253,6 +255,10 @@ func (rs *RecSplit) Close() {
 		rs.existenceFV0.Close()
 		_ = os.Remove(rs.existenceFV0.Name())
 		rs.existenceFV0 = nil
+	}
+	if rs.existenceFV1 != nil {
+		rs.existenceFV1.Close()
+		rs.existenceFV1 = nil
 	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
@@ -293,12 +299,12 @@ func (rs *RecSplit) ResetNextSalt() {
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
-	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
+	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
 	rs.bucketCollector.SortAndFlushInBackground(true)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if rs.offsetCollector != nil {
 		rs.offsetCollector.Close()
-		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
+		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
 		rs.offsetCollector.SortAndFlushInBackground(true)
 		rs.bucketCollector.LogLvl(log.LvlDebug)
 	}
@@ -407,14 +413,22 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
+		if rs.lessFalsePositives {
+			if rs.version == 0 {
+				//1 byte from each hashed key
+				if err := rs.existenceWV0.WriteByte(byte(hi)); err != nil {
+					return err
+				}
+			}
+		}
 	} else {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
 	}
-	if rs.version == 0 && rs.lessFalsePositives && rs.enums {
-		//1 byte from each hashed key
-		if err := rs.existenceWV0.WriteByte(byte(hi)); err != nil {
+
+	if rs.lessFalsePositives && rs.version >= 1 {
+		if err := rs.existenceFV1.AddHash(hi); err != nil {
 			return err
 		}
 	}
@@ -618,11 +632,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return errors.New("already built")
 	}
 	if rs.keysAdded != rs.keyExpectedCount {
-		return fmt.Errorf("rs %s expected keys %d, got %d", rs.indexFileName, rs.keyExpectedCount, rs.keysAdded)
+		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
 	}
 	var err error
 	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {
-		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
+		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
 	}
 
 	defer rs.indexF.Close()
@@ -652,7 +666,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
 	if rs.lvl < log.LvlTrace {
-		log.Log(rs.lvl, "[index] calculating", "file", rs.indexFileName)
+		log.Log(rs.lvl, "[index] calculating", "file", rs.fileName)
 	}
 	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
@@ -668,11 +682,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		rs.indexF.Seek(0, 0)
 		b, _ := io.ReadAll(rs.indexF)
 		if len(b) != 9+int(rs.keysAdded)*rs.bytesPerRec {
-			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.bytesPerRec, len(b), rs.keysAdded, rs.bytesPerRec, rs.indexFile))
+			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.bytesPerRec, len(b), rs.keysAdded, rs.bytesPerRec, rs.filePath))
 		}
 	}
 	if rs.lvl < log.LvlTrace {
-		log.Log(rs.lvl, "[index] write", "file", rs.indexFileName)
+		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
 	if rs.enums && rs.keysAdded > 0 {
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
@@ -719,9 +733,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	var features Features
 	if rs.enums {
 		features |= Enums
-		if rs.lessFalsePositives {
-			features |= LessFalsePositives
-		}
+	}
+	if rs.lessFalsePositives {
+		features |= LessFalsePositives
 	}
 	if err := rs.indexW.WriteByte(byte(features)); err != nil {
 		return fmt.Errorf("writing enums = true: %w", err)
@@ -759,11 +773,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	if err = os.Rename(rs.tmpFilePath, rs.indexFile); err != nil {
+	if err = os.Rename(rs.tmpFilePath, rs.filePath); err != nil {
 		rs.logger.Warn("[index] rename", "file", rs.tmpFilePath, "err", err)
 		return err
 	}
-	rs.logger.Debug("[index] created", "file", rs.indexFileName)
+	rs.logger.Debug("[index] created", "file", rs.fileName)
 
 	return nil
 }
@@ -786,6 +800,13 @@ func (rs *RecSplit) flushExistenceFilter() error {
 			return err
 		}
 		if _, err := io.CopyN(rs.indexW, rs.existenceFV0, int64(rs.keysAdded)); err != nil {
+			return err
+		}
+	}
+
+	if rs.version >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
+		_, err := rs.existenceFV1.BuildTo(rs.indexW)
+		if err != nil {
 			return err
 		}
 	}
