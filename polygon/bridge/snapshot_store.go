@@ -278,12 +278,7 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash common
 	return 0, 0, false, nil
 }
 
-func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
-	lastFrozenEventId := s.LastFrozenEventId()
-	if start > lastFrozenEventId || lastFrozenEventId == 0 {
-		return s.Store.Events(ctx, start, end)
-	}
-
+func (s *SnapshotStore) events(ctx context.Context, start, end, blockNumber uint64) ([][]byte, error) {
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
 	segments := tx.Segments
@@ -292,6 +287,13 @@ func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	var result [][]byte
 
 	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].From() > blockNumber {
+			continue
+		}
+		if segments[i].To() <= blockNumber {
+			break
+		}
+
 		gg0 := segments[i].Src().MakeGetter()
 
 		if !gg0.HasNext() {
@@ -370,7 +372,13 @@ func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash common.Hash, blo
 	if !ok {
 		return []rlp.RawValue{}, nil
 	}
-	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
+
+	lastFrozenEventId := s.LastFrozenEventId()
+	if startEventId > lastFrozenEventId || lastFrozenEventId == 0 {
+		return s.Store.EventsByBlock(ctx, hash, blockHeight)
+	}
+
+	bytevals, err := s.events(ctx, startEventId, endEventId+1, blockHeight)
 	if err != nil {
 		return nil, err
 	}
