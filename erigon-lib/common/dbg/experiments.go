@@ -31,7 +31,7 @@ import (
 )
 
 var (
-	doMemstat           = EnvBool("NO_MEMSTAT", true)
+	doMemstat           = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)

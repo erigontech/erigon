@@ -1,7 +1,22 @@
 ChangeLog
 ---------
 
-## v3.0.5 (in development)
+## v3.0.11
+
+### Milestone
+
+https://github.com/erigontech/erigon/milestone/50
+
+The default gas limit for Ethereum Mainnet is increased to 45M in line with other clients.
+
+**Improvements:**
+- Added chain-specific gas limit defaults by @Giulio2002 in https://github.com/erigontech/erigon/pull/15802
+
+**Bugfixes:**
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.0.10...v3.0.11
+
+## v3.0.5
 
 ### Milestone
 

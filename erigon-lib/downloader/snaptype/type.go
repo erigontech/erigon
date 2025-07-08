@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -72,14 +73,18 @@ type Versions struct {
 
 type FirstKeyGetter func(ctx context.Context) uint64
 
-type RangeExtractor interface {
-	Extract(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+type BlockHashResolver interface {
+	CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, ok bool, err error)
 }
 
-type RangeExtractorFunc func(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+type RangeExtractor interface {
+	Extract(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error)
+}
 
-func (f RangeExtractorFunc) Extract(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-	return f(ctx, blockFrom, blockTo, firstKey, db, chainConfig, collect, workers, lvl, logger)
+type RangeExtractorFunc func(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error)
+
+func (f RangeExtractorFunc) Extract(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error) {
+	return f(ctx, blockFrom, blockTo, firstKey, db, chainConfig, collect, workers, lvl, logger, hashResolver)
 }
 
 type IndexBuilder interface {
@@ -199,7 +204,7 @@ type Type interface {
 	Indexes() []Index
 	HasIndexFiles(info FileInfo, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
-	ExtractRange(ctx context.Context, info FileInfo, rangeExtractor RangeExtractor, indexBuilder IndexBuilder, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+	ExtractRange(ctx context.Context, info FileInfo, rangeExtractor RangeExtractor, indexBuilder IndexBuilder, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error)
 
 	RangeExtractor() RangeExtractor
 }
@@ -269,11 +274,11 @@ func (s snapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	return f
 }
 
-func (s snapType) ExtractRange(ctx context.Context, info FileInfo, rangeExtractor RangeExtractor, indexBuilder IndexBuilder, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func (s snapType) ExtractRange(ctx context.Context, info FileInfo, rangeExtractor RangeExtractor, indexBuilder IndexBuilder, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error) {
 	if rangeExtractor == nil {
 		rangeExtractor = s.rangeExtractor
 	}
-	return ExtractRange(ctx, info, rangeExtractor, indexBuilder, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger)
+	return ExtractRange(ctx, info, rangeExtractor, indexBuilder, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger, hashResolver)
 }
 
 func (s snapType) Indexes() []Index {
@@ -554,7 +559,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	}
 }
 
-func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, indexBuilder IndexBuilder, firstKey FirstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, indexBuilder IndexBuilder, firstKey FirstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error) {
 	var lastKeyValue uint64
 
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.DefaultCfg, lvl, logger)
@@ -566,7 +571,7 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 
 	lastKeyValue, err = extractor.Extract(ctx, f.From, f.To, firstKey, chainDB, chainConfig, func(v []byte) error {
 		return sn.AddWord(v)
-	}, workers, lvl, logger)
+	}, workers, lvl, logger, hashResolver)
 
 	if err != nil {
 		return lastKeyValue, fmt.Errorf("ExtractRange: %w", err)

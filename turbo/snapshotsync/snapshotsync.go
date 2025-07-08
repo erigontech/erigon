@@ -283,6 +283,21 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
 
+// isTransactionsSegmentExpired - check if the transactions segment is expired according to whichever history expiry policy we use.
+func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snapcfg.PreverifiedItem) bool {
+	// History expiry is the default.
+	if pruneMode.Blocks != prune.DefaultBlocksPruneMode {
+		return false
+	}
+
+	// We use the pre-merge data policy.
+	s, _, ok := snaptype.ParseFileName("", p.Name)
+	if !ok {
+		return false
+	}
+	return cc.IsPreMerge(s.From)
+}
+
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
@@ -361,6 +376,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		}
 
 		if _, ok := blackListForPruning[p.Name]; ok {
+			continue
+		}
+		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
 			continue
 		}
 

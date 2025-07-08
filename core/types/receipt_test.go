@@ -29,6 +29,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -557,5 +558,29 @@ func TestReceiptUnmarshalBinary(t *testing.T) {
 		if !reflect.DeepEqual(got1559Receipt, eip1559Receipt) {
 			t.Errorf("receipt unmarshalled from binary mismatch, got %v want %v", got1559Receipt, eip1559Receipt)
 		}
+	})
+}
+
+func TestReceiptEncode(t *testing.T) {
+	t.Run("Enc.FirstLogIndexWithinBlock", func(t *testing.T) {
+		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1}
+		buf, err := rlp.EncodeToBytes(r1)
+		require.NoError(t, err)
+		r2 := &ReceiptForStorage{}
+		err = rlp.DecodeBytes(buf, r2)
+		require.NoError(t, err)
+		require.Equal(t, r1.FirstLogIndexWithinBlock, r2.FirstLogIndexWithinBlock)
+	})
+
+	t.Run("Enc.Empty.FirstLogIndexWithinBlock", func(t *testing.T) {
+		r1 := &ReceiptForStorage{Logs: Logs{
+			&Log{Index: 1},
+		}}
+		buf, err := rlp.EncodeToBytes(r1)
+		require.NoError(t, err)
+		r2 := &ReceiptForStorage{}
+		err = rlp.DecodeBytes(buf, r2)
+		require.NoError(t, err)
+		require.Equal(t, int(r1.Logs[0].Index), int(r2.FirstLogIndexWithinBlock))
 	})
 }

@@ -13,17 +13,17 @@ on:
     types:
       - ready_for_review
 
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: >-
-    ${{
-      !startsWith(github.ref, 'refs/heads/release/') &&
-      github.ref != 'refs/heads/main'
-    }}
-
 
 jobs:
   mainnet-rpc-integ-tests:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}', github.workflow, github.run_id) ||
+          format('{0}-{1}', github.workflow, github.ref)
+        }}
+      cancel-in-progress: true
     runs-on: [ self-hosted, qa, RpcSpecific ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
