@@ -91,6 +91,8 @@ type Downloader struct {
 	torrentFS *AtomicTorrentFS
 
 	logPrefix string
+	// Set when the downloader discovers something isn't complete. Probably doesn't belong in the
+	// Downloader.
 	startTime time.Time
 
 	lock sync.RWMutex
@@ -1331,6 +1333,8 @@ func (d *Downloader) logProgress() {
 	haveAllMetadata := d.stats.MetadataReady == d.stats.NumTorrents
 
 	if !d.stats.AllTorrentsComplete() {
+		// We have work to do so start timing.
+		d.setStartTime()
 		// TODO: Include what we're syncing.
 		log.Info(fmt.Sprintf("[%s] Syncing", prefix),
 			"file-metadata", fmt.Sprintf("%d/%d", d.stats.MetadataReady, d.stats.NumTorrents),
@@ -1379,7 +1383,7 @@ func (d *Downloader) logProgress() {
 
 func calculateTime(amountLeft, rate uint64) string {
 	if rate == 0 {
-		return "inf"
+		return "∞"
 	}
 	return time.Duration(float64(amountLeft) / float64(rate) * float64(time.Second)).Truncate(time.Second).String()
 }
@@ -1410,7 +1414,7 @@ func (d *Downloader) updateVerificationOccurring() {
 	d.verificationOccurring.SetBool(d.filesBeingVerified.Size() != 0)
 }
 
-// Delete - stop seeding, remove file, remove .torrent
+// Delete - stop seeding, remove file, remove .torrent.
 func (s *Downloader) Delete(name string) (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -1439,4 +1443,11 @@ func (s *Downloader) Delete(name string) (err error) {
 
 func (d *Downloader) filePathForName(name string) string {
 	return filepath.Join(d.SnapDir(), filepath.FromSlash(name))
+}
+
+// Set the start time for the progress logging. Only set when we determine we're actually starting work.
+func (d *Downloader) setStartTime() {
+	if d.startTime.IsZero() {
+		d.startTime = time.Now()
+	}
 }
