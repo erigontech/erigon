@@ -3,15 +3,12 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"runtime"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/services"
-	"golang.org/x/sync/errgroup"
 )
 
 // CheckReceiptsNoDups performs integrity checks on receipts to ensure no duplicates exist.
@@ -32,14 +29,13 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	}
 	defer tx.Rollback()
 
-	receiptDomainProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
+	receiptProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
 
 	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptDomainProgress)
+	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
 
 	{
 		log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
-		receiptProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
 		accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
 		if accProgress != receiptProgress {
 			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
@@ -48,74 +44,7 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	}
 	tx.Rollback()
 
-	if err := receiptsNoDupsRangeParallel(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
-		return err
-	}
-	return nil
-}
-
-func receiptsNoDupsRangeParallel(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
-	blockRange := toBlock - fromBlock + 1
-	if blockRange == 0 {
-		return nil
-	}
-
-	numWorkers := runtime.NumCPU()
-	chunkSize := uint64(1000)
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(numWorkers)
-	var completedChunks atomic.Uint64
-	var totalChunks uint64 = (blockRange + chunkSize - 1) / chunkSize
-	log.Info("[integrity] ReceiptsNoDups using parallel processing", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
-
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-logEvery.C:
-				completed := completedChunks.Load()
-				progress := float64(completed) / float64(totalChunks) * 100
-				log.Info("[integrity] CheckReceiptsNoDups progress", "progress", fmt.Sprintf("%.1f%%", progress))
-			}
-		}
-	}()
-
-	// Process chunks in parallel
-	for start := fromBlock; start <= toBlock; start += chunkSize {
-		end := start + chunkSize - 1
-		if end > toBlock {
-			end = toBlock
-		}
-
-		chunkStart := start // Capture loop variable
-		chunkEnd := end     // Capture loop variable
-
-		g.Go(func() error {
-			tx, err := db.BeginTemporalRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-
-			chunkErr := ReceiptsNoDupsRange(ctx, chunkStart, chunkEnd, tx, blockReader, failFast)
-			if chunkErr != nil {
-				return chunkErr
-			}
-
-			completedChunks.Add(1)
-			return nil
-		})
-	}
-
-	if err := g.Wait(); err != nil {
-		return err
-	}
-	return nil
+	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, ReceiptsNoDupsRange)
 }
 
 func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
@@ -139,29 +68,21 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 
 	prevCumUsedGas := -1
 	prevLogIdx := uint32(0)
+	blockNum := fromBlock
+	var _min, _max uint64
+	_min, _ = txNumsReader.Min(tx, fromBlock)
+	_max, _ = txNumsReader.Max(tx, fromBlock)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
 		cumUsedGas, _, logIdx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 		if err != nil {
 			return err
 		}
-		blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			err := fmt.Errorf("CheckReceiptsNoDups: didn't find block at txnum: %d", txNum)
-			if failFast {
-				return err
-			}
-			log.Error(err.Error())
-		}
-		_min, _ := txNumsReader.Min(tx, blockNum)
+
 		blockChanged := txNum == _min
 		if blockChanged {
 			prevCumUsedGas = 0
 			prevLogIdx = 0
 		}
-		_max, _ := txNumsReader.Max(tx, blockNum)
 
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
 		if !strongMonotonicCumGasUsed && txNum != _min && txNum != _max { // system tx can be skipped
@@ -184,10 +105,18 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		prevCumUsedGas = int(cumUsedGas)
 		prevLogIdx = logIdx
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if txNum == _max {
+			blockNum++
+			_min = _max + 1
+			_max, _ = txNumsReader.Max(tx, blockNum)
+		}
+
+		if txNum%1000 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
 	}
 	return nil

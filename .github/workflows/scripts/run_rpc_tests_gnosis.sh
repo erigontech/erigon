@@ -19,15 +19,25 @@ fi
 
 # Array of disabled tests
 disabled_tests=(
+    # these tests requires Erigon active
+    eth_mining
+    eth_submitHashrate
+    eth_submitWork
+    net_peerCount
+    net_listening
+    net_version
+    web3_clientVersion
 )
 
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
 python3 ./run_tests.py --blockchain gnosis --port 8545 --engine-port 8545 --continue -f --json-diff --serial -x "$disabled_test_list"
+RUN_TESTS_EXIT_CODE=$?
 if $manual; then
   echo "deactivating…"
   deactivate 2>/dev/null || echo "No active virtualenv"
   echo "deactivating complete."
 fi
-exit $?
+exit $RUN_TESTS_EXIT_CODE
+

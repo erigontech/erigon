@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func TestRemoteCheckpointSync(t *testing.T) {
@@ -34,7 +34,7 @@ func TestRemoteCheckpointSync(t *testing.T) {
 	defer mockServer.Close()
 
 	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL}
-	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, networkid.MainnetChainID)
+	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
 	state, err := syncer.GetLatestBeaconState(context.Background())
 	assert.True(t, rec)
 	require.NoError(t, err)

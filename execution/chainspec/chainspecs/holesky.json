@@ -29,5 +29,6 @@
       "baseFeeUpdateFraction": 5007716
     }
   },
-  "depositContractAddress": "0x4242424242424242424242424242424242424242"
+  "depositContractAddress": "0x4242424242424242424242424242424242424242",
+  "defaultBlockGasLimit" : 60000000
 }

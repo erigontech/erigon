@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
@@ -63,10 +64,11 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 		//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 		var bytes []byte
 		var err error
-		bytes, err = rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
+		packet := eth.GetBlockBodiesPacket66{
 			RequestId:            rand.Uint64(), // nolint: gosec
 			GetBlockBodiesPacket: req.Hashes,
-		})
+		}
+		bytes, err = rlp.EncodeToBytes(&packet)
 		if err != nil {
 			cs.logger.Error("Could not encode block bodies request", "err", err)
 			return [64]byte{}, false
@@ -100,16 +102,11 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
-			var fromNum, toNum uint64
-			if len(req.BlockNums) > 0 {
-				fromNum, toNum = req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]
-			}
-			var fromHash, toHash common.Hash
-			if len(req.Hashes) > 0 {
-				fromHash, toHash = req.Hashes[0], req.Hashes[len(req.Hashes)-1]
-			}
+			fromNum, toNum := req.FromBlockNum(), req.ToBlockNum()
+			fromHash, toHash := req.FromBlockHash(), req.ToBlockHash()
 			cs.logger.Trace(
 				"body request not sent to any peers",
+				"reqId", packet.RequestId,
 				"fromNum", fromNum,
 				"fromHash", fromHash,
 				"toNum", toNum,
@@ -117,19 +114,14 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			)
 			continue
 		}
-		go func() {
-			var fromNum, toNum uint64
-			if len(req.BlockNums) > 0 {
-				fromNum, toNum = req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]
-			}
-			var fromHash, toHash common.Hash
-			if len(req.Hashes) > 0 {
-				fromHash, toHash = req.Hashes[0], req.Hashes[len(req.Hashes)-1]
-			}
+		if cs.logger.Enabled(ctx, log.LvlTrace) {
+			fromNum, toNum := req.FromBlockNum(), req.ToBlockNum()
+			fromHash, toHash := req.FromBlockHash(), req.ToBlockHash()
 			for _, p := range sentPeers.Peers {
 				pid := sentry.ConvertH512ToPeerID(p)
 				cs.logger.Trace(
 					"body request sent to peer",
+					"reqId", packet.RequestId,
 					"fromNum", fromNum,
 					"fromHash", fromHash,
 					"toNum", toNum,
@@ -137,7 +129,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 					"peer", hex.EncodeToString(pid[:]),
 				)
 			}
-		}()
+		}
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
@@ -199,6 +191,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
 			cs.logger.Trace(
 				"header request not sent to any peers",
+				"reqId", reqData.RequestId,
 				"height", req.Number,
 				"hash", req.Hash,
 				"length", req.Length,
@@ -206,11 +199,12 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			)
 			continue
 		}
-		go func() {
+		if cs.logger.Enabled(ctx, log.LvlTrace) {
 			for _, p := range sentPeers.Peers {
 				pid := sentry.ConvertH512ToPeerID(p)
 				cs.logger.Trace(
 					"header request sent to peer",
+					"reqId", reqData.RequestId,
 					"height", req.Number,
 					"hash", req.Hash,
 					"length", req.Length,
@@ -218,7 +212,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 					"peer", hex.EncodeToString(pid[:]),
 				)
 			}
-		}()
+		}
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false

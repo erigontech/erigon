@@ -66,7 +66,9 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 	}
 	logs := make([][]*types.Log, len(receipts))
 	for i, receipt := range receipts {
-		logs[i] = receipt.Logs
+		if len(receipt.Logs) > 0 {
+			logs[i] = receipt.Logs
+		}
 	}
 	return logs, nil
 }
