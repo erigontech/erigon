@@ -113,7 +113,7 @@ jobs:
 
           cd ${{ runner.workspace }}/rpc-tests/integration
           rm -rf ./gnosis/results/
-                    
+          
           # Run RPC integration test runner via http
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_gnosis.sh
           ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_gnosis.sh

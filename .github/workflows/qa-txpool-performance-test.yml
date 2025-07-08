@@ -11,7 +11,7 @@ on:
 
 jobs:
   tx_pool_assertoor_test:
-    runs-on: [self-hosted, qa, X64, long-running]
+    runs-on: [ self-hosted, qa, X64, long-running ]
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}"
@@ -69,10 +69,10 @@ jobs:
             if [[ "$line" == *'msg="outputs_json:'* ]]; then
               # Extract the JSON object and unescape the quotes
               json_str=$(echo "$line" | sed 's/.*msg="outputs_json: \(.*\)".*/\1/' | sed 's/\\"/"/g')
-              
+          
               # Extract the task value from the log line
               task=$(echo "$line" | sed -n 's/.*task=\([^ ]*\).*/\1/p')
-              
+          
               # Skip if task is empty
               if [ -n "$task" ]; then
                 # Create or append to task file
@@ -89,16 +89,16 @@ jobs:
           first_task=true
           for task_file in "$tmp_dir"/*; do
             [ -f "$task_file" ] || continue
-            
+          
             task=$(basename "$task_file")
-            
+          
             # Add comma for all but first task
             if [ "$first_task" = true ]; then
               first_task=false
             else
               echo "," >> $output_json
             fi
-            
+          
             # Write the task array to the file
             echo "\"$task\": [$(cat "$task_file")]" >> $output_json
           done
@@ -143,25 +143,25 @@ jobs:
           for ((i=0; i<array_length; i++)); do
             # Get tx_count for this element
             tx_count=$(jq -r ".tx_pool_latency_analysis[$i].tx_count" "$output_json")
-            
+          
             # Check if tx_pool_latency_hdr_plot exists for this element
             if jq -e ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json" > /dev/null 2>&1; then
               # Extract the plot data to a CSV file
               csv_file="tx_pool_latency_analysis_${i}_${tx_count}.csv"
-              
+          
               # Extract the plot data, replace literal '\n' with actual newlines and '\t' with actual tabs,
               # and remove all lines starting with '#'
               jq -r ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json" | \
                 sed 's/\\n/\n/g; s/\\t/\t/g' | grep -v "^#" > "$csv_file"
-              
+          
               # Call the Python script to process the CSV file
               python3 $ERIGON_QA_PATH/test_system/qa-tests/tx-pool/hdr_plot.py \
                 --input_file "$csv_file" \
                 --output_file "tx_pool_latency_analysis_${i}_${tx_count}.png"
-              
+          
               # Delete the CSV file after processing
               rm -f "$csv_file"
-              
+          
               echo "Processed tx_pool_latency_analysis[$i] with tx_count=$tx_count"
             else
               echo "tx_pool_latency_hdr_plot not found for element $i, skipping"

@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   minimal-node-sync-from-scratch-test:
-    runs-on: [self-hosted, qa, long-running]
+    runs-on: [ self-hosted, qa, long-running ]
     timeout-minutes: 1100  # 18 hours plus 20 minutes
     strategy:
       fail-fast: false

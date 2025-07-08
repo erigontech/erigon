@@ -58,26 +58,44 @@ function getDateStringsBetween(startDate: Date, endDate: Date): string[] {
 // see https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/about-status-checks#check-statuses-and-conclusions
 function mapConclusionToIcon(conclusion: string | null, status: string | null): string {
     switch (conclusion) {
-        case 'success': return '✅';
-        case 'failure': return '❌';
-        case 'cancelled': return '⏭️';  // The run was cancelled before it completed.
-        case 'skipped': return '⏩';  // The run was skipped.
-        case 'timed_out': return '⏰️';
-        case 'neutral': return '⚪️';
-        case 'stale': return '🕸️';  // The run was marked stale by GitHub because it took too long.
-        case 'action_required': return '⚠️';
+        case 'success':
+            return '✅';
+        case 'failure':
+            return '❌';
+        case 'cancelled':
+            return '⏭️';  // The run was cancelled before it completed.
+        case 'skipped':
+            return '⏩';  // The run was skipped.
+        case 'timed_out':
+            return '⏰️';
+        case 'neutral':
+            return '⚪️';
+        case 'stale':
+            return '🕸️';  // The run was marked stale by GitHub because it took too long.
+        case 'action_required':
+            return '⚠️';
         default: {
             switch (status) {
-                case 'requested': return '📥'; // Requested
-                case 'queued': return '⏳'; // Queued
-                case 'waiting': return '⏸️'; // Waiting (for a deployment protection rule to be satisfied)
-                case 'pending': return '🕓'; // Pending (the run is at the front of the queue but the concurrency limit has been reached)
-                case 'in_progress': return '🔄'; // In progress (the run is currently running)
-                case 'expected': return '🔍'; // Expected (the run is waiting for a status to be reported)
-                case 'startup_failure': return '💥'; // Startup_Failure (the run failed during startup, not applicable here)
-                case 'completed': return '✅'; // Completed
-                case 'failed': return '❌'; // Failed
-                default: return status ?? '❓'; // Unknown status
+                case 'requested':
+                    return '📥'; // Requested
+                case 'queued':
+                    return '⏳'; // Queued
+                case 'waiting':
+                    return '⏸️'; // Waiting (for a deployment protection rule to be satisfied)
+                case 'pending':
+                    return '🕓'; // Pending (the run is at the front of the queue but the concurrency limit has been reached)
+                case 'in_progress':
+                    return '🔄'; // In progress (the run is currently running)
+                case 'expected':
+                    return '🔍'; // Expected (the run is waiting for a status to be reported)
+                case 'startup_failure':
+                    return '💥'; // Startup_Failure (the run failed during startup, not applicable here)
+                case 'completed':
+                    return '✅'; // Completed
+                case 'failed':
+                    return '❌'; // Failed
+                default:
+                    return status ?? '❓'; // Unknown status
             }
         }
     }
@@ -124,9 +142,9 @@ async function run() {
         const token = process.env.GITHUB_TOKEN as string;  // The GitHub token for authentication
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
-        const branch= process.env.BRANCH_NAME ?? github.context.ref.replace(/^refs\/\w+\//, '');   // The branch name, defaults to the current branch
+        const branch = process.env.BRANCH_NAME ?? github.context.ref.replace(/^refs\/\w+\//, '');   // The branch name, defaults to the current branch
         //const branch= 'main';   // For testing purposes
-        const { owner, repo } = github.context.repo;
+        const {owner, repo} = github.context.repo;
         //const {owner, repo} = {owner: 'erigontech', repo: 'erigon'};  // For testing purposes
 
         endDate.setUTCHours(23, 59, 59, 999);
@@ -291,8 +309,7 @@ async function run() {
             .addTable(table)
             .write();
 
-    }
-    catch (err: any) {
+    } catch (err: any) {
         core.setFailed(err.message);
     }
 }
