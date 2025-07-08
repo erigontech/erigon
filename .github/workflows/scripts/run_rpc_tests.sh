@@ -10,7 +10,7 @@ RPC_VERSION="v1.66.0"
 
 # Clone rpc-tests repository at specific tag/branch
 rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
-git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" 1>/dev/null
+git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
 cd "$WORKSPACE/rpc-tests"
 
 # Try to create and activate a Python virtual environment or install packages globally if it fails (not ideal but works)
