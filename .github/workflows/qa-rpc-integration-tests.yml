@@ -105,9 +105,9 @@ jobs:
           TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
-          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
+          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum.sh
           set +e # Disable exit on error for test run
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh ${{ runner.workspace }} $TEST_RESULT_DIR
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum.sh ${{ runner.workspace }} $TEST_RESULT_DIR
           # Capture test runner script exit status
           test_exit_status=$?
           set -e # Re-enable exit on error after test run
