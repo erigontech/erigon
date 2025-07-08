@@ -1216,8 +1216,17 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	return nil
 }
 
-func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
-	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing value BEFORE-change*/)
+type RCacheV2Query struct {
+	BlockNum  uint64
+	BlockHash common.Hash
+	TxnHash   common.Hash
+	TxNum     uint64
+
+	DontCalcBloom bool // avoid calculating bloom (can be bottleneck)
+}
+
+func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1231,10 +1240,10 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 	// Convert the receipts from their storage form to their internal representation
 	receipt := &types.ReceiptForStorage{}
 	if err := rlp.DecodeBytes(v, receipt); err != nil {
-		return nil, false, fmt.Errorf("%w, of block %d, len(v)=%d", err, blockNum, len(v))
+		return nil, false, fmt.Errorf("%w, of block %d, len(v)=%d", err, query.BlockNum, len(v))
 	}
 	res := (*types.Receipt)(receipt)
-	res.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txnHash)
+	res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
 	return res, true, nil
 }
 
@@ -1271,7 +1280,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		x := (*types.Receipt)(receipt)
 		if int(receipt.TransactionIndex) < len(block.Transactions()) {
 			txn := block.Transactions()[receipt.TransactionIndex]
-			x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash())
+			x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash(), true)
 		}
 		res = append(res, x)
 	}
