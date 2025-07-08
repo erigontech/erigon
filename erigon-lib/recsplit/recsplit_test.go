@@ -112,6 +112,7 @@ func TestIndexLookup(t *testing.T) {
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
 	test := func(t *testing.T, cfg RecSplitArgs) {
+		t.Helper()
 		rs, err := NewRecSplit(cfg, logger)
 		if err != nil {
 			t.Fatal(err)
@@ -164,6 +165,7 @@ func TestTwoLayerIndex(t *testing.T) {
 	salt := uint32(1)
 	N := 2571
 	test := func(t *testing.T, cfg RecSplitArgs) {
+		t.Helper()
 		rs, err := NewRecSplit(cfg, logger)
 		if err != nil {
 			t.Fatal(err)
