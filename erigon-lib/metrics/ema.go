@@ -30,22 +30,22 @@ func NewEmaWithBeta[T constraints.Integer | constraints.Float](defaultValue T, d
 
 // UpdateAlpha calculates and stores new EMA based on the duration and α
 // value passed in.
-func (e *EMA[T]) UpdateAlpha(v T, α float64) T {
-	return e.updateAlphaBeta(v, α, α)
+func (e *EMA[T]) UpdateAlpha(v T, alpha float64) T {
+	return e.updateAlphaBeta(v, alpha, alpha)
 }
 
 // UpdateAlphaBeta is the same as UpdateAlpha but calculates new EMA based on β
 // if new value is smaller than the current EMA.
-func (e *EMA[T]) updateAlphaBeta(v T, α float64, β float64) T {
+func (e *EMA[T]) updateAlphaBeta(v T, alpha float64, beta float64) T {
 	oldEma := e.v.Load()
 	var newEma T
 	if oldEma == nil {
 		newEma = v
 	} else {
 		if v >= *oldEma {
-			newEma = T((1-α)*float64(*oldEma) + α*float64(v))
+			newEma = T((1-alpha)*float64(*oldEma) + alpha*float64(v))
 		} else {
-			newEma = T((1-β)*float64(*oldEma) + β*float64(v))
+			newEma = T((1-beta)*float64(*oldEma) + beta*float64(v))
 		}
 	}
 	e.v.Store(&newEma)
