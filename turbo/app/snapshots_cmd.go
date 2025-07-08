@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"io"
 	"math"
 	"net/http"
@@ -35,6 +34,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon-lib/chain/networkname"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
@@ -749,7 +750,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.BorSpans:
-			println("chainName", chainConfig.ChainName)
 			if !CheckBorChain(chainConfig.ChainName) {
 				logger.Info("BorSpans skipped because not bor chain")
 				continue
