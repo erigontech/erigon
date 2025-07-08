@@ -235,9 +235,28 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) AggTx() any                       { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx        { panic("not implemented") }
-func (tx *tx) FreezeInfo() kv.FreezeInfo        { panic("not implemented") }
+func (tx *tx) AggTx() any                           { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx            { return kv.TemporalDebugTx(tx) }
+func (tx *tx) FreezeInfo() kv.FreezeInfo            { panic("not implemented") }
+func (tx *tx) CanUnwindToBlockNum() (uint64, error) { panic("not implemented") }
+func (tx *tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	panic("not implemented")
+}
+func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
+func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
+func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
+	panic("not implemented")
+}
+func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	panic("not implemented")
+}
+func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 { panic("not implemented") }
+func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	panic("not implemented")
+}
+func (tx *tx) StepSize() uint64                                     { panic("not implemented") }
+func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
+
 func (db *DB) OnFilesChange(f kv.OnFilesChange) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
