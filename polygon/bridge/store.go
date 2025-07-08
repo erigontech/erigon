@@ -37,7 +37,6 @@ type Store interface {
 	LastFrozenEventBlockNum() uint64
 
 	EventTxnToBlockNum(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
-	Events(ctx context.Context, start, end uint64) ([][]byte, error)
 	BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, ok bool, err error)         // [start,end]
 	EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) (events [][]byte, eventIds []uint64, err error) // [timeFrom, timeTo)
 
