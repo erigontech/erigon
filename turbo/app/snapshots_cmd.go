@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -67,7 +68,6 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -460,12 +460,29 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 	}
 
-	var toRemove []snaptype.FileInfo
+	toRemove := make(map[string]snaptype.FileInfo)
+	if cliCtx.IsSet("domain") {
+		domainFiles := make([]snaptype.FileInfo, 0, len(files))
+		domainNames := cliCtx.StringSlice("domain")
+		for _, domainName := range domainNames {
+			_, err := kv.String2InvertedIdx(domainName)
+			if err != nil {
+				_, err = kv.String2Domain(domainName)
+				if err != nil {
+					return err
+				}
+			}
+			for _, res := range files {
+				if !strings.Contains(res.Name(), domainName) {
+					continue
+				}
+				domainFiles = append(domainFiles, res)
+			}
+		}
+		files = domainFiles
+	}
 	if cliCtx.IsSet("step") || removeLatest {
 		steprm := cliCtx.String("step")
-		if steprm == "" && !removeLatest {
-			return errors.New("step to remove is required (eg 0-2) OR flag --latest provided")
-		}
 
 		var minS, maxS uint64
 		if steprm != "" {
@@ -537,31 +554,14 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				}
 			}
 		}
-
-		toRemove = toRemove[:0] // reset list
 		for _, res := range files {
 			if res.From >= minS && res.To <= maxS {
-				toRemove = append(toRemove, res)
+				toRemove[res.Path] = res
 			}
 		}
-	}
-	if cliCtx.IsSet("domain") {
-		domainNames := cliCtx.StringSlice("domain")
-		toRemove = toRemove[:0]
-		for _, domainName := range domainNames {
-			_, err := kv.String2InvertedIdx(domainName)
-			if err != nil {
-				_, err = kv.String2Domain(domainName)
-				if err != nil {
-					return err
-				}
-			}
-			for _, res := range files {
-				if !strings.Contains(res.Name(), domainName) {
-					continue
-				}
-				toRemove = append(toRemove, res)
-			}
+	} else {
+		for _, res := range files {
+			toRemove[res.Path] = res
 		}
 	}
 

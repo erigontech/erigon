@@ -1032,10 +1032,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 type StaticFiles struct {
 	HistoryFiles
-	valuesDecomp *seg.Decompressor
-	valuesIdx    *recsplit.Index
-	valuesBt     *BtIndex
-	bloom        *existence.Filter
+	valuesDecomp    *seg.Decompressor
+	valuesIdx       *recsplit.Index
+	valuesBt        *BtIndex
+	existenceFilter *existence.Filter
 }
 
 // CleanupOnError - call it on collation fail. It closing all files
@@ -1049,8 +1049,8 @@ func (sf StaticFiles) CleanupOnError() {
 	if sf.valuesBt != nil {
 		sf.valuesBt.Close()
 	}
-	if sf.bloom != nil {
-		sf.bloom.Close()
+	if sf.existenceFilter != nil {
+		sf.existenceFilter.Close()
 	}
 	sf.HistoryFiles.CleanupOnError()
 }
@@ -1074,11 +1074,11 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 	valuesComp := collation.valuesComp
 
 	var (
-		valuesDecomp *seg.Decompressor
-		valuesIdx    *recsplit.Index
-		bt           *BtIndex
-		bloom        *existence.Filter
-		err          error
+		valuesDecomp    *seg.Decompressor
+		valuesIdx       *recsplit.Index
+		bt              *BtIndex
+		existenceFilter *existence.Filter
+		err             error
 	)
 	closeComp := true
 	defer func() {
@@ -1095,8 +1095,8 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 			if bt != nil {
 				bt.Close()
 			}
-			if bloom != nil {
-				bloom.Close()
+			if existenceFilter != nil {
+				existenceFilter.Close()
 			}
 		}
 	}()
@@ -1137,7 +1137,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath)
+			existenceFilter, err = existence.OpenFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1145,10 +1145,10 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 	}
 	closeComp = false
 	return StaticFiles{
-		valuesDecomp: valuesDecomp,
-		valuesIdx:    valuesIdx,
-		valuesBt:     bt,
-		bloom:        bloom,
+		valuesDecomp:    valuesDecomp,
+		valuesIdx:       valuesIdx,
+		valuesBt:        bt,
+		existenceFilter: existenceFilter,
 	}, nil
 }
 
@@ -1247,11 +1247,11 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 	closeComp = false
 	return StaticFiles{
-		HistoryFiles: hStaticFiles,
-		valuesDecomp: valuesDecomp,
-		valuesIdx:    valuesIdx,
-		valuesBt:     bt,
-		bloom:        bloom,
+		HistoryFiles:    hStaticFiles,
+		valuesDecomp:    valuesDecomp,
+		valuesIdx:       valuesIdx,
+		valuesBt:        bt,
+		existenceFilter: bloom,
 	}, nil
 }
 
@@ -1412,7 +1412,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
-	fi.existence = sf.bloom
+	fi.existence = sf.existenceFilter
 	d.dirtyFiles.Set(fi)
 }
 

@@ -328,6 +328,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			}
 
 			doms.SetTxNum(txTask.TxNum)
+			putter := doms.AsPutDel(tx)
 
 			if produce.ReceiptDomain {
 				var logIndexAfterTx uint32
@@ -357,7 +358,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 					}
 				}
 
-				if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
+				if err := rawtemporaldb.AppendReceipt(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
 				if txTask.Final { // block changed
@@ -379,7 +380,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						}
 					}
 				}
-				if err := rawdb.WriteReceiptCacheV2(doms.AsPutDel(tx), receipt, txTask.TxNum); err != nil {
+				if err := rawdb.WriteReceiptCacheV2(putter, receipt, txTask.TxNum); err != nil {
 					return err
 				}
 			}

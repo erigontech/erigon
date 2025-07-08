@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -30,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/polygon/aa"
@@ -361,7 +360,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
 	resultChannelLimit := workerCount * 128
 	heapLimit := workerCount * 128
-	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
+	out := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
 
 	g.Go(func() (err error) {
 		defer func() {
@@ -369,8 +368,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
-		defer rws.Close()
-		return doHistoryMap(consumer, cfg, ctx, in, workerCount, rws, logger)
+		defer out.Close()
+		return doHistoryMap(consumer, cfg, ctx, in, workerCount, out, logger)
 	})
 	g.Go(func() (err error) {
 		defer func() {
@@ -378,12 +377,26 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
-		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, rws, logger)
+		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, out, logger)
 	})
+	// deadlock - need move logging inside `map` goroutine
+	//g.Go(func() (err error) {
+	//	logEvery := time.NewTicker(20 * time.Second)
+	//	defer logEvery.Stop()
+	//	for outputTxNum.Load() <= toTxNum {
+	//		select {
+	//		case <-ctx.Done():
+	//			return ctx.Err()
+	//		case <-logEvery.C:
+	//			log.Debug("[map_reduce] ", "in.len", in.Len(), "in.cap", in.Capacity(), "out.len", out.Len(), "out.cap", out.Capacity(), "out.chanLen", out.ChanLen(), "out.chanCap", out.ChanCapacity())
+	//		}
+	//	}
+	//	return nil
+	//})
 	return g
 }
 
-func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue, logger log.Logger) error {
+func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, out *state.ResultsQueue, logger log.Logger) error {
 	tx, err := cfg.ChainDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -400,16 +413,16 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 	for outputTxNum.Load() <= toTxNum {
 		//select {
 		//case <-logEvery.C:
-		//	log.Info("[dbg] out", "chanLen", rws.ChanLen(), "chanCapacity", rws.ChanCapacity(), "heapLen", rws.Len(), "heapCapacity", rws.Capacity())
+		//	log.Info("[dbg] out", "chanLen", out.ChanLen(), "chanCapacity", out.ChanCapacity(), "heapLen", out.Len(), "heapCapacity", out.Capacity())
 		//default:
 		//}
 
-		err = rws.DrainNonBlocking(ctx)
+		err = out.DrainNonBlocking(ctx)
 		if err != nil {
 			return err
 		}
 
-		processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), tx, true, applyWorker)
+		processedTxNum, _, err := processResultQueueHistorical(consumer, out, outputTxNum.Load(), tx, true, applyWorker)
 		if err != nil {
 			return fmt.Errorf("processResultQueueHistorical: %w", err)
 		}
@@ -423,14 +436,14 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 	//}
 	return nil
 }
-func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.Logger) error {
+func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, out *state.ResultsQueue, logger log.Logger) error {
 	workers := make([]*HistoricalTraceWorker, workerCount)
 	mapGroup, ctx := errgroup.WithContext(ctx)
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
 	for i := 0; i < workerCount; i++ {
 		i := i
-		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
+		workers[i] = NewHistoricalTraceWorker(consumer, in, out, true, ctx, cfg, logger)
 		mapGroup.Go(func() error {
 			return workers[i].Run()
 		})
@@ -455,7 +468,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		stopedAtBlockEnd = txTask.Final
 
 		if txTask.Final { // `Final` system txn must be executed in reducer, because `consensus.Finalize` requires "all receipts of block" to be available
-			applyWorker.RunTxTaskNoLock(txTask.Reset())
+			applyWorker.RunTxTaskNoLock(txTask)
 		}
 
 		//hooks := txTask.Tracer.TracingHooks()
@@ -554,15 +567,13 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
-	readAhead, clean := BlocksReadAhead(ctx, 4, cfg.ChainDB, cfg.Engine, cfg.BlockReader)
+	readAhead, clean := BlocksReadAhead(ctx, 2, cfg.ChainDB, cfg.Engine, cfg.BlockReader)
 	defer clean()
 
 	inputTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return err
 	}
-	logEvery := time.NewTicker(1 * time.Second)
-	defer logEvery.Stop()
 	for blockNum := fromBlock; blockNum <= toBlock && !workersExited.Load(); blockNum++ {
 		select {
 		case readAhead <- blockNum:
@@ -591,9 +602,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			return f(n)
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
-
 		blockReceipts := make(types.Receipts, len(txs))
-		rules := chainConfig.Rules(blockNum, b.Time())
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -601,7 +610,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				Header:          header,
 				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
-				Rules:           rules,
+				Rules:           chainConfig.Rules(blockNum, b.Time()),
 				Txs:             txs,
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
@@ -626,12 +635,12 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			}
 			in.Add(ctx, txTask)
 			inputTxNum++
+		}
 
-			//select {
-			//case <-logEvery.C:
-			//	log.Info("[dbg] in", "len", in.Len(), "cap", in.Capacity())
-			//default:
-			//}
+		// run heavy computation in current goroutine - because it's not a bottleneck
+		// it will speed up `processResultQueueHistorical` goroutine
+		for _, t := range b.Transactions() {
+			t.Hash()
 		}
 	}
 	in.Close() //no more work. no retries in map-reduce. means can close here.

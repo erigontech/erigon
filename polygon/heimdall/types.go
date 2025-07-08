@@ -425,25 +425,15 @@ func RecordWayPoints(value bool) {
 
 func SnapshotTypes() []snaptype.Type {
 	if recordWaypoints {
-		return []snaptype.Type{Events, Spans, Checkpoints, Milestones}
+		return []snaptype.Type{Events, Spans, Checkpoints}
 	}
 
 	return []snaptype.Type{Events, Spans}
 }
 
-func CheckpointsEnabled() bool {
+func WaypointsEnabled() bool {
 	for _, snapType := range SnapshotTypes() {
 		if snapType.Enum() == Checkpoints.Enum() {
-			return true
-		}
-	}
-
-	return false
-}
-
-func MilestonesEnabled() bool {
-	for _, snapType := range SnapshotTypes() {
-		if snapType.Enum() == Milestones.Enum() {
 			return true
 		}
 	}

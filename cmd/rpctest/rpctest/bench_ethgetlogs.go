@@ -22,16 +22,15 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/estimate"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // BenchEthGetLogs compares response of Erigon with Geth
@@ -166,7 +165,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 		return fmt.Errorf("fromBlock(%d) > latestBlock(%d)", blockFrom, latestBlock)
 	}
 
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery, lastLoggedBlock, lastLoggedTime := time.NewTicker(20*time.Second), blockFrom, time.Now()
 	defer logEvery.Stop()
 
 	noDuplicates := func(logs []Log) error {
@@ -186,8 +185,6 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 	eg := &errgroup.Group{}
 	eg.SetLimit(estimate.AlmostAllCPUs())
 
-	startTime := time.Now()
-	loggedBlock := blockFrom
 	for bn := blockFrom; bn < blockTo; bn++ {
 		eg.Go(func() error {
 			var resp EthGetLogs
@@ -290,17 +287,13 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 
 		select {
 		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
+			blocksProcessed := bn - lastLoggedBlock
+			blocksPerSec := int(float64(blocksProcessed) / time.Since(lastLoggedTime).Seconds())
 
-			blocksProcessed := bn - loggedBlock
-			blocksPerSec := int(float64(blocksProcessed) / time.Since(startTime).Seconds())
+			lastLoggedBlock = bn
+			lastLoggedTime = time.Now()
 
-			loggedBlock = bn
-			startTime = time.Now()
-
-			log.Info("[ethGetLogsInvariants]", "block_num", fmt.Sprintf("%.2fm", float64(bn)/1_000_000), "blk/s", blocksPerSec,
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			log.Info("[ethGetLogsInvariants]", "block_num", fmt.Sprintf("%.2fm", float64(bn)/1_000_000), "blk/s", blocksPerSec)
 		case <-ctx.Done():
 			return ctx.Err()
 		default:

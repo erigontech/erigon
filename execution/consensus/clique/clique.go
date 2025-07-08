@@ -48,8 +48,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -178,9 +178,9 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
 	ChainConfig    *chain.Config
-	config         *chain.CliqueConfig             // Consensus engine configuration parameters
-	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
-	DB             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
+	config         *chain.CliqueConfig                // Consensus engine configuration parameters
+	snapshotConfig *chainspec.ConsensusSnapshotConfig // Consensus engine configuration parameters
+	DB             kv.RwDB                            // Database to store and retrieve snapshot checkpoints
 
 	signatures *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
 	recents    *lru.ARCCache[common.Hash, *Snapshot]      // Snapshots for recent block to speed up reorgs
@@ -200,7 +200,7 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB, logger log.Logger) *Clique {
+func New(cfg *chain.Config, snapshotConfig *chainspec.ConsensusSnapshotConfig, cliqueDB kv.RwDB, logger log.Logger) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults
