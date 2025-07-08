@@ -13,7 +13,7 @@ rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
 git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
 cd "$WORKSPACE/rpc-tests"
 
-# Try to create and activate a Python virtual environment or install packages globally if it fails (not ideal but works)
+# Try to create and activate a Python virtual environment or install packages globally if it fails
 if python3 -m venv .venv >/dev/null 2>&1; then :
 elif python3 -m virtualenv .venv >/dev/null 2>&1; then :
 elif virtualenv .venv >/dev/null 2>&1; then :
@@ -25,7 +25,7 @@ fi
 # Activate virtual environment if it was created
 if [ -f ".venv/bin/activate" ]; then
   source .venv/bin/activate
-  pip3 install -r requirements.txt
+  pip3 install -r requirements.txt 1>/dev/null
 fi
 
 # Remove the local results directory if any
@@ -84,7 +84,7 @@ if [ $RUN_TESTS_EXIT_CODE -ne 0 ] && [ -n "$RESULT_DIR" ]; then
   rm -rf "$WORKSPACE/rpc-tests/integration/mainnet/results/"
 fi
 
-# Always deactivate the Python virtual environment at the end
+# Deactivate the Python virtual environment if it was created
 cd "$WORKSPACE/rpc-tests"
 if [ -f ".venv/bin/activate" ]; then
   deactivate 2>/dev/null || :
