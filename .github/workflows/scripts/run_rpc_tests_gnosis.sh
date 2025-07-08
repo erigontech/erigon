@@ -19,6 +19,14 @@ fi
 
 # Array of disabled tests
 disabled_tests=(
+    # these tests requires Erigon active
+    eth_mining
+    eth_submitHashrate
+    eth_submitWork
+    net_peerCount
+    net_listening
+    net_version
+    web3_clientVersion
 )
 
 # Transform the array into a comma-separated string
@@ -32,3 +40,4 @@ if $manual; then
   echo "deactivating complete."
 fi
 exit $RUN_TESTS_EXIT_CODE
+
