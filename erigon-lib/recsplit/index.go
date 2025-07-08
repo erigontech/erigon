@@ -231,7 +231,7 @@ func (idx *Index) init() (err error) {
 		idx.offsetEf, size = eliasfano32.ReadEliasFano(idx.data[offset:])
 		offset += size
 	}
-	if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
+	if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 1 {
 		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 		if arrSz != idx.keyCount {
@@ -416,7 +416,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
-	if idx.version == 0 && idx.lessFalsePositives {
+	if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 1 {
 		return found, idx.existenceV0[found] == byte(bucketHash)
 	}
 	return found, true
