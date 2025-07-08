@@ -94,8 +94,8 @@ func (bbd BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Contex
 		return err
 	}
 
-	// 4. Start downloading the bodies in batches of config.blocksBatchSize from the next in-turn peer. Upon
-	//    every complete batch we construct the blocks and feed them to the result feed.
+	// 4. Start forward downloading the bodies in batches of config.blocksBatchSize from the next in-turn peer.
+	//    Upon every complete batch we construct the blocks and feed them to the result feed.
 	return bbd.downloadBlocks(ctx, headerCollector, peers, config, feed)
 }
 
