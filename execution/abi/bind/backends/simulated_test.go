@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 

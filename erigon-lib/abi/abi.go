@@ -32,7 +32,7 @@ import (
 )
 
 // The ABI holds information about a contract's context and available
-// invokable methods. It will allow you to type check function calls and
+// invocable methods. It will allow you to type check function calls and
 // packs data accordingly.
 type ABI struct {
 	Constructor Method
@@ -248,7 +248,6 @@ func (abi *ABI) MethodById(sigdata []byte) (*Method, error) {
 func (abi *ABI) EventByID(topic common.Hash) (*Event, error) {
 	for _, event := range abi.Events {
 		if bytes.Equal(event.ID.Bytes(), topic.Bytes()) {
-			//nolint:scopelint
 			return &event, nil
 		}
 	}

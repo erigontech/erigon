@@ -48,5 +48,5 @@ func storeHash(num uint64, hash common.Hash, state *state.IntraBlockState) error
 	slotNum := num % params.BlockHashHistoryServeWindow
 	storageSlot := common.BytesToHash(uint256.NewInt(slotNum).Bytes())
 	parentHashInt := uint256.NewInt(0).SetBytes32(hash.Bytes())
-	return state.SetState(params.HistoryStorageAddress, &storageSlot, *parentHashInt)
+	return state.SetState(params.HistoryStorageAddress, storageSlot, *parentHashInt)
 }

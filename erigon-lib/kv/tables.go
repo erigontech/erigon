@@ -58,12 +58,6 @@ const (
 
 const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
 
-// Mapping [block number] => [Verkle Root]
-const VerkleRoots = "VerkleRoots"
-
-// Mapping [Verkle Root] => [Rlp-Encoded Verkle Node]
-const VerkleTrie = "VerkleTrie"
-
 const (
 	// DatabaseInfo is used to store information about data layout.
 	DatabaseInfo = "DbInfo"
@@ -83,7 +77,7 @@ const (
 
 	// Naming:
 	//  TxNum - Ethereum canonical transaction number - same across all nodes.
-	//  TxnID - auto-increment ID - can be differrent across all nodes
+	//  TxnID - auto-increment ID - can be different across all nodes
 	//  BlockNum/BlockID - same
 	//
 	// EthTx - stores all transactions of Canonical/NonCanonical/Bad blocks
@@ -157,7 +151,7 @@ const (
 	BittorrentInfo       = "BittorrentInfo"
 
 	// Domains/History/InvertedIndices
-	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
+	// Constants have "Tbl" prefix, to avoid collision with actual Domain names
 	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
 	TblAccountVals        = "AccountVals"
 	TblAccountHistoryKeys = "AccountHistoryKeys"
@@ -235,7 +229,8 @@ const (
 	LastBeaconSnapshot    = "LastBeaconSnapshot"
 	LastBeaconSnapshotKey = "LastBeaconSnapshotKey"
 
-	BlockRootToKzgCommitments = "BlockRootToKzgCommitments"
+	BlockRootToKzgCommitments  = "BlockRootToKzgCommitments"
+	BlockRootToDataColumnCount = "BlockRootToDataColumnCount"
 
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot  = "BlockRootToParentRoot"
@@ -272,7 +267,7 @@ const (
 
 	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
 	RandaoMixes      = "RandaoMixes"      // [validator_index+slot] => [randao_mix]
-	Proposers        = "BlockProposers"   // epoch => proposers indicies
+	Proposers        = "BlockProposers"   // epoch => proposers indices
 
 	// Electra
 	PendingDepositsDump           = "PendingDepositsDump"           // block_num => dump
@@ -292,7 +287,7 @@ const (
 
 // Keys
 var (
-	// ExperimentalGetProofsLayout is used to keep track whether we store indecies to facilitate eth_getProof
+	// ExperimentalGetProofsLayout is used to keep track whether we store indices to facilitate eth_getProof
 	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
 
 	PruneTypeOlder = []byte("older")
@@ -405,8 +400,6 @@ var ChaindataTables = []string{
 
 	MaxTxNum,
 
-	VerkleRoots,
-	VerkleTrie,
 	// Beacon stuff
 	BeaconBlocks,
 	CanonicalBlockRoots,
@@ -422,6 +415,7 @@ var ChaindataTables = []string{
 	ParentRootToBlockRoots,
 	// Blob Storage
 	BlockRootToKzgCommitments,
+	BlockRootToDataColumnCount,
 	// State Reconstitution
 	ValidatorEffectiveBalance,
 	ValidatorBalance,
@@ -758,25 +752,25 @@ const (
 func (idx InvertedIdx) String() string {
 	switch idx {
 	case AccountsHistoryIdx:
-		return "AccountsHistoryIdx"
+		return "accounts"
 	case StorageHistoryIdx:
-		return "StorageHistoryIdx"
+		return "storage"
 	case CodeHistoryIdx:
-		return "CodeHistoryIdx"
+		return "code"
 	case CommitmentHistoryIdx:
-		return "CommitmentHistoryIdx"
+		return "commitment"
 	case ReceiptHistoryIdx:
-		return "ReceiptHistoryIdx"
+		return "receipt"
 	case RCacheHistoryIdx:
-		return "ReceiptCacheHistoryIdx"
+		return "rcache"
 	case LogAddrIdx:
-		return "LogAddrIdx"
+		return "logaddrs"
 	case LogTopicIdx:
-		return "LogTopicIdx"
+		return "logtopics"
 	case TracesFromIdx:
-		return "TracesFromIdx"
+		return "tracesfrom"
 	case TracesToIdx:
-		return "TracesToIdx"
+		return "tracesto"
 	default:
 		return "unknown index"
 	}
@@ -784,25 +778,25 @@ func (idx InvertedIdx) String() string {
 
 func String2InvertedIdx(in string) (InvertedIdx, error) {
 	switch in {
-	case "AccountsHistoryIdx":
+	case "accounts":
 		return AccountsHistoryIdx, nil
-	case "StorageHistoryIdx":
+	case "storage":
 		return StorageHistoryIdx, nil
-	case "CodeHistoryIdx":
+	case "code":
 		return CodeHistoryIdx, nil
-	case "CommitmentHistoryIdx":
+	case "commitment":
 		return CommitmentHistoryIdx, nil
-	case "ReceiptHistoryIdx":
+	case "receipt":
 		return ReceiptHistoryIdx, nil
-	case "ReceiptCacheHistoryIdx":
+	case "rcache":
 		return RCacheHistoryIdx, nil
-	case "LogAddrIdx":
+	case "logaddrs":
 		return LogAddrIdx, nil
-	case "LogTopicIdx":
+	case "logtopics":
 		return LogTopicIdx, nil
-	case "TracesFromIdx":
+	case "tracesfrom":
 		return TracesFromIdx, nil
-	case "TracesToIdx":
+	case "tracesto":
 		return TracesToIdx, nil
 	default:
 		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
@@ -848,29 +842,11 @@ func String2Domain(in string) (Domain, error) {
 	case "rcache":
 		return RCacheDomain, nil
 	default:
-		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
+		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
 	}
 }
 
 const MaxUint16 uint16 = 1<<16 - 1
-
-func (iip Appendable) String() string {
-	switch iip {
-	case ReceiptsAppendable:
-		return "receipts"
-	default:
-		return "unknown Appendable"
-	}
-}
-
-func String2Appendable(in string) (Appendable, error) {
-	switch in {
-	case "receipts":
-		return ReceiptsAppendable, nil
-	default:
-		return Appendable(MaxUint16), fmt.Errorf("unknown Appendable name: %s", in)
-	}
-}
 
 // --- Deprecated
 const (
@@ -878,7 +854,7 @@ const (
 	// ChaindataTables
 
 	// Dictionary:
-	// "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
+	// "Plain State" - state where keys aren't hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
 	// "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
 
 	/*

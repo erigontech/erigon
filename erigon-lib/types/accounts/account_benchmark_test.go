@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
@@ -37,8 +38,8 @@ func BenchmarkEncodingLengthForStorage(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
-				Root:     emptyRoot,     // extAccount doesn't have Root value
-				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+				Root:     empty.RootHash, // extAccount doesn't have Root value
+				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -90,8 +91,8 @@ func BenchmarkEncodingLengthForHashing(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
-				Root:     emptyRoot,     // extAccount doesn't have Root value
-				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+				Root:     empty.RootHash, // extAccount doesn't have Root value
+				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -145,8 +146,8 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
-				Root:     emptyRoot,     // extAccount doesn't have Root value
-				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+				Root:     empty.RootHash, // extAccount doesn't have Root value
+				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -201,8 +202,8 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
-				Root:     emptyRoot,     // extAccount doesn't have Root value
-				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+				Root:     empty.RootHash, // extAccount doesn't have Root value
+				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -255,8 +256,8 @@ func BenchmarkDecodingAccount(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
-				Root:     emptyRoot,     // extAccount doesn't have Root value
-				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+				Root:     empty.RootHash, // extAccount doesn't have Root value
+				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -324,8 +325,8 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
-				Root:     emptyRoot,     // extAccount doesn't have Root value
-				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+				Root:     empty.RootHash, // extAccount doesn't have Root value
+				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -395,8 +396,8 @@ func BenchmarkRLPEncodingAccount(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
-				Root:     emptyRoot,     // extAccount doesn't have Root value
-				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+				Root:     empty.RootHash, // extAccount doesn't have Root value
+				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -438,8 +439,8 @@ func BenchmarkIsEmptyCodeHash(b *testing.B) {
 	acc := &Account{
 		Nonce:    0,
 		Balance:  *new(uint256.Int),
-		Root:     emptyRoot,     // extAccount doesn't have Root value
-		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+		Root:     empty.RootHash, // extAccount doesn't have Root value
+		CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	var isEmpty bool
@@ -456,8 +457,8 @@ func BenchmarkIsEmptyRoot(b *testing.B) {
 	acc := &Account{
 		Nonce:    0,
 		Balance:  *new(uint256.Int),
-		Root:     emptyRoot,     // extAccount doesn't have Root value
-		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+		Root:     empty.RootHash, // extAccount doesn't have Root value
+		CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	var isEmpty bool

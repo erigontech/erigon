@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/erigon-db/migrations"
+	"github.com/erigontech/erigon/node/migrations"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"

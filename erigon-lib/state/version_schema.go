@@ -1,85 +1,162 @@
 package state
 
 import (
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 )
 
-var commitmentDomainVersion snaptype.Version
-
 func InitSchemas() {
-	Schema.AccountsDomain.version.DataKV = snaptype.V1_0
-	Schema.AccountsDomain.version.AccessorBT = snaptype.V1_0
-	Schema.AccountsDomain.version.AccessorKVEI = snaptype.V1_0
-	Schema.AccountsDomain.hist.version.DataV = snaptype.V1_0
-	Schema.AccountsDomain.hist.version.AccessorVI = snaptype.V1_0
-	Schema.AccountsDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
-	Schema.AccountsDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.AccountsDomain.version.DataKV = version.V1_0_standart
+	Schema.AccountsDomain.version.AccessorBT = version.V1_0_standart
+	Schema.AccountsDomain.version.AccessorKVEI = version.V1_0_standart
+	Schema.AccountsDomain.hist.version.DataV = version.V1_0_standart
+	Schema.AccountsDomain.hist.version.AccessorVI = version.V1_0_standart
+	Schema.AccountsDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
+	Schema.AccountsDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
-	Schema.StorageDomain.version.DataKV = snaptype.V1_0
-	Schema.StorageDomain.version.AccessorBT = snaptype.V1_0
-	Schema.StorageDomain.version.AccessorKVEI = snaptype.V1_0
-	Schema.StorageDomain.hist.version.DataV = snaptype.V1_0
-	Schema.StorageDomain.hist.version.AccessorVI = snaptype.V1_0
-	Schema.StorageDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
-	Schema.StorageDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.StorageDomain.version.DataKV = version.V1_0_standart
+	Schema.StorageDomain.version.AccessorBT = version.V1_0_standart
+	Schema.StorageDomain.version.AccessorKVEI = version.V1_0_standart
+	Schema.StorageDomain.hist.version.DataV = version.V1_0_standart
+	Schema.StorageDomain.hist.version.AccessorVI = version.V1_0_standart
+	Schema.StorageDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
+	Schema.StorageDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
-	Schema.CodeDomain.version.DataKV = snaptype.V1_0
-	Schema.CodeDomain.version.AccessorBT = snaptype.V1_0
-	Schema.CodeDomain.version.AccessorKVEI = snaptype.V1_0
-	Schema.CodeDomain.hist.version.DataV = snaptype.V1_0
-	Schema.CodeDomain.hist.version.AccessorVI = snaptype.V1_0
-	Schema.CodeDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
-	Schema.CodeDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.CodeDomain.version.DataKV = version.V1_0_standart
+	Schema.CodeDomain.version.AccessorBT = version.V1_0_standart
+	Schema.CodeDomain.version.AccessorKVEI = version.V1_0_standart
+	Schema.CodeDomain.hist.version.DataV = version.V1_0_standart
+	Schema.CodeDomain.hist.version.AccessorVI = version.V1_0_standart
+	Schema.CodeDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
+	Schema.CodeDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
-	Schema.CommitmentDomain.version.DataKV = snaptype.V1_0
-	Schema.CommitmentDomain.version.AccessorKVI = snaptype.V1_0
-	Schema.CommitmentDomain.hist.version.DataV = snaptype.V1_0
-	Schema.CommitmentDomain.hist.version.AccessorVI = snaptype.V1_0
-	Schema.CommitmentDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
-	Schema.CommitmentDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
-	commitmentDomainVersion = Schema.CommitmentDomain.version.DataKV
+	Schema.CommitmentDomain.version.DataKV = version.V1_0_standart
+	Schema.CommitmentDomain.version.AccessorKVI = version.V2_0_standart
+	Schema.CommitmentDomain.hist.version.DataV = version.V1_0_standart
+	Schema.CommitmentDomain.hist.version.AccessorVI = version.V1_0_standart
+	Schema.CommitmentDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
+	Schema.CommitmentDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
-	Schema.ReceiptDomain.version.DataKV = snaptype.V1_0
-	Schema.ReceiptDomain.version.AccessorBT = snaptype.V1_0
-	Schema.ReceiptDomain.version.AccessorKVEI = snaptype.V1_0
-	Schema.ReceiptDomain.hist.version.DataV = snaptype.V1_0
-	Schema.ReceiptDomain.hist.version.AccessorVI = snaptype.V1_0
-	Schema.ReceiptDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
-	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.ReceiptDomain.version.DataKV = version.V1_0_standart
+	Schema.ReceiptDomain.version.AccessorBT = version.V1_0_standart
+	Schema.ReceiptDomain.version.AccessorKVEI = version.V1_0_standart
+	Schema.ReceiptDomain.hist.version.DataV = version.V1_0_standart
+	Schema.ReceiptDomain.hist.version.AccessorVI = version.V1_0_standart
+	Schema.ReceiptDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
+	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
-	Schema.RCacheDomain.version.DataKV = snaptype.V1_0
-	Schema.RCacheDomain.version.AccessorKVI = snaptype.V1_0
-	Schema.RCacheDomain.hist.version.DataV = snaptype.V1_0
-	Schema.RCacheDomain.hist.version.AccessorVI = snaptype.V1_0
-	Schema.RCacheDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
-	Schema.RCacheDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.RCacheDomain.version.DataKV = version.V1_0_standart
+	Schema.RCacheDomain.version.AccessorKVI = version.V2_0_standart
+	Schema.RCacheDomain.hist.version.DataV = version.V1_0_standart
+	Schema.RCacheDomain.hist.version.AccessorVI = version.V1_0_standart
+	Schema.RCacheDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
+	Schema.RCacheDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
-	Schema.LogAddrIdx.version.DataEF = snaptype.V1_0
-	Schema.LogAddrIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.LogAddrIdx.version.DataEF = version.V2_0_standart
+	Schema.LogAddrIdx.version.AccessorEFI = version.V2_0_standart
 
-	Schema.LogTopicIdx.version.DataEF = snaptype.V1_0
-	Schema.LogTopicIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.LogTopicIdx.version.DataEF = version.V2_0_standart
+	Schema.LogTopicIdx.version.AccessorEFI = version.V2_0_standart
 
-	Schema.TracesFromIdx.version.DataEF = snaptype.V1_0
-	Schema.TracesFromIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.TracesFromIdx.version.DataEF = version.V2_0_standart
+	Schema.TracesFromIdx.version.AccessorEFI = version.V2_0_standart
 
-	Schema.TracesToIdx.version.DataEF = snaptype.V1_0
-	Schema.TracesToIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.TracesToIdx.version.DataEF = version.V2_0_standart
+	Schema.TracesToIdx.version.AccessorEFI = version.V2_0_standart
+
+	SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{
+		"accounts": {
+			".kv":  Schema.AccountsDomain.GetVersions().Domain.DataKV.MinSupported,
+			".bt":  Schema.AccountsDomain.GetVersions().Domain.AccessorBT.MinSupported,
+			".kvi": Schema.AccountsDomain.GetVersions().Domain.AccessorKVI.MinSupported,
+			".efi": Schema.AccountsDomain.GetVersions().II.AccessorEFI.MinSupported,
+			".ef":  Schema.AccountsDomain.GetVersions().II.DataEF.MinSupported,
+			".vi":  Schema.AccountsDomain.GetVersions().Hist.AccessorVI.MinSupported,
+			".v":   Schema.AccountsDomain.GetVersions().Hist.DataV.MinSupported,
+		},
+		"code": {
+			".kv":  Schema.CodeDomain.GetVersions().Domain.DataKV.MinSupported,
+			".bt":  Schema.CodeDomain.GetVersions().Domain.AccessorBT.MinSupported,
+			".kvi": Schema.CodeDomain.GetVersions().Domain.AccessorKVI.MinSupported,
+			".efi": Schema.CodeDomain.GetVersions().II.AccessorEFI.MinSupported,
+			".ef":  Schema.CodeDomain.GetVersions().II.DataEF.MinSupported,
+			".vi":  Schema.CodeDomain.GetVersions().Hist.AccessorVI.MinSupported,
+			".v":   Schema.CodeDomain.GetVersions().Hist.DataV.MinSupported,
+		},
+		"commitment": {
+			".kv":  Schema.CommitmentDomain.GetVersions().Domain.DataKV.MinSupported,
+			".bt":  Schema.CommitmentDomain.GetVersions().Domain.AccessorBT.MinSupported,
+			".kvi": Schema.CommitmentDomain.GetVersions().Domain.AccessorKVI.MinSupported,
+			".efi": Schema.CommitmentDomain.GetVersions().II.AccessorEFI.MinSupported,
+			".ef":  Schema.CommitmentDomain.GetVersions().II.DataEF.MinSupported,
+			".vi":  Schema.CommitmentDomain.GetVersions().Hist.AccessorVI.MinSupported,
+			".v":   Schema.CommitmentDomain.GetVersions().Hist.DataV.MinSupported,
+		},
+		"storage": {
+			".kv":  Schema.StorageDomain.GetVersions().Domain.DataKV.MinSupported,
+			".bt":  Schema.StorageDomain.GetVersions().Domain.AccessorBT.MinSupported,
+			".kvi": Schema.StorageDomain.GetVersions().Domain.AccessorKVI.MinSupported,
+			".efi": Schema.StorageDomain.GetVersions().II.AccessorEFI.MinSupported,
+			".ef":  Schema.StorageDomain.GetVersions().II.DataEF.MinSupported,
+			".vi":  Schema.StorageDomain.GetVersions().Hist.AccessorVI.MinSupported,
+			".v":   Schema.StorageDomain.GetVersions().Hist.DataV.MinSupported,
+		},
+		"receipt": {
+			".kv":  Schema.ReceiptDomain.GetVersions().Domain.DataKV.MinSupported,
+			".bt":  Schema.ReceiptDomain.GetVersions().Domain.AccessorBT.MinSupported,
+			".kvi": Schema.ReceiptDomain.GetVersions().Domain.AccessorKVI.MinSupported,
+			".efi": Schema.ReceiptDomain.GetVersions().II.AccessorEFI.MinSupported,
+			".ef":  Schema.ReceiptDomain.GetVersions().II.DataEF.MinSupported,
+			".vi":  Schema.ReceiptDomain.GetVersions().Hist.AccessorVI.MinSupported,
+			".v":   Schema.ReceiptDomain.GetVersions().Hist.DataV.MinSupported,
+		},
+		"rcache": {
+			".kv":  Schema.RCacheDomain.GetVersions().Domain.DataKV.MinSupported,
+			".bt":  Schema.RCacheDomain.GetVersions().Domain.AccessorBT.MinSupported,
+			".kvi": Schema.RCacheDomain.GetVersions().Domain.AccessorKVI.MinSupported,
+			".efi": Schema.RCacheDomain.GetVersions().II.AccessorEFI.MinSupported,
+			".ef":  Schema.RCacheDomain.GetVersions().II.DataEF.MinSupported,
+			".vi":  Schema.RCacheDomain.GetVersions().Hist.AccessorVI.MinSupported,
+			".v":   Schema.RCacheDomain.GetVersions().Hist.DataV.MinSupported,
+		},
+		"logaddrs": {
+			".ef":  Schema.LogAddrIdx.GetVersions().II.DataEF.MinSupported,
+			".efi": Schema.LogAddrIdx.GetVersions().II.AccessorEFI.MinSupported,
+		},
+		"logtopics": {
+			".ef":  Schema.LogTopicIdx.GetVersions().II.DataEF.MinSupported,
+			".efi": Schema.LogTopicIdx.GetVersions().II.AccessorEFI.MinSupported,
+		},
+		"tracesfrom": {
+			".ef":  Schema.TracesFromIdx.GetVersions().II.DataEF.MinSupported,
+			".efi": Schema.TracesFromIdx.GetVersions().II.AccessorEFI.MinSupported,
+		},
+		"tracesto": {
+			".ef":  Schema.TracesToIdx.GetVersions().II.DataEF.MinSupported,
+			".efi": Schema.TracesToIdx.GetVersions().II.AccessorEFI.MinSupported,
+		},
+	}
 }
 
 type DomainVersionTypes struct {
-	DataKV       snaptype.Version
-	AccessorBT   snaptype.Version
-	AccessorKVEI snaptype.Version
-	AccessorKVI  snaptype.Version
+	DataKV       version.Versions
+	AccessorBT   version.Versions
+	AccessorKVEI version.Versions
+	AccessorKVI  version.Versions
 }
 
 type HistVersionTypes struct {
-	DataV      snaptype.Version
-	AccessorVI snaptype.Version
+	DataV      version.Versions
+	AccessorVI version.Versions
 }
 
 type IIVersionTypes struct {
-	DataEF      snaptype.Version
-	AccessorEFI snaptype.Version
+	DataEF      version.Versions
+	AccessorEFI version.Versions
+}
+
+type VersionTypes struct {
+	Hist   *HistVersionTypes
+	Domain *DomainVersionTypes
+	II     *IIVersionTypes
 }

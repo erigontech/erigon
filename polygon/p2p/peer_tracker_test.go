@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func TestPeerTracker(t *testing.T) {
@@ -44,7 +44,7 @@ func TestPeerTracker(t *testing.T) {
 	test := newPeerTrackerTest(t)
 	peerTracker := test.peerTracker
 	peerIds := peerTracker.ListPeersMayHaveBlockNum(100)
-	require.Len(t, peerIds, 0)
+	require.Empty(t, peerIds)
 
 	peerTracker.PeerConnected(PeerIdFromUint64(1))
 	peerTracker.PeerConnected(PeerIdFromUint64(2))
@@ -85,7 +85,7 @@ func TestPeerTracker(t *testing.T) {
 
 	peerTracker.BlockHashPresent(PeerIdFromUint64(1), common.HexToHash("0x0"))
 	peerIds = peerTracker.ListPeersMayMissBlockHash(common.HexToHash("0x0"))
-	require.Len(t, peerIds, 0)
+	require.Empty(t, peerIds)
 }
 
 func TestPeerTrackerPeerEventObserver(t *testing.T) {

@@ -25,10 +25,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
@@ -298,7 +298,7 @@ func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 				return result, nil
 			}
 
-			result = append(result, bytes.Clone(common.Copy(buf[length.Hash+length.BlockNum+8:])))
+			result = append(result, bytes.Clone(buf[length.Hash+length.BlockNum+8:]))
 		}
 	}
 

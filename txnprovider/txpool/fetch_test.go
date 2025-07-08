@@ -105,15 +105,15 @@ func TestSendTxnPropagate(t *testing.T) {
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
-		require.Equal(t, 2, len(requests))
+		require.Len(t, requests, 2)
 
 		txnsMessage := requests[0].Data
 		assert.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
-		assert.Equal(t, 3, len(txnsMessage.Data))
+		assert.Len(t, txnsMessage.Data, 3)
 
 		txnHashesMessage := requests[1].Data
 		assert.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
-		assert.Equal(t, 76, len(txnHashesMessage.Data))
+		assert.Len(t, txnHashesMessage.Data, 76)
 	})
 
 	t.Run("much remote byHash", func(t *testing.T) {
@@ -140,15 +140,15 @@ func TestSendTxnPropagate(t *testing.T) {
 		send.BroadcastPooledTxns(testRlps(len(list)/32), 100)
 		send.AnnouncePooledTxns([]byte{0, 1, 2}, []uint32{10, 12, 14}, list, 100)
 
-		require.Equal(t, 2, len(requests))
+		require.Len(t, requests, 2)
 
 		txnsMessage := requests[0].Data
 		require.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
-		require.True(t, len(txnsMessage.Data) > 0)
+		require.Positive(t, len(txnsMessage.Data))
 
 		txnHashesMessage := requests[1].Data
 		require.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
-		require.True(t, len(txnHashesMessage.Data) > 0)
+		require.Positive(t, len(txnHashesMessage.Data))
 	})
 
 	t.Run("few local byHash", func(t *testing.T) {
@@ -170,15 +170,15 @@ func TestSendTxnPropagate(t *testing.T) {
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
-		require.Equal(t, 2, len(requests))
+		require.Len(t, requests, 2)
 
 		txnsMessage := requests[0].Data
 		assert.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
-		assert.True(t, len(txnsMessage.Data) > 0)
+		assert.Positive(t, len(txnsMessage.Data))
 
 		txnHashesMessage := requests[1].Data
 		assert.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
-		assert.Equal(t, 76, len(txnHashesMessage.Data))
+		assert.Len(t, txnHashesMessage.Data, 76)
 	})
 
 	t.Run("sync with new peer", func(t *testing.T) {
@@ -210,11 +210,11 @@ func TestSendTxnPropagate(t *testing.T) {
 		expectPeers := toPeerIDs(1, 2, 42)
 		send.PropagatePooledTxnsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
-		require.Equal(t, 3, len(requests))
+		require.Len(t, requests, 3)
 		for i, req := range requests {
 			assert.Equal(t, expectPeers[i], PeerID(req.PeerId))
 			assert.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, req.Data.Id)
-			assert.True(t, len(req.Data.Data) > 0)
+			assert.Positive(t, len(req.Data.Data))
 		}
 	})
 }
@@ -288,7 +288,7 @@ func TestOnNewBlock(t *testing.T) {
 	fetch := NewFetch(ctx, nil, pool, stateChanges, db, *u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
-	assert.Equal(t, 3, len(minedTxns.Txns))
+	assert.Len(t, minedTxns.Txns, 3)
 }
 
 type MockSentry struct {

@@ -400,7 +400,7 @@ func (t *Tracer) OnSystemCallEnd() {
 	})
 }
 
-func (t *Tracer) OnBalanceChange(address common.Address, oldBalance, newBalance *uint256.Int, reason tracing.BalanceChangeReason) {
+func (t *Tracer) OnBalanceChange(address common.Address, oldBalance, newBalance uint256.Int, reason tracing.BalanceChangeReason) {
 	if t.recordOptions.DisableOnBalanceChangeRecording {
 		return
 	}
@@ -457,7 +457,7 @@ func (t *Tracer) OnCodeChange(address common.Address, prevCodeHash common.Hash, 
 	})
 }
 
-func (t *Tracer) OnStorageChange(address common.Address, slot *common.Hash, prev, new uint256.Int) {
+func (t *Tracer) OnStorageChange(address common.Address, slot common.Hash, prev, new uint256.Int) {
 	if t.recordOptions.DisableOnStorageChangeRecording {
 		return
 	}
@@ -708,8 +708,8 @@ type OnSystemCallEndTrace struct{}
 
 type OnBalanceChangeTrace struct {
 	Address    common.Address `json:"address,omitempty"`
-	OldBalance *uint256.Int   `json:"oldBalance,omitempty"`
-	NewBalance *uint256.Int   `json:"newBalance,omitempty"`
+	OldBalance uint256.Int    `json:"oldBalance,omitempty"`
+	NewBalance uint256.Int    `json:"newBalance,omitempty"`
 	Reason     string         `json:"reason,omitempty"`
 }
 
@@ -729,7 +729,7 @@ type OnCodeChangeTrace struct {
 
 type OnStorageChangeTrace struct {
 	Address common.Address `json:"address,omitempty"`
-	Slot    *common.Hash   `json:"slot,omitempty"`
+	Slot    common.Hash    `json:"slot,omitempty"`
 	Prev    uint256.Int    `json:"prev,omitempty"`
 	New     uint256.Int    `json:"new,omitempty"`
 }

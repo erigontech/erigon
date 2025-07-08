@@ -33,6 +33,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -43,10 +44,10 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/testutil"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -117,9 +118,9 @@ type btHeaderMarshaling struct {
 }
 
 func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
-	config, ok := Forks[bt.json.Network]
+	config, ok := testutil.Forks[bt.json.Network]
 	if !ok {
-		return UnsupportedForkError{bt.json.Network}
+		return testutil.UnsupportedForkError{Name: bt.json.Network}
 	}
 
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
@@ -140,7 +141,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 		return err
 	}
 
-	tx, err := m.DB.BeginRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	if err != nil {
 		return err
 	}
@@ -341,7 +342,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		for loc, val := range acct.Storage {
 			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
 			val2 := uint256.NewInt(0)
-			statedb.GetState(addr, &loc, val2)
+			statedb.GetState(addr, loc, val2)
 			if !val1.Eq(val2) {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
 			}

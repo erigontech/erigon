@@ -25,7 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -50,14 +50,11 @@ const (
 	MimetypeTextPlain         = "text/plain"
 )
 
-var emptyCodeHash = crypto.Keccak256Hash(nil)
-var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-
 // NewAccount creates a new account w/o code nor storage.
 func NewAccount() Account {
 	return Account{
-		Root:     emptyRoot,
-		CodeHash: emptyCodeHash,
+		Root:     empty.RootHash,
+		CodeHash: empty.CodeHash,
 	}
 }
 
@@ -292,8 +289,8 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 	a.Initialised = true
 	a.Nonce = 0
 	a.Balance.Clear()
-	a.Root = emptyRoot
-	a.CodeHash = emptyCodeHash
+	a.Root = empty.RootHash
+	a.CodeHash = empty.CodeHash
 	if length == 0 && structure {
 		return nil
 	}
@@ -446,8 +443,8 @@ func (a *Account) Reset() {
 	a.Nonce = 0
 	a.Incarnation = 0
 	a.Balance.Clear()
-	copy(a.Root[:], emptyRoot[:])
-	copy(a.CodeHash[:], emptyCodeHash[:])
+	a.Root = empty.RootHash
+	a.CodeHash = empty.CodeHash
 }
 
 func (a *Account) DecodeForStorage(enc []byte) error {
@@ -591,11 +588,11 @@ func (a *Account) IsEmptyCodeHash() bool {
 }
 
 func IsEmptyCodeHash(codeHash common.Hash) bool {
-	return codeHash == emptyCodeHash || codeHash == (common.Hash{})
+	return codeHash == empty.CodeHash || codeHash == (common.Hash{})
 }
 
 func (a *Account) IsEmptyRoot() bool {
-	return a.Root == emptyRoot || a.Root == common.Hash{}
+	return a.Root == empty.RootHash || a.Root == common.Hash{}
 }
 
 func (a *Account) GetIncarnation() uint64 {

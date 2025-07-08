@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -38,9 +39,9 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
@@ -52,7 +53,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 	logger := log.New()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
-		genesis := core.GenesisBlockByChainName(network)
+		genesis := chainspec.GenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -60,9 +61,9 @@ func TestGenesisBlockHashes(t *testing.T) {
 		defer tx.Rollback()
 		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, datadir.New(t.TempDir()), logger)
 		require.NoError(t, err)
-		expect := params.GenesisHashByChainName(network)
+		expect := chainspec.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
-		require.EqualValues(t, block.Hash(), *expect, network)
+		require.Equal(t, block.Hash(), *expect, network)
 	}
 	for _, network := range networkname.All {
 		check(network)
@@ -72,38 +73,38 @@ func TestGenesisBlockHashes(t *testing.T) {
 func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
-	var err error
 
-	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
-	if block.Hash() != params.MainnetGenesisHash {
-		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
-	}
-
-	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err := core.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
-	if block.Root() != params.GnosisGenesisStateRoot {
-		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
-	}
-	if block.Hash() != params.GnosisGenesisHash {
-		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
+	if block.Hash() != chainspec.MainnetGenesisHash {
+		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), chainspec.MainnetGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err = core.GenesisToBlock(chainspec.GnosisGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
-	if block.Root() != params.ChiadoGenesisStateRoot {
-		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
+	if block.Root() != chainspec.GnosisGenesisStateRoot {
+		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), chainspec.GnosisGenesisStateRoot)
 	}
-	if block.Hash() != params.ChiadoGenesisHash {
-		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
+	if block.Hash() != chainspec.GnosisGenesisHash {
+		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), chainspec.GnosisGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.TestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err = core.GenesisToBlock(chainspec.ChiadoGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
-	if block.Root() != params.TestGenesisStateRoot {
-		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
+	if block.Root() != chainspec.ChiadoGenesisStateRoot {
+		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), chainspec.ChiadoGenesisStateRoot)
 	}
-	if block.Hash() != params.TestGenesisHash {
-		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
+	if block.Hash() != chainspec.ChiadoGenesisHash {
+		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), chainspec.ChiadoGenesisHash)
+	}
+
+	block, _, err = core.GenesisToBlock(chainspec.TestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	require.NoError(err)
+	if block.Root() != chainspec.TestGenesisStateRoot {
+		t.Errorf("wrong test genesis state root, got %v, want %v", block.Root(), chainspec.TestGenesisStateRoot)
+	}
+	if block.Hash() != chainspec.TestGenesisHash {
+		t.Errorf("wrong test genesis hash, got %v, want %v", block.Hash(), chainspec.TestGenesisHash)
 	}
 }
 
@@ -115,7 +116,7 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	genesis := core.GenesisBlockByChainName(networkname.Mainnet)
+	genesis := chainspec.GenesisBlockByChainName(networkname.Mainnet)
 	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
@@ -141,7 +142,7 @@ func TestAllocConstructor(t *testing.T) {
 	funds := big.NewInt(1000000000)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	genSpec := &types.Genesis{
-		Config: params.AllProtocolChanges,
+		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			address: {Constructor: deploymentCode, Balance: funds},
 		},
@@ -155,7 +156,7 @@ func TestAllocConstructor(t *testing.T) {
 	defer tx.Rollback()
 
 	//TODO: support historyV3
-	reader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, genSpec.Config.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
 	balance, err := state.GetBalance(address)
@@ -167,11 +168,11 @@ func TestAllocConstructor(t *testing.T) {
 
 	key0 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}
-	state.GetState(address, &key0, storage0)
+	state.GetState(address, key0, storage0)
 	assert.Equal(uint256.NewInt(0x2a), storage0)
 	key1 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
 	storage1 := &uint256.Int{}
-	state.GetState(address, &key1, storage1)
+	state.GetState(address, key1, storage1)
 	assert.Equal(uint256.NewInt(0x01c9), storage1)
 }
 

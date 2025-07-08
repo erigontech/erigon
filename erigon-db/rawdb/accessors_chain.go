@@ -28,8 +28,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/gballet/go-verkle"
-
+	"github.com/erigontech/erigon-db/rawdb/utils"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -40,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb/utils"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -291,7 +289,7 @@ func ReadHeader(db kv.Getter, hash common.Hash, number uint64) *types.Header {
 		return nil
 	}
 	header := new(types.Header)
-	if err := rlp.Decode(bytes.NewReader(data), header); err != nil {
+	if err := rlp.DecodeBytes(data, header); err != nil {
 		log.Error("Invalid block header RLP", "hash", hash, "err", err)
 		return nil
 	}
@@ -340,7 +338,7 @@ func ReadHeadersByNumber(db kv.Tx, number uint64) (res []*types.Header, err erro
 			return nil, err
 		}
 		header := new(types.Header)
-		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
+		if err := rlp.DecodeBytes(v, header); err != nil {
 			return nil, fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
 		}
 		res = append(res, header)
@@ -735,7 +733,7 @@ func ReadTd(db kv.Getter, hash common.Hash, number uint64) (*big.Int, error) {
 		return nil, nil
 	}
 	td := new(big.Int)
-	if err := rlp.Decode(bytes.NewReader(data), td); err != nil {
+	if err := rlp.DecodeBytes(data, td); err != nil {
 		return nil, fmt.Errorf("invalid block total difficulty RLP: %x, %w", hash, err)
 	}
 	return td, nil
@@ -1159,44 +1157,6 @@ func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint6
 	return nil
 }
 
-func ReadVerkleRoot(tx kv.Tx, blockNum uint64) (common.Hash, error) {
-	root, err := tx.GetOne(kv.VerkleRoots, hexutil.EncodeTs(blockNum))
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	return common.BytesToHash(root), nil
-}
-
-func WriteVerkleRoot(tx kv.RwTx, blockNum uint64, root common.Hash) error {
-	return tx.Put(kv.VerkleRoots, hexutil.EncodeTs(blockNum), root[:])
-}
-
-func WriteVerkleNode(tx kv.RwTx, node verkle.VerkleNode) error {
-	var (
-		root    common.Hash
-		encoded []byte
-		err     error
-	)
-	root = node.Commitment().Bytes()
-	encoded, err = node.Serialize()
-	if err != nil {
-		return err
-	}
-
-	return tx.Put(kv.VerkleTrie, root[:], encoded)
-}
-
-func ReadVerkleNode(tx kv.RwTx, root common.Hash) (verkle.VerkleNode, error) {
-	encoded, err := tx.GetOne(kv.VerkleTrie, root[:])
-	if err != nil {
-		return nil, err
-	}
-	if len(encoded) == 0 {
-		return verkle.New(), nil
-	}
-	return verkle.ParseNode(encoded, 0, root[:])
-}
 func WriteDBSchemaVersion(tx kv.RwTx) error {
 	var version [12]byte
 	binary.BigEndian.PutUint32(version[:], kv.DBSchemaVersion.Major)
@@ -1256,15 +1216,10 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	return nil
 }
 
-func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txnIndex uint32, txnHash common.Hash, txNumReader rawdbv3.TxNumsReader) (*types.Receipt, bool, error) {
-	_min, err := txNumReader.Min(tx, blockNum)
+func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
 		return nil, false, err
-	}
-
-	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, _min+uint64(txnIndex)+1)
-	if err != nil {
-		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", _min+uint64(txnIndex)+1, err)
 	}
 	if !ok {
 		return nil, false, nil
@@ -1299,10 +1254,10 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	for txnID := _min; txnID < _max+1; txnID++ {
 		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID+1)
 		if err != nil {
-			return nil, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txnID, err)
+			return nil, err
 		}
 		if !ok {
-			return res, nil
+			continue
 		}
 		if len(v) == 0 {
 			continue
@@ -1323,7 +1278,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
-func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
+func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var toWrite []byte
 
 	if receipt != nil {
@@ -1343,12 +1298,15 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
 				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
 			}
+			if storageReceipt.FirstLogIndexWithinBlock != storageReceipt2.FirstLogIndexWithinBlock {
+				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.FirstLogIndexWithinBlock, storageReceipt2.FirstLogIndexWithinBlock))
+			}
 		}
 	} else {
 		toWrite = []byte{}
 	}
 
-	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, nil, toWrite, nil, 0); err != nil {
+	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil, 0); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
 	}
 	return nil

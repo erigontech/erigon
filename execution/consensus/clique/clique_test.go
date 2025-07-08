@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -34,10 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/clique"
-	params2 "github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/execution/stages/mock"
 )
 
 // This test case is a repro of an annoying bug that took us forever to catch.
@@ -52,7 +52,7 @@ func TestReimportMirroredState(t *testing.T) {
 		cliqueDB = memdb.NewTestDB(t, kv.ConsensusDB)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
-		engine   = clique.New(params2.AllCliqueProtocolChanges, params2.CliqueSnapshot, cliqueDB, log.New())
+		engine   = clique.New(chainspec.AllCliqueProtocolChanges, chainspec.CliqueSnapshot, cliqueDB, log.New())
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &types.Genesis{
@@ -60,21 +60,19 @@ func TestReimportMirroredState(t *testing.T) {
 		Alloc: map[common.Address]types.GenesisAccount{
 			addr: {Balance: big.NewInt(10000000000000000)},
 		},
-		Config: params2.AllCliqueProtocolChanges,
+		Config: chainspec.AllCliqueProtocolChanges,
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
 	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot)
 
 	// Generate a batch of blocks, each properly signed
-	getHeader := func(hash common.Hash, number uint64) (h *types.Header) {
-		if err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+	getHeader := func(hash common.Hash, number uint64) (h *types.Header, err error) {
+		err = m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
 			h, err = m.BlockReader.Header(m.Ctx, tx, hash, number)
 			return err
-		}); err != nil {
-			panic(err)
-		}
-		return h
+		})
+		return h, err
 	}
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {

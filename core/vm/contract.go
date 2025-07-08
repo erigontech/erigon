@@ -22,11 +22,12 @@ package vm
 import (
 	"fmt"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/tracing"
 )
@@ -77,12 +78,12 @@ type JumpDestCache struct {
 }
 
 var (
-	jumpDestCacheLimit = dbg.EnvInt("JD_LRU", 128)
+	JumpDestCacheLimit = dbg.EnvInt("JD_LRU", 128)
 	jumpDestCacheTrace = dbg.EnvBool("JD_LRU_TRACE", false)
 )
 
-func NewJumpDestCache() *JumpDestCache {
-	c, err := simplelru.NewLRU[common.Hash, bitvec](jumpDestCacheLimit, nil)
+func NewJumpDestCache(limit int) *JumpDestCache {
+	c, err := simplelru.NewLRU[common.Hash, bitvec](limit, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -93,7 +94,7 @@ func (c *JumpDestCache) LogStats() {
 	if c == nil || !c.trace {
 		return
 	}
-	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", jumpDestCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
+	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", JumpDestCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
 }
 
 // NewContract returns a new contract environment for the execution of EVM.

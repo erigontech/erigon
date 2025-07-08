@@ -33,7 +33,7 @@ func TestLogRead(t *testing.T) {
 	line = strings.TrimLeft(line, "\r\n ")
 	eventLog := NewLog(NewScannerLineReader(strings.NewReader(line)))
 	event, err := eventLog.Read()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	require.NotNil(t, event)
 
 	assert.NotEmpty(t, event.Message)
@@ -45,7 +45,7 @@ func TestLogRead(t *testing.T) {
 	assert.Equal(t, "Sentry peer did Connect", event.Message)
 	assert.True(t, strings.HasPrefix(event.NodeURL, "enode:"))
 	assert.True(t, strings.HasPrefix(event.ClientID, "Nethermind"))
-	assert.Equal(t, 2, len(event.Capabilities))
+	assert.Len(t, event.Capabilities, 2)
 }
 
 func TestLogReadTailSkimFile(t *testing.T) {

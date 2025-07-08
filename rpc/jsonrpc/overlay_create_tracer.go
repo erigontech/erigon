@@ -48,7 +48,7 @@ func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
 func (ct *OverlayCreateTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ct.evm = env
 }
-func (ct *OverlayCreateTracer) CaptureEnd(output []byte, usedGas uint64, err error) {}
+func (ct *OverlayCreateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {}
 
 // Rest of the frames
 func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {

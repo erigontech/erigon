@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/testutil"
 )
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
@@ -117,16 +118,16 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		fork   ttFork
 		config *chain.Config
 	}{
-		{"Frontier", types.MakeFrontierSigner(), tt.Forks.Frontier, Forks["Frontier"]},
-		{"Homestead", types.LatestSignerForChainID(nil), tt.Forks.Homestead, Forks["Homestead"]},
-		{"EIP150", types.LatestSignerForChainID(nil), tt.Forks.EIP150, Forks["EIP150"]},
-		{"EIP158", types.LatestSignerForChainID(chainID), tt.Forks.EIP158, Forks["EIP158"]},
-		{"Byzantium", types.LatestSignerForChainID(chainID), tt.Forks.Byzantium, Forks["Byzantium"]},
-		{"Constantinople", types.LatestSignerForChainID(chainID), tt.Forks.Constantinople, Forks["Constantinople"]},
-		{"ConstantinopleFix", types.LatestSignerForChainID(chainID), tt.Forks.ConstantinopleFix, Forks["ConstantinopleFix"]},
-		{"Istanbul", types.LatestSignerForChainID(chainID), tt.Forks.Istanbul, Forks["Istanbul"]},
-		{"Berlin", types.LatestSignerForChainID(chainID), tt.Forks.Berlin, Forks["Berlin"]},
-		{"London", types.LatestSignerForChainID(chainID), tt.Forks.London, Forks["London"]},
+		{"Frontier", types.MakeFrontierSigner(), tt.Forks.Frontier, testutil.Forks["Frontier"]},
+		{"Homestead", types.LatestSignerForChainID(nil), tt.Forks.Homestead, testutil.Forks["Homestead"]},
+		{"EIP150", types.LatestSignerForChainID(nil), tt.Forks.EIP150, testutil.Forks["EIP150"]},
+		{"EIP158", types.LatestSignerForChainID(chainID), tt.Forks.EIP158, testutil.Forks["EIP158"]},
+		{"Byzantium", types.LatestSignerForChainID(chainID), tt.Forks.Byzantium, testutil.Forks["Byzantium"]},
+		{"Constantinople", types.LatestSignerForChainID(chainID), tt.Forks.Constantinople, testutil.Forks["Constantinople"]},
+		{"ConstantinopleFix", types.LatestSignerForChainID(chainID), tt.Forks.ConstantinopleFix, testutil.Forks["ConstantinopleFix"]},
+		{"Istanbul", types.LatestSignerForChainID(chainID), tt.Forks.Istanbul, testutil.Forks["Istanbul"]},
+		{"Berlin", types.LatestSignerForChainID(chainID), tt.Forks.Berlin, testutil.Forks["Berlin"]},
+		{"London", types.LatestSignerForChainID(chainID), tt.Forks.London, testutil.Forks["London"]},
 	} {
 		sender, txhash, intrinsicGas, err := validateTx(tt.RLP, *testcase.signer, testcase.config.Rules(0, 0))
 

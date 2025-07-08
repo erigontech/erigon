@@ -770,7 +770,7 @@ func (do *dbObj) GetState(addrSlice goja.Value, hashSlice goja.Value) goja.Value
 	}
 	hash := common.BytesToHash(h)
 	var outValue uint256.Int
-	do.ibs.GetState(addr, &hash, &outValue)
+	do.ibs.GetState(addr, hash, &outValue)
 	res, err := do.toBuf(do.vm, outValue.PaddedBytes(32))
 	if err != nil {
 		do.vm.Interrupt(err)

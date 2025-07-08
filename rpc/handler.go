@@ -23,14 +23,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	jsoniter "github.com/json-iterator/go"
-
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -88,7 +89,7 @@ type callProc struct {
 	notifiers []*RemoteNotifier
 }
 
-func HandleError(err error, stream *jsoniter.Stream) {
+func HandleError(err error, stream jsonstream.Stream) {
 	if err != nil {
 		stream.WriteObjectField("error")
 		stream.WriteObjectStart()
@@ -154,12 +155,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 func (h *handler) isRpcMethodNeedsCheck(method string) bool {
-	for _, m := range h.slowLogBlacklist {
-		if m == method {
-			return false
-		}
-	}
-	return true
+	return !slices.Contains(h.slowLogBlacklist, method)
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
@@ -206,7 +202,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				}
 
 				buf := bytes.NewBuffer(nil)
-				stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
+				stream := jsonstream.New(buf)
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
 					answersWithNils[i] = res
 				}
@@ -234,14 +230,14 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 }
 
 // handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
 		needWriteStream := false
 		if stream == nil {
-			stream = jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
+			stream = jsonstream.New(nil)
 			needWriteStream = true
 		}
 		answer := h.handleCallMsg(cp, msg, stream)
@@ -399,7 +395,7 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 }
 
 // handleCallMsg executes a call message and returns the answer.
-func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
+func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
 		h.handleCall(ctx, msg, stream)
@@ -470,7 +466,7 @@ func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 }
 
 // handleCall processes method calls.
-func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
+func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
 	if msg.isSubscribe() {
 		return h.handleSubscribe(cp, msg, stream)
 	}
@@ -532,7 +528,7 @@ func (h *handler) handleCallNew(cp *callProc, msg *jsonrpcMessage, stream *jsoni
 }
 
 // handleSubscribe processes *_subscribe method calls.
-func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
+func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
 	if !h.allowSubscribe {
 		return msg.errorResponse(ErrNotificationsUnsupported)
 	}
@@ -565,7 +561,7 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 }
 
 // runMethod runs the Go callback for an RPC method.
-func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsoniter.Stream) *jsonrpcMessage {
+func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream jsonstream.Stream) *jsonrpcMessage {
 	if !callb.streamable {
 		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
@@ -586,7 +582,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	stream.WriteObjectField("result")
 	_, err := callb.call(ctx, msg.Method, args, stream)
 	if err != nil {
-		writeNilIfNotPresent(stream)
+		_ = stream.ClosePending(1) // the enclosing JSON object is explicitly handled below
 		stream.WriteMore()
 		HandleError(err, stream)
 	}
@@ -623,51 +619,6 @@ func (h *handler) runMethodNew(ctx context.Context, msg *jsonrpcMessage, callb i
 	stream.WriteObjectEnd()
 	stream.Flush()
 	return nil
-}
-
-var nullAsBytes = []byte{110, 117, 108, 108}
-
-// there are many avenues that could lead to an error being handled in runMethod, so we need to check
-// if nil has already been written to the stream before writing it again here
-func writeNilIfNotPresent(stream *jsoniter.Stream) {
-	if stream == nil {
-		return
-	}
-	b := stream.Buffer()
-	hasNil := true
-	if len(b) >= 4 {
-		b = b[len(b)-4:]
-		for i, v := range nullAsBytes {
-			if v != b[i] {
-				hasNil = false
-				break
-			}
-		}
-	} else {
-		hasNil = false
-	}
-	if hasNil {
-		// not needed
-		return
-	}
-
-	var validJsonEnd bool
-	if len(b) > 0 {
-		// assumption is that api call handlers would write valid json in case of errors
-		// we are not guaranteed that they did write valid json if last elem is "}" or "]"
-		// since we don't check json nested-ness
-		// however appending "null" after "}" or "]" does not help much either
-		lastIdx := len(b) - 1
-		validJsonEnd = b[lastIdx] == '}' || b[lastIdx] == ']'
-	}
-	if validJsonEnd {
-		// not needed
-		return
-	}
-
-	// does not have nil ending
-	// does not have valid json
-	stream.WriteNil()
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

@@ -18,6 +18,7 @@ package consensus_tests
 
 import (
 	"io/fs"
+	"math"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -41,29 +42,43 @@ var Eip4844MerkleProof = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c s
 	err = spectest.ReadYml(root, "proof.yaml", &proofYaml)
 	require.NoError(t, err)
 
+	// read branch from proof.yaml
 	branch := make([][32]byte, len(proofYaml.Branch))
 	for i, b := range proofYaml.Branch {
 		branch[i] = common.HexToHash(b)
 	}
+	// get the depth of the merkle proof
+	depth := uint64(math.Floor(math.Log2(float64(proofYaml.LeafIndex))))
+	// get the leaf
 	leaf := common.HexToHash(proofYaml.Leaf)
 	beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
 	require.NoError(t, spectest.ReadSsz(root, c.Version(), spectest.ObjectSSZ, beaconBody))
-	proof, err := beaconBody.KzgCommitmentMerkleProof(0)
+
+	singleProofBranch, err := beaconBody.KzgCommitmentMerkleProof(0)
+	kzgCommitmentsProofBranch := singleProofBranch[len(singleProofBranch)-int(depth):] // only need to get the last depth elements
 	require.NoError(t, err)
 
-	require.Equal(t, branch, proof)
+	// 1. check if the proof is the same as the branch
+	require.Equal(t, branch, kzgCommitmentsProofBranch)
+
 	bodyRoot, err := beaconBody.HashSSZ()
 	require.NoError(t, err)
-	proofHashes := make([]common.Hash, len(proof))
-	for i := range proof {
-		proofHashes[i] = common.Hash(proof[i])
+	proofHashes := make([]common.Hash, len(branch))
+	for i := range branch {
+		proofHashes[i] = common.Hash(branch[i])
 	}
-	require.True(t, utils.IsValidMerkleBranch(leaf, proofHashes, 17, proofYaml.LeafIndex, bodyRoot)) // Test if this is correct
-	hashList := solid.NewHashVector(17)
-	for i, h := range proof {
-		hashList.Set(i, common.Hash(h))
-	}
-	require.True(t, cltypes.VerifyCommitmentInclusionProof(common.Bytes48(*beaconBody.BlobKzgCommitments.Get(0)), hashList, 0, c.Version(), bodyRoot))
-	return nil
+	// 2. check if the proof of entire kzg commitments is correct
+	require.True(t, utils.IsValidMerkleBranch(leaf, proofHashes, depth, proofYaml.LeafIndex, bodyRoot))
 
+	// 3. Then check each kzg commitment inclusion proof
+	for i := 0; i < beaconBody.BlobKzgCommitments.Len(); i++ {
+		proof, err := beaconBody.KzgCommitmentMerkleProof(i)
+		require.NoError(t, err)
+		commitmentInclusionProof := solid.NewHashVector(len(proof))
+		for j := 0; j < len(proof); j++ {
+			commitmentInclusionProof.Set(j, common.Hash(proof[j]))
+		}
+		require.True(t, cltypes.VerifyCommitmentInclusionProof(common.Bytes48(*beaconBody.BlobKzgCommitments.Get(i)), commitmentInclusionProof, uint64(i), c.Version(), bodyRoot))
+	}
+	return nil
 })

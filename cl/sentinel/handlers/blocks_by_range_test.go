@@ -83,7 +83,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, true,
 	)
 	c.Start()
 	req := &cltypes.BeaconBlocksByRangeRequest{

@@ -33,7 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -57,8 +56,9 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 type BlockPublishingValidation string
@@ -82,7 +82,7 @@ func (a *ApiHandler) waitForHeadSlot(slot uint64) {
 		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
 			return
 		}
-		_, ok, err := a.attestationProducer.CachedAttestationData(slot, 0)
+		_, ok, err := a.attestationProducer.CachedAttestationData(slot)
 		if err != nil {
 			log.Warn("Failed to get attestation data", "err", err)
 		}
@@ -134,7 +134,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 
 	a.waitForHeadSlot(*slot)
 
-	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot, *committeeIndex)
+	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot)
 	if err != nil {
 		log.Warn("Failed to get attestation data", "err", err)
 	}
@@ -167,7 +167,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			headState,
 			a.syncedData.HeadRoot(),
 			*slot,
-			*committeeIndex,
 		)
 
 		if errors.Is(err, attestation_producer.ErrHeadStateBehind) {
@@ -225,7 +224,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	// builder boost factor controls block choice between local execution node or builder
-	var builderBoostFactor uint64
+	builderBoostFactor := uint64(100)
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
 	if builderBoostFactorStr != "" {
 		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
@@ -310,7 +309,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
-		"attestations", block.BeaconBody.Attestations.Len(),
 		"execution_value", block.GetExecutionValue().Uint64(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
@@ -575,6 +573,10 @@ func (a *ApiHandler) produceBeaconBody(
 	if finalizedHash == (common.Hash{}) {
 		finalizedHash = head // probably fuck up fcu for EL but not a big deal.
 	}
+	safeHash := a.forkchoiceStore.GetEth1Hash(baseState.CurrentJustifiedCheckpoint().Root)
+	if safeHash == (common.Hash{}) {
+		safeHash = head
+	}
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, 0, err
@@ -618,6 +620,7 @@ func (a *ApiHandler) produceBeaconBody(
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
 			finalizedHash,
+			safeHash,
 			head,
 			&engine_types.PayloadAttributes{
 				Timestamp:             hexutil.Uint64(latestExecutionPayload.Time + secsDiff),
@@ -993,7 +996,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		}
 	}
 	// submit and unblind the signedBlindedBlock
-	blockPayload, blobsBundle, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
+	blockPayload, blobsBundle, executionRequests, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
@@ -1039,6 +1042,10 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 				Commitment: common.Bytes48(blobsBundle.Commitments[i]),
 			})
 		}
+	}
+
+	if blockPayload.Version() >= clparams.ElectraVersion {
+		signedBlock.Block.Body.ExecutionRequests = executionRequests
 	}
 
 	// broadcast the block
@@ -1205,8 +1212,9 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, true, false); err != nil {
 		return err
 	}
-	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().Root
-	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
+	finalizedHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.FinalizedCheckpoint().Root)
+	safeHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.JustifiedCheckpoint().Root)
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
 		return err
 	}
 	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)
@@ -1218,7 +1226,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
-		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot, 0)
+		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot)
 		return err
 	}); err != nil {
 		return err

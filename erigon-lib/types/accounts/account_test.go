@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
@@ -31,8 +32,8 @@ func TestEmptyAccount(t *testing.T) {
 		Initialised: true,
 		Nonce:       100,
 		Balance:     *new(uint256.Int),
-		Root:        emptyRoot,     // extAccount doesn't have Root value
-		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
+		Root:        empty.RootHash, // extAccount doesn't have Root value
+		CodeHash:    empty.CodeHash, // extAccount doesn't have CodeHash value
 		Incarnation: 5,
 	}
 
@@ -124,8 +125,8 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
-		Root:        emptyRoot,     // extAccount doesn't have Root value
-		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
+		Root:        empty.RootHash, // extAccount doesn't have Root value
+		CodeHash:    empty.CodeHash, // extAccount doesn't have CodeHash value
 		Incarnation: 5,
 	}
 
@@ -212,8 +213,8 @@ func TestIncarnationForEmptyAccount(t *testing.T) {
 		Initialised: true,
 		Nonce:       100,
 		Balance:     *new(uint256.Int),
-		Root:        emptyRoot,
-		CodeHash:    emptyCodeHash,
+		Root:        empty.RootHash,
+		CodeHash:    empty.CodeHash,
 		Incarnation: 4,
 	}
 

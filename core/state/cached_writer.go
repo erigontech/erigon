@@ -60,11 +60,11 @@ func (cw *CachedWriter) DeleteAccount(address common.Address, original *accounts
 	return nil
 }
 
-func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	if err := cw.w.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 		return err
 	}
-	if *original == *value {
+	if original == value {
 		return nil
 	}
 	if value.IsZero() {

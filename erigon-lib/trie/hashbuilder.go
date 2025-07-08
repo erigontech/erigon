@@ -27,17 +27,15 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	length2 "github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/rlphacks"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
 
-var EmptyCodeHash = crypto.Keccak256Hash(nil) //c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+var emptyCodeHash = empty.CodeHash
 
 // HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
@@ -92,7 +90,7 @@ func (hb *HashBuilder) setProofElement(pe *proofElement) {
 	hb.proofElement = pe
 }
 
-func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAF %d\n", length)
 	}
@@ -122,7 +120,7 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 }
 
 // To be called internally
-func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlp.RlpSerializable) error {
 	// Compute the total length of binary representation
 	var kp, kl int
 	// Write key
@@ -167,9 +165,9 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 	return nil
 }
 
-func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
-	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
+	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalLen)
 
 	var writer io.Writer
 	var reader io.Reader
@@ -220,7 +218,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 	return nil
 }
 
-func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlp.RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAFHASH %d\n", length)
 	}
@@ -238,7 +236,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	fullKey := keyHex[:len(keyHex)-1]
 	key := keyHex[len(keyHex)-length:]
 	copy(hb.acc.Root[:], EmptyRoot[:])
-	copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
+	copy(hb.acc.CodeHash[:], emptyCodeHash[:])
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
@@ -261,7 +259,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	if fieldSet&uint32(8) != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		var ok bool
-		if !bytes.Equal(hb.acc.CodeHash[:], EmptyCodeHash[:]) {
+		if !bytes.Equal(hb.acc.CodeHash[:], emptyCodeHash[:]) {
 			stackTop := hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if stackTop != nil { // if we don't have any stack top it might be okay because we didn't resolve the code yet (stateful resolver)
 				// but if we have something on top of the stack that isn't `nil`, it has to be a codeNode
@@ -285,7 +283,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
 
-	if !bytes.Equal(accCopy.CodeHash[:], EmptyCodeHash[:]) && accountCode != nil {
+	if !bytes.Equal(accCopy.CodeHash[:], emptyCodeHash[:]) && accountCode != nil {
 		accountCodeSize = len(accountCode)
 	}
 
@@ -328,7 +326,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	} else {
-		copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
+		copy(hb.acc.CodeHash[:], emptyCodeHash[:])
 	}
 
 	return hb.accountLeafHashWithKey(key, popped)
@@ -366,7 +364,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	}
 	valLen := hb.acc.EncodingLengthForHashing()
 	hb.acc.EncodeForHashing(hb.valBuf[:])
-	val := rlphacks.RlpEncodedBytes(hb.valBuf[:valLen])
+	val := rlp.RlpEncodedBytes(hb.valBuf[:valLen])
 	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
 	if err != nil {
 		return err
@@ -429,7 +427,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	var compactLen int
 	var ni int
 	var compact0 byte
-	// https://github.com/ethereum/wiki/wiki/Patricia-Tree#specification-compact-encoding-of-hex-sequence-with-optional-terminator
+	// https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/#specification
 	if hasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
@@ -453,7 +451,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		kl = 1
 	}
 	totalLen := kp + kl + 33
-	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
+	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalLen)
 	hb.sha.Reset()
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
@@ -562,7 +560,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		}
 	}
 	hb.sha.Reset()
-	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalSize)
+	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalSize)
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}

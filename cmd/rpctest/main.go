@@ -17,34 +17,50 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
+	"time"
 
+	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func main() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	logger := logging.SetupLogger("rpctest")
+	startTime := time.Now()
+	var logger log.Logger
+	var rootCmd = &cobra.Command{
+		Use: "test",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			log.Info(cmd.Name() + " starting")
+			logger = debug.SetupCobra(cmd, "rpctest")
+			go mem.LogMemStats(cmd.Context(), logger)
+		},
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			log.Info(cmd.Name(), "took", time.Since(startTime))
+			debug.Exit()
+		},
+	}
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	var (
-		needCompare   bool
-		fullTest      bool
-		gethURL       string
-		erigonURL     string
-		blockFrom     uint64
-		blockTo       uint64
-		latest        bool
-		recordFile    string
-		errorFile     string
-		visitAllPages bool
+		needCompare      bool
+		fullTest         bool
+		gethURL          string
+		erigonURL        string
+		blockFrom        uint64
+		blockTo          uint64
+		latest           bool
+		recordFile       string
+		errorFile        string
+		visitAllPages    bool
+		additionalParams string
 	)
 	withErigonUrl := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")
@@ -70,6 +86,9 @@ func main() {
 	}
 	withVisitAllPages := func(cmd *cobra.Command) {
 		cmd.Flags().BoolVar(&visitAllPages, "visitAllPages", false, "Visit all pages")
+	}
+	withAdditionalParams := func(cmd *cobra.Command) {
+		cmd.Flags().StringVar(&additionalParams, "additionalParams", "", "Additional params for the request")
 	}
 	with := func(cmd *cobra.Command, opts ...func(*cobra.Command)) {
 		for i := range opts {
@@ -134,7 +153,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetTransactionByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			err := rpctest.BenchEthGetTransactionByHash(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 			if err != nil {
 				logger.Error(err.Error())
 			}
@@ -262,13 +281,13 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.EthGetLogsInvariants(erigonURL, gethURL, needCompare, blockFrom, blockTo)
+			err := rpctest.EthGetLogsInvariants(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, latest)
 			if err != nil {
 				logger.Error(err.Error())
 			}
 		},
 	}
-	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
 	var benchOverlayGetLogsCmd = &cobra.Command{
 		Use:   "benchOverlayGetLogs",
@@ -341,13 +360,13 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchDebugTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			err := rpctest.BenchDebugTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, additionalParams, recordFile, errorFile)
 			if err != nil {
 				logger.Error(err.Error())
 			}
 		},
 	}
-	with(benchDebugTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+	with(benchDebugTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withAdditionalParams, withRecord, withErrorFile)
 
 	var benchDebugTraceCallCmd = &cobra.Command{
 		Use:   "benchDebugTraceCall",
@@ -442,6 +461,19 @@ func main() {
 	}
 	with(benchTraceReplayTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
+	var benchTraceTransactionCmd = &cobra.Command{
+		Use:   "benchTraceTransaction",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var benchEthBlockByNumberCmd = &cobra.Command{
 		Use:   "benchBlockByNumber",
 		Short: "",
@@ -493,7 +525,6 @@ func main() {
 	compareAccountRange.Flags().StringVar(&tmpDataDir, "tmpdir", "/media/b00ris/nvme/accrange1", "dir for tmp db")
 	compareAccountRange.Flags().StringVar(&tmpDataDirOrig, "gethtmpdir", "/media/b00ris/nvme/accrangeorig1", "dir for tmp db")
 
-	var rootCmd = &cobra.Command{Use: "test"}
 	rootCmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")
 	rootCmd.Flags().StringVar(&gethURL, "gethUrl", "http://localhost:8546", "geth rpc url")
 	rootCmd.Flags().Uint64Var(&blockFrom, "blockFrom", 2000000, "Block number to start test generation from")
@@ -528,31 +559,16 @@ func main() {
 		benchBlockReceiptsCmd,
 		compareAccountRange,
 		benchTraceReplayTransactionCmd,
+		benchTraceTransactionCmd,
 		benchEthBlockByNumberCmd,
 		benchEthGetBalanceCmd,
 		benchOtsGetBlockTransactions,
 		replayCmd,
 	)
-	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
+
+	rootCtx, _ := common.RootContext()
+	if err := rootCmd.ExecuteContext(rootCtx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-}
-
-func rootContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-
-		select {
-		case <-ch:
-			log.Info("Got interrupt, shutting down...")
-		case <-ctx.Done():
-		}
-
-		cancel()
-	}()
-	return ctx
 }
