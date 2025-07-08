@@ -13,10 +13,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/arb/lru"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"github.com/erigontech/nitro-erigon/util/arbmath"
 )
 

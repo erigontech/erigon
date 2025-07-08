@@ -1,7 +1,7 @@
 package ethdb
 
 import (
-	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/nitro-erigon/arbos/programs"
 )
 
