@@ -259,17 +259,6 @@ func (s *MdbxStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint
 	return txStore{tx}.EventsByTimeframe(ctx, timeFrom, timeTo)
 }
 
-// Events gets raw events, start inclusive, end exclusive
-func (s *MdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	return txStore{tx}.Events(ctx, start, end)
-}
-
 func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	if len(blockNumToEventId) == 0 {
 		return nil
@@ -332,14 +321,14 @@ func (s *MdbxStore) BorStartEventId(ctx context.Context, hash common.Hash, block
 	return txStore{tx}.BorStartEventId(ctx, hash, blockHeight)
 }
 
-func (s *MdbxStore) EventsByBlock(ctx context.Context, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+func (s *MdbxStore) EventsByBlock(ctx context.Context, blockHeight uint64) ([]rlp.RawValue, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.EventsByBlock(ctx, hash, blockHeight)
+	return txStore{tx}.EventsByBlock(ctx, blockHeight)
 }
 
 func (s *MdbxStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
@@ -557,7 +546,7 @@ func (s txStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64)
 }
 
 // Events gets raw events, start inclusive, end exclusive
-func (s txStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+func (s txStore) events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	var events [][]byte
 
 	kStart := make([]byte, 8)
@@ -662,7 +651,7 @@ func (s txStore) BorStartEventId(ctx context.Context, hash common.Hash, blockHei
 	return startEventId, nil
 }
 
-func (s txStore) EventsByBlock(ctx context.Context, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+func (s txStore) EventsByBlock(ctx context.Context, blockHeight uint64) ([]rlp.RawValue, error) {
 	startEventId, endEventId, ok, err := s.blockEventIdsRange(ctx, blockHeight, 0)
 	if err != nil {
 		return nil, err
@@ -670,7 +659,7 @@ func (s txStore) EventsByBlock(ctx context.Context, hash common.Hash, blockHeigh
 	if !ok {
 		return []rlp.RawValue{}, nil
 	}
-	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
+	bytevals, err := s.events(ctx, startEventId, endEventId+1)
 	if err != nil {
 		return nil, err
 	}
