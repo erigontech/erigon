@@ -16,17 +16,17 @@ on:
       - synchronize
       - ready_for_review
 
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: >-
-    ${{
-      !startsWith(github.ref, 'refs/heads/release/') &&
-      github.ref != 'refs/heads/main'
-    }}
-
 
 jobs:
-  integration-test-suite:
+  mainnet-rpc-integ-tests:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}', github.workflow, github.run_id) ||
+          format('{0}-{1}', github.workflow, github.ref)
+        }}
+      cancel-in-progress: true
     runs-on: [ self-hosted, qa, RpcSpecific ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
@@ -43,7 +43,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.63.1  https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.66.0  https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 

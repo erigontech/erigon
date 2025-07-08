@@ -200,7 +200,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 }
 
 // SetupTracerCtx performs the tracing setup according to the parameters
-// containted in the given urfave context.
+// contained in the given urfave context.
 func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
 	tracerName := ctx.String(vmTraceFlag.Name)
 	if tracerName == "" {

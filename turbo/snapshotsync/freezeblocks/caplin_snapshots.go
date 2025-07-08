@@ -36,13 +36,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/version"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -72,7 +71,7 @@ type CaplinSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
-	// allows for pruning segments - this is the min availible segment
+	// allows for pruning segments - this is the minimum available segment
 	segmentsMin atomic.Uint64
 	// chain cfg
 	beaconCfg *clparams.BeaconChainConfig

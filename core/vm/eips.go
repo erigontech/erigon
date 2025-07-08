@@ -275,6 +275,13 @@ func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	return nil, nil
 }
 
+func opCLZ(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	x := scope.Stack.peek()
+	// count leading zero bits in x
+	x.SetUint64(256 - uint64(x.BitLen()))
+	return nil, nil
+}
+
 // enable5656 enables EIP-5656 (MCOPY opcode)
 // https://eips.ethereum.org/EIPS/eip-5656
 func enable5656(jt *JumpTable) {
@@ -329,4 +336,23 @@ func enable7702(jt *JumpTable) {
 	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
 	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702
 	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7702
+}
+
+func enable7939(jt *JumpTable) {
+	jt[CLZ] = &operation{
+		execute:     opCLZ,
+		constantGas: GasFastestStep,
+		numPop:      1,
+		numPush:     1,
+	}
+}
+
+func enable7907(jt *JumpTable) {
+	jt[CALL].dynamicGas = gasCallEIP7907
+	jt[CALLCODE].dynamicGas = gasCallCodeEIP7907
+	jt[STATICCALL].dynamicGas = gasStaticCallEIP7907
+	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7907
+	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP7907
+	jt[CREATE].dynamicGas = gasCreateEIP7907
+	jt[CREATE2].dynamicGas = gasCreate2EIP7907
 }

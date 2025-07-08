@@ -185,7 +185,7 @@ func ExecuteBlockEphemerally(
 	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		newBlock, _, _, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
+		newBlock, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
 		if err != nil {
 			return nil, err
 		}
@@ -359,19 +359,19 @@ func FinalizeBlockExecution(
 	isMining bool,
 	logger log.Logger,
 	tracer *tracing.Hooks,
-) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, retRequests types.FlatRequests, err error) {
+) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, tracer, vm.Config{})
 		return ret, err
 	}
 
 	if isMining {
-		newBlock, newTxs, newReceipt, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
+		newBlock, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {
-		newTxs, newReceipt, retRequests, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, false, logger)
+		retRequests, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, false, logger)
 	}
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	var arbosVersion int
@@ -380,10 +380,10 @@ func FinalizeBlockExecution(
 	}
 
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64(), header.Time, uint64(arbosVersion)), stateWriter); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
-	return newBlock, newTxs, newReceipt, retRequests, nil
+	return newBlock, retRequests, nil
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,

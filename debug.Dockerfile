@@ -63,7 +63,6 @@ COPY --from=builder /app/build/bin/sentinel /usr/local/bin/sentinel
 COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
 COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
-COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
 
 
 EXPOSE 8545 \

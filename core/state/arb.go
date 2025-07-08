@@ -10,13 +10,14 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/lru"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/arb/lru"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
+	"github.com/erigontech/nitro-erigon/util/arbmath"
 )
 
 var (
@@ -154,14 +155,14 @@ func (s *IntraBlockState) SetStylusPagesOpen(open uint16) {
 // Tracks that `new` additional pages have been opened, returning the previous counts
 func (s *IntraBlockState) AddStylusPages(new uint16) (uint16, uint16) {
 	open, ever := s.GetStylusPages()
-	s.arbExtraData.openWasmPages = common.SaturatingUAdd(open, new)
+	s.arbExtraData.openWasmPages = arbmath.SaturatingUAdd(open, new)
 	s.arbExtraData.everWasmPages = max(ever, s.arbExtraData.openWasmPages)
 	return open, ever
 }
 
 // TODO arbitrum - not used in og nitro as well
 func (s *IntraBlockState) AddStylusPagesEver(new uint16) {
-	s.arbExtraData.everWasmPages = common.SaturatingUAdd(s.arbExtraData.everWasmPages, new)
+	s.arbExtraData.everWasmPages = arbmath.SaturatingUAdd(s.arbExtraData.everWasmPages, new)
 }
 
 var ErrArbTxFilter error = errors.New("internal error")

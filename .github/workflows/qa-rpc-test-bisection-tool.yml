@@ -14,7 +14,7 @@ on:
         required: true
 
 jobs:
-  bisect:
+  rpc-test-bisect:
     runs-on: [self-hosted, qa, RpcSpecific]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir

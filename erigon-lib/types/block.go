@@ -21,17 +21,16 @@
 package types
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"reflect"
 	"sync/atomic"
 
-	"github.com/gballet/go-verkle"
-
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -42,6 +41,8 @@ const (
 	ExtraVanityLength = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
 	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
 )
+
+var ErrBlockExceedsMaxRlpSize = errors.New("block exceeds max rlp size")
 
 var (
 	EmptyRootHash     = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
@@ -122,11 +123,6 @@ type Header struct {
 
 	RequestsHash *common.Hash `json:"requestsHash"` // EIP-7685
 
-	// The verkle proof is ignored in legacy headers
-	Verkle        bool
-	VerkleProof   []byte
-	VerkleKeyVals []verkle.KeyValuePair
-
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
@@ -193,16 +189,6 @@ func (h *Header) EncodingSize() int {
 
 	if h.RequestsHash != nil {
 		encodingSize += 33
-	}
-
-	if h.Verkle {
-		// Encoding of Verkle Proof
-		encodingSize += rlp.StringLen(h.VerkleProof)
-		var tmpBuffer bytes.Buffer
-		if err := rlp.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
-			panic(err)
-		}
-		encodingSize += rlp.ListPrefixLen(tmpBuffer.Len()) + tmpBuffer.Len()
 	}
 
 	return encodingSize
@@ -352,16 +338,6 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 		if _, err := w.Write(h.RequestsHash[:]); err != nil {
 			return err
-		}
-	}
-
-	if h.Verkle {
-		if err := rlp.EncodeString(h.VerkleProof, w, b[:]); err != nil {
-			return err
-		}
-
-		if err := rlp.Encode(w, h.VerkleKeyVals); err != nil {
-			return nil
 		}
 	}
 
@@ -560,17 +536,6 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.RequestsHash = new(common.Hash)
 	h.RequestsHash.SetBytes(b)
 
-	if h.Verkle {
-		if h.VerkleProof, err = s.Bytes(); err != nil {
-			return fmt.Errorf("read VerkleProof: %w", err)
-		}
-		rawKv, err := s.Raw()
-		if err != nil {
-			return err
-		}
-		rlp.DecodeBytes(rawKv, h.VerkleKeyVals)
-	}
-
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
 	}
@@ -723,6 +688,31 @@ func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
 // Supposed that txAmount includes 2 system txns.
 func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
 
+type BodyOnlyTxn struct {
+	// 50% of BodyForStorage spent on withdrawal
+	// this structure does rlp decode only for
+	// "tx related" data
+	BaseTxnID BaseTxnID
+	TxCount   uint32
+}
+
+func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
+	// discard rlp.Stream after this...
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode BaseTxId
+	if err = s.Decode(&b.BaseTxnID); err != nil {
+		return err
+	}
+	// decode TxCount
+	if err = s.Decode(&b.TxCount); err != nil {
+		return err
+	}
+	return nil
+}
+
 type BodyForStorage struct {
 	BaseTxnID   BaseTxnID
 	TxCount     uint32
@@ -734,6 +724,35 @@ type BodyForStorage struct {
 type RawBlock struct {
 	Header *Header
 	Body   *RawBody
+}
+
+func (r RawBlock) EncodingSize() int {
+	headerLen := r.Header.EncodingSize()
+	payloadSize := rlp.ListPrefixLen(headerLen) + headerLen
+	payloadSize += r.Body.EncodingSize()
+	return payloadSize
+}
+
+func (r RawBlock) ValidateMaxRlpSize(chainConfig *chain.Config) error {
+	maxRlpSize := chainConfig.GetMaxRlpBlockSize(r.Header.Time)
+	if maxRlpSize == math.MaxInt {
+		return nil
+	}
+
+	blockRlpSize := r.EncodingSize()
+	blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
+	if blockRlpSize > maxRlpSize {
+		return fmt.Errorf(
+			"%w: blockNum=%d, blockHash=%s, blockRlpSize=%d, maxRlpSize=%d",
+			ErrBlockExceedsMaxRlpSize,
+			r.Header.Number,
+			r.Header.Hash(),
+			blockRlpSize,
+			maxRlpSize,
+		)
+	}
+
+	return nil
 }
 
 func (r RawBlock) AsBlock() (*Block, error) {
@@ -798,12 +817,12 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	unclesLen += encodingSizeGeneric(rb.Uncles)
+	unclesLen += EncodingSizeGenericList(rb.Uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if rb.Withdrawals != nil {
-		withdrawalsLen += encodingSizeGeneric(rb.Withdrawals)
+		withdrawalsLen += EncodingSizeGenericList(rb.Withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
@@ -884,12 +903,12 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 	payloadSize += txCountLen
 
 	// size of Uncles
-	unclesLen += encodingSizeGeneric(bfs.Uncles)
+	unclesLen += EncodingSizeGenericList(bfs.Uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bfs.Withdrawals != nil {
-		withdrawalsLen += encodingSizeGeneric(bfs.Withdrawals)
+		withdrawalsLen += EncodingSizeGenericList(bfs.Withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
@@ -964,16 +983,16 @@ func (bb Body) EncodingSize() int {
 
 func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
-	txsLen += encodingSizeGeneric(bb.Transactions)
+	txsLen += EncodingSizeGenericList(bb.Transactions)
 	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	unclesLen += encodingSizeGeneric(bb.Uncles)
+	unclesLen += EncodingSizeGenericList(bb.Uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bb.Withdrawals != nil {
-		withdrawalsLen += encodingSizeGeneric(bb.Withdrawals)
+		withdrawalsLen += EncodingSizeGenericList(bb.Withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
@@ -1172,15 +1191,6 @@ func CopyHeader(h *Header) *Header {
 		cpy.RequestsHash = new(common.Hash)
 		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
 	}
-	cpy.Verkle = h.Verkle
-	if h.VerkleProof != nil {
-		cpy.VerkleProof = make([]byte, len(h.VerkleProof))
-		copy(cpy.VerkleProof, h.VerkleProof)
-	}
-	if h.VerkleKeyVals != nil {
-		cpy.VerkleKeyVals = make([]verkle.KeyValuePair, len(h.VerkleKeyVals))
-		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
-	}
 	cpy.mutable = h.mutable
 	return &cpy
 }
@@ -1223,16 +1233,16 @@ func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsL
 	payloadSize += rlp.ListPrefixLen(headerLen) + headerLen
 
 	// size of Transactions
-	txsLen += encodingSizeGeneric(bb.transactions)
+	txsLen += EncodingSizeGenericList(bb.transactions)
 	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	unclesLen += encodingSizeGeneric(bb.uncles)
+	unclesLen += EncodingSizeGenericList(bb.uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bb.withdrawals != nil {
-		withdrawalsLen += encodingSizeGeneric(bb.withdrawals)
+		withdrawalsLen += EncodingSizeGenericList(bb.withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
@@ -1328,7 +1338,7 @@ func (b *Block) Body() *Body {
 	return bd
 }
 func (b *Block) SendersToTxs(senders []common.Address) {
-	return// TODO Arbitrum!!!
+	return // TODO Arbitrum!!!
 	if len(senders) == 0 {
 		return
 	}
@@ -1537,7 +1547,7 @@ type rlpEncodable interface {
 	EncodingSize() int
 }
 
-func encodingSizeGeneric[T rlpEncodable](arr []T) (_len int) {
+func EncodingSizeGenericList[T rlpEncodable](arr []T) (_len int) {
 	for _, item := range arr {
 		size := item.EncodingSize()
 		_len += rlp.ListPrefixLen(size) + size

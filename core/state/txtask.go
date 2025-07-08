@@ -22,9 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
-
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -34,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
@@ -87,7 +85,6 @@ type TxTask struct {
 	// Need investigate if we can pass here - only limited amount of receipts
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
-	Tracer        *calltracer.CallTracer
 
 	Config *chain.Config
 
@@ -121,7 +118,11 @@ func (t *TxTask) Sender() *common.Address {
 }
 
 func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
-	if t.TxIndex < 0 || t.Final {
+	if t.TxIndex < 0 {
+		return
+	}
+	if t.Final {
+		t.BlockReceipts.AssertLogIndex(t.BlockNum)
 		return
 	}
 
@@ -181,8 +182,6 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
-
-	receipt.Bloom = types.LogsBloom(receipt.Logs) // TODO arbitrum why do we need to add this?
 
 	// if the transaction created a contract, store the creation address in the receipt.
 	if t.TxAsMessage != nil && t.TxAsMessage.To() == nil {
@@ -368,8 +367,8 @@ func (q *QueueWithRetry) Close() {
 
 // ResultsQueue thread-safe priority-queue of execution results
 type ResultsQueue struct {
-	limit  int
-	closed bool
+	heapLimit int
+	closed    bool
 
 	resultCh chan *TxTask
 	iter     *ResultsQueueIter
@@ -382,10 +381,10 @@ type ResultsQueue struct {
 
 func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
 	r := &ResultsQueue{
-		results:  &TxTaskQueue{},
-		limit:    heapLimit,
-		resultCh: make(chan *TxTask, resultChannelLimit),
-		ticker:   time.NewTicker(2 * time.Second),
+		results:   &TxTaskQueue{},
+		heapLimit: heapLimit,
+		resultCh:  make(chan *TxTask, resultChannelLimit),
+		ticker:    time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
 	r.iter = &ResultsQueueIter{q: r, results: r.results}
@@ -421,7 +420,7 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (err erro
 				continue
 			}
 			heap.Push(q.results, txTask)
-			if q.results.Len() > q.limit {
+			if q.results.Len() > q.heapLimit {
 				return nil
 			}
 		default: // we are inside mutex section, can't block here
@@ -515,13 +514,16 @@ func (q *ResultsQueue) Close() {
 }
 func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
 func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }
-func (q *ResultsQueue) Limit() int       { return q.limit }
+func (q *ResultsQueue) Limit() int       { return q.heapLimit }
 func (q *ResultsQueue) Len() (l int) {
 	q.m.Lock()
 	l = q.results.Len()
 	q.m.Unlock()
 	return l
 }
+func (q *ResultsQueue) Capacity() int            { return q.heapLimit }
+func (q *ResultsQueue) ChanLen() int             { return len(q.resultCh) }
+func (q *ResultsQueue) ChanCapacity() int        { return cap(q.resultCh) }
 func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].TxNum }
 func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
 func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }

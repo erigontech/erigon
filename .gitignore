@@ -22,6 +22,7 @@ docs/readthedocs/build
 .#*
 *#
 *~
+go.work.sum
 .project
 .settings
 
@@ -99,4 +100,11 @@ node_modules
 /config.yaml
 /config.yml
 
-vendor
+vendor/
+
+!/cmd/snapshots
+**/snapshots/
+mdbx.dat
+mdbx.lck
+/*/**/LOCK
+/*/**/nodekey

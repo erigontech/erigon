@@ -31,15 +31,16 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
@@ -49,9 +50,16 @@ import (
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
 var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
-var BorDefaultMinerGasLimit uint64 = 45_000_000
 
-var DefaultMinerGasLimit uint64 = 36_000_000
+// Fail-back block gas limit. Better specify one in the chain config.
+const DefaultBlockGasLimit uint64 = 45_000_000
+
+func DefaultBlockGasLimitByChain(config *Config) uint64 {
+	if config.Genesis == nil || config.Genesis.Config == nil || config.Genesis.Config.DefaultBlockGasLimit == nil {
+		return DefaultBlockGasLimit
+	}
+	return *config.Genesis.Config.DefaultBlockGasLimit
+}
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -143,7 +151,6 @@ type BlocksFreezing struct {
 	ProduceE2         bool // produce new block files
 	ProduceE3         bool // produce new state files
 	NoDownloader      bool // possible to use snapshots without calling Downloader
-	Verify            bool // verify snapshots on startup
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
@@ -211,7 +218,7 @@ type Config struct {
 	// Ethash options
 	Ethash ethashcfg.Config
 
-	Clique params.ConsensusSnapshotConfig
+	Clique chainspec.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
 
 	// Transaction pool options

@@ -58,6 +58,10 @@ func Uint64SSZ(x uint64) []byte {
 	return b
 }
 
+func Uint64SSZDecode(buf []byte) uint64 {
+	return binary.LittleEndian.Uint64(buf)
+}
+
 func BoolSSZ(b bool) byte {
 	if b {
 		return 1

@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -144,7 +144,7 @@ func TestEIP2200(t *testing.T) {
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0, 0), w)
+			_ = s.CommitBlock(chain.AllProtocolChanges.Rules(0, 0, 0), w)
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
@@ -197,12 +197,12 @@ func TestCreateGas(t *testing.T) {
 		defer domains.Close()
 
 		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
-		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, nil, 0)
+		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code))
-		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0), stateWriter)
+		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },

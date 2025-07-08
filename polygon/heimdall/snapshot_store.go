@@ -13,9 +13,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
@@ -23,7 +23,7 @@ func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 	return &SnapshotStore{
 		Store:                       base,
 		checkpoints:                 NewCheckpointSnapshotStore(base.Checkpoints(), snapshots),
-		milestones:                  NewMilestoneSnapshotStore(base.Milestones(), snapshots),
+		milestones:                  base.Milestones(),
 		spans:                       NewSpanSnapshotStore(base.Spans(), snapshots),
 		spanBlockProducerSelections: base.SpanBlockProducerSelections(),
 	}
@@ -87,9 +87,9 @@ func (s *SpanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
 
 func (s *SpanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
-		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
-				s.EntityStore.(*mdbxEntityStore[*Span]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
+				s.EntityStore.(*mdbxEntityStore[*Span]).db.RoDB(), chainConfig, collect, workers, lvl, logger, hashResolver)
 		})
 }
 
@@ -225,9 +225,9 @@ func (s *MilestoneSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Milestone] {
 
 func (s *MilestoneSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
-		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
-				s.EntityStore.(*mdbxEntityStore[*Milestone]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
+				s.EntityStore.(*mdbxEntityStore[*Milestone]).db.RoDB(), chainConfig, collect, workers, lvl, logger, hashResolver)
 		})
 }
 
@@ -344,9 +344,9 @@ func NewCheckpointSnapshotStore(base EntityStore[*Checkpoint], snapshots *RoSnap
 
 func (s *CheckpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
-		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
-				s.EntityStore.(*mdbxEntityStore[*Checkpoint]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
+				s.EntityStore.(*mdbxEntityStore[*Checkpoint]).db.RoDB(), chainConfig, collect, workers, lvl, logger, hashResolver)
 		})
 }
 
@@ -509,7 +509,7 @@ func validateSnapshots[T Entity](
 				accumulatedErr = errors.New("missing entities")
 			}
 
-			accumulatedErr = fmt.Errorf("%w: snap [%d, %d)", accumulatedErr, expectedId, entity.RawId())
+			accumulatedErr = fmt.Errorf("%w: snap [%d, %d, %s)", accumulatedErr, expectedId, entity.RawId(), seg.Src().FileName())
 			if failFast {
 				return accumulatedErr
 			}

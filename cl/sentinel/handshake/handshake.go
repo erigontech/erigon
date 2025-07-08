@@ -24,6 +24,8 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	communication2 "github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
@@ -102,16 +104,27 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 		return false, err
 	}
 	defer resp.Body.Close()
+
 	if resp.Header.Get("REQRESP-RESPONSE-CODE") != "0" {
 		a, _ := io.ReadAll(resp.Body)
 		//TODO: proper errors
-		return false, fmt.Errorf("hand  shake error: %s", string(a))
+		return false, fmt.Errorf("hand shake error: %s, %s", resp.Header.Get("REQRESP-RESPONSE-CODE"), string(a))
 	}
 	responseStatus := &cltypes.Status{}
 
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(resp.Body, responseStatus, clparams.Phase0Version); err != nil {
+		log.Debug("DecodeAndReadNoForkDigest", "error", err)
 		return false, nil
 	}
 	forkDigest, err := h.ethClock.CurrentForkDigest()
-	return responseStatus.ForkDigest == forkDigest, err
+	if err != nil {
+		return false, err
+	}
+	if responseStatus.ForkDigest != forkDigest {
+		respDigest := common.Bytes4{}
+		copy(respDigest[:], responseStatus.ForkDigest[:])
+		log.Trace("Fork digest mismatch", "responseStatus.ForkDigest", respDigest, "forkDigest", forkDigest, "responseStatus.HeadSlot", responseStatus.HeadSlot)
+		return false, nil
+	}
+	return true, nil
 }

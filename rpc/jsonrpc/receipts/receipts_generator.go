@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -72,7 +71,7 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		panic(err)
 	}
 
-	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader))
+	txNumReader := blockReader.TxnumReader(context.Background())
 
 	return &Generator{
 		receiptsCache:      receiptsCache,
@@ -105,7 +104,7 @@ func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*ty
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
+	txNumsReader := g.blockReader.TxnumReader(ctx)
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)
@@ -150,7 +149,21 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	txnHash := txn.Hash()
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	var receiptFromDB *types.Receipt
+	var receiptFromDB, receipt *types.Receipt
+	var firstLogIndex uint32
+	var cumGasUsed uint64
+
+	defer func() {
+		if dbg.Enabled(ctx) {
+			log.Info("[dbg] ReceiptGenerator.GetReceipt",
+				"txNum", txNum,
+				"txHash", txnHash.String(),
+				"blockNum", blockNum,
+				"firstLogIndex", firstLogIndex,
+				"nil receipt in db", receiptFromDB == nil)
+		}
+	}()
+
 	if !rpcDisableRCache {
 		var ok bool
 		var err error
@@ -176,14 +189,12 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
 	}
 
-	var receipt *types.Receipt
-
 	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
 	if err != nil {
 		return nil, err
 	}
 
-	cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+	cumGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
 	}
@@ -234,6 +245,14 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptsFromDB types.Receipts
+	receipts := make(types.Receipts, len(block.Transactions()))
+	defer func() {
+		if dbg.Enabled(ctx) {
+			log.Info("[dbg] ReceiptGenerator.GetReceipts",
+				"blockNum", block.NumberU64(),
+				"nil receipts in db", receiptsFromDB == nil)
+		}
+	}()
 	if !rpcDisableRCache {
 		var err error
 		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
@@ -250,8 +269,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
 		return receipts, nil
 	}
-
-	receipts := make(types.Receipts, len(block.Transactions()))
 
 	genEnv, err := g.PrepareEnv(ctx, block.HeaderNoCopy(), cfg, tx, 0)
 	if err != nil {

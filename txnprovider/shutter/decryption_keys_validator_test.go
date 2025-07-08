@@ -21,7 +21,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/stretchr/testify/require"
 

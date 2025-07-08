@@ -95,6 +95,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	sr := snappy.NewReader(r)
 	raw := make([]byte, encodedLn)
 	if _, err := io.ReadFull(sr, raw); err != nil {
+		// fetch struct name of val
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 

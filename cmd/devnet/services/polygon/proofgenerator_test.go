@@ -46,13 +46,13 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/polygon/bor"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -86,7 +86,7 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 	return &requestGenerator{
 		chain:      chain,
 		sentry:     sentry,
-		bor:        bor.NewRo(params.BorDevnetChainConfig, db, reader, log.Root()),
+		bor:        bor.NewRo(polychain.BorDevnetChainConfig, db, reader, log.Root()),
 		txBlockMap: map[common.Hash]*types.Block{},
 	}, nil
 }
@@ -141,7 +141,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 	}
 
 	engine := rg.bor
-	chainConfig := params.BorDevnetChainConfig
+	chainConfig := polychain.BorDevnetChainConfig
 
 	reader := blockReader{
 		chain: rg.chain,
@@ -161,7 +161,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 	var gasUsed uint64
 	var usedBlobGas uint64
 
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Header().Time))
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Header().Time, 0))
 
 	noopWriter := state.NewNoopWriter()
 

@@ -30,12 +30,13 @@ import (
 	"strings"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -46,28 +47,31 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/direct"
-	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
-	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/enode"
-	"github.com/erigontech/erigon-p2p/nat"
-	"github.com/erigontech/erigon-p2p/netutil"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/nat"
+	"github.com/erigontech/erigon/p2p/netutil"
 	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+
+	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 // These are all the command line flags we support.
@@ -83,15 +87,6 @@ var (
 		Name:  "datadir",
 		Usage: "Data directory for the databases",
 		Value: flags.DirectoryString(paths.DefaultDataDir()),
-	}
-
-	AncientFlag = flags.DirectoryFlag{
-		Name:  "datadir.ancient",
-		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
-	}
-	MinFreeDiskSpaceFlag = flags.DirectoryFlag{
-		Name:  "datadir.minfreedisk",
-		Usage: "Minimum free disk space in MB, once reached triggers auto shut down (default = --cache.gc converted to MB, 0 = disabled)",
 	}
 	NetworkIdFlag = cli.Uint64Flag{
 		Name:  "networkid",
@@ -344,11 +339,13 @@ var (
 
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
-		Usage: "Enable compression over HTTP-RPC",
+		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
+		Value: true,
 	}
 	WsCompressionFlag = cli.BoolFlag{
 		Name:  "ws.compression",
-		Usage: "Enable compression over WebSocket",
+		Usage: "Enable compression over WebSocket (enabled by default in case WS-RPC is enabled). Use --ws.enabled=false to disable it",
+		Value: true,
 	}
 	HTTPCORSDomainFlag = cli.StringFlag{
 		Name:  "http.corsdomain",
@@ -685,24 +682,36 @@ var (
 		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
-		Name:  "torrent.download.rate",
+		Name: "torrent.download.rate",
+		// TODO: Set this higher to demonstrate effectiveness. This should exceed 128 MB (256 might
+		// be good) to demonstrate when webseeding is working optimally. A separate rate limit could
+		// be used for peers.
 		Value: "128mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
-		Name:  "torrent.upload.rate",
+		Name: "torrent.upload.rate",
+		// TODO: Set this higher to demonstrate effectiveness?
 		Value: "4mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
+	// Deprecated. Shouldn't do anything. TODO: Remove.
 	TorrentDownloadSlotsFlag = cli.IntFlag{
-		Name:  "torrent.download.slots",
-		Value: 32,
-		Usage: "Amount of files to download in parallel.",
+		Name:   "torrent.download.slots",
+		Value:  32,
+		Usage:  "Amount of files to download in parallel.",
+		Hidden: true,
 	}
+	// TODO: Currently unused.
 	TorrentStaticPeersFlag = cli.StringFlag{
-		Name:  "torrent.staticpeers",
-		Usage: "Comma separated host:port to connect to",
-		Value: "",
+		Name:   "torrent.staticpeers",
+		Usage:  "Comma separated host:port to connect to",
+		Value:  "",
+		Hidden: true,
+	}
+	TorrentDisableTrackers = cli.BoolFlag{
+		Name:  "torrent.trackers.disable",
+		Usage: "Disable conventional BitTorrent trackers",
 	}
 	NoDownloaderFlag = cli.BoolFlag{
 		Name:  "no-downloader",
@@ -1135,8 +1144,9 @@ var (
 		Value: false,
 	}
 	KeepExecutionProofsFlag = cli.BoolFlag{
-		Name:  "experimental.commitment-history",
-		Usage: "Enables blazing fast eth_getProof for executed block",
+		Name:    "prune.experimental.include-commitment-history",
+		Usage:   "Enables blazing fast eth_getProof for executed block",
+		Aliases: []string{"experimental.commitment-history"},
 	}
 )
 
@@ -1207,7 +1217,7 @@ func GetBootnodesFromFlags(urlsStr, chain string) ([]*enode.Node, error) {
 	if urlsStr != "" {
 		urls = common.CliString2Array(urlsStr)
 	} else {
-		urls = params2.BootnodeURLsOfChain(chain)
+		urls = chainspec.BootnodeURLsOfChain(chain)
 	}
 	return enode.ParseNodesFromURLs(urls)
 }
@@ -1218,7 +1228,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		urls = common.CliString2Array(ctx.String(StaticPeersFlag.Name))
 	} else {
 		chain := ctx.String(ChainFlag.Name)
-		urls = params2.StaticPeerURLsOfChain(chain)
+		urls = chainspec.StaticPeerURLsOfChain(chain)
 	}
 
 	nodes, err := enode.ParseNodesFromURLs(urls)
@@ -1276,19 +1286,17 @@ func NewP2PConfig(
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:         fmt.Sprintf(":%d", port),
-		MaxPeers:           maxPeers,
-		MaxPendingPeers:    maxPendPeers,
-		NAT:                nat.Any(),
-		NoDiscovery:        nodiscover,
-		PrivateKey:         serverKey,
-		Name:               nodeName,
-		NodeDatabase:       enodeDBPath,
-		AllowedPorts:       allowedPorts,
-		TmpDir:             dirs.Tmp,
-		MetricsEnabled:     metricsEnabled,
-		LookupBootnodeURLs: params2.BootnodeURLsByGenesisHash,
-		LookupDNSNetwork:   params2.KnownDNSNetwork,
+		ListenAddr:      fmt.Sprintf(":%d", port),
+		MaxPeers:        maxPeers,
+		MaxPendingPeers: maxPendPeers,
+		NAT:             nat.Any(),
+		NoDiscovery:     nodiscover,
+		PrivateKey:      serverKey,
+		Name:            nodeName,
+		NodeDatabase:    enodeDBPath,
+		AllowedPorts:    allowedPorts,
+		TmpDir:          dirs.Tmp,
+		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1696,7 +1704,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params2.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *params2.ConsensusSnapshotConfig, datadir string) {
+func setClique(ctx *cli.Context, cfg *chainspec.ConsensusSnapshotConfig, datadir string) {
 	cfg.CheckpointInterval = ctx.Uint64(CliqueSnapshotCheckpointIntervalFlag.Name)
 	cfg.InmemorySnapshots = ctx.Int(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.Int(CliqueSnapshotInmemorySignaturesFlag.Name)
@@ -1721,7 +1729,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 
 	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync)
 
-	chainConfig := params2.ChainConfigByChainName(ctx.String(ChainFlag.Name))
+	chainConfig := chainspec.ChainConfigByChainName(ctx.String(ChainFlag.Name))
 	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
 		// override default max devp2p peers for polygon as per
 		// https://forum.polygon.technology/t/introducing-our-new-dns-discovery-for-polygon-pos-faster-smarter-more-connected/19871
@@ -1949,7 +1957,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
 		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
-			chainName, ok := networkid.NetworkNameByID[cfg.NetworkID]
+			chainName, ok := chainspec.NetworkNameByID[cfg.NetworkID]
 			if !ok {
 				chain = "" // don't default to mainnet if NetworkID != 1 and it's devchain or smth
 			} else {
@@ -1958,7 +1966,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 		}
 	} else {
-		cfg.NetworkID = params2.NetworkIDByChainName(chain)
+		cfg.NetworkID = chainspec.NetworkIDByChainName(chain)
 	}
 
 	cfg.Dirs = nodeConfig.Dirs
@@ -1967,7 +1975,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.ProduceE3 = !ctx.Bool(SnapStateStopFlag.Name)
 	cfg.Snapshot.DisableDownloadE3 = ctx.Bool(SnapSkipStateSnapshotDownloadFlag.Name)
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
-	cfg.Snapshot.Verify = ctx.Bool(DownloaderVerifyFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot
@@ -2026,8 +2033,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Override any default configs for hard coded networks.
 	switch chain {
 	default:
-		genesis := core.GenesisBlockByChainName(chain)
-		genesisHash := params2.GenesisHashByChainName(chain)
+		genesis := chainspec.GenesisBlockByChainName(chain)
+		genesisHash := chainspec.GenesisHashByChainName(chain)
 		if (genesis == nil) || (genesisHash == nil) {
 			Fatalf("ChainDB name is not recognized: %s", chain)
 			return
@@ -2036,7 +2043,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		SetDNSDiscoveryDefaults(cfg, *genesisHash)
 	case "":
 		if cfg.NetworkID == 1 {
-			SetDNSDiscoveryDefaults(cfg, params2.MainnetGenesisHash)
+			SetDNSDiscoveryDefaults(cfg, chainspec.MainnetGenesisHash)
 		}
 	case networkname.Dev:
 		// Create new developer account or reuse existing one
@@ -2047,7 +2054,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		logger.Info("Using developer account", "address", developer)
 
 		// Create a new developer genesis block or reuse existing one
-		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
+		cfg.Genesis = chainspec.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
 		logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
 		if !ctx.IsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
@@ -2078,20 +2085,32 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 			panic(err)
 		}
-		lvl, _, err := downloadercfg2.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
+		lvl, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
-		logger.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params2.VersionWithCommit(params2.GitCommit)
 		webseedsList := common.CliString2Array(ctx.String(WebSeedsFlag.Name))
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 			webseedsList = append(webseedsList, known...)
 		}
-		cfg.Downloader, err = downloadercfg2.New(ctx.Context, cfg.Dirs, version, lvl, downloadRate, uploadRate,
-			ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name),
+		cfg.Downloader, err = downloadercfg.New(
+			ctx.Context,
+			cfg.Dirs,
+			version,
+			lvl,
+			downloadRate,
+			uploadRate,
+			ctx.Int(TorrentPortFlag.Name),
+			ctx.Int(TorrentConnsPerFileFlag.Name),
 			common.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)),
-			webseedsList, chain, true, ctx.Bool(DbWriteMapFlag.Name),
+			webseedsList,
+			chain,
+			ctx.Bool(DbWriteMapFlag.Name),
+			downloadercfg.NewCfgOpts{
+				DisableTrackers: boolFlagOpt(ctx, &TorrentDisableTrackers),
+				Verify:          DownloaderVerifyFlag.Get(ctx),
+			},
 		)
 		if err != nil {
 			panic(err)
@@ -2100,14 +2119,21 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 }
 
+// Converts flag value to an Option for packages that abstract over flag handling.
+func boolFlagOpt(ctx *cli.Context, flag *cli.BoolFlag) g.Option[bool] {
+	if ctx.IsSet(flag.Name) {
+		return g.Some(ctx.Bool(flag.Name))
+	}
+	return g.None[bool]()
+}
+
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
 // no URLs are set.
 func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
 	}
-	protocol := "all"
-	if url := params2.KnownDNSNetwork(genesis, protocol); url != "" {
+	if url := chainspec.KnownDNSNetwork(genesis); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
 }

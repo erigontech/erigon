@@ -11,8 +11,8 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 

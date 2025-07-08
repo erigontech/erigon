@@ -95,3 +95,26 @@ func computeProposerIndexElectra(b *raw.BeaconState, indices []uint64, seed [32]
 		i += 1
 	}
 }
+
+func ComputeProposerIndices(b *raw.BeaconState, epoch uint64, seed [32]byte, indices []uint64) ([]uint64, error) {
+	startSlot := epoch * b.BeaconConfig().SlotsPerEpoch
+	proposerIndices := make([]uint64, b.BeaconConfig().SlotsPerEpoch)
+
+	// Generate seed for each slot
+	input := make([]byte, 40)
+	copy(input, seed[:])
+	for i := uint64(0); i < b.BeaconConfig().SlotsPerEpoch; i++ {
+		// Hash seed + slot to get per-slot seed
+		binary.LittleEndian.PutUint64(input[32:], startSlot+i)
+		slotSeed := utils.Sha256(input)
+
+		// Compute proposer index for this slot
+		proposerIndex, err := ComputeProposerIndex(b, indices, slotSeed)
+		if err != nil {
+			return nil, err
+		}
+		proposerIndices[i] = proposerIndex
+	}
+
+	return proposerIndices, nil
+}

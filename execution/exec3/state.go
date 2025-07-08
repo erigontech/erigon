@@ -24,7 +24,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"github.com/erigontech/nitro-erigon/arbos"
 	"github.com/erigontech/nitro-erigon/arbos/arbosState"
 	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
@@ -47,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/polygon/aa"
+	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -312,9 +312,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 
 		if isMining {
-			_, txTask.Txs, txTask.BlockReceipts, _, err = rw.engine.FinalizeAndAssemble(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, nil, rw.logger)
+			_, _, err = rw.engine.FinalizeAndAssemble(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, nil, rw.logger)
 		} else {
-			_, _, _, err = rw.engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
+			_, err = rw.engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
 		}
 		if err != nil {
 			txTask.Error = err
@@ -369,7 +369,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			//txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
 			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()

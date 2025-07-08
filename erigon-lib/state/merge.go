@@ -255,7 +255,7 @@ func (r HistoryRanges) any() bool {
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
 // files are in the descending order of endTxNum
-func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*filesItem) {
+func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*FilesItem) {
 	if r.history.any() {
 		var err error
 		indexFiles, historyFiles, err = dt.ht.staticFilesInRange(r.history)
@@ -282,8 +282,8 @@ func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFile
 	return
 }
 
-func (iit *InvertedIndexRoTx) staticFilesInRange(startTxNum, endTxNum uint64) []*filesItem {
-	files := make([]*filesItem, 0, len(iit.files))
+func (iit *InvertedIndexRoTx) staticFilesInRange(startTxNum, endTxNum uint64) []*FilesItem {
+	files := make([]*FilesItem, 0, len(iit.files))
 
 	for _, item := range iit.files {
 		if item.startTxNum < startTxNum {
@@ -303,7 +303,7 @@ func (iit *InvertedIndexRoTx) staticFilesInRange(startTxNum, endTxNum uint64) []
 	return files
 }
 
-func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles []*filesItem, err error) {
+func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles []*FilesItem, err error) {
 	if !r.history.needMerge && r.index.needMerge {
 		indexFiles = ht.iit.staticFilesInRange(r.index.from, r.index.to)
 		return indexFiles, historyFiles, nil
@@ -383,7 +383,7 @@ type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, err
 
 const DomainMinStepsToCompress = 16
 
-func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*filesItem, r DomainRanges, vt valueTransformer, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
+func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*FilesItem, r DomainRanges, vt valueTransformer, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *FilesItem, err error) {
 	if !r.any() {
 		return
 	}
@@ -580,8 +580,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	return
 }
 
-func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*filesItem, error) {
-	var outItem *filesItem
+func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*FilesItem, error) {
+	var outItem *FilesItem
 	var comp *seg.Compressor
 	var decomp *seg.Decompressor
 	var err error
@@ -729,7 +729,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	return outItem, nil
 }
 
-func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles []*filesItem, r HistoryRanges, ps *background.ProgressSet) (indexIn, historyIn *filesItem, err error) {
+func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet) (indexIn, historyIn *FilesItem, err error) {
 	if !r.any() {
 		return nil, nil, nil
 	}
@@ -875,20 +875,20 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	return
 }
 
-func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *filesItem) {
+func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *FilesItem) {
 	d.History.integrateMergedDirtyFiles(indexIn, historyIn)
 	if valuesIn != nil {
 		d.dirtyFiles.Set(valuesIn)
 	}
 }
 
-func (ii *InvertedIndex) integrateMergedDirtyFiles(in *filesItem) {
+func (ii *InvertedIndex) integrateMergedDirtyFiles(in *FilesItem) {
 	if in != nil {
 		ii.dirtyFiles.Set(in)
 	}
 }
 
-func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *filesItem) {
+func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
 	h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
 	//TODO: handle collision
 	if historyIn != nil {
@@ -896,7 +896,7 @@ func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *filesItem) {
 	}
 }
 
-func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *filesItem) {
+func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem) {
 	dt.ht.cleanAfterMerge(mergedHist, mergedIdx)
 	outs := dt.garbage(mergedDomain)
 	deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.filenameBase, dt.d.logger)
@@ -905,7 +905,7 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *files
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *filesItem) {
+func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) {
 	ht.iit.cleanAfterMerge(mergedIdx)
 	if merged != nil && merged.endTxNum == 0 {
 		return
@@ -915,7 +915,7 @@ func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *filesItem) {
 }
 
 // cleanAfterMerge - mark all small files before `f` as `canDelete=true`
-func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
+func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) {
 	if merged != nil && merged.endTxNum == 0 {
 		return
 	}
@@ -924,7 +924,7 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
 }
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
-func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
+func (dt *DomainRoTx) garbage(merged *FilesItem) (outs []*FilesItem) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	dchecker := dt.d.checker
 	dname := dt.name
@@ -938,11 +938,11 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 }
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
-func (ht *HistoryRoTx) garbage(merged *filesItem) (outs []*filesItem) {
+func (ht *HistoryRoTx) garbage(merged *FilesItem) (outs []*FilesItem) {
 	return garbage(ht.h.dirtyFiles, ht.files, merged, nil)
 }
 
-func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
+func (iit *InvertedIndexRoTx) garbage(merged *FilesItem) (outs []*FilesItem) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	dchecker := iit.ii.checker
 
@@ -955,10 +955,10 @@ func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	return garbage(iit.ii.dirtyFiles, iit.files, merged, checker)
 }
 
-func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, merged *filesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*filesItem) {
+func garbage(dirtyFiles *btree.BTreeG[*FilesItem], visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
 	// `kill -9` may leave some garbage
 	// AggRoTx doesn't have such files, only Agg.files does
-	dirtyFiles.Walk(func(items []*filesItem) bool {
+	dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
@@ -990,7 +990,7 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 	return outs
 }
 
-func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
+func hasCoverVisibleFile(visibleFiles []visibleFile, item *FilesItem) bool {
 	for _, f := range visibleFiles {
 		if item.isProperSubsetOf(f.src) {
 			return true
