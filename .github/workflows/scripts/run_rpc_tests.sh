@@ -1,6 +1,5 @@
 #!/bin/bash
 set -e
-set -x
 
 # Accept WORKSPACE as the first argument, default to /tmp directory if not provided
 WORKSPACE="${1:-/tmp}"
