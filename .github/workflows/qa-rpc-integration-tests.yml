@@ -114,11 +114,12 @@ jobs:
 
           echo "test_executed=true" >> $GITHUB_OUTPUT
 
+          echo
           if [ $test_exit_status -eq 0 ]; then
-            echo "tests completed successfully"
+            echo "RPC tests completed successfully"
             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
-            echo "error detected during tests"
+            echo "Error detected during RPC tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           fi
 
