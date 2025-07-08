@@ -23,7 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
-	evmone "github.com/erigontech/evmone_precompiles"
+	"github.com/kevaundray/go-gmp"
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -547,9 +547,24 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		}
 	}
 
-	output := make([]byte, modLen)
-	evmone.ModExp(output, input)
-	return output, nil
+	if len(input) > 96 {
+		input = input[96:]
+	} else {
+		input = input[:0]
+	}
+	// Handle a special case when both the base and mod length is zero
+	if baseLen == 0 && modLen == 0 {
+		return []byte{}, nil
+	}
+	// Retrieve the operands and execute the exponentiation
+	var (
+		base = gmp.NewInt().SetBytes(getData(input, 0, baseLen))
+		exp  = gmp.NewInt().SetBytes(getData(input, baseLen, expLen))
+		mod  = gmp.NewInt().SetBytes(getData(input, baseLen+expLen, modLen))
+	)
+
+	output := gmp.NewInt().ExpMod(base, exp, mod)
+	return common.LeftPadBytes(output.Bytes(), int(modLen)), nil
 }
 
 // newCurvePoint unmarshals a binary blob into a bn256 elliptic curve point,

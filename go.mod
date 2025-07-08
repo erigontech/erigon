@@ -15,6 +15,7 @@ require (
 replace (
 	github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
+	github.com/kevaundray/go-gmp => ./erigon-lib/crypto/go-gmp
 )
 
 require (
@@ -69,6 +70,7 @@ require (
 	github.com/jedib0t/go-pretty/v6 v6.5.9
 	github.com/jinzhu/copier v0.4.0
 	github.com/json-iterator/go v1.1.12
+	github.com/kevaundray/go-gmp v0.0.0-00010101000000-000000000000
 	github.com/klauspost/compress v1.18.0
 	github.com/libp2p/go-libp2p v0.37.2
 	github.com/libp2p/go-libp2p-mplex v0.9.0
