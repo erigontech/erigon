@@ -1147,6 +1147,14 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history"},
 	}
+	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
+		Name:  "experimental.always-generate-changesets",
+		Usage: "Enables blazing fast eth_getProof for executed block",
+	}
+	ShadowForkFlag = cli.BoolFlag{
+		Name:  "shadowfork",
+		Usage: "Enables shadowfork mode",
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}
@@ -1932,6 +1940,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.PersistReceiptsCacheV2 = true
 		state.EnableHistoricalRCache()
 	}
+
+	cfg.AlwaysGenerateChangesets = ctx.Bool(AlwaysGenerateChangesetsFlag.Name)
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
@@ -1968,6 +1978,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.NetworkID = chainspec.NetworkIDByChainName(chain)
 	}
 
+	cfg.ShadowFork = ctx.Bool(ShadowForkFlag.Name)
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.ProduceE2 = !ctx.Bool(SnapStopFlag.Name)
