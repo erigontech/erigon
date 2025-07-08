@@ -55,8 +55,8 @@ const DefaultNetworkChunkSize = 256 << 10
 
 type Cfg struct {
 	Dirs datadir.Dirs
-	// Options when adding webseeds to torrents added to the Downloader.
-	AddWebseedOpts []torrent.AddWebSeedsOpt
+	// Separate rate limit for webseeds.
+	SeparateWebseedDownloadRateLimit g.Option[rate.Limit]
 	// These are WebSeed URLs conforming to the requirements in anacrolix/torrent.
 	WebSeedUrls []string
 
@@ -271,11 +271,8 @@ func New(
 		cfg.WebSeedUrls = append(cfg.WebSeedUrls, s.String()+"/")
 	}
 
-	if opts.WebseedDownloadRateLimit.Ok {
-		cfg.AddWebseedOpts = append(
-			cfg.AddWebseedOpts,
-			torrent.WebSeedResponseBodyRateLimiter(rate.NewLimiter(opts.WebseedDownloadRateLimit.Value, 0)),
-		)
+	for value := range opts.WebseedDownloadRateLimit.Iter() {
+		cfg.SeparateWebseedDownloadRateLimit.Set(value)
 	}
 
 	return &cfg, nil

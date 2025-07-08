@@ -2130,8 +2130,11 @@ func (me RateLimitFlagValue) TorrentRateLimit() g.Option[rate.Limit] {
 }
 
 func GetStringFlagRateLimit(value string) (_ RateLimitFlagValue, err error) {
-	if value == "" {
+	switch value {
+	case "":
 		return
+	case "Inf":
+		return RateLimitFlagValue(g.Some(rate.Inf)), nil
 	}
 	var size datasize.ByteSize
 	err = size.UnmarshalText([]byte(value))
@@ -2143,7 +2146,7 @@ func GetStringFlagRateLimit(value string) (_ RateLimitFlagValue, err error) {
 
 // Takes a string value from a flag, in a human readable byte rate format, and converts it to a
 // Downloader rate limit option value. Panics on parse errors per the old package behaviour.
-func MustGetStringFlagDownloaderRateLimit(value string) g.Option[rate.Limit] {
+func MustGetStringFlagDownloaderRateLimit(value string) (_ g.Option[rate.Limit]) {
 	hiho, err := GetStringFlagRateLimit(value)
 	panicif.Err(err)
 	return hiho.TorrentRateLimit()

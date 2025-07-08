@@ -42,6 +42,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/puzpuzpuz/xsync/v4"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	// Make Go expvars available to Prometheus for diagnostics.
 	_ "github.com/anacrolix/missinggo/v2/expvar-prometheus"
@@ -68,7 +69,8 @@ import (
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
 type Downloader struct {
-	torrentClient *torrent.Client
+	addWebSeedOpts []torrent.AddWebSeedsOpt
+	torrentClient  *torrent.Client
 
 	cfg *downloadercfg.Cfg
 
@@ -319,6 +321,18 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 	defer db.Close()
 
+	var addWebSeedOpts []torrent.AddWebSeedsOpt
+
+	for value := range cfg.SeparateWebseedDownloadRateLimit.Iter() {
+		addWebSeedOpts = append(
+			addWebSeedOpts,
+			torrent.WebSeedResponseBodyRateLimiter(rate.NewLimiter(value, 0)),
+		)
+		if value == 0 {
+			cfg.ClientConfig.DisableWebseeds = true
+		}
+	}
+
 	m, torrentClient, err := newTorrentClient(ctx, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("newTorrentClient: %w", err)
@@ -348,12 +362,15 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		cfg:                cfg,
 		torrentStorage:     m,
 		torrentClient:      torrentClient,
+		addWebSeedOpts:     addWebSeedOpts,
 		stats:              stats,
 		logger:             logger,
 		verbosity:          verbosity,
 		torrentFS:          &AtomicTorrentFS{dir: cfg.Dirs.Snap},
 		filesBeingVerified: xsync.NewMap[*torrent.File, struct{}](),
 	}
+
+	d.logTorrentClientParams()
 
 	if len(cfg.WebSeedUrls) == 0 {
 		logger.Warn("downloader has no webseed urls configured")
@@ -789,8 +806,9 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 	return rates, peers
 }
 
-// This is too coupled to the Downloader. Check all loaded torrents by forcing a new verification
-// then checking if the client considers them complete.
+// Check all loaded torrents by forcing a new verification then checking if the client considers
+// them complete. If whitelist is not empty, torrents are verified if their name contains any
+// whitelist entry as a prefix, suffix, or total match. TODO: This is too coupled to cmd/Downloader.
 func (d *Downloader) VerifyData(
 	ctx context.Context,
 	whiteList []string,
@@ -1212,7 +1230,7 @@ func openMdbx(
 	return dbCfg.Open(ctx)
 }
 
-// This used to return the MDBX database. Instead that's opened separately now and should be passed
+// This used to return the MDBX database. Instead, that's opened separately now and should be passed
 // in if it's revived.
 func newTorrentClient(
 	ctx context.Context,
@@ -1256,6 +1274,34 @@ func newTorrentClient(
 	}()
 
 	return
+}
+
+// Moved from EthConfig to be as close to torrent client init as possible. Logs important torrent
+// parameters.
+func (d *Downloader) logTorrentClientParams() {
+	cfg := d.cfg.ClientConfig
+	d.logger.Info(
+		"[Downloader] Running with",
+		"ipv6-enabled", !cfg.DisableIPv6,
+		"ipv4-enabled", !cfg.DisableIPv4,
+		"download.rate", rateLimitString(cfg.DownloadRateLimiter.Limit()),
+		"webseed-download-rate", func() string {
+			opt := d.cfg.SeparateWebseedDownloadRateLimit
+			if opt.Ok {
+				return rateLimitString(opt.Value)
+			}
+			return "shared with p2p"
+		}(),
+		"upload.rate", rateLimitString(cfg.UploadRateLimiter.Limit()),
+	)
+}
+
+func rateLimitString(rateLimit rate.Limit) string {
+	if rateLimit == rate.Inf {
+		return "∞"
+	}
+	// Use the same type for human-readable bytes as elsewhere.
+	return datasize.ByteSize(rateLimit).String()
 }
 
 func (d *Downloader) SetLogPrefix(prefix string) {

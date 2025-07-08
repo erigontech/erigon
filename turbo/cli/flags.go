@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var (
@@ -247,12 +246,6 @@ var (
 		Usage: "Maximum number of topics per subscription to filter logs by.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
 	}
-
-	TxPoolCommitEvery = cli.DurationFlag{
-		Name:  "txpool.commit.every",
-		Usage: "How often transactions should be committed to the storage",
-		Value: txpoolcfg.DefaultConfig.CommitEvery,
-	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
@@ -336,18 +329,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		}
 	}
 
-	disableIPV6 := ctx.Bool(utils.DisableIPV6.Name)
-	disableIPV4 := ctx.Bool(utils.DisableIPV4.Name)
-	downloadRate := ctx.String(utils.TorrentDownloadRateFlag.Name)
-	uploadRate := ctx.String(utils.TorrentUploadRateFlag.Name)
-
-	logger.Info(
-		"[Downloader] Running with",
-		"ipv6-enabled", !disableIPV6,
-		"ipv4-enabled", !disableIPV4,
-		"download.rate", downloadRate,
-		"upload.rate", uploadRate,
-	)
 	if ctx.Bool(utils.DisableIPV6.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv6 = true
 	}
