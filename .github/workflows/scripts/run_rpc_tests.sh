@@ -11,35 +11,21 @@ RPC_VERSION="v1.66.0"
 
 # Clone rpc-tests repository at specific tag/branch
 rm -rf "$WORKSPACE/rpc-tests" > /dev/null 2>&1
-echo "[DEBUG] Cloning rpc-tests repo (branch $RPC_VERSION) into $WORKSPACE/rpc-tests..."
 git -c advice.detachedHead=false clone --depth 1 --branch $RPC_VERSION https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests"
-echo "[DEBUG] Clone complete."
-
-# Always create and activate a Python virtual environment
 cd "$WORKSPACE/rpc-tests"
-echo "[DEBUG] Creating Python virtual environment..."
 
-# Try different methods to create virtual environment
-if python3 -m venv .venv 2>/dev/null; then
-  echo "[DEBUG] Created venv using python3 -m venv"
-elif python3 -m virtualenv .venv 2>/dev/null; then
-  echo "[DEBUG] Created venv using python3 -m virtualenv"
-elif virtualenv .venv 2>/dev/null; then
-  echo "[DEBUG] Created venv using virtualenv"
+# Try to create and activate a Python virtual environment or install packages globally if it fails (not ideal but works)
+if python3 -m venv .venv 2>/dev/null; then :
+elif python3 -m virtualenv .venv 2>/dev/null; then :
+elif virtualenv .venv 2>/dev/null; then :
 else
-  echo "[ERROR] Could not create virtual environment. Trying to install packages globally..."
-  # Fallback: install packages globally (not ideal but works)
   pip3 install -r requirements.txt
-  echo "[DEBUG] Installed packages globally"
 fi
 
 # Activate virtual environment if it was created
 if [ -f ".venv/bin/activate" ]; then
   source .venv/bin/activate
-  echo "[DEBUG] Virtual environment activated"
   pip3 install -r requirements.txt
-else
-  echo "[DEBUG] Using global Python environment"
 fi
 
 # Remove the local results directory if any
@@ -60,7 +46,6 @@ disabled_tests=(
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
-    # these tests require Fix on erigon DM on repeipts domain
     # these tests requires Erigon active
     admin_nodeInfo/test_01.json
     admin_peers/test_01.json
@@ -102,10 +87,7 @@ fi
 # Always deactivate the Python virtual environment at the end
 cd "$WORKSPACE/rpc-tests"
 if [ -f ".venv/bin/activate" ]; then
-  deactivate 2>/dev/null || echo "No active virtualenv"
-  echo "[DEBUG] Virtual environment deactivated"
-else
-  echo "[DEBUG] No virtual environment to deactivate"
+  deactivate 2>/dev/null || :
 fi
 
 exit $RUN_TESTS_EXIT_CODE
