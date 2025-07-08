@@ -146,7 +146,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 	return nil
 }
 
-func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, failFast bool) error {
+func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, latest, failFast bool) error {
 	setRoutes(erigonURL, gethURL)
 
 	reqGen := &RequestGenerator{}
@@ -163,6 +163,9 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 	log.Info("[ethGetLogsInvariants] starting", "blockFrom", blockFrom, "blockTo", blockTo, "latestBlock", latestBlock)
 	if blockFrom > latestBlock {
 		return fmt.Errorf("fromBlock(%d) > latestBlock(%d)", blockFrom, latestBlock)
+	}
+	if blockTo > latestBlock {
+		log.Info("[ethGetLogsInvariants] blockTo > latestBlock, setting blockTo to latestBlock", "blockTo", blockTo, "latestBlock", latestBlock)
 	}
 
 	logEvery, lastLoggedBlock, lastLoggedTime := time.NewTicker(20*time.Second), blockFrom, time.Now()
