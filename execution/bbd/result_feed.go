@@ -26,23 +26,23 @@ type ResultFeed struct {
 	ch chan BatchResult
 }
 
-func (rf ResultFeed) Next(ctx context.Context) ([]*types.Block, bool, error) {
+func (rf ResultFeed) Next(ctx context.Context) ([]*types.Block, error) {
 	select {
 	case <-ctx.Done():
-		return nil, false, ctx.Err()
+		return nil, ctx.Err()
 	case batch, ok := <-rf.ch:
 		if !ok {
-			return nil, false, nil
+			return nil, nil
 		}
-		return batch.Blocks, batch.HasNext, batch.Err
+		return batch.Blocks, batch.Err
 	}
 }
 
-func (rf ResultFeed) consumeData(ctx context.Context, blocks []*types.Block, hasNext bool) error {
+func (rf ResultFeed) consumeData(ctx context.Context, blocks []*types.Block) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case rf.ch <- BatchResult{Blocks: blocks, HasNext: hasNext}:
+	case rf.ch <- BatchResult{Blocks: blocks}:
 		return nil
 	}
 }
@@ -60,7 +60,6 @@ func (rf ResultFeed) close() {
 }
 
 type BatchResult struct {
-	Blocks  []*types.Block
-	HasNext bool
-	Err     error
+	Blocks []*types.Block
+	Err    error
 }

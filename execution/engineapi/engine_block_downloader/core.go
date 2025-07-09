@@ -17,26 +17,18 @@
 package engine_block_downloader
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/etl"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/bbd"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/polygon/p2p"
 )
 
 // download is the process that reverse download a specific block hash.
@@ -157,6 +149,7 @@ func (e *EngineBlockDownloader) download(
 }
 
 func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDownloadRequest) {
+	defer e.status.Store(headerdownload.Idle)
 	err := e.processDownloadV2(ctx, req)
 	if err != nil {
 		args := []interface{}{"hash", req.MissingHash, "trigger", req.Trigger}
@@ -165,223 +158,89 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 		}
 		args = append(args, "err", err)
 		e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args)
-		e.status.Store(headerdownload.Idle)
-		return
 	}
 }
 
 func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req BackwardDownloadRequest) error {
-	// 1. Get all peers
-	peers := e.p2pGatewayV2.ListPeers()
-	if len(peers) == 0 {
-		return fmt.Errorf("no peers")
+	opts := []bbd.Option{bbd.WithBlocksBatchSize(500)}
+	if req.Trigger == NewPayloadTrigger || req.Trigger == SegmentRecoveryTrigger {
+		opts = append(opts, bbd.WithChainLengthLimit(uint64(dbg.MaxReorgDepth)))
 	}
 
-	peerIdToIndex := make(map[p2p.PeerId]int, len(peers))
-	peerIndexToId := make(map[int]p2p.PeerId, len(peers))
-	for i, peer := range peers {
-		peerIdToIndex[*peer] = i
-		peerIndexToId[i] = *peer
-	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel() // need to cancel the ctx so that we cancel the download request processing if we err out prematurely
+	feed := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash)
 
-	// 2. Check which peers have the header to build knowledge of which peers we can use for syncing
-	//    and terminate early if none have seen it
-	exhaustedPeers := make([]bool, len(peers))
-	peersHeadersResponses := make([][]*types.Header, len(peers))
-	eg := errgroup.Group{}
-	for _, peer := range peers {
-		eg.Go(func() error {
-			peerIndex := peerIdToIndex[*peer]
-			resp, err := e.p2pGatewayV2.FetchHeadersBackwards(ctx, req.MissingHash, 1, peer)
-			if err != nil {
-				e.logger.Debug(
-					"[EngineBlockDownloader] peer does not have initial header",
-					"peer", peer,
-					"hash", req.MissingHash,
-					"err", err,
-				)
-				exhaustedPeers[peerIndex] = true
-				return nil
-			}
-
-			header := resp.Data[0]
-			peersHeadersResponses[peerIndex] = []*types.Header{header}
-			return nil
-		})
-	}
-	if err := eg.Wait(); err != nil {
-		panic(err) // err not expected since we don't return any errors in the above goroutines
-	}
-	var initialHeader *types.Header
-	for _, headers := range peersHeadersResponses {
-		if len(headers) > 0 {
-			initialHeader = headers[0]
-			break
-		}
-	}
-	if initialHeader == nil {
-		return fmt.Errorf("no peers have initial header hash for backward download: %s", req.MissingHash)
-	}
-	if initialHeader.Number.Uint64() == 0 {
-		return fmt.Errorf("asked to download hash at height 0: %s", req.MissingHash)
-	}
-
-	// 3. Download the header chain backwards in an etl collector until we connect it to a known local header.
-	//    Note we fetch headers in batches of 1024 max from 1 peer and send every following request to
-	//    the next available peer (in rotating fashion) to distribute the requests across all peers.
-	sortableBuffer := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	headerCollector := etl.NewCollector("EngineBlockDownloader", e.tmpdir, sortableBuffer, e.logger)
-	defer headerCollector.Close()
-	headerRlpBuf := make([]byte, 0, 512)
-	err := initialHeader.EncodeRLP(bytes.NewBuffer(headerRlpBuf))
-	if err != nil {
-		return err
-	}
-	err = headerCollector.Collect(dbutils.HeaderKey(initialHeader.Number.Uint64(), initialHeader.Hash()), headerRlpBuf)
-	if err != nil {
-		return err
-	}
-
-	var nextAvailablePeerIdx int
-	nextAvailablePeer := func() (p2p.PeerId, error) {
-		var iterations int
-		for !exhaustedPeers[nextAvailablePeerIdx] {
-			nextAvailablePeerIdx++
-			nextAvailablePeerIdx %= len(peers)
-			if iterations == len(peers) {
-				return p2p.PeerId{}, errors.New("all peers exhausted")
-			}
-			iterations++
-		}
-		return peerIndexToId[nextAvailablePeerIdx], nil
-	}
-
-	chainLen := 1
-	lastHeader := initialHeader
-	var connectionPoint *types.Header
-	for connectionPoint == nil && lastHeader.Number.Uint64() > 0 {
-		if req.Trigger == NewPayloadTrigger && chainLen > dbg.MaxReorgDepth {
-			return fmt.Errorf(
-				"new payload side chain too long - ignore until fcu confirms it: hash=%s, height=%d, len=%d",
-				initialHeader.Hash(),
-				initialHeader.Number.Uint64(),
-				chainLen,
-			)
-		}
-
-		if req.Trigger == SegmentRecoveryTrigger && chainLen > dbg.MaxReorgDepth {
-			return fmt.Errorf(
-				"segment recovery chain too long - ignoring download request: hash=%s, height=%d, len=%d",
-				initialHeader.Hash(),
-				initialHeader.Number.Uint64(),
-				chainLen,
-			)
-		}
-
-		parentHash := lastHeader.ParentHash
-		parentHeight := lastHeader.Number.Uint64() - 1
-		amount := min(parentHeight, eth.MaxHeadersServe)
-		if amount == 0 {
-			// can't fetch 0 blocks, just check if the hash matches our genesis and if it does set the connecting point
-			err = e.db.View(ctx, func(tx kv.Tx) error {
-				h, err := e.blockReader.Header(ctx, tx, parentHash, 0)
-				if err != nil {
-					return err
-				}
-				if h != nil {
-					connectionPoint = lastHeader
-				}
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			break
-		}
-
-		peerId, err := nextAvailablePeer()
-		if err != nil {
-			return fmt.Errorf(
-				"no peers available before reaching connection point hash=%s, height=%d: %w",
-				parentHash,
-				parentHeight,
-				err,
-			)
-		}
-
-		peerIndex := peerIdToIndex[peerId]
-		resp, err := e.p2pGatewayV2.FetchHeadersBackwards(ctx, parentHash, amount, &peerId)
-		if err != nil {
-			e.logger.Debug(
-				"[EngineBlockDownloader] could not fetch headers batch",
-				"hash", parentHash,
-				"height", parentHeight,
-				"amount", amount,
-				"peerId", peerId,
-				"err", err,
-			)
-			exhaustedPeers[peerIndex] = true
-			return nil
-		}
-
-		headers := resp.Data
-		connectionPointHeight := uint64(0)
-		err = e.db.View(ctx, func(tx kv.Tx) error {
-			for i := len(headers) - 1; i >= 0; i-- {
-				newHeader := headers[i]
-				newHeaderNum := newHeader.Number.Uint64()
-				if newHeaderNum == 0 {
-					return nil
-				}
-				h, err := e.blockReader.Header(ctx, tx, newHeader.ParentHash, newHeaderNum-1)
-				if err != nil {
-					return err
-				}
-				if h != nil {
-					connectionPoint = newHeader
-					connectionPointHeight = newHeader.Number.Uint64()
-					break
-				}
-			}
-			return nil
-		})
+	var blocks []*types.Block
+	var err error
+	var insertedBlocksWithoutExec int
+	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
+		err := e.chainRW.InsertBlocksAndWait(ctx, blocks)
 		if err != nil {
 			return err
 		}
-
-		// collect the headers batch into the etl
-		for i := len(headers) - 1; i >= 0; i-- {
-			header := headers[i]
-			headerNum := header.Number.Uint64()
-			if headerNum < connectionPointHeight {
-				break
-			}
-			w := bytes.NewBuffer(headerRlpBuf[:0])
-			err = header.EncodeRLP(w)
+		insertedBlocksWithoutExec += len(blocks)
+		blocks = nil
+		if req.Trigger == FcuTrigger && uint(insertedBlocksWithoutExec) >= e.syncCfg.LoopBlockLimit {
+			err = e.execDownloadedBatch(ctx, blocks[len(blocks)-1], req.MissingHash)
 			if err != nil {
 				return err
 			}
-			err = headerCollector.Collect(dbutils.HeaderKey(headerNum, header.Hash()), w.Bytes())
-			if err != nil {
-				return err
-			}
-			chainLen++
-			lastHeader = header
+			insertedBlocksWithoutExec = 0
 		}
 	}
-	if connectionPoint == nil {
-		return fmt.Errorf("connection point not found: hash=%s, height=%d", initialHeader.Hash(), initialHeader.Number.Uint64())
+	if err != nil {
+		return err
 	}
-
-	// 4. Start downloading the bodies from 1 random peer at a time
-	headerCollectorLoadFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		//
-		// TODO
-		//
+	if len(blocks) > 0 {
+		err = e.chainRW.InsertBlocksAndWait(ctx, blocks)
+		if err != nil {
+			return err
+		}
+	}
+	if req.ValidateChainTip == nil {
 		return nil
 	}
+	tip := req.ValidateChainTip
+	err = e.chainRW.InsertBlockAndWait(ctx, tip)
+	if err != nil {
+		return err
+	}
+	status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
+	if err != nil {
+		return err
+	}
+	if status == execution.ExecutionStatus_BadBlock {
+		e.hd.ReportBadHeaderPoS(tip.Hash(), latestValidHash)
+		return fmt.Errorf("bad block after validating chain tip: tip=%s, latestValidHash=%s", tip.Hash(), latestValidHash)
+	}
+	if status != execution.ExecutionStatus_Success {
+		return fmt.Errorf("unexpected status after validating chain tip: tip=%s, status=%s", tip.Hash(), status)
+	}
+	return nil
+}
 
-	return headerCollector.Load(nil, "", headerCollectorLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
+func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
+	status, _, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	if err != nil {
+		return err
+	}
+	if status == execution.ExecutionStatus_BadBlock {
+		e.hd.ReportBadHeaderPoS(block.Hash(), lastValidHash)
+		e.hd.ReportBadHeaderPoS(requested, lastValidHash)
+		return fmt.Errorf("bad block when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
+	}
+	if status != execution.ExecutionStatus_Success {
+		return fmt.Errorf("unsuccessful status when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
+	}
+	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{})
+	if err != nil {
+		return err
+	}
+	if fcuStatus != execution.ExecutionStatus_Success {
+		return fmt.Errorf("unsuccessful status when updating fork choice for batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
+	}
+	return nil
 }
 
 // StartDownloading triggers the download process and returns true if the process started or false if it could not.

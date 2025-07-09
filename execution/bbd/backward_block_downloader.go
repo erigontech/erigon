@@ -281,7 +281,7 @@ func (bbd BackwardBlockDownloader) downloadBlocks(
 			return nil // keep accumulating headers
 		}
 		// we've accumulated enough headers in the batch - time to fetch them from peers and send to the result feed
-		err = bbd.downloadBlocksForHeaders(ctx, headers, peers, false, feed)
+		err = bbd.downloadBlocksForHeaders(ctx, headers, peers, feed)
 		if err != nil {
 			return err
 		}
@@ -293,17 +293,16 @@ func (bbd BackwardBlockDownloader) downloadBlocks(
 		return err
 	}
 	if len(headers) == 0 {
-		return nil
+		return feed.consumeData(ctx, nil)
 	}
 	// make sure to download blocks for the remaining incomplete header batch after the etl collector has been loaded
-	return bbd.downloadBlocksForHeaders(ctx, headers, peers, true, feed)
+	return bbd.downloadBlocksForHeaders(ctx, headers, peers, feed)
 }
 
 func (bbd BackwardBlockDownloader) downloadBlocksForHeaders(
 	ctx context.Context,
 	headers []*types.Header,
 	peers peersContext,
-	lastBatch bool,
 	feed ResultFeed,
 ) error {
 	blocks := make([]*types.Block, 0, len(headers))
@@ -355,7 +354,7 @@ func (bbd BackwardBlockDownloader) downloadBlocksForHeaders(
 		}
 	}
 
-	err := feed.consumeData(ctx, blocks, lastBatch)
+	err := feed.consumeData(ctx, blocks)
 	if err != nil {
 		return fmt.Errorf("result feed could not consume blocks batch: %w", err)
 	}

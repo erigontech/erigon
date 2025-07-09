@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/bbd"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
@@ -79,8 +80,8 @@ type EngineBlockDownloader struct {
 	logger log.Logger
 
 	// V2 downloader
-	v2           bool
-	p2pGatewayV2 p2pGateway
+	v2    bool
+	bbdV2 *bbd.BackwardBlockDownloader
 }
 
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
