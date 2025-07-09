@@ -80,12 +80,24 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if err != nil {
 		return fmt.Errorf("failed to get block root: %v", err)
 	}
-	if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockRoot) ||
-		s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
-		return ErrIgnore
-	}
-
 	s.seenSidecar.Add(seenKey, struct{}{})
+
+	if s.forkChoice.GetPeerDas().IsArchivedMode() {
+		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockRoot) ||
+			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
+			// already processed
+			return ErrIgnore
+		}
+	} else {
+		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
+		if err != nil {
+			return fmt.Errorf("failed to get my custody columns: %v", err)
+		}
+		if _, ok := myCustodyColumns[msg.Index]; !ok {
+			// not my custody column
+			return ErrIgnore
+		}
+	}
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
 	if !das.VerifyDataColumnSidecar(msg) {
@@ -149,8 +161,10 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
 	}
-	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
-		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", blockRoot)
+	if s.forkChoice.GetPeerDas().IsArchivedMode() {
+		if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
+			log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", blockRoot)
+		}
 	}
 	return nil
 }

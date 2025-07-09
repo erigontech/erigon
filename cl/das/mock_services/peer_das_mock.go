@@ -119,6 +119,44 @@ func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.C
 	return c
 }
 
+// IsArchivedMode mocks base method.
+func (m *MockPeerDas) IsArchivedMode() bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsArchivedMode")
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsArchivedMode indicates an expected call of IsArchivedMode.
+func (mr *MockPeerDasMockRecorder) IsArchivedMode() *MockPeerDasIsArchivedModeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsArchivedMode", reflect.TypeOf((*MockPeerDas)(nil).IsArchivedMode))
+	return &MockPeerDasIsArchivedModeCall{Call: call}
+}
+
+// MockPeerDasIsArchivedModeCall wrap *gomock.Call
+type MockPeerDasIsArchivedModeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasIsArchivedModeCall) Return(arg0 bool) *MockPeerDasIsArchivedModeCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasIsArchivedModeCall) Do(f func() bool) *MockPeerDasIsArchivedModeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasIsArchivedModeCall) DoAndReturn(f func() bool) *MockPeerDasIsArchivedModeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // IsBlobAlreadyRecovered mocks base method.
 func (m *MockPeerDas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
 	m.ctrl.T.Helper()

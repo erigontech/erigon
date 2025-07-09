@@ -115,6 +115,45 @@ func (c *MockPeerDasStateReaderGetEarliestAvailableSlotCall) DoAndReturn(f func(
 	return c
 }
 
+// GetMyCustodyColumns mocks base method.
+func (m *MockPeerDasStateReader) GetMyCustodyColumns() (map[uint64]bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetMyCustodyColumns")
+	ret0, _ := ret[0].(map[uint64]bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetMyCustodyColumns indicates an expected call of GetMyCustodyColumns.
+func (mr *MockPeerDasStateReaderMockRecorder) GetMyCustodyColumns() *MockPeerDasStateReaderGetMyCustodyColumnsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMyCustodyColumns", reflect.TypeOf((*MockPeerDasStateReader)(nil).GetMyCustodyColumns))
+	return &MockPeerDasStateReaderGetMyCustodyColumnsCall{Call: call}
+}
+
+// MockPeerDasStateReaderGetMyCustodyColumnsCall wrap *gomock.Call
+type MockPeerDasStateReaderGetMyCustodyColumnsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasStateReaderGetMyCustodyColumnsCall) Return(arg0 map[uint64]bool, arg1 error) *MockPeerDasStateReaderGetMyCustodyColumnsCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasStateReaderGetMyCustodyColumnsCall) Do(f func() (map[uint64]bool, error)) *MockPeerDasStateReaderGetMyCustodyColumnsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasStateReaderGetMyCustodyColumnsCall) DoAndReturn(f func() (map[uint64]bool, error)) *MockPeerDasStateReaderGetMyCustodyColumnsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // GetRealCgc mocks base method.
 func (m *MockPeerDasStateReader) GetRealCgc() uint64 {
 	m.ctrl.T.Helper()
