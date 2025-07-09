@@ -407,11 +407,13 @@ type BlockReader struct {
 	headerByNumCache *lru.Cache[uint64, *types.Header]
 }
 
+var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 10_000)
+
 func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store, borBridge bridge.Store) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
 	br := &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore, borBridgeStore: borBridge}
-	br.headerByNumCache, _ = lru.New[uint64, *types.Header](10_000)
+	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
 	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
 	br.txBlockIndex = txnumReader
 	return br
