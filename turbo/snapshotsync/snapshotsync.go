@@ -310,7 +310,7 @@ func isReceiptsSegmentPruned(tx kv.RwTx, cc *chain.Config, pruneMode prune.Mode,
 		return false
 	}
 	minStep := minTxNum / config3.DefaultStepSize
-	fmt.Println("Checking if receipts segment is pruned for", p.Name, "prune mode:", pruneMode, "frozen blocks:", head, "pruned", s.From < minStep, "min step:", minStep, "s.From:", s.From)
+	fmt.Println("Checking if receipts segment is pruned for", p.Name, "prune mode:", pruneMode, "frozen blocks:", head, "pruned", s.From < minStep, "min step:", minStep, "s.From:", s.From, "pruneHeight:", pruneHeight, "minTxNum:", minTxNum)
 	return s.From < minStep
 }
 
