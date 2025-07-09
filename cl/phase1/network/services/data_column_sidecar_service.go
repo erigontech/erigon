@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -163,10 +164,10 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	}
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
 		if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
-			log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", blockRoot)
+			log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
 		}
 	}
-	log.Debug("[dataColumnSidecarService] processed data column sidecar", "slot", blockHeader.Slot, "blockRoot", blockRoot, "index", msg.Index)
+	log.Trace("[dataColumnSidecarService] processed data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index)
 	return nil
 }
 
