@@ -78,7 +78,7 @@ const (
 )
 
 var (
-	inmemorySignatures = dbg.EnvInt("BOR_AUTHOR_LRU", 10_000) // Number of recent block signatures to keep in memory
+	inmemorySignatures = dbg.EnvInt("BOR_AUTHOR_LRU", 100_000) // Number of recent block signatures to keep in memory
 )
 
 var enableBoreventsRemoteFallback = dbg.EnvBool("BOREVENTS_REMOTE_FALLBACK", false)
