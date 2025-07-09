@@ -157,7 +157,7 @@ func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 func canSnapshotBePruned(name string) bool {
-	return isStateHistory(name) || strings.Contains(name, "transactions")
+	return (isStateHistory(name) || strings.Contains(name, "transactions")) && !strings.Contains(name, "rcache")
 }
 
 func buildBlackListForPruning(

@@ -1518,7 +1518,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Con
 			return err
 		}
 
-		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
+		//s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
 		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 		if err != nil {
