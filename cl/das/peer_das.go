@@ -170,7 +170,7 @@ func (d *peerdas) resubscribeGossip() {
 		subnet := ComputeSubnetForDataColumnSidecar(column)
 		if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
 			Topic:          gossip.TopicNameDataColumnSidecar(subnet),
-			ExpiryUnixSecs: math.MaxUint64,
+			ExpiryUnixSecs: uint64(time.Unix(0, math.MaxInt64).Unix()),
 		}); err != nil {
 			log.Warn("[peerdas] failed to set subscribe expiry", "err", err, "column", column, "subnet", subnet)
 		} else {
