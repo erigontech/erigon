@@ -722,6 +722,9 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 	var err error
 	var storageRootHash [length.Hash]byte
 	var storageRootHashIsSet bool
+	if hph.memoizationOff {
+		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
+	}
 	if cell.storageAddrLen > 0 {
 		var hashedKeyOffset int
 		if depth >= 64 {
@@ -1234,6 +1237,19 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			}
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
 			if keyPos+1 == len(hashedKey) {
+				if cellToExpand.storageAddrLen > 0 {
+					storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
+					if err != nil {
+						return nil, err
+					}
+					cellToExpand.setFromUpdate(storageUpdate)
+					storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
+					nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
+
+					if hph.trace {
+						fmt.Printf("witness storage leaf (%d, %0x, depth=%d) %s keyPos %d %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), keyPos, nextNode)
+					}
+				}
 				if cellToExpand.accountAddrLen > 0 {
 					accNode, err := hph.witnessCreateAccountNode(cellToExpand, row, hashedKey, codeReads)
 					if err != nil {
@@ -1251,18 +1267,6 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 						fmt.Printf("witness account leaf (%d, %0x, depth=%d) %s %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextNode)
 					}
 					//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
-				}
-			} else if cellToExpand.storageAddrLen > 0 {
-				storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
-				if err != nil {
-					return nil, err
-				}
-				cellToExpand.setFromUpdate(storageUpdate)
-				storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
-				nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
-
-				if hph.trace {
-					fmt.Printf("witness storage leaf (%d, %0x, depth=%d) %s keyPos %d %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), keyPos, nextNode)
 				}
 			}
 		} else if cellToExpand.storageAddrLen > 0 {
