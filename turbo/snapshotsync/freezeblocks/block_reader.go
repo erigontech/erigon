@@ -407,7 +407,7 @@ type BlockReader struct {
 	headerByNumCache *lru.Cache[uint64, *types.Header]
 }
 
-var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 10_000)
+var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 
 func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store, borBridge bridge.Store) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
