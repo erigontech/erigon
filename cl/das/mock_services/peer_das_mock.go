@@ -196,18 +196,18 @@ func (c *MockPeerDasIsColumnOverHalfCall) DoAndReturn(f func(common.Hash) bool) 
 }
 
 // IsDataAvailable mocks base method.
-func (m *MockPeerDas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
+func (m *MockPeerDas) IsDataAvailable(blockRoot common.Hash) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsDataAvailable", ctx, blockRoot)
+	ret := m.ctrl.Call(m, "IsDataAvailable", blockRoot)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // IsDataAvailable indicates an expected call of IsDataAvailable.
-func (mr *MockPeerDasMockRecorder) IsDataAvailable(ctx, blockRoot any) *MockPeerDasIsDataAvailableCall {
+func (mr *MockPeerDasMockRecorder) IsDataAvailable(blockRoot any) *MockPeerDasIsDataAvailableCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsDataAvailable", reflect.TypeOf((*MockPeerDas)(nil).IsDataAvailable), ctx, blockRoot)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsDataAvailable", reflect.TypeOf((*MockPeerDas)(nil).IsDataAvailable), blockRoot)
 	return &MockPeerDasIsDataAvailableCall{Call: call}
 }
 
@@ -223,13 +223,13 @@ func (c *MockPeerDasIsDataAvailableCall) Return(arg0 bool, arg1 error) *MockPeer
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasIsDataAvailableCall) Do(f func(context.Context, common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
+func (c *MockPeerDasIsDataAvailableCall) Do(f func(common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasIsDataAvailableCall) DoAndReturn(f func(context.Context, common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
+func (c *MockPeerDasIsDataAvailableCall) DoAndReturn(f func(common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
