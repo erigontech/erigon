@@ -240,10 +240,6 @@ type Config struct {
 	HeimdallURL string
 	// No heimdall service
 	WithoutHeimdall bool
-	// Heimdall services active
-	WithHeimdallMilestones bool
-	// Heimdall waypoint recording active
-	WithHeimdallWaypointRecording bool
 
 	// Ethstats service
 	Ethstats string

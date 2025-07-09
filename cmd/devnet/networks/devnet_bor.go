@@ -205,7 +205,6 @@ func NewBorDevnetWithRemoteHeimdall(
 ) devnet.Devnet {
 	heimdallURL := ""
 	checkpointOwner := accounts.NewAccount("checkpoint-owner")
-	withMilestones := utils.WithHeimdallMilestones.Value
 	return NewBorDevnetWithHeimdall(
 		dataDir,
 		baseRpcHost,

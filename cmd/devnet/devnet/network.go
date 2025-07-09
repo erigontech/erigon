@@ -89,12 +89,6 @@ func (nw *Network) Start(ctx context.Context) error {
 		Snapshots:      nw.Snapshots,
 	}
 
-	if nw.BorWithMilestones != nil {
-		baseNode.WithHeimdallMilestones = *nw.BorWithMilestones
-	} else {
-		baseNode.WithHeimdallMilestones = utils.WithHeimdallMilestones.Value
-	}
-
 	nw.namedNodes = map[string]Node{}
 
 	for i, nodeArgs := range nw.Nodes {

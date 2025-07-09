@@ -795,20 +795,6 @@ var (
 		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
 	}
 
-	// TODO - this is a depricated flag - should be removed
-	WithHeimdallMilestones = cli.BoolFlag{
-		Name:  "bor.milestone",
-		Usage: "Enabling bor milestone processing",
-		Value: true,
-	}
-
-	// TODO - this is a depricated flag - should be removed
-	WithHeimdallWaypoints = cli.BoolFlag{
-		Name:  "bor.waypoints",
-		Usage: "Enabling bor waypont recording",
-		Value: false,
-	}
-
 	AAFlag = cli.BoolFlag{
 		Name:  "aa",
 		Usage: "Enable AA transactions",
@@ -1711,8 +1697,6 @@ func setClique(ctx *cli.Context, cfg *chainspec.ConsensusSnapshotConfig, datadir
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
-	cfg.WithHeimdallMilestones = false
-	cfg.WithHeimdallWaypointRecording = true
 
 	heimdall.RecordWayPoints(true)
 

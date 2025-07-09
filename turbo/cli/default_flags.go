@@ -173,8 +173,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithoutHeimdallFlag,
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
-	&utils.WithHeimdallMilestones,
-	&utils.WithHeimdallWaypoints,
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,

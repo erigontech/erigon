@@ -650,7 +650,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.polygonBridge = polygonBridge
 		backend.heimdallService = heimdallService
 
-		flags.Milestone = config.WithHeimdallMilestones
+		flags.Milestone = false
 	}
 
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
@@ -708,7 +708,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := chainConfig.Bor != nil 
+	sentryMcDisableBlockDownload := chainConfig.Bor != nil
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
