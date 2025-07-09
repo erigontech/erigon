@@ -292,7 +292,7 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 }
 
 // isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
-func isReceiptsSegmentPruned(tx kv.RwTx, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem) bool {
+func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem) bool {
 	if strings.Contains(p.Name, "domain") {
 		return false // domain snapshots are never pruned
 	}
@@ -307,7 +307,7 @@ func isReceiptsSegmentPruned(tx kv.RwTx, cc *chain.Config, pruneMode prune.Mode,
 		fmt.Println(snaptype.ParseFileName("", p.Name))
 		return false
 	}
-	minTxNum, err := rawdbv3.TxNums.Min(tx, pruneHeight)
+	minTxNum, err := txNumsReader.Min(tx, pruneHeight)
 	if err != nil {
 		log.Crit("Failed to get minimum transaction number", "err", err)
 		return false
@@ -329,6 +329,7 @@ func WaitForDownloader(
 	agg *state.Aggregator,
 	tx kv.RwTx,
 	blockReader blockReader,
+	txNumsReader rawdbv3.TxNumsReader,
 	cc *chain.Config,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
@@ -417,7 +418,7 @@ func WaitForDownloader(
 			continue
 		}
 
-		if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, cc, prune, frozenBlocks, p) {
+		if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
 			continue
 		}
 
