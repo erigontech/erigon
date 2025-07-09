@@ -25,8 +25,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -36,12 +38,59 @@ import (
 var ErrChainLengthExceedsLimit = errors.New("chain length exceeds limit")
 
 type BackwardBlockDownloader struct {
-	logger        log.Logger
-	fetcher       p2p.Fetcher
-	peerTracker   *p2p.PeerTracker
-	peerPenalizer *p2p.PeerPenalizer
-	headerReader  headerReader
-	tmpDir        string
+	logger          log.Logger
+	fetcher         p2p.Fetcher
+	peerTracker     *p2p.PeerTracker
+	peerPenalizer   *p2p.PeerPenalizer
+	messageListener *p2p.MessageListener
+	headerReader    HeaderReader
+	tmpDir          string
+}
+
+func NewBackwardBlockDownloader(
+	logger log.Logger,
+	sentryClient sentryproto.SentryClient,
+	statusDataFactory sentry.StatusDataFactory,
+	headerReader HeaderReader,
+	tmpDir string,
+) *BackwardBlockDownloader {
+	peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
+	messageListener := p2p.NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
+	messageSender := p2p.NewMessageSender(sentryClient)
+	peerTracker := p2p.NewPeerTracker(logger, sentryClient, messageListener)
+	var fetcher p2p.Fetcher
+	fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
+	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
+	fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
+	return &BackwardBlockDownloader{
+		logger:          logger,
+		fetcher:         fetcher,
+		peerTracker:     peerTracker,
+		headerReader:    headerReader,
+		tmpDir:          tmpDir,
+		messageListener: messageListener,
+	}
+}
+
+func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
+	bbd.logger.Debug("[backward-block-downloader] running")
+	defer bbd.logger.Debug("[backward-block-downloader] stopped")
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error {
+		err := bbd.peerTracker.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("backward block downloader peer tracker failed: %w", err)
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		err := bbd.messageListener.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("backward block downloader message listener failed: %w", err)
+		}
+		return nil
+	})
+	return eg.Wait()
 }
 
 // DownloadBlocksBackwards downloads blocks backwards given a starting block hash. It uses the underlying header reader
@@ -56,7 +105,7 @@ type BackwardBlockDownloader struct {
 //     (default: 500 blocks)
 //   - WithChainLengthLimit - terminate the download if the backward header chain goes beyond a certain length.
 //     (default: unlimited)
-func (bbd BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...Option) ResultFeed {
+func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...Option) ResultFeed {
 	feed := ResultFeed{ch: make(chan BatchResult)}
 	go func() {
 		defer feed.close()
@@ -68,7 +117,7 @@ func (bbd BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, 
 	return feed
 }
 
-func (bbd BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, feed ResultFeed, opts ...Option) error {
+func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, feed ResultFeed, opts ...Option) error {
 	// 1. Get all peers
 	config := applyOptions(opts...)
 	peers, err := bbd.loadPeers(config)
@@ -99,7 +148,7 @@ func (bbd BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Contex
 	return bbd.downloadBlocks(ctx, headerCollector, peers, config, feed)
 }
 
-func (bbd BackwardBlockDownloader) loadPeers(config requestConfig) (peersContext, error) {
+func (bbd *BackwardBlockDownloader) loadPeers(config requestConfig) (peersContext, error) {
 	if config.peerId != nil {
 		return newPeersContext([]*p2p.PeerId{config.peerId}), nil
 	}
@@ -112,7 +161,7 @@ func (bbd BackwardBlockDownloader) loadPeers(config requestConfig) (peersContext
 	return newPeersContext(peers), nil
 }
 
-func (bbd BackwardBlockDownloader) downloadInitialHeader(
+func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 	ctx context.Context,
 	hash common.Hash,
 	peers peersContext,
@@ -157,7 +206,7 @@ func (bbd BackwardBlockDownloader) downloadInitialHeader(
 	return initialHeader, nil
 }
 
-func (bbd BackwardBlockDownloader) downloadHeaderChain(
+func (bbd *BackwardBlockDownloader) downloadHeaderChain(
 	ctx context.Context,
 	start *types.Header,
 	headerCollector *etl.Collector,
@@ -262,7 +311,7 @@ func (bbd BackwardBlockDownloader) downloadHeaderChain(
 	return nil
 }
 
-func (bbd BackwardBlockDownloader) downloadBlocks(
+func (bbd *BackwardBlockDownloader) downloadBlocks(
 	ctx context.Context,
 	headerCollector *etl.Collector,
 	peers peersContext,
@@ -299,7 +348,7 @@ func (bbd BackwardBlockDownloader) downloadBlocks(
 	return bbd.downloadBlocksForHeaders(ctx, headers, peers, feed)
 }
 
-func (bbd BackwardBlockDownloader) downloadBlocksForHeaders(
+func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	ctx context.Context,
 	headers []*types.Header,
 	peers peersContext,

@@ -23,6 +23,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 )
 
-type headerReader interface {
+type HeaderReader interface {
 	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
 }

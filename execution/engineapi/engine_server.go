@@ -142,6 +142,13 @@ func (e *EngineServer) Start(
 	if err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger); err != nil {
 		e.logger.Error(err.Error())
 	}
+
+	go func() {
+		err := e.blockDownloader.Run(ctx)
+		if err != nil {
+			e.logger.Error("[EngineBlockDownloader] background goroutine failed", "err", err)
+		}
+	}()
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
