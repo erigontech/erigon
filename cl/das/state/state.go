@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
@@ -74,7 +75,13 @@ func (s *PeerDasState) GetMyCustodyColumns() (map[cltypes.CustodyIndex]bool, err
 	if custodyColumns != nil {
 		return *custodyColumns, nil
 	}
-	updatedCustodyColumns, err := peerdasutils.GetCustodyColumns(*s.nodeID.Load(), s.GetAdvertisedCgc())
+	nodeID := s.nodeID.Load()
+	if nodeID == nil {
+		// Return empty map if node ID is not set
+		log.Warn("node ID is not set, return empty map")
+		return make(map[cltypes.CustodyIndex]bool), nil
+	}
+	updatedCustodyColumns, err := peerdasutils.GetCustodyColumns(*nodeID, s.GetAdvertisedCgc())
 	if err != nil {
 		return nil, err
 	}

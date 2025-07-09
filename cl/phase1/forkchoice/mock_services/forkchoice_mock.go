@@ -135,7 +135,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Return(nil).
 		AnyTimes()
 	mockPeerDas.EXPECT().
-		IsDataAvailable(gomock.Any(), gomock.Any()).
+		IsDataAvailable(gomock.Any()).
 		Return(true, nil).
 		AnyTimes()
 	mockPeerDas.EXPECT().
