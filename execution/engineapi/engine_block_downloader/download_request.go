@@ -13,6 +13,14 @@ type BackwardDownloadRequest struct {
 	ValidateChainTip *types.Block
 }
 
+func (r BackwardDownloadRequest) LogArgs() []interface{} {
+	args := []interface{}{"hash", r.MissingHash, "trigger", r.Trigger}
+	if r.ValidateChainTip != nil {
+		args = append(args, "chainTip", r.ValidateChainTip)
+	}
+	return args
+}
+
 type Trigger byte
 
 const (

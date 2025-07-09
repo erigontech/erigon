@@ -152,16 +152,13 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 	defer e.status.Store(headerdownload.Idle)
 	err := e.processDownloadV2(ctx, req)
 	if err != nil {
-		args := []interface{}{"hash", req.MissingHash, "trigger", req.Trigger}
-		if req.ValidateChainTip != nil {
-			args = append(args, "chainTip", req.ValidateChainTip)
-		}
-		args = append(args, "err", err)
-		e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args)
+		args := append(req.LogArgs(), "err", err)
+		e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
 	}
 }
 
 func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req BackwardDownloadRequest) error {
+	e.logger.Info("[EngineBlockDownloader] processing backward download request", req.LogArgs()...)
 	opts := []bbd.Option{bbd.WithBlocksBatchSize(500)}
 	if req.Trigger == NewPayloadTrigger || req.Trigger == SegmentRecoveryTrigger {
 		opts = append(opts, bbd.WithChainLengthLimit(uint64(dbg.MaxReorgDepth)))
@@ -175,6 +172,13 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 	var err error
 	var insertedBlocksWithoutExec int
 	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
+		e.logger.Debug(
+			"[EngineBlockDownloader] processing downloaded blocks",
+			"from", blocks[0].NumberU64(),
+			"fromHash", blocks[0].Hash(),
+			"to", blocks[len(blocks)-1].NumberU64(),
+			"toHash", blocks[len(blocks)-1].Hash(),
+		)
 		err := e.chainRW.InsertBlocksAndWait(ctx, blocks)
 		if err != nil {
 			return err
@@ -182,7 +186,9 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 		insertedBlocksWithoutExec += len(blocks)
 		blocks = nil
 		if req.Trigger == FcuTrigger && uint(insertedBlocksWithoutExec) >= e.syncCfg.LoopBlockLimit {
-			err = e.execDownloadedBatch(ctx, blocks[len(blocks)-1], req.MissingHash)
+			tip := blocks[len(blocks)-1]
+			e.logger.Debug("[EngineBlockDownloader] executing downloaded batch", "to", tip.NumberU64(), "toHash", tip.Hash())
+			err = e.execDownloadedBatch(ctx, tip, req.MissingHash)
 			if err != nil {
 				return err
 			}

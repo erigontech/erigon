@@ -118,6 +118,7 @@ func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context,
 }
 
 func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, feed ResultFeed, opts ...Option) error {
+	bbd.logger.Debug("[backward-block-downloader] fetching blocks backwards by hash", "hash", hash)
 	// 1. Get all peers
 	config := applyOptions(opts...)
 	peers, err := bbd.loadPeers(config)
@@ -166,6 +167,7 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 	hash common.Hash,
 	peers peersContext,
 ) (*types.Header, error) {
+	bbd.logger.Debug("[backward-block-downloader] downloading initial header", "hash", hash)
 	peersHeadersResponses := make([][]*types.Header, len(peers.all))
 	eg := errgroup.Group{}
 	for _, peer := range peers.all {
@@ -261,6 +263,14 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChain(
 				err,
 			)
 		}
+
+		bbd.logger.Debug(
+			"[backward-block-downloader] fetching headers backward",
+			"hash", parentHash,
+			"height", parentHeight,
+			"amount", amount,
+			"peerId", peerId,
+		)
 
 		peerIndex := peers.peerIdToIndex[peerId]
 		resp, err := bbd.fetcher.FetchHeadersBackwards(ctx, parentHash, amount, &peerId)
@@ -360,6 +370,15 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 		if err != nil {
 			return err
 		}
+
+		bbd.logger.Debug(
+			"[backward-block-downloader] fetching bodies for headers",
+			"fromHeight", headers[0].Number.Uint64(),
+			"fromHash", headers[0].Hash(),
+			"toHeight", headers[len(headers)-1].Number.Uint64(),
+			"toHash", headers[len(headers)-1].Hash(),
+			"peerId", peerId,
+		)
 
 		bodiesResponse, err := bbd.fetcher.FetchBodies(ctx, headers, &peerId)
 		if err != nil {
