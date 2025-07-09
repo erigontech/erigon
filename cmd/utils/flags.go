@@ -809,12 +809,6 @@ var (
 		Value: false,
 	}
 
-	PolygonSyncFlag = cli.BoolFlag{
-		Name:  "polygon.sync",
-		Usage: "Enabling syncing using the new polygon sync component",
-		Value: true,
-	}
-
 	AAFlag = cli.BoolFlag{
 		Name:  "aa",
 		Usage: "Enable AA transactions",
@@ -1717,16 +1711,10 @@ func setClique(ctx *cli.Context, cfg *chainspec.ConsensusSnapshotConfig, datadir
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
-	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
-	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
-	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
+	cfg.WithHeimdallMilestones = false
+	cfg.WithHeimdallWaypointRecording = true
 
-	if cfg.PolygonSync {
-		cfg.WithHeimdallMilestones = false
-		cfg.WithHeimdallWaypointRecording = true
-	}
-
-	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync)
+	heimdall.RecordWayPoints(true)
 
 	chainConfig := chainspec.ChainConfigByChainName(ctx.String(ChainFlag.Name))
 	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
