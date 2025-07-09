@@ -66,7 +66,7 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		panic(err)
 	}
 
-	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit * 1000) // think they should be connected in some of that way
+	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit * 100) // think they should be connected in some of that way
 	if err != nil {
 		panic(err)
 	}
@@ -165,6 +165,19 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 	}()
 
+	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
+		return receipts[index], nil
+	}
+
+	mu := g.txnExecMutex.lock(txnHash)
+	defer g.txnExecMutex.unlock(mu, txnHash)
+	if receipt, ok := g.receiptCache.Get(txnHash); ok {
+		if receipt.BlockHash == blockHash { // elegant way to handle reorgs
+			return receipt, nil
+		}
+		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
+	}
+
 	if !rpcDisableRCache {
 		var ok bool
 		var err error
@@ -178,21 +191,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+			g.addToCacheReceipt(txnHash, receiptFromDB)
 			return receiptFromDB, nil
 		}
-	}
-
-	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
-		return receipts[index], nil
-	}
-
-	mu := g.txnExecMutex.lock(txnHash)
-	defer g.txnExecMutex.unlock(mu, txnHash)
-	if receipt, ok := g.receiptCache.Get(txnHash); ok {
-		if receipt.BlockHash == blockHash { // elegant way to handle reorgs
-			return receipt, nil
-		}
-		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
 	}
 
 	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
@@ -238,7 +239,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(receipt.TxHash, receipt)
+	g.addToCacheReceipt(txnHash, receipt)
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB)
@@ -259,6 +260,13 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				"nil receipts in db", receiptsFromDB == nil)
 		}
 	}()
+
+	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
+	defer g.blockExecMutex.unlock(mu, blockHash)
+	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
+		return receipts, nil
+	}
+
 	if !rpcDisableRCache {
 		var err error
 		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
@@ -266,14 +274,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			return nil, err
 		}
 		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+			g.addToCacheReceipts(block.HeaderNoCopy(), receiptsFromDB)
 			return receiptsFromDB, nil
 		}
-	}
-
-	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
-	defer g.blockExecMutex.unlock(mu, blockHash)
-	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
-		return receipts, nil
 	}
 
 	genEnv, err := g.PrepareEnv(ctx, block.HeaderNoCopy(), cfg, tx, 0)
