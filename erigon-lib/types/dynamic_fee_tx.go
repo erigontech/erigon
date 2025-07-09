@@ -104,6 +104,10 @@ func (tx *DynamicFeeTransaction) GetAccessList() AccessList {
 	return tx.AccessList
 }
 
+func (tx *DynamicFeeTransaction) GetAuthorizations() []Authorization {
+	return nil
+}
+
 func (tx *DynamicFeeTransaction) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
 	// Add envelope size and type size
