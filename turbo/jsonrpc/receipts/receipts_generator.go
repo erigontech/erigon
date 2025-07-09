@@ -174,6 +174,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		g.addToCacheReceipt(txnHash, receiptFromDB)
 		return receiptFromDB, nil
 	}
 
@@ -204,7 +205,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(receipt.TxHash, receipt)
+	g.addToCacheReceipt(txnHash, receipt)
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB)
@@ -236,6 +237,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+		g.addToCacheReceipts(block.HeaderNoCopy(), receiptsFromDB)
 		return receiptsFromDB, nil
 	}
 
