@@ -907,7 +907,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
 
-	prevFrom, prevTo := uint64(accFiles[0].From), uint64(accFiles[0].To)
+	prevFrom, prevTo := accFiles[0].From, accFiles[0].To
 	for i := 1; i < len(accFiles); i++ {
 		res := accFiles[i]
 		if prevFrom == res.From {
@@ -1015,7 +1015,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
 
-	prevFrom, prevTo = uint64(accFiles[0].From), uint64(accFiles[0].To)
+	prevFrom, prevTo = accFiles[0].From, accFiles[0].To
 	for i := 1; i < len(accFiles); i++ {
 		res := accFiles[i]
 		if prevFrom == res.From {
