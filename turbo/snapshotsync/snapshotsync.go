@@ -291,6 +291,28 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 	return cc.IsPreMerge(s.From)
 }
 
+// isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
+func isReceiptsSegmentPruned(tx kv.RwTx, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem) bool {
+	pruneHeight := pruneMode.Blocks.PruneTo(head) // if a receipt is below this height, it is pruned
+	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc.MergeHeight != nil {
+		pruneHeight = cc.MergeHeight.Uint64()
+	}
+
+	// We use the pre-merge data policy.
+	s, _, ok := snaptype.ParseFileName("", p.Name)
+	if !ok {
+		return false
+	}
+	minTxNum, err := rawdbv3.TxNums.Min(tx, pruneHeight)
+	if err != nil {
+		log.Crit("Failed to get minimum transaction number", "err", err)
+		return false
+	}
+	minStep := minTxNum / config3.DefaultStepSize
+
+	return s.From < minStep
+}
+
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(
@@ -309,6 +331,8 @@ func WaitForDownloader(
 ) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
+
+	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 
 	// Find minimum block to download.
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
@@ -377,6 +401,7 @@ func WaitForDownloader(
 		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
 			continue
 		}
+
 		if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
 			continue
 		}
@@ -385,6 +410,9 @@ func WaitForDownloader(
 			continue
 		}
 		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
+			continue
+		}
+		if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, cc, prune, frozenBlocks, p) {
 			continue
 		}
 

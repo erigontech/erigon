@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -264,6 +265,19 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 	distance := ctx.Uint64(PruneDistanceFlag.Name)
+
+	// check if the prune.mode flag is not set to archive
+	persistenceReceiptsV2 := ctx.String(PruneModeFlag.Name) != prune.ArchiveMode.String()
+
+	// overwrite receipts persistence if the flag is set
+	if ctx.IsSet(utils.PersistReceiptsV2Flag.Name) {
+		persistenceReceiptsV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
+	}
+
+	if persistenceReceiptsV2 {
+		cfg.PersistReceiptsCacheV2 = true
+		state.EnableHistoricalRCache()
+	}
 
 	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance)
 	if err != nil {
