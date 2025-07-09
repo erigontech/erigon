@@ -34,6 +34,7 @@ type PeerDas interface {
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
 	IsBlobAlreadyRecovered(blockRoot common.Hash) bool
 	IsColumnOverHalf(blockRoot common.Hash) bool
+	IsArchivedMode() bool
 	StateReader() peerdasstate.PeerDasStateReader
 }
 
@@ -114,8 +115,12 @@ func (d *peerdas) IsColumnOverHalf(blockRoot common.Hash) bool {
 	return len(existingColumns) >= int(d.beaconConfig.NumberOfColumns+1)/2
 }
 
+func (d *peerdas) IsArchivedMode() bool {
+	return d.caplinConfig.ArchiveBlobs || d.caplinConfig.ImmediateBlobsBackfilling
+}
+
 func (d *peerdas) IsDataAvailable(blockRoot common.Hash) (bool, error) {
-	if d.caplinConfig.ArchiveBlobs || d.caplinConfig.ImmediateBlobsBackfilling {
+	if d.IsArchivedMode() {
 		return d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot), nil
 	}
 	return d.isMyColumnDataAvailable(blockRoot)
@@ -140,7 +145,7 @@ func (d *peerdas) isMyColumnDataAvailable(blockRoot common.Hash) (bool, error) {
 }
 
 func (d *peerdas) resubscribeGossip() {
-	if d.caplinConfig.ArchiveBlobs || d.caplinConfig.ImmediateBlobsBackfilling {
+	if d.IsArchivedMode() {
 		// subscribe to all subnets
 		for subnet := range d.beaconConfig.DataColumnSidecarSubnetCount {
 			if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
@@ -177,7 +182,7 @@ func (d *peerdas) resubscribeGossip() {
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 	adCgcChanged := d.state.SetCustodyGroupCount(cgc)
 	if adCgcChanged {
-		if !d.caplinConfig.ArchiveBlobs && !d.caplinConfig.ImmediateBlobsBackfilling {
+		if !d.IsArchivedMode() {
 			// subscribe more topics, advertised cgc is increased
 			d.resubscribeGossip()
 		}
@@ -339,6 +344,11 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
+	if !d.IsArchivedMode() {
+		// only recover blobs in archived mode
+		return nil
+	}
+
 	if !d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot) {
 		// no need to recover if column data is not over 50% or the blobs are already recovered
 		return nil
