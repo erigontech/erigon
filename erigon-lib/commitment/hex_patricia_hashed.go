@@ -827,7 +827,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			}
 		}
 		if !cell.loaded.account() {
-			if cell.stateHashLen > 0 {
+			if cell.stateHashLen > 0 && !storageRootHashIsSet {
 				res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
 				hph.keccak.Reset()
 
@@ -1178,12 +1178,11 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, row int, hashedK
 		}
 	}
 
-	var accountNode *trie.AccountNode
-	if !storageIsSet {
-		account.Root = trie.EmptyRoot
-		accountNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: code, CodeSize: -1}
-	} else {
-		accountNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: code, CodeSize: -1}
+	account.Root = trie.EmptyRoot
+	accountNode := &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: code, CodeSize: -1}
+	if storageIsSet {
+		account.Root = common.Hash(storageRootHash)
+		accountNode.Storage = trie.NewHashNode(storageRootHash)
 	}
 	return accountNode, nil
 }
@@ -1211,9 +1210,16 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		// need to check node type along the key path
 		cellToExpand := &hph.grid[row][currentNibble]
 		// determine the next node
+		if hph.trace {
+			fmt.Printf("witness EXPANDING (%d, %0x, depth=%d) key pos %d %s\n", row, currentNibble, hph.depths[row], keyPos, cellToExpand.FullString())
+		}
 		if cellToExpand.hashedExtLen > 0 { // extension cell
-			keyPos += cellToExpand.hashedExtLen // jump ahead
-			hashedExtKey := cellToExpand.hashedExtension[:cellToExpand.hashedExtLen]
+			hashExtLen := cellToExpand.hashedExtLen
+			if hph.depths[row] < 64 {
+				hashExtLen = 64 - hph.depths[row] // adjust depth
+			}
+			keyPos += hashExtLen // jump ahead
+			hashedExtKey := cellToExpand.hashedExtension[:hashExtLen]
 			extKeyLength := len(hashedExtKey)
 			if keyPos+1 == len(hashedKey) || keyPos+1 == 64 {
 				extKeyLength++ //  +1 for the terminator 0x10 ([16])  byte when on a terminal extension node
@@ -1223,16 +1229,12 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			if keyPos+1 == len(hashedKey) || keyPos+1 == 64 {
 				extensionKey[len(extensionKey)-1] = terminatorHexByte // append terminator byte
 			}
+			if hph.trace {
+				fmt.Printf("witness extensionKey %x (%d) key is %x\n", extensionKey, len(extensionKey), hashedKey[:min(keyPos, len(hashedKey)-1)])
+			}
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
 			if keyPos+1 == len(hashedKey) {
-				if cellToExpand.storageAddrLen > 0 {
-					storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
-					if err != nil {
-						return nil, err
-					}
-					storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
-					nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
-				} else if cellToExpand.accountAddrLen > 0 {
+				if cellToExpand.accountAddrLen > 0 {
 					accNode, err := hph.witnessCreateAccountNode(cellToExpand, row, hashedKey, codeReads)
 					if err != nil {
 						return nil, err
@@ -1245,17 +1247,35 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 					}
 					// // DEBUG patch with cell hash which we know to be correct
-					//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
+					if hph.trace {
+						fmt.Printf("witness account leaf (%d, %0x, depth=%d) %s %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextNode)
+					}
 					//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 				}
+			} else if cellToExpand.storageAddrLen > 0 {
+				storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
+				if err != nil {
+					return nil, err
+				}
+				cellToExpand.setFromUpdate(storageUpdate)
+				storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
+				nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
+
+				if hph.trace {
+					fmt.Printf("witness storage leaf (%d, %0x, depth=%d) %s keyPos %d %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), keyPos, nextNode)
+				}
 			}
-		} else if cellToExpand.storageAddrLen > 0 { // storage cell
+		} else if cellToExpand.storageAddrLen > 0 {
 			storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 			if err != nil {
 				return nil, err
 			}
 			storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
 			nextNode = &storageValueNode //nolint:ineffassign, wastedassign
+
+			if hph.trace {
+				fmt.Printf("witness storage cell (%d, %0x, depth=%d) %s %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextNode)
+			}
 			break
 		} else if cellToExpand.accountAddrLen > 0 { // account cell
 			accNode, err := hph.witnessCreateAccountNode(cellToExpand, row, hashedKey, codeReads)
@@ -1263,6 +1283,9 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				return nil, err
 			}
 			nextNode = accNode
+			if hph.trace {
+				fmt.Printf("witness account cell (%d, %0x, depth=%d) %s %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextNode)
+			}
 			keyPos++ // only move one nibble
 		} else if cellToExpand.hashLen > 0 { // hash cell means we will expand using a full node
 			nextNode = &trie.FullNode{}
@@ -1287,15 +1310,26 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 					return nil, err
 				}
 				fullNode.Children[col] = trie.NewHashNode(cellHash[1:]) // because cellHash has 33 bytes and we want 32
+
+				if hph.trace {
+					fmt.Printf("witness FullNodeChild Hash (%d, %0x, depth=%d) %s proof %+v\n", row, col, hph.depths[row], cellToExpand.FullString(), fullNode.Children[col])
+				}
 			}
 			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
 		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
 			if len(hashedKey) <= 64 { // no storage, stop here
 				nextNode = nil // nolint:ineffassign, wastedassign
+				if hph.trace {
+					fmt.Printf("witness AccountNode (break) (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), accNode)
+				}
 				break
 			}
 			// there is storage so we need to expand further
 			accNode.Storage = nextNode
+
+			if hph.trace {
+				fmt.Printf("witness AccountNode (+storage) (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), accNode)
+			}
 		} else if extNode, ok := currentNode.(*trie.ShortNode); ok { // handle extension node case
 			// expect only one item in this row, so take the first one
 			// technically it should be at the last nibble of the key but we will adjust this later
@@ -1303,6 +1337,10 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				break
 			}
 			extNode.Val = nextNode
+
+			if hph.trace {
+				fmt.Printf("witness ShortNode (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), extNode)
+			}
 		} else {
 			break // break if currentNode is nil
 		}
@@ -1311,6 +1349,10 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		if nextAccNode, ok := nextNode.(*trie.AccountNode); ok && len(hashedKey) > 64 {
 			nextNode = &trie.FullNode{}
 			nextAccNode.Storage = nextNode
+
+			if hph.trace {
+				fmt.Printf("witness AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
+			}
 		}
 		currentNode = nextNode
 	}
@@ -2066,6 +2108,10 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		//hph.updateCell(plainKey, hashedKey, update)
 
 		// convert grid to trie.Trie
+
+		if hph.trace {
+			fmt.Printf("ToWitness for key %x, currentKey %x, activeRows %d\n", hashedKey, hph.currentKey[:hph.currentKeyLen], hph.activeRows)
+		}
 		tr, err = hph.toWitnessTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
