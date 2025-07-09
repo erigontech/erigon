@@ -135,11 +135,13 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 }
 
 func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Receipts) {
-	g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
+	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
+	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
 func (g *Generator) addToCacheReceipt(hash common.Hash, receipt *types.Receipt) {
-	g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
+	//g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
+	g.receiptCache.Add(hash, receipt)
 }
 
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64) (*types.Receipt, error) {
