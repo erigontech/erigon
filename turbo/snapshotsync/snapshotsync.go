@@ -301,6 +301,7 @@ func isReceiptsSegmentPruned(tx kv.RwTx, cc *chain.Config, pruneMode prune.Mode,
 	// We use the pre-merge data policy.
 	s, _, ok := snaptype.ParseFileName("", p.Name)
 	if !ok {
+		fmt.Println(snaptype.ParseFileName("", p.Name))
 		return false
 	}
 	minTxNum, err := rawdbv3.TxNums.Min(tx, pruneHeight)
