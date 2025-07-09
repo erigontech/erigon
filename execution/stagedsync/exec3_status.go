@@ -1,8 +1,10 @@
 package stagedsync
 
 import (
+	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,7 +81,7 @@ func ReportDAG(d *state.DAG, stats map[int]ExecutionStat, out func(string)) {
 
 	makeStrs := func(ints []int) (ret []string) {
 		for _, v := range ints {
-			ret = append(ret, fmt.Sprint(v))
+			ret = append(ret, strconv.Itoa(v))
 		}
 
 		return
@@ -155,7 +157,7 @@ func removeFromList(l []int, v int, expect bool) []int {
 	x := sort.SearchInts(l, v)
 	if x == -1 || l[x] != v {
 		if expect {
-			panic(fmt.Errorf("should not happen - element expected in list"))
+			panic(errors.New("should not happen - element expected in list"))
 		}
 
 		return l

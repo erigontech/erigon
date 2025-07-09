@@ -34,6 +34,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/mmap"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano16"
@@ -101,6 +102,7 @@ type Index struct {
 
 	lessFalsePositives bool
 	existenceV0        []byte
+	existenceV1        *fusefilter.Reader
 
 	readers         *sync.Pool
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
@@ -239,6 +241,15 @@ func (idx *Index) init() (err error) {
 		offset += int(arrSz)
 	}
 
+	if idx.version >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+		var sz int
+		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
+		if err != nil {
+			return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
+		}
+		offset += sz
+	}
+
 	// Size of golomb rice params
 	golombParamSize := binary.BigEndian.Uint16(idx.data[offset:])
 	offset += 4
@@ -341,6 +352,12 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.keyCount == 1 {
 		return 0, true
 	}
+	if idx.version == 1 && idx.lessFalsePositives {
+		if ok := idx.existenceV1.ContainsHash(bucketHash); !ok {
+			return 0, false
+		}
+	}
+
 	var gr GolombRiceReader
 	gr.data = idx.grData
 
@@ -399,7 +416,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
-	if idx.version == 0 && idx.lessFalsePositives {
+	if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 1 {
 		return found, idx.existenceV0[found] == byte(bucketHash)
 	}
 	return found, true
@@ -409,6 +426,9 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 // Perfect hash table lookup is not performed, only access to the
 // Elias-Fano structure containing all offsets.
 func (idx *Index) OrdinalLookup(i uint64) uint64 {
+	if !idx.enums {
+		panic("OrdinalLookup should not be used for indices without enums: " + idx.fileName)
+	}
 	return idx.offsetEf.Get(i)
 }
 

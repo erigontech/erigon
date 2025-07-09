@@ -15,6 +15,7 @@ require (
 )
 
 require (
+	github.com/FastFilter/xorfilter v0.2.1
 	github.com/RoaringBitmap/roaring/v2 v2.5.0
 	github.com/anacrolix/torrent v1.58.2-0.20250604010703-7c29c120a504
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b

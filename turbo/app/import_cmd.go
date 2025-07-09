@@ -80,7 +80,7 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	nodeCfg, err := turboNode.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := turboNode.NewNodConfigUrfave(cliCtx, nil, logger)
 	if err != nil {
 		return err
 	}
