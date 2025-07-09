@@ -94,8 +94,14 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 			wg.Add(1)
 			go func(block *cltypes.SignedBeaconBlock) {
 				defer wg.Done()
-				if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, []*cltypes.SignedBeaconBlock{block}); err != nil {
-					log.Warn("[chainTipSync] failed to download columns and recover blobs", "err", err)
+				if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
+					if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, []*cltypes.SignedBeaconBlock{block}); err != nil {
+						log.Warn("[chainTipSync] failed to download columns and recover blobs", "err", err)
+					}
+				} else {
+					if err := cfg.peerDas.DownloadOnlyCustodyColumns(ctx, []*cltypes.SignedBeaconBlock{block}); err != nil {
+						log.Warn("[chainTipSync] failed to download only custody columns", "err", err)
+					}
 				}
 			}(block)
 		}

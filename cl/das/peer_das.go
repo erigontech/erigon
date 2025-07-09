@@ -3,7 +3,6 @@ package das
 import (
 	"context"
 	"errors"
-	"sort"
 	"sync"
 	"time"
 
@@ -26,6 +25,7 @@ import (
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
+	DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
 	IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error)
 	Prune(keepSlotDistance uint64) error
 	UpdateValidatorsCustody(cgc uint64)
@@ -36,7 +36,7 @@ type PeerDas interface {
 }
 
 var (
-	numOfBlobRecoveryWorkers = 16
+	numOfBlobRecoveryWorkers = 8
 )
 
 type peerdas struct {
@@ -108,11 +108,6 @@ func (d *peerdas) IsColumnOverHalf(blockRoot common.Hash) bool {
 	return len(existingColumns) >= int(d.beaconConfig.NumberOfColumns+1)/2
 }
 
-type recoverBlobsRequest struct {
-	slot      uint64
-	blockRoot common.Hash
-}
-
 func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
 	return d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot), nil
 }
@@ -140,6 +135,11 @@ func (d *peerdas) Prune(keepSlotDistance uint64) error {
 		}
 	}
 	return nil
+}
+
+type recoverBlobsRequest struct {
+	slot      uint64
+	blockRoot common.Hash
 }
 
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
@@ -303,6 +303,29 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	return nil
 }
 
+var (
+	allColumns = func() map[cltypes.CustodyIndex]bool {
+		columns := map[cltypes.CustodyIndex]bool{}
+		for i := range 128 {
+			columns[cltypes.CustodyIndex(i)] = true
+		}
+		return columns
+	}()
+)
+
+// DownloadMissingColumns downloads the missing columns for the given blocks but not recover the blobs
+func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+	custodyColumns, err := d.state.GetMyCustodyColumns()
+	if err != nil {
+		return err
+	}
+	req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage, custodyColumns)
+	if err != nil {
+		return err
+	}
+	return d.runDownload(ctx, req, false)
+}
+
 func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
 	// filter out blocks that don't need to be processed
 	blocksToProcess := []*cltypes.SignedBeaconBlock{}
@@ -337,11 +360,15 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	}()
 
 	// initialize the download request
-	req, err := initializeDownloadRequest(blocksToProcess, d.beaconConfig, d.columnStorage)
+	req, err := initializeDownloadRequest(blocksToProcess, d.beaconConfig, d.columnStorage, allColumns)
 	if err != nil {
 		return err
 	}
 
+	return d.runDownload(ctx, req, true)
+}
+
+func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) error {
 	type resultData struct {
 		sidecars  []*cltypes.DataColumnSidecar
 		pid       string
@@ -349,11 +376,14 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 		reqLength int
 		err       error
 	}
+	if len(req.remainingBlockRoots()) == 0 {
+		return nil
+	}
 
 	stopChan := make(chan struct{})
 	defer close(stopChan)
 	resultChan := make(chan resultData, 64)
-	requestColumnSidecars := func(req *downloadRequest) {
+	go func(req *downloadRequest) {
 		// send the request in a loop with a ticker to avoid overwhelming the peer
 		// keep trying until the request is done
 		ticker := time.NewTicker(100 * time.Millisecond)
@@ -396,10 +426,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 		}
 		wg.Wait()
 		close(resultChan)
-	}
-
-	// send the request
-	go requestColumnSidecars(req)
+	}(req)
 
 	// check if the column data is over half at the same time because we might also receive the column sidecars from other peers
 	halfCheckTicker := time.NewTicker(500 * time.Millisecond)
@@ -411,7 +438,8 @@ mainloop:
 			break mainloop
 		case <-halfCheckTicker.C:
 			for _, blockRoot := range req.remainingBlockRoots() {
-				if d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot) {
+				if needToRecoverBlobs &&
+					(d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot)) {
 					// no need to schedule recovery for this block because someone else will do it
 					req.removeBlock(blockRoot)
 				}
@@ -423,7 +451,7 @@ mainloop:
 			if result.err != nil {
 				log.Debug("failed to download columns from peer", "pid", result.pid, "err", result.err)
 				//d.rpc.BanPeer(result.pid)
-				//continue
+				continue
 			}
 			if len(result.sidecars) == 0 {
 				continue
@@ -443,7 +471,8 @@ mainloop:
 					slot := sidecar.SignedBlockHeader.Header.Slot
 					defer func() {
 						// check if need to schedule recover whenever we download a column sidecar
-						if d.IsColumnOverHalf(blockRoot) {
+						if needToRecoverBlobs &&
+							(d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot)) {
 							req.removeBlock(blockRoot)
 							d.TryScheduleRecover(slot, blockRoot)
 						}
@@ -497,39 +526,6 @@ mainloop:
 	return nil
 }
 
-// getExpectedColumnIndex returns expected column indexes for the given block root
-// Note that expected_columns is subset of custody_columns
-func (d *peerdas) getExpectedColumnIndex(
-	ctx context.Context,
-	blockRoot common.Hash,
-	custodyColumns map[cltypes.CustodyIndex]bool,
-) ([]uint64, error) {
-	existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
-	if err != nil {
-		return nil, err
-	}
-
-	existingColumnsMap := make(map[uint64]bool)
-	for _, column := range existingColumns {
-		existingColumnsMap[column] = true
-	}
-
-	// expected_colums = custody_columns - existing_columns
-	want := make([]uint64, 0)
-	for c := range custodyColumns {
-		if !existingColumnsMap[c] {
-			want = append(want, c)
-		}
-	}
-	sort.Slice(want, func(i, j int) bool {
-		return want[i] < want[j]
-	})
-
-	// TODO: Consider data recovery when having more than 50% of the columns
-	// eg: we can just collect 50% of the columns and then recover the rest
-	return want, nil
-}
-
 // downloadRequest is used to track the download progress of the column sidecars
 type downloadRequest struct {
 	beaconConfig           *clparams.BeaconChainConfig
@@ -539,14 +535,19 @@ type downloadRequest struct {
 	cacheRequest           *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]
 }
 
-func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig *clparams.BeaconChainConfig, columnStorage blob_storage.DataColumnStorage) (*downloadRequest, error) {
+func initializeDownloadRequest(
+	blocks []*cltypes.SignedBeaconBlock,
+	beaconConfig *clparams.BeaconChainConfig,
+	columnStorage blob_storage.DataColumnStorage,
+	expectedColumns map[cltypes.CustodyIndex]bool,
+) (*downloadRequest, error) {
 	downloadTable := make(map[common.Hash]map[uint64]bool)
 	blockRootToBeaconBlock := make(map[common.Hash]*cltypes.SignedBeaconBlock)
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion {
 			continue
 		}
-		if block.Block.Body.BlobKzgCommitments.Len() == 0 {
+		if block.Block.Body.BlobKzgCommitments == nil || block.Block.Body.BlobKzgCommitments.Len() == 0 {
 			continue
 		}
 
@@ -568,12 +569,14 @@ func initializeDownloadRequest(blocks []*cltypes.SignedBeaconBlock, beaconConfig
 
 		if _, ok := downloadTable[blockRoot]; !ok {
 			table := make(map[uint64]bool)
-			for i := range beaconConfig.NumberOfColumns { // try download all columns for now
-				if !existingColumnsMap[i] {
-					table[i] = true
+			for column := range expectedColumns {
+				if !existingColumnsMap[column] {
+					table[column] = true
 				}
 			}
-			downloadTable[blockRoot] = table
+			if len(table) > 0 {
+				downloadTable[blockRoot] = table
+			}
 		}
 	}
 	return &downloadRequest{
