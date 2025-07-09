@@ -140,6 +140,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 						prevTask.Final = false
 						prevTask.HistoryExecution = true
 						se.applyWorker.RunTxTaskNoLock(&prevTask, se.isMining, se.skipPostEvaluation)
+						if prevTask.Error != nil {
+							return false, fmt.Errorf("error while finding last receipt: %w", prevTask.Error)
+						}
 						prevTask.CreateReceipt(se.applyTx.(kv.TemporalTx))
 						lastReceipt = txTask.BlockReceipts[txTask.TxIndex-1]
 					} else {
