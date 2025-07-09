@@ -412,6 +412,7 @@ func WaitForDownloader(
 		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
 			continue
 		}
+		fmt.Println("Checking if receipts segment is pruned for", p.Name, "prune mode:", prune, "frozen blocks:", frozenBlocks, "pruned", strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, cc, prune, frozenBlocks, p))
 		if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, cc, prune, frozenBlocks, p) {
 			continue
 		}
