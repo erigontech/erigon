@@ -218,6 +218,10 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 	return span, err
 }
 
+func (h *HeimdallSimulator) IsOnline(ctx context.Context) (bool, error) {
+	return true, nil
+}
+
 func (h *HeimdallSimulator) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Span, error) {
 	return nil, errors.New("method FetchSpans is not implemented")
 }
