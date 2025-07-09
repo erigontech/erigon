@@ -293,6 +293,9 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 
 // isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
 func isReceiptsSegmentPruned(tx kv.RwTx, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem) bool {
+	if strings.Contains(p.Name, "domain") {
+		return false // domain snapshots are never pruned
+	}
 	pruneHeight := pruneMode.Blocks.PruneTo(head) // if a receipt is below this height, it is pruned
 	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc.MergeHeight != nil {
 		pruneHeight = cc.MergeHeight.Uint64()
