@@ -130,13 +130,6 @@ func createSentinel(
 			int(cfg.BeaconConfig.MaxBlobsPerBlockElectra),
 		)...)
 
-	gossipTopics = append(
-		gossipTopics,
-		generateSubnetsTopics(
-			gossip.TopicNamePrefixDataColumnSidecar,
-			int(cfg.BeaconConfig.DataColumnSidecarSubnetCount),
-		)...)
-
 	attestationSubnetTopics := generateSubnetsTopics(
 		gossip.TopicNamePrefixBeaconAttestation,
 		int(cfg.NetworkConfig.AttestationSubnetCount),
@@ -152,6 +145,17 @@ func createSentinel(
 			gossip.TopicNamePrefixSyncCommittee,
 			int(cfg.BeaconConfig.SyncCommitteeSubnetCount),
 		)...)
+
+	for subnet := range cfg.BeaconConfig.DataColumnSidecarSubnetCount {
+		topic := sentinel.GossipTopic{
+			Name:     gossip.TopicNameDataColumnSidecar(subnet),
+			CodecStr: sentinel.SSZSnappyCodec,
+		}
+		// just subscribe but do not listen to the messages. This topic will be dynamically controlled in peerdas.
+		if _, err := sent.SubscribeGossip(topic, time.Unix(0, 0)); err != nil {
+			logger.Error("[Sentinel] failed to subscribe to data column sidecar", "err", err)
+		}
+	}
 
 	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {

@@ -81,6 +81,44 @@ func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) DoAndReturn(f func(conte
 	return c
 }
 
+// DownloadOnlyCustodyColumns mocks base method.
+func (m *MockPeerDas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DownloadOnlyCustodyColumns", ctx, blocks)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DownloadOnlyCustodyColumns indicates an expected call of DownloadOnlyCustodyColumns.
+func (mr *MockPeerDasMockRecorder) DownloadOnlyCustodyColumns(ctx, blocks any) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadOnlyCustodyColumns", reflect.TypeOf((*MockPeerDas)(nil).DownloadOnlyCustodyColumns), ctx, blocks)
+	return &MockPeerDasDownloadOnlyCustodyColumnsCall{Call: call}
+}
+
+// MockPeerDasDownloadOnlyCustodyColumnsCall wrap *gomock.Call
+type MockPeerDasDownloadOnlyCustodyColumnsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) Return(arg0 error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) Do(f func(context.Context, []*cltypes.SignedBeaconBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.Context, []*cltypes.SignedBeaconBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // IsBlobAlreadyRecovered mocks base method.
 func (m *MockPeerDas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
 	m.ctrl.T.Helper()

@@ -3,6 +3,7 @@ package das
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/kzg"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
@@ -80,6 +82,7 @@ func NewPeerDas(
 		recoveringMutex: sync.Mutex{},
 		isRecovering:    make(map[common.Hash]bool),
 	}
+	p.resubscribeGossip()
 	for range numOfBlobRecoveryWorkers {
 		go p.blobsRecoverWorker(ctx)
 	}
@@ -112,11 +115,26 @@ func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (b
 	return d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot), nil
 }
 
+func (d *peerdas) resubscribeGossip() {
+	custodyColumns, err := d.state.GetMyCustodyColumns()
+	if err != nil {
+		log.Warn("failed to get my custody columns", "err", err)
+		return
+	}
+	for column := range custodyColumns {
+		subnet := ComputeSubnetForDataColumnSidecar(column)
+		d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
+			Topic:          gossip.TopicNameDataColumnSidecar(subnet),
+			ExpiryUnixSecs: math.MaxUint64,
+		})
+	}
+}
+
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 	adCgcChanged := d.state.SetCustodyGroupCount(cgc)
 	if adCgcChanged {
-		// advertise cgc changed
-		// try backfill the missing columns
+		// subscribe more topics, advertised cgc must be increased
+		d.resubscribeGossip()
 	}
 }
 
