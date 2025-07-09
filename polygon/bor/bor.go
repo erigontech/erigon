@@ -75,7 +75,10 @@ const (
 const (
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
 	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
-	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
+)
+
+var (
+	inmemorySignatures = dbg.EnvInt("BOR_AUTHOR_LRU", 10_000) // Number of recent block signatures to keep in memory
 )
 
 var enableBoreventsRemoteFallback = dbg.EnvBool("BOREVENTS_REMOTE_FALLBACK", false)
