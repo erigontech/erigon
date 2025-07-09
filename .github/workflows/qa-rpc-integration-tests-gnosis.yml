@@ -1,4 +1,4 @@
-name: QA - RPC Integration Tests (Polygon)
+name: QA - RPC Integration Tests (Gnosis)
 
 on:
   workflow_dispatch:     # Run manually
@@ -18,7 +18,7 @@ on:
 
 
 jobs:
-  bor-mainnet-rpc-integ-tests:
+  gnosis-rpc-integ-tests:
     concurrency:
       group: >-
         ${{
@@ -27,14 +27,14 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [ self-hosted, qa, Polygon, rpc-integration ]
+    runs-on: [ self-hosted, qa, Gnosis, rpc-integration ]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
-      CHAIN: bor-mainnet
+      CHAIN: gnosis
 
     steps:
       - name: Check out repository
@@ -65,7 +65,7 @@ jobs:
         run: |
           echo "Starting RpcDaemon..."
           
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api bor,admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           RPC_DAEMON_EXIT_STATUS=$?
@@ -102,13 +102,13 @@ jobs:
         id: test_step
         run: |
           commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
-          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/polygon_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
+          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/gnosis_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
-          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_polygon.sh
-          
+          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_gnosis.sh
+
           set +e # Disable exit on error for test run
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_polygon.sh ${{ runner.workspace }} $TEST_RESULT_DIR
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_gnosis.sh ${{ runner.workspace }} $TEST_RESULT_DIR
           test_exit_status=$? # Capture test runner script exit status
           set -e # Re-enable exit on error after test run
 

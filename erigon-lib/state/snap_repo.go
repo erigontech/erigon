@@ -5,13 +5,14 @@ import (
 	"path/filepath"
 	"sync"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
-	btree2 "github.com/tidwall/btree"
 )
 
 // i) manages dirtyfiles and visible files,
@@ -398,7 +399,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 				}
 				if ok {
-					if item.existence, err = existence.OpenFilter(fPath); err != nil {
+					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files maybe good

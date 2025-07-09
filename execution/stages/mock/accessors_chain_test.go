@@ -499,7 +499,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 		TransactionIndex: 0,
 	}
-	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
+	receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
 	receipt2 := &types.Receipt{
 		PostState:         common.Hash{2}.Bytes(),
@@ -515,7 +515,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		BlockHash:        header.Hash(),
 		TransactionIndex: 1,
 	}
-	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
+	receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
 	receipts := types.Receipts{receipt1, receipt2}
 
 	// Check that no receipt entries are in a pristine database

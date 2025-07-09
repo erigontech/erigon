@@ -169,6 +169,7 @@ func CreateHistoryStateReader(tx kv.TemporalTx, blockNumber uint64, txnIndex int
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
+
 	if txNum < r.StateHistoryStartFrom() {
 		return r, state.PrunedError
 	}

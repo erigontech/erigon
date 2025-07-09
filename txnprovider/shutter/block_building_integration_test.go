@@ -67,6 +67,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+
 	//goland:noinspection GoBoolExpressions
 	if race.Enabled && runtime.GOOS == "darwin" {
 		// We run race detector for medium tests which fails on macOS.

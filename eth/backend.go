@@ -420,7 +420,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, config.Downloader, chainConfig); err != nil {
+	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader, chainConfig); err != nil {
 		return nil, err
 	}
 
@@ -1475,7 +1475,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
+func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Config, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
 	var err error
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
 		s.logger.Warn("files changed...sending notification")
@@ -1520,7 +1520,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 			return err
 		}
 
-		s.downloader.HandleTorrentClientStatus()
+		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
 		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 		if err != nil {

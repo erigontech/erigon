@@ -442,7 +442,7 @@ func ExecV3(ctx context.Context,
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
 
-		readAhead, clean = exec3.BlocksReadAhead(ctx, 4, cfg.db, cfg.engine, cfg.blockReader)
+		readAhead, clean = exec3.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
 	}
 
