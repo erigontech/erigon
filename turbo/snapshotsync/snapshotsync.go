@@ -140,20 +140,6 @@ func RequestSnapshotsDownload(
 	return nil
 }
 
-func adjustStepPrune(steps uint64) uint64 {
-	if steps == 0 {
-		return 0
-	}
-	if steps < snaptype.Erigon3SeedableSteps {
-		return snaptype.Erigon3SeedableSteps
-	}
-	if steps%snaptype.Erigon3SeedableSteps == 0 {
-		return steps
-	}
-	// round to nearest multiple of 64. if less than 64, round to 64
-	return steps + steps%snaptype.Erigon3SeedableSteps
-}
-
 func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
 		minBlocksToDownload = snaptype.Erigon2MergeLimit
@@ -184,7 +170,6 @@ func buildBlackListForPruning(
 	if !pruneMode {
 		return blackList, nil
 	}
-	stepPrune = adjustStepPrune(stepPrune)
 	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
 	for _, p := range preverified.Items {
 		name := p.Name
@@ -192,7 +177,6 @@ func buildBlackListForPruning(
 		if !canSnapshotBePruned(name) {
 			continue
 		}
-		var _, to uint64
 		if isStateSnapshot(name) {
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1.0-accounts.0-64.ef' is "idx/v1.0-accounts"
@@ -200,20 +184,18 @@ func buildBlackListForPruning(
 			if !ok {
 				return blackList, errors.New("invalid state snapshot name")
 			}
-			to = res.To
-			if stepPrune < to {
+			if stepPrune < res.To {
 				continue
 			}
 			blackList[name] = struct{}{}
 		} else {
 			// e.g 'v1.0-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
-			s, _, ok := snaptype.ParseFileName("", name)
+			res, _, ok := snaptype.ParseFileName("", name)
 			if !ok {
 				continue
 			}
-			to = s.To
-			if blockPrune < to {
+			if blockPrune < res.To {
 				continue
 			}
 			blackList[name] = struct{}{}
@@ -233,16 +215,16 @@ type blockReader interface {
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
-func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint64, historyPruneTo uint64) (uint64, uint64, error) {
+func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, maxStateStep uint64, historyPruneTo uint64) (minBlockToDownload uint64, minStateStepToDownload uint64, err error) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
-	minStepToDownload := uint64(math.MaxUint32)
-	stateTxNum := minStep * config3.DefaultStepSize
+	minStateStepToDownload = uint64(math.MaxUint32)
+	stateTxNum := maxStateStep * config3.DefaultStepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if blockNum == historyPruneTo {
-			minStepToDownload = (baseTxNum - (config3.DefaultStepSize - 1)) / config3.DefaultStepSize
+			minStateStepToDownload = (baseTxNum - (config3.DefaultStepSize - 1)) / config3.DefaultStepSize
 			if baseTxNum < (config3.DefaultStepSize - 1) {
-				minStepToDownload = 0
+				minStateStepToDownload = 0
 			}
 		}
 		if stateTxNum <= baseTxNum { // only cosnider the block if it
@@ -261,7 +243,7 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint6
 	}
 
 	// return the minimum number of blocks to download and the minimum step.
-	return frozenBlocks - minToDownload, minStepToDownload, nil
+	return frozenBlocks - minToDownload, minStateStepToDownload, nil
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
@@ -355,11 +337,11 @@ func WaitForDownloader(
 	blackListForPruning := make(map[string]struct{})
 	wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
 	if !headerchain && wantToPrune {
-		minStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
+		maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}
-		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, historyPrune)
+		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, maxStateStep, historyPrune)
 		if err != nil {
 			return err
 		}
