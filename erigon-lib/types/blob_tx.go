@@ -275,9 +275,10 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 }
 
 func (stx *BlobTx) MarshalBinary(w io.Writer) error {
-	if stx.To == nil {
-		return ErrNilToFieldTx
-	}
+	// todo: uncomment
+	// if stx.To == nil {
+	// 	return ErrNilToFieldTx
+	// }
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)

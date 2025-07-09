@@ -807,7 +807,15 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
 	}
 
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	// todo: return back
+	// maxBlockNumInFiles := r.sn.BlocksAvailable()
+
+	var maxBlockNumInFiles uint64
+	if r.sn == nil {
+		maxBlockNumInFiles = 0
+	} else {
+		maxBlockNumInFiles = r.sn.BlocksAvailable()
+	}
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx == nil {
 			if dbgLogs {
