@@ -113,7 +113,7 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	hashToDownload common.Hash,
 	heightToDownload uint64,
 ) bool {
-	if e.hd.PosStatus() != headerdownload.Idle {
+	if e.hd.PosStatus() != headerdownload.Idle && e.hd.PosStatus() != headerdownload.Synced {
 		e.logger.Info("[EngineBlockDownloader] Postponing PoS download since another one is in progress", "height", heightToDownload, "hash", hashToDownload)
 		return false
 	}

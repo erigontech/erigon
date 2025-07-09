@@ -51,7 +51,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx, toBlock *uint64) (err error) {
 		bd.maxProgress = headerProgress + 1
 	}
 	// Resetting for requesting a new range of blocks
-	bd.requestedLow = bodyProgress + 1
+	bd.requestedLow = bodyProgress
 	bd.requestedMap = make(map[BodyHashes]uint64)
 	bd.delivered.Clear()
 	bd.deliveredCount = 0

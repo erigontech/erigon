@@ -55,7 +55,6 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 		e.status.Store(headerdownload.Idle)
 		return
 	}
-	e.hd.SetPosStatus(headerdownload.Idle)
 
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
@@ -121,6 +120,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 	increment := uint64(500)
 	tx.Rollback()
 	currentBlockNr := latestBlockNr // start from latest fork choice
+	e.status.Store(headerdownload.Syncing)
 	for currentBlockNr < targetBlockNr {
 		tx, err = e.db.BeginRo(ctx)
 		if err != nil {
@@ -142,7 +142,10 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 		tx.Rollback() // free up the roTx so chaindata doesn't grow
 	}
 	// Can fail, not an issue in this case.
-	e.chainRW.InsertBlockAndWait(ctx, block)
+	// CHANGE(taiko) : don't insert if there are no transactions
+	if len(block.Transactions()) > 0 {
+		e.chainRW.InsertBlockAndWait(ctx, block)
+	}
 	e.logger.Info("[EngineBlockDownloader] Sync completed")
 	e.status.Store(headerdownload.Synced)
 
@@ -208,7 +211,6 @@ func (e *EngineBlockDownloader) downloadAndExecLoopIteration(ctx context.Context
 	}
 
 	e.logger.Info("[EngineBlockDownloader] fork choice update successful")
-	e.status.Store(headerdownload.Idle)
 	return nil
 }
 
@@ -218,8 +220,10 @@ func (e *EngineBlockDownloader) StartDownloading(ctx context.Context, requestId 
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	if e.status.Load() == headerdownload.Syncing {
+		e.logger.Info("[EngineBlockDownloader] received sync request, but sync already in progress")
 		return false
 	}
+	e.logger.Info("[EngineBlockDownloader] received sync, can go ahead with sync", "status", e.status.Load())
 	e.status.Store(headerdownload.Syncing)
 	go e.download(e.bacgroundCtx, hashToDownload, requestId, blockTip)
 	return true

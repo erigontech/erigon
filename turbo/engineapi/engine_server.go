@@ -355,6 +355,10 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 
+	if len(block.Transactions()) < 2 {
+		s.logger.Warn(fmt.Sprintf("too few transactions (%d) for block #%d", len(block.Transactions()), block.NumberU64()))
+	}
+
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
 		if errors.Is(err, consensus.ErrInvalidBlock) {
