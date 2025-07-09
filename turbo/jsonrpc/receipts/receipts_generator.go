@@ -155,15 +155,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return receiptFromDB, nil
 	}
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-1, txnHash)
-	if err != nil {
-		return nil, err
-	}
-	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-		return receiptFromDB, nil
-	}
-
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
 		return receipts[index], nil
 	}
@@ -175,6 +166,15 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return receipt, nil
 		}
 		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
+	}
+
+	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txNum-1, txnHash)
+	if err != nil {
+		return nil, err
+	}
+	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		return receiptFromDB, nil
 	}
 
 	var receipt *types.Receipt
@@ -224,6 +224,12 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return receiptsFromDB, nil
 	}
 
+	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
+	defer g.blockExecMutex.unlock(mu, blockHash)
+	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
+		return receipts, nil
+	}
+
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
 	if err != nil {
@@ -231,12 +237,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	}
 	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
 		return receiptsFromDB, nil
-	}
-
-	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
-	defer g.blockExecMutex.unlock(mu, blockHash)
-	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
-		return receipts, nil
 	}
 
 	receipts := make(types.Receipts, len(block.Transactions()))
