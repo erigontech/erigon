@@ -140,6 +140,22 @@ func (d *peerdas) isMyColumnDataAvailable(blockRoot common.Hash) (bool, error) {
 }
 
 func (d *peerdas) resubscribeGossip() {
+	if d.caplinConfig.ArchiveBlobs || d.caplinConfig.ImmediateBlobsBackfilling {
+		// subscribe to all subnets
+		for subnet := range d.beaconConfig.DataColumnSidecarSubnetCount {
+			if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
+				Topic:          gossip.TopicNameDataColumnSidecar(subnet),
+				ExpiryUnixSecs: math.MaxUint64,
+			}); err != nil {
+				log.Warn("[peerdas] failed to set subscribe expiry", "err", err, "subnet", subnet)
+			} else {
+				log.Info("[peerdas] subscribed to column sidecar subnet", "subnet", subnet)
+			}
+		}
+		return
+	}
+
+	// subscribe to the columns in our custody group
 	custodyColumns, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		log.Warn("failed to get my custody columns", "err", err)
@@ -161,8 +177,10 @@ func (d *peerdas) resubscribeGossip() {
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 	adCgcChanged := d.state.SetCustodyGroupCount(cgc)
 	if adCgcChanged {
-		// subscribe more topics, advertised cgc must be increased
-		d.resubscribeGossip()
+		if !d.caplinConfig.ArchiveBlobs && !d.caplinConfig.ImmediateBlobsBackfilling {
+			// subscribe more topics, advertised cgc is increased
+			d.resubscribeGossip()
+		}
 	}
 }
 
