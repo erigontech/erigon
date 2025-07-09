@@ -166,6 +166,7 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 			log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", blockRoot)
 		}
 	}
+	log.Debug("[dataColumnSidecarService] processed data column sidecar", "slot", blockHeader.Slot, "blockRoot", blockRoot, "index", msg.Index)
 	return nil
 }
 
