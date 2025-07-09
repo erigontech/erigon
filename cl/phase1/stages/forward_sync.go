@@ -127,9 +127,16 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 	}
 
 	if len(fuluBlocks) > 0 && canDownloadColumnData(fuluBlocks, cfg) {
-		if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
-			logger.Trace("[Caplin] Failed to download missing columns", "err", err)
-			return err
+		if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
+			if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
+				logger.Debug("[Caplin] Failed to download columns and recover blobs", "err", err)
+				return err
+			}
+		} else {
+			if err = cfg.peerDas.DownloadOnlyCustodyColumns(ctx, fuluBlocks); err != nil {
+				logger.Debug("[Caplin] Failed to download only custody columns", "err", err)
+				return err
+			}
 		}
 	}
 
