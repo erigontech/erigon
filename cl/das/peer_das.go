@@ -28,7 +28,7 @@ import (
 type PeerDas interface {
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
 	DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
-	IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error)
+	IsDataAvailable(blockRoot common.Hash) (bool, error)
 	Prune(keepSlotDistance uint64) error
 	UpdateValidatorsCustody(cgc uint64)
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
@@ -46,6 +46,7 @@ type peerdas struct {
 	nodeID            enode.ID
 	rpc               *rpc.BeaconRpcP2P
 	beaconConfig      *clparams.BeaconChainConfig
+	caplinConfig      *clparams.CaplinConfig
 	columnStorage     blob_storage.DataColumnStorage
 	blobStorage       blob_storage.BlobStorage
 	sentinel          sentinelproto.SentinelClient
@@ -60,6 +61,7 @@ func NewPeerDas(
 	ctx context.Context,
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
+	caplinConfig *clparams.CaplinConfig,
 	columnStorage blob_storage.DataColumnStorage,
 	blobStorage blob_storage.BlobStorage,
 	sentinel sentinelproto.SentinelClient,
@@ -73,6 +75,7 @@ func NewPeerDas(
 		nodeID:            nodeID,
 		rpc:               rpc,
 		beaconConfig:      beaconConfig,
+		caplinConfig:      caplinConfig,
 		columnStorage:     columnStorage,
 		blobStorage:       blobStorage,
 		sentinel:          sentinel,
@@ -111,8 +114,29 @@ func (d *peerdas) IsColumnOverHalf(blockRoot common.Hash) bool {
 	return len(existingColumns) >= int(d.beaconConfig.NumberOfColumns+1)/2
 }
 
-func (d *peerdas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
-	return d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot), nil
+func (d *peerdas) IsDataAvailable(blockRoot common.Hash) (bool, error) {
+	if d.caplinConfig.ArchiveBlobs || d.caplinConfig.ImmediateBlobsBackfilling {
+		return d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot), nil
+	}
+	return d.isMyColumnDataAvailable(blockRoot)
+}
+
+func (d *peerdas) isMyColumnDataAvailable(blockRoot common.Hash) (bool, error) {
+	expectedCustodies, err := d.state.GetMyCustodyColumns()
+	if err != nil {
+		return false, err
+	}
+	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), blockRoot)
+	if err != nil {
+		return false, err
+	}
+	nowCustodies := map[cltypes.CustodyIndex]bool{}
+	for _, column := range existingColumns {
+		if _, ok := expectedCustodies[column]; ok {
+			nowCustodies[column] = true
+		}
+	}
+	return len(nowCustodies) == len(expectedCustodies), nil
 }
 
 func (d *peerdas) resubscribeGossip() {
@@ -123,10 +147,14 @@ func (d *peerdas) resubscribeGossip() {
 	}
 	for column := range custodyColumns {
 		subnet := ComputeSubnetForDataColumnSidecar(column)
-		d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
+		if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
 			Topic:          gossip.TopicNameDataColumnSidecar(subnet),
 			ExpiryUnixSecs: math.MaxUint64,
-		})
+		}); err != nil {
+			log.Warn("[peerdas] failed to set subscribe expiry", "err", err, "column", column, "subnet", subnet)
+		} else {
+			log.Info("[peerdas] subscribed to column sidecar", "column", column, "subnet", subnet)
+		}
 	}
 }
 

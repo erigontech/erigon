@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -127,17 +128,24 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 	}
 
 	if len(fuluBlocks) > 0 && canDownloadColumnData(fuluBlocks, cfg) {
-		if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
-			if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
-				logger.Debug("[Caplin] Failed to download columns and recover blobs", "err", err)
-				return err
-			}
-		} else {
-			if err = cfg.peerDas.DownloadOnlyCustodyColumns(ctx, fuluBlocks); err != nil {
-				logger.Debug("[Caplin] Failed to download only custody columns", "err", err)
-				return err
-			}
+		wg := sync.WaitGroup{} // TODO: remove this bad fix
+		for i := 0; i < len(fuluBlocks); i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				blocks := []*cltypes.SignedBeaconBlock{fuluBlocks[i]}
+				if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
+					if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, blocks); err != nil {
+						logger.Warn("[Caplin] Failed to download columns and recover blobs", "err", err)
+					}
+				} else {
+					if err = cfg.peerDas.DownloadOnlyCustodyColumns(ctx, blocks); err != nil {
+						logger.Warn("[Caplin] Failed to download custody columns", "err", err)
+					}
+				}
+			}()
 		}
+		wg.Wait()
 	}
 
 	return nil
