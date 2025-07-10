@@ -17,12 +17,7 @@ func growslice(b []byte, wantLength int) []byte {
 }
 
 var (
-	zstdEncPool = sync.Pool{
-		New: func() interface{} {
-			enc, _ := zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
-			return enc
-		},
-	}
+	zstdEnc, _  = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
 	zstdDecPool = sync.Pool{
 		New: func() interface{} {
 			dec, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
@@ -31,20 +26,22 @@ var (
 	}
 )
 
+func putDec(dec *zstd.Decoder) {
+	_ = dec.Reset(nil)
+	zstdDecPool.Put(dec)
+}
+
 // EncodeZstdIfNeed compresses v into buf if enabled, otherwise returns buf and v unchanged.
 // It pre-allocates buf to ZSTD’s worst-case bound (src + src/255 + 16) and reuses encoders.
-func EncodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
+func EncodeZstdIfNeed(buf, v []byte, enabled bool) (outBuf []byte, compressed []byte) {
 	if !enabled {
 		return buf, v
 	}
 	bound := len(v) + len(v)/255 + 16
 	buf = growslice(buf, bound)
 
-	enc := zstdEncPool.Get().(*zstd.Encoder)
-	defer zstdEncPool.Put(enc)
-
 	// EncodeAll uses buf[:0] to reuse the backing array
-	buf = enc.EncodeAll(v, buf[:0])
+	buf = zstdEnc.EncodeAll(v, buf[:0])
 	return buf, buf
 }
 
@@ -57,7 +54,7 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	buf = growslice(buf, len(v))
 
 	dec := zstdDecPool.Get().(*zstd.Decoder)
-	defer zstdDecPool.Put(dec)
+	defer putDec(dec)
 
 	out, err := dec.DecodeAll(v, buf[:0])
 	if err != nil {
