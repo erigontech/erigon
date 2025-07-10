@@ -131,8 +131,8 @@ func New(
 ) (_ *Cfg, err error) {
 	torrentConfig := defaultTorrentClientConfig()
 
-	if f := opts.DisableTrackers; f.Ok {
-		torrentConfig.DisableTrackers = f.Value
+	for value := range opts.DisableTrackers.Iter() {
+		torrentConfig.DisableTrackers = value
 	}
 
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
@@ -150,8 +150,12 @@ func New(
 	if opts.UploadRateLimit.Ok {
 		torrentConfig.UploadRateLimiter = rate.NewLimiter(opts.UploadRateLimit.Value, 0)
 	}
-	if opts.DownloadRateLimit.Ok {
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(opts.DownloadRateLimit.Value, 0)
+	for value := range opts.DownloadRateLimit.Iter() {
+		torrentConfig.DownloadRateLimiter = rate.NewLimiter(value, 0)
+		if value == 0 {
+			torrentConfig.DialForPeerConns = false
+			torrentConfig.AcceptPeerConnections = false
+		}
 	}
 
 	var analogLevel analog.Level
