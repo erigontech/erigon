@@ -33,7 +33,7 @@ var (
 
 // EncodeZstdIfNeed compresses v into buf if enabled, otherwise returns buf and v unchanged.
 // It pre-allocates buf to ZSTD’s worst-case bound (src + src/255 + 16) and reuses encoders.
-func EncodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
+func EncodeZstdIfNeed(buf, v []byte, enabled bool) (outBuf []byte, compressed []byte) {
 	if !enabled {
 		return buf, v
 	}
