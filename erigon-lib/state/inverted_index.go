@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -1275,12 +1274,6 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 }
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) (err error) {
-	defer func() {
-		rec := recover()
-		if rec != nil {
-			err = fmt.Errorf("ii.buildMapAccessor: %s, %s", rec, dbg.Stack())
-		}
-	}()
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		BucketSize: recsplit.DefaultBucketSize,
@@ -1322,7 +1315,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	// each such non-existing key read `MPH` transforms to random
 	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 
-	if err := buildHashMapAccessor(ctx, data, idxPath, cfg, ps, ii.logger); err != nil {
+	if err := buildHashMapAccessor2(ctx, data, idxPath, cfg, ps, ii.logger); err != nil {
 		return err
 	}
 	return nil
