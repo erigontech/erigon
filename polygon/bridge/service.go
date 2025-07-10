@@ -390,8 +390,8 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 			if *eventLimit == 0 {
 				endId = 0
 			} else {
-				if endId > startId && endId-startId > uint64(*eventLimit) {
-					endId = startId + uint64(*eventLimit) - 1
+				if endId > startId && endId-startId > *eventLimit {
+					endId = startId + *eventLimit - 1
 				}
 			}
 		}
