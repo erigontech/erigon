@@ -280,23 +280,22 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 	})
 }
 
-func decodeTopics(appendList *[]common.Hash, s *rlp.Stream) (err error) {
-	if _, err = s.List(); err != nil {
-		return err
+func decodeTopics(s *rlp.Stream) (list []common.Hash, err error) {
+	l, err := s.List()
+	if err != nil {
+		return list, err
 	}
-	var b []byte
-	var u common.Hash
-	for err == nil {
-		if b, err = s.Bytes(); err != nil {
-			break
-		}
-		if len(b) != 32 {
-			return fmt.Errorf("wrong size for Topic: %d", len(b))
-		}
-		copy(u[:], b)
-		*appendList = append(*appendList, u)
+	if l == 0 {
+		return list, s.ListEnd()
 	}
-	return checkErrListEnd(s, err)
+
+	list = make([]common.Hash, (l-1)/32)
+	for i := 0; s.MoreDataInList(); i++ {
+		if err = s.ReadBytes(list[i][:]); err != nil {
+			return list, err
+		}
+	}
+	return list, s.ListEnd()
 }
 
 // DecodeRLP implements rlp.Decoder.
@@ -307,15 +306,12 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	err = s.ReadBytes(l.Address[:])
+	if err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	if len(b) != 20 {
-		return fmt.Errorf("wrong size for Address: %d", len(b))
-	}
-	copy(l.Address[:], b)
-	if err := decodeTopics(&l.Topics, s); err != nil {
+	l.Topics, err = decodeTopics(s)
+	if err != nil {
 		return err
 	}
 	if l.Data, err = s.Bytes(); err != nil {

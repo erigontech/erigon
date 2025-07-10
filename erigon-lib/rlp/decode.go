@@ -746,6 +746,35 @@ func (s *Stream) Bytes() ([]byte, error) {
 	}
 }
 
+func (s *Stream) ReadBytes(b []byte) error {
+	kind, size, err := s.Kind()
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case Byte:
+		if len(b) != 1 {
+			return fmt.Errorf("input value has wrong size 1, want %d", len(b))
+		}
+		b[0] = s.byteval
+		s.kind = -1 // rearm Kind
+		return nil
+	case String:
+		if uint64(len(b)) != size {
+			return fmt.Errorf("input value has wrong size %d, want %d", size, len(b))
+		}
+		if err = s.readFull(b); err != nil {
+			return err
+		}
+		if size == 1 && b[0] < 128 {
+			return ErrCanonSize
+		}
+		return nil
+	default:
+		return ErrExpectedString
+	}
+}
+
 // Raw reads a raw encoded value including RLP type information.
 func (s *Stream) Raw() ([]byte, error) {
 	kind, size, err := s.Kind()
@@ -1171,6 +1200,22 @@ func (s *Stream) willRead(n uint64) error {
 		s.remaining -= n
 	}
 	return nil
+}
+
+// MoreDataInList reports whether the current list context contains
+// more data to be read.
+func (s *Stream) MoreDataInList() bool {
+	_, listLimit := s.listLimit()
+	return listLimit > 0
+}
+
+// listLimit returns the amount of data remaining in the innermost list.
+func (s *Stream) listLimit() (inList bool, limit uint64) {
+	if len(s.stack) == 0 {
+		return false, 0
+	}
+	a := s.stack[len(s.stack)-1]
+	return true, a.size - a.pos
 }
 
 type sliceReader []byte
