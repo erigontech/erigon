@@ -161,7 +161,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	// prev := i
 	prev := uint64(0)
 	timer := time.NewTicker(40 * time.Second)
-	latestBlock.SetUint64(6000)
+	latestBlock.SetUint64(60000)
 	// err = cfg.db.Update(context.TODO(), func(tx kv.RwTx) error {
 	for blockNum := curBlock; blockNum < latestBlock.Uint64(); blockNum++ {
 		blockNumber.SetUint64(blockNum)
@@ -235,7 +235,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Warn("Error updating db", "err", err)
 		return err
 	}
-	return nil
+	// return nil
 	// if !useExternalTx {
 	// 	var err error
 	// 	tx, err = cfg.db.BeginRw(ctx)
