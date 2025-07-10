@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -303,7 +302,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
-	d.HandleTorrentClientStatus(http.DefaultServeMux)
+	d.HandleTorrentClientStatus(nil)
 
 	err = d.AddTorrentsFromDisk(ctx)
 	if err != nil {
