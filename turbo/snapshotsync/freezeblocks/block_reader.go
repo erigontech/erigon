@@ -188,6 +188,11 @@ func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash
 	if reply == nil {
 		return 0, 0, false, nil
 	}
+
+	// Not a perfect solution, assumes there are no transactions in block 0 (same check on server side)
+	if reply.BlockNumber == 0 && reply.TxNumber == 0 {
+		return reply.BlockNumber, reply.TxNumber, false, nil
+	}
 	return reply.BlockNumber, reply.TxNumber, true, nil
 }
 
