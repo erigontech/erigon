@@ -1634,7 +1634,7 @@ func doCompress(cliCtx *cli.Context) error {
 		}
 
 		snappyBuf, word = compress.EncodeZstdIfNeed(snappyBuf[:0], word, doSnappyEachWord)
-		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf, word, doUnSnappyEachWord)
+		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf[:0], word, doUnSnappyEachWord)
 		if err != nil {
 			return err
 		}

@@ -30,7 +30,7 @@ var be = binary.BigEndian
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
 	var err error
 	var page []byte
-	compressionBuf, page, err = compress.DecodeZstdIfNeed(compressionBuf, compressedPage, compressionEnabled)
+	compressionBuf, page, err = compress.DecodeZstdIfNeed(compressionBuf[:0], compressedPage, compressionEnabled)
 	if err != nil {
 		panic(err)
 	}
@@ -79,7 +79,7 @@ func FromBytes(buf []byte, compressionEnabled bool) *Page {
 
 func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 	var err error
-	r.compressionBuf, v, err = compress.DecodeZstdIfNeed(r.compressionBuf, v, compressionEnabled)
+	r.compressionBuf, v, err = compress.DecodeZstdIfNeed(r.compressionBuf[:0], v, compressionEnabled)
 	if err != nil {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}
