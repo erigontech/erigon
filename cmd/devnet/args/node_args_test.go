@@ -197,7 +197,6 @@ func producingNodeArgs(dataDir string, nodeNumber int) []string {
 		p2pProtocol,
 		downloaderArg,
 		accountSlotsArg,
-		withHeimdallMilestonesArg,
 	}
 }
 
@@ -236,6 +235,5 @@ func nonProducingNodeArgs(dataDir string, nodeNumber int, enode string) []string
 		torrentPort,
 		p2pProtocol,
 		downloaderArg,
-		withHeimdallMilestonesArg,
 	}
 }
