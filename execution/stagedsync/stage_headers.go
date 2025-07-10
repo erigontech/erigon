@@ -92,7 +92,7 @@ func StageHeadersCfg(
 	notifications *shards.Notifications,
 	L2RPCAddr string, // L2 RPC address for Arbitrum
 ) HeadersCfg {
-	L2RPCAddr = "http://37.59.187.216:8547"
+	L2RPCAddr = "http://0.0.0.0:8547"
 	fmt.Printf("StageHeadersCfg: L2RPCAddr: %s\n", L2RPCAddr)
 	return HeadersCfg{
 		db:                db,
