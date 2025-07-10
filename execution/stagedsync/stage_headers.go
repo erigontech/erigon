@@ -92,8 +92,8 @@ func StageHeadersCfg(
 	notifications *shards.Notifications,
 	L2RPCAddr string, // L2 RPC address for Arbitrum
 ) HeadersCfg {
-	L2RPCAddr = "http://0.0.0.0:8547"
 	fmt.Printf("StageHeadersCfg: L2RPCAddr: %s\n", L2RPCAddr)
+	L2RPCAddr = "http://37.59.187.216:8547"
 	return HeadersCfg{
 		db:                db,
 		hd:                headerDownload,
@@ -171,71 +171,68 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	prev := uint64(0)
 	timer := time.NewTicker(40 * time.Second)
 	latestBlock.SetUint64(6000)
-	// err := cfg.db.Update(context.TODO(), func(tx kv.RwTx) error {
-	for blockNum := curBlock; blockNum < latestBlock.Uint64(); blockNum++ {
-		blockNumber.SetUint64(blockNum)
-		blk, err := snapshots.GetBlockByNumber(client, &blockNumber, false)
-		if err != nil {
-			return fmt.Errorf("error fetching block %d: %w", blockNum, err)
-		}
-
-		if err := rawdb.WriteBlock(tx, blk); err != nil {
-			return fmt.Errorf("error writing block %d: %w", blockNum, err)
-		}
-		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
-		}
-		if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
-		}
-		rawdb.WriteHeadBlockHash(tx, blk.Hash())
-		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(tx, stages.Snapshots, blockNum); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
-			return err
-		}
-		// fmt.Printf("Wrote block %d with hash %s\n", blockNum, blk.Hash().Hex())
-		// if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
-		// 	return err
-		// }
-
-		// Update the progress counter.
-		// i = blockNum + 1
-		select {
-		case <-timer.C:
-			blkSec := float64(blockNum-prev) / float64(40)
-			log.Info("Block processed", "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec))
-			tx.Commit()
-			tx, err = cfg.db.BeginRw(ctx)
+	err = cfg.db.Update(context.TODO(), func(tx kv.RwTx) error {
+		for blockNum := curBlock; blockNum < latestBlock.Uint64(); blockNum++ {
+			blockNumber.SetUint64(blockNum)
+			blk, err := snapshots.GetBlockByNumber(client, &blockNumber, false)
 			if err != nil {
+				return fmt.Errorf("error fetching block %d: %w", blockNum, err)
+			}
+
+			if err := rawdb.WriteBlock(tx, blk); err != nil {
+				return fmt.Errorf("error writing block %d: %w", blockNum, err)
+			}
+			if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+				return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+			}
+			if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+				return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+			}
+			rawdb.WriteHeadBlockHash(tx, blk.Hash())
+			if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
 				return err
 			}
-			defer tx.Rollback()
-		default:
-			// continue processing without waiting
+			if err := stages.SaveStageProgress(tx, stages.Snapshots, blockNum); err != nil {
+				return err
+			}
+			if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
+				return err
+			}
+			if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
+				return err
+			}
+			if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
+				return err
+			}
+			// fmt.Printf("Wrote block %d with hash %s\n", blockNum, blk.Hash().Hex())
+			if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
+				return err
+			}
+
+			// Update the progress counter.
+			// i = blockNum + 1
+			select {
+			case <-timer.C:
+				blkSec := float64(blockNum-prev) / float64(40)
+				log.Info("Block processed", "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec))
+				tx.Commit()
+				tx, err = cfg.db.BeginRw(ctx)
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+			default:
+				// continue processing without waiting
+			}
 		}
-
-		// }														//
-		// 	return nil
-		// })
-
-	}
+		return nil
+	})
 	timer.Stop()
 	if err != nil {
 		log.Warn("Error updating db", "err", err)
 		return err
 	}
-	return tx.Commit()
+	return nil
 	// if !useExternalTx {
 	// 	var err error
 	// 	tx, err = cfg.db.BeginRw(ctx)

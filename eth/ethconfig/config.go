@@ -111,6 +111,7 @@ var Defaults = Config{
 	RPCTxFeeCap: 1, // 1 ether
 
 	ArbRPCEVMTimeout: 5 * time.Second,
+	L2RPCAddr:        "http://localhost:8547",
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
