@@ -226,6 +226,11 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	}
 
 	block = &types.Block{}
+	if (len(reply.BlockRlp)) == 0 {
+		// block not found
+		return nil, nil, nil
+	}
+
 	err = rlp.DecodeBytes(reply.BlockRlp, block)
 	if err != nil {
 		return nil, nil, err

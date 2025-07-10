@@ -300,13 +300,21 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	if err != nil {
 		return nil, err
 	}
-	blockRlp, err := rlp.EncodeToBytes(block)
-	if err != nil {
-		return nil, err
+
+	var blockRlp []byte
+	if block != nil {
+		blockRlp, err = rlp.EncodeToBytes(block)
+		if err != nil {
+			return nil, err
+		}
 	}
-	sendersBytes := make([]byte, 20*len(senders))
-	for i, sender := range senders {
-		copy(sendersBytes[i*20:], sender[:])
+
+	var sendersBytes []byte
+	if sendersBytes != nil {
+		sendersBytes = make([]byte, 20*len(senders))
+		for i, sender := range senders {
+			copy(sendersBytes[i*20:], sender[:])
+		}
 	}
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
 }
