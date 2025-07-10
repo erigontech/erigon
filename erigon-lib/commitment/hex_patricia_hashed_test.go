@@ -1894,3 +1894,66 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 	}
 	return pks, upds
 }
+
+func Test_WitnessTrie_GenerateWitness(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(length.Addr, ms)
+	hph.SetTrace(false)
+
+	// generate list of updates diverging from first nibble (good case for parallelization))
+	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, length.Addr, 0, 15)
+	builder := NewUpdateBuilder()
+	for i := 0; i < len(plainKeysList); i++ {
+		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+	}
+	builder.Storage(common.Bytes2Hex(plainKeysList[1]), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+
+	plainKeys, updates := builder.Build()
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess.Close()
+
+	root, err := hph.Process(ctx, toProcess, "")
+	require.NoError(t, err)
+
+	toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+	toWitness.TouchPlainKey(fmt.Sprintf("%x", plainKeys[0]), nil, toProcess.TouchAccount)
+
+	witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, root, "")
+	require.NoError(t, err)
+	_ = witnessTrie
+	require.NotNil(t, witnessTrie, "witness trie should not be nil")
+	require.NotNil(t, rootWitness, "root witness should not be nil")
+
+	t.Logf("witness root hash %x\n", rootWitness)
+	t.Logf("our hash %x\n", root)
+
+	// ms.SetConcurrentCommitment(true)
+	// paratrie := NewConcurrentPatriciaHashed(hph, ms)
+	// canParallel, err := paratrie.CanDoConcurrentNext()
+	// require.NoError(t, err)
+	// require.True(t, canParallel, "should be able to parallelize next run")
+
+	// builder = NewUpdateBuilder()
+	// for i := 2; i < len(plainKeys); i++ {
+	// 	builder.Delete(common.Bytes2Hex(plainKeys[i]))
+	// }
+	// plainKeys, updates = builder.Build()
+	// err = ms.applyPlainUpdates(plainKeys, updates)
+	// require.NoError(t, err)
+
+	// toProcess2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	// defer toProcess2.Close()
+
+	// _, err = paratrie.Process(ctx, toProcess2, "")
+	// require.NoError(t, err)
+
+	// canParallel, err = paratrie.CanDoConcurrentNext()
+	// require.NoError(t, err)
+	// require.False(t, canParallel, "should be NOT able to parallelize next run")
+}
