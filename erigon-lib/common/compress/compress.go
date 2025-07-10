@@ -61,7 +61,7 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	defer zstdDecPool.Put(dec)
 
 	out, err := dec.DecodeAll(v, buf[:0])
-	dec.Reset(nil)
+	_ = dec.Reset(nil)
 	if err != nil {
 		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
 	}
