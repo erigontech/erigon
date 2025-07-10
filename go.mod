@@ -48,7 +48,7 @@ require (
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/emicklei/dot v1.6.2
 	github.com/ethereum/c-kzg-4844/v2 v2.1.1
-	github.com/felixge/fgprof v0.9.3
+	github.com/felixge/fgprof v0.9.5
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/go-chi/cors v1.2.1
@@ -98,7 +98,7 @@ require (
 	github.com/tidwall/btree v1.6.0
 	github.com/urfave/cli/v2 v2.27.5
 	github.com/valyala/fastjson v1.6.4
-	github.com/vektah/gqlparser/v2 v2.5.27
+	github.com/vektah/gqlparser/v2 v2.5.30
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/mock v0.5.2
 	go.uber.org/zap v1.27.0
