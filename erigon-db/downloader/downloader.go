@@ -1394,12 +1394,17 @@ func (d *Downloader) Completed() bool {
 	return d.allTorrentsComplete()
 }
 
-// Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http. Only
-// do this if you have a single instance.
+// Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http, and
+// the provided "debug" mux if non-nil. Only do this if you have a single instance of a Downloader.
 func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
-	debugMux.HandleFunc("/downloader/torrents", func(w http.ResponseWriter, r *http.Request) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d.torrentClient.WriteStatus(w)
 	})
+	p := "/downloader/torrentClientStatus"
+	http.Handle(p, h)
+	if debugMux != nil {
+		debugMux.Handle(p, h)
+	}
 }
 
 func (d *Downloader) spawn(f func()) {
