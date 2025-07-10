@@ -2,6 +2,7 @@ package compress
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -16,8 +17,13 @@ func growslice(b []byte, wantLength int) []byte {
 }
 
 var (
-	zstdEnc, _ = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
-	zstdDec, _ = zstd.NewReader(nil, zstd.IgnoreChecksum(true))
+	zstdEnc, _  = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
+	zstdDecPool = sync.Pool{
+		New: func() interface{} {
+			dec, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
+			return dec
+		},
+	}
 )
 
 // EncodeZstdIfNeed compresses v into buf if enabled, otherwise returns buf and v unchanged.
@@ -41,7 +47,10 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	}
 	buf = growslice(buf, len(v))
 
-	out, err := zstdDec.DecodeAll(v, buf[:0])
+	dec := zstdDecPool.Get().(*zstd.Decoder)
+	defer zstdDecPool.Put(dec)
+
+	out, err := dec.DecodeAll(v, buf[:0])
 	if err != nil {
 		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
 	}
