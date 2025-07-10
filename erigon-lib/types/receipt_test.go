@@ -647,8 +647,8 @@ func makeTestLog(topics int) *ReceiptForStorage {
 }
 
 func BenchmarkDecodeRLP(b *testing.B) {
-	for i := 0; i < 300; i++ {
-		r := makeTestLog(20)
+	for i := 0; i < 5000; i++ {
+		r := makeTestLog(i)
 		dataRlp, err := rlp.EncodeToBytes(r)
 		require.NoError(b, err)
 		var l ReceiptForStorage
