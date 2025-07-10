@@ -20,6 +20,7 @@
 package types
 
 import (
+	"fmt"
 	"io"
 	"slices"
 
@@ -279,24 +280,46 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 	})
 }
 
+func decodeTopics(appendList *[]common.Hash, s *rlp.Stream) (err error) {
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var b []byte
+	var u common.Hash
+	for err == nil {
+		if b, err = s.Bytes(); err != nil {
+			break
+		}
+		if len(b) != 32 {
+			return fmt.Errorf("wrong size for Topic: %d", len(b))
+		}
+		copy(u[:], b)
+		*appendList = append(*appendList, u)
+	}
+	return checkErrListEnd(s, err)
+}
+
 // DecodeRLP implements rlp.Decoder.
 //
 // Note some redundant fields(e.g. block number, txn hash etc) will be assembled later.
 func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
-	blob, err := s.Raw()
+	_, err := s.List()
 	if err != nil {
 		return err
 	}
-	var dec rlpStorageLog
-	err = rlp.DecodeBytes(blob, &dec)
-	if err != nil {
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Address: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for Address: %d", len(b))
+	}
+	copy(l.Address[:], b)
+	if err := decodeTopics(&l.Topics, s); err != nil {
 		return err
 	}
-
-	*l = LogForStorage{
-		Address: dec.Address,
-		Topics:  dec.Topics,
-		Data:    dec.Data,
+	if l.Data, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Data: %w", err)
 	}
-	return nil
+	return s.ListEnd()
 }
