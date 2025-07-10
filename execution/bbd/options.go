@@ -54,13 +54,15 @@ func applyOptions(opts ...Option) requestConfig {
 }
 
 type requestConfig struct {
-	peerId           *p2p.PeerId
-	blocksBatchSize  uint64
-	chainLengthLimit uint64
+	peerId                   *p2p.PeerId
+	blocksBatchSize          uint64
+	chainLengthLimit         uint64
+	maxParallelBodyDownloads int
 }
 
 var defaultRequestConfig = requestConfig{
-	peerId:           nil,
-	blocksBatchSize:  500,
-	chainLengthLimit: math.MaxUint64,
+	peerId:                   nil,
+	blocksBatchSize:          500,
+	chainLengthLimit:         math.MaxUint64,
+	maxParallelBodyDownloads: 10,
 }

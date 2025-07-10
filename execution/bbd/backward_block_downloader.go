@@ -340,7 +340,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 			return nil // keep accumulating headers
 		}
 		// we've accumulated enough headers in the batch - time to fetch them from peers and send to the result feed
-		err = bbd.downloadBlocksForHeaders(ctx, headers, peers, feed)
+		err = bbd.downloadBlocksForHeaders(ctx, headers, peers, config, feed)
 		if err != nil {
 			return err
 		}
@@ -355,74 +355,143 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 		return feed.consumeData(ctx, nil)
 	}
 	// make sure to download blocks for the remaining incomplete header batch after the etl collector has been loaded
-	return bbd.downloadBlocksForHeaders(ctx, headers, peers, feed)
+	return bbd.downloadBlocksForHeaders(ctx, headers, peers, config, feed)
 }
 
+// downloadBlocksForHeaders downloads the bodies for the corresponding headers in parallel across all available peers
+// and constructs the corresponding blocks which get fed to the result feed.
 func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	ctx context.Context,
 	headers []*types.Header,
 	peers peersContext,
+	config requestConfig,
 	feed ResultFeed,
 ) error {
-	blocks := make([]*types.Block, 0, len(headers))
-	for len(blocks) != len(headers) {
-		peerId, err := peers.nextAvailablePeer()
-		if err != nil {
-			return err
+	neededPeers := min(len(headers), config.maxParallelBodyDownloads)
+	availablePeers, err := peers.nextAvailablePeers(neededPeers)
+	if err != nil {
+		return err
+	}
+
+	// split the headers into batches
+	batchSize := (len(headers) + len(availablePeers)) / len(availablePeers)
+	headerBatches := make([][]*types.Header, 0, len(availablePeers))
+	for i := range availablePeers {
+		headerStartIndex := i * batchSize
+		headerEndIndex := min(headerStartIndex+batchSize, len(headers))
+		headerBatches[i] = headers[headerStartIndex:headerEndIndex]
+	}
+
+	// download from peers available until all batches are downloaded
+	blockBatches := make([][]*types.Block, 0, len(availablePeers))
+	pendingBatches := true
+	attempts := 1
+	for pendingBatches {
+		// assign remaining batches to available peers
+		batchAssignments := make(map[int]p2p.PeerId, len(headerBatches))
+		var peerIndex int
+		for batchIndex := range headerBatches {
+			if blockBatches[batchIndex] != nil {
+				continue // already fetched
+			}
+			if peerIndex == len(availablePeers) {
+				break
+			}
+			batchAssignments[batchIndex] = availablePeers[peerIndex]
+			peerIndex++
 		}
-
-		bbd.logger.Debug(
-			"[backward-block-downloader] fetching bodies for headers",
-			"fromHeight", headers[0].Number.Uint64(),
-			"fromHash", headers[0].Hash(),
-			"toHeight", headers[len(headers)-1].Number.Uint64(),
-			"toHash", headers[len(headers)-1].Hash(),
-			"peerId", peerId,
-		)
-
-		bodiesResponse, err := bbd.fetcher.FetchBodies(ctx, headers, &peerId)
-		if err != nil {
+		eg := errgroup.Group{}
+		for headerBatchIndex, peerId := range batchAssignments {
+			headers := headerBatches[headerBatchIndex]
 			bbd.logger.Debug(
-				"[backward-block-downloader] could not fetch bodies batch",
+				"[backward-block-downloader] fetching bodies for headers",
+				"attempt", attempts,
 				"fromHeight", headers[0].Number.Uint64(),
 				"fromHash", headers[0].Hash(),
 				"toHeight", headers[len(headers)-1].Number.Uint64(),
 				"toHash", headers[len(headers)-1].Hash(),
 				"peerId", peerId,
-				"err", err,
 			)
-			peers.exhaustedPeers[peers.peerIdToIndex[peerId]] = true
-			continue
+
+			eg.Go(func() error {
+				bodiesResponse, err := bbd.fetcher.FetchBodies(ctx, headers, &peerId)
+				if err != nil {
+					bbd.logger.Debug(
+						"[backward-block-downloader] could not fetch bodies batch",
+						"fromHeight", headers[0].Number.Uint64(),
+						"fromHash", headers[0].Hash(),
+						"toHeight", headers[len(headers)-1].Number.Uint64(),
+						"toHash", headers[len(headers)-1].Hash(),
+						"peerId", peerId,
+						"err", err,
+					)
+					return nil
+				}
+
+				bodies := bodiesResponse.Data
+				blocks := make([]*types.Block, len(headers))
+				for i, header := range headers {
+					block := types.NewBlockFromNetwork(header, bodies[i])
+					err = block.HashCheck(true)
+					if err == nil {
+						blocks = append(blocks, block)
+						continue
+					}
+
+					bbd.logger.Debug(
+						"[backward-block-downloader] block hash check failed, penalizing peer",
+						"hash", block.Hash(),
+						"num", block.NumberU64(),
+						"peerId", peerId,
+						"err", err,
+					)
+
+					err = bbd.peerPenalizer.Penalize(ctx, &peerId)
+					if err != nil {
+						bbd.logger.Debug(
+							"[backward-block-downloader] could not penalize peer",
+							"peerId", peerId,
+							"err", err,
+						)
+					}
+
+					break
+				}
+				if len(blocks) == len(headers) {
+					blockBatches[headerBatchIndex] = blocks
+				}
+				return nil
+			})
 		}
-
-		bodies := bodiesResponse.Data
-		for i, header := range headers {
-			block := types.NewBlockFromNetwork(header, bodies[i])
-			err = block.HashCheck(true)
-			if err == nil {
-				blocks = append(blocks, block)
-				continue
+		if err := eg.Wait(); err != nil {
+			panic(err) // workers do not return errs
+		}
+		// mark peers as exhausted for those that had unsuccessful fetches
+		allBatchesComplete := true
+		for batchIndex, peerId := range batchAssignments {
+			if blockBatches[batchIndex] == nil {
+				peers.exhaustedPeers[peers.peerIdToIndex[peerId]] = true
+				allBatchesComplete = false
 			}
-
-			bbd.logger.Debug(
-				"[backward-block-downloader] block hash check failed",
-				"hash", block.Hash(),
-				"num", block.NumberU64(),
-				"err", err,
-			)
-
-			err = bbd.peerPenalizer.Penalize(ctx, &peerId)
+		}
+		if !allBatchesComplete {
+			attempts++
+			// recalculate the available peers as some have become exhausted
+			availablePeers, err = peers.nextAvailablePeers(config.maxParallelBodyDownloads)
 			if err != nil {
-				bbd.logger.Debug("[backward-block-downloader] could not penalize peer", "peerId", peerId, "err", err)
+				return err
 			}
-
-			peers.exhaustedPeers[peers.peerIdToIndex[peerId]] = true
-			blocks = make([]*types.Block, 0, len(headers))
-			break
+		} else {
+			pendingBatches = false
 		}
 	}
 
-	err := feed.consumeData(ctx, blocks)
+	blocks := make([]*types.Block, 0, len(headers))
+	for _, blocksBatch := range blockBatches {
+		blocks = append(blocks, blocksBatch...)
+	}
+
+	err = feed.consumeData(ctx, blocks)
 	if err != nil {
 		return fmt.Errorf("result feed could not consume blocks batch: %w", err)
 	}
@@ -465,6 +534,19 @@ func (pc *peersContext) nextAvailablePeer() (p2p.PeerId, error) {
 	peer := pc.peerIndexToId[pc.currentPeerIndex]
 	pc.incrementCurrentPeerIndex()
 	return peer, nil
+}
+
+func (pc *peersContext) nextAvailablePeers(n int) ([]p2p.PeerId, error) {
+	peers := make([]p2p.PeerId, 0, len(pc.exhaustedPeers))
+	for iteration := 0; iteration < len(pc.exhaustedPeers) && n > 0; iteration++ {
+		pid, err := pc.nextAvailablePeer()
+		if err != nil {
+			return nil, err
+		}
+		peers = append(peers, pid)
+		n--
+	}
+	return peers, nil
 }
 
 func (pc *peersContext) incrementCurrentPeerIndex() {
