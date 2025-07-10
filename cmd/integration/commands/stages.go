@@ -466,6 +466,7 @@ func init() {
 	withChain(cmdStageHeaders)
 	withHeimdall(cmdStageHeaders)
 	withChaosMonkey(cmdStageHeaders)
+	// cmdStageHeaders.Flags().StringVar()
 	rootCmd.AddCommand(cmdStageHeaders)
 
 	withConfig(cmdStageBodies)
