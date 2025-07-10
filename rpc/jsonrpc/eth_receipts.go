@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/RoaringBitmap/roaring/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -347,6 +348,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			})
 		}
 	}
+	return nil, nil
 
 	return logs, nil
 }
