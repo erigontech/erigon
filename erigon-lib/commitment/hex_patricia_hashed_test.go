@@ -1904,7 +1904,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	hph.SetTrace(false)
 
 	// generate list of updates diverging from first nibble (good case for parallelization))
-	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, length.Addr, 0, 15)
+	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, length.Addr, 2, 15)
 	builder := NewUpdateBuilder()
 	for i := 0; i < len(plainKeysList); i++ {
 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
