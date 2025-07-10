@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 
@@ -45,6 +46,7 @@ type BackwardBlockDownloader struct {
 	messageListener *p2p.MessageListener
 	headerReader    HeaderReader
 	tmpDir          string
+	stopped         atomic.Bool
 }
 
 func NewBackwardBlockDownloader(
@@ -74,7 +76,10 @@ func NewBackwardBlockDownloader(
 
 func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
 	bbd.logger.Debug("[backward-block-downloader] running")
-	defer bbd.logger.Debug("[backward-block-downloader] stopped")
+	defer func() {
+		bbd.logger.Debug("[backward-block-downloader] stopped")
+		bbd.stopped.Store(true)
+	}()
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
 		err := bbd.peerTracker.Run(ctx)
@@ -105,7 +110,10 @@ func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
 //     (default: 500 blocks)
 //   - WithChainLengthLimit - terminate the download if the backward header chain goes beyond a certain length.
 //     (default: unlimited)
-func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...Option) ResultFeed {
+func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...Option) (ResultFeed, error) {
+	if bbd.stopped.Load() {
+		return ResultFeed{}, errors.New("backward block downloader is stopped")
+	}
 	feed := ResultFeed{ch: make(chan BatchResult)}
 	go func() {
 		defer feed.close()
@@ -114,7 +122,7 @@ func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context,
 			feed.consumeErr(ctx, err)
 		}
 	}()
-	return feed
+	return feed, nil
 }
 
 func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, feed ResultFeed, opts ...Option) error {
@@ -123,7 +131,7 @@ func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Conte
 	config := applyOptions(opts...)
 	peers, err := bbd.loadPeers(config)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	// 2. Check which peers have the header to build knowledge about which peers we can use for syncing
@@ -156,7 +164,7 @@ func (bbd *BackwardBlockDownloader) loadPeers(config requestConfig) (peersContex
 
 	peers := bbd.peerTracker.ListPeers()
 	if len(peers) == 0 {
-		return peersContext{}, errors.New("no all")
+		return peersContext{}, errors.New("no peers available")
 	}
 
 	return newPeersContext(peers), nil

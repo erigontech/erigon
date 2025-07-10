@@ -1,6 +1,8 @@
 package engine_block_downloader
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 )
@@ -22,6 +24,19 @@ func (r BackwardDownloadRequest) LogArgs() []interface{} {
 }
 
 type Trigger byte
+
+func (s Trigger) String() string {
+	switch s {
+	case NewPayloadTrigger:
+		return "NewPayloadTrigger"
+	case SegmentRecoveryTrigger:
+		return "SegmentRecoveryTrigger"
+	case FcuTrigger:
+		return "FcuTrigger"
+	default:
+		panic(fmt.Sprintf("unknown trigger: %v", s))
+	}
+}
 
 const (
 	NewPayloadTrigger Trigger = iota

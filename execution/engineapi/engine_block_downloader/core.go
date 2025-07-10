@@ -166,10 +166,12 @@ func (e *EngineBlockDownloader) processDownloadV2(ctx context.Context, req Backw
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // need to cancel the ctx so that we cancel the download request processing if we err out prematurely
-	feed := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash)
+	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash)
+	if err != nil {
+		return err
+	}
 
 	var blocks []*types.Block
-	var err error
 	var insertedBlocksWithoutExec int
 	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
 		e.logger.Debug(
