@@ -2,6 +2,7 @@ package compress
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -16,7 +17,7 @@ func growslice(b []byte, wantLength int) []byte {
 }
 
 var (
-	zstdEnc, _ = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
+	zstdEnc, _ = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true), zstd.WithEncoderConcurrency(runtime.GOMAXPROCS(-1)*10))
 	zstdDec, _ = zstd.NewReader(nil, zstd.IgnoreChecksum(true))
 )
 
