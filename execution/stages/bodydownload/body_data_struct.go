@@ -79,6 +79,34 @@ type BodyRequest struct {
 	waitUntil uint64
 }
 
+func (bd BodyRequest) FromBlockNum() uint64 {
+	if len(bd.BlockNums) > 0 {
+		return bd.BlockNums[0]
+	}
+	return 0
+}
+
+func (bd BodyRequest) ToBlockNum() uint64 {
+	if len(bd.BlockNums) > 0 {
+		return bd.BlockNums[len(bd.BlockNums)-1]
+	}
+	return 0
+}
+
+func (bd BodyRequest) FromBlockHash() common.Hash {
+	if len(bd.Hashes) > 0 {
+		return bd.Hashes[0]
+	}
+	return common.Hash{}
+}
+
+func (bd BodyRequest) ToBlockHash() common.Hash {
+	if len(bd.Hashes) > 0 {
+		return bd.Hashes[len(bd.Hashes)-1]
+	}
+	return common.Hash{}
+}
+
 // NewBodyDownload create a new body download state object
 func NewBodyDownload(engine consensus.Engine, blockBufferSize, bodyCacheLimit int, br services.FullBlockReader, logger log.Logger) *BodyDownload {
 	bd := &BodyDownload{

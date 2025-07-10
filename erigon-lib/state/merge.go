@@ -224,6 +224,9 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		startTxNum = start
 		endTxNum = item.endTxNum
 	}
+	if minFound && startTxNum == endTxNum {
+		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
+	}
 	return &MergeRange{iit.name.String(), minFound, startTxNum, endTxNum}
 }
 
@@ -567,7 +570,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 		if exists {
-			valuesIn.existence, err = existence.OpenFilter(bloomIndexPath)
+			valuesIn.existence, err = existence.OpenFilter(bloomIndexPath, false)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 			}
@@ -579,6 +582,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 }
 
 func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*FilesItem, error) {
+	if startTxNum == endTxNum {
+		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
+	}
+
 	var outItem *FilesItem
 	var comp *seg.Compressor
 	var decomp *seg.Decompressor

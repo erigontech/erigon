@@ -21,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/params"
 )
 
 var (
@@ -52,17 +51,16 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:         ":30307",
-		AllowedPorts:       []uint{30303, 30304, 30305, 30306, 30307},
-		ProtocolVersion:    []uint{direct.ETH68, direct.ETH67},
-		MaxPeers:           32,
-		MaxPendingPeers:    1000,
-		NAT:                nat.Any(),
-		NoDiscovery:        true,
-		Name:               "p2p-mock",
-		NodeDatabase:       "dev/nodes/eth67",
-		PrivateKey:         privateKey,
-		LookupBootnodeURLs: params.BootnodeURLsByGenesisHash,
+		ListenAddr:      ":30307",
+		AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307},
+		ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
+		MaxPeers:        32,
+		MaxPendingPeers: 1000,
+		NAT:             nat.Any(),
+		NoDiscovery:     true,
+		Name:            "p2p-mock",
+		NodeDatabase:    "dev/nodes/eth67",
+		PrivateKey:      privateKey,
 	}
 
 	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(

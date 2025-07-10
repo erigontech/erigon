@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/debug"
 	rand2 "golang.org/x/exp/rand"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
@@ -525,22 +526,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
 	}
 
-	err := func() error {
-		defer func() {
-			r := recover()
-			if err, ok := r.(error); ok {
-				var pe errgroup.PanicError
-				if errors.As(err, &pe) {
-					a.logger.Crit("panic error in Aggregator errgroup", "err", pe, "stack", string(pe.Stack))
-					os.Stderr.Write(pe.Stack)
-				}
-			}
-			if r != nil {
-				panic(r)
-			}
-		}()
-		return g.Wait()
-	}()
+	err := debug.WaitErrGroupRecoverPanicError(g, a.logger)
 	if err != nil {
 		return err
 	}
@@ -767,26 +753,30 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
-	defer a.buildingFiles.Store(false)
-	if toStep > fromStep {
-		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
-	}
-	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-		if err := a.buildFiles(ctx, step); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer a.buildingFiles.Store(false)
+		if toStep > fromStep {
+			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+		}
+		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+			if err := a.buildFiles(ctx, step); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+					panic(err)
+				}
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				panic(err)
 			}
-			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-			panic(err)
+			a.onFilesChange(nil)
 		}
-		a.onFilesChange(nil)
-	}
 
-	go func() {
-		if err := a.MergeLoop(ctx); err != nil {
-			panic(err)
-		}
-		a.onFilesChange(nil)
+		go func() {
+			if err := a.MergeLoop(ctx); err != nil {
+				panic(err)
+			}
+			a.onFilesChange(nil)
+		}()
 	}()
 	return nil
 }

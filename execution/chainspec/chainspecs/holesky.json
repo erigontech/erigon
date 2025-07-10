@@ -1,25 +1,22 @@
 {
-  "chainName": "hoodi",
-  "chainId": 560048,
-  "consensus": "ethash",
+  "chainName": "holesky",
+  "chainId": 17000,
   "homesteadBlock": 0,
-  "daoForkBlock": 0,
   "eip150Block": 0,
   "eip155Block": 0,
+  "eip158Block": 0,
   "byzantiumBlock": 0,
   "constantinopleBlock": 0,
   "petersburgBlock": 0,
   "istanbulBlock": 0,
-  "muirGlacierBlock": 0,
   "berlinBlock": 0,
   "londonBlock": 0,
-  "arrowGlacierBlock": 0,
-  "grayGlacierBlock": 0,
+  "mergeForkBlock": 0,
   "terminalTotalDifficulty": 0,
   "terminalTotalDifficultyPassed": true,
-  "shanghaiTime": 0,
-  "cancunTime": 0,
-  "pragueTime": 1742999832,
+  "shanghaiTime": 1696000704,
+  "cancunTime": 1707305664,
+  "pragueTime": 1740434112,
   "blobSchedule": {
     "cancun": {
       "target": 3,
@@ -32,6 +29,6 @@
       "baseFeeUpdateFraction": 5007716
     }
   },
-  "depositContractAddress": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
-  "ethash": {}
+  "depositContractAddress": "0x4242424242424242424242424242424242424242",
+  "defaultBlockGasLimit": 60000000
 }

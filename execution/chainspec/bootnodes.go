@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package params
+package chainspec
 
 import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
@@ -104,11 +104,6 @@ var V5Bootnodes = []string{
 	"enr:-Ku4QEWzdnVtXc2Q0ZVigfCGggOVB2Vc1ZCPEc6j21NIFLODSJbvNaef1g4PxhPwl_3kax86YPheFUSLXPRs98vvYsoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhDZBrP2Jc2VjcDI1NmsxoQM6jr8Rb1ktLEsVcKAPa08wCsKUmvoQ8khiOl_SLozf9IN1ZHCCIyg",
 }
 
-var BorMainnetBootnodes = []string{
-	"enode://b8f1cc9c5d4403703fbf377116469667d2b1823c0daf16b7250aa576bacf399e42c3930ccfcb02c5df6879565a2b8931335565f0e8d3f8e72385ecf4a4bf160a@3.36.224.80:30303",
-	"enode://8729e0c825f3d9cad382555f3e46dcff21af323e89025a0e6312df541f4a9e73abfa562d64906f5e59c51fe6f0501b3e61b07979606c56329c020ed739910759@54.194.245.5:30303",
-}
-
 var GnosisBootnodes = []string{
 	"enode://fb14d72321ee823fcf21e163091849ee42e0f6ac0cddc737d79e324b0a734c4fc51823ef0a96b749c954483c25e8d2e534d1d5fc2619ea22d58671aff96f5188@65.109.103.148:30303",
 	"enode://40f40acd78004650cce57aa302de9acbf54becf91b609da93596a18979bb203ba79fcbee5c2e637407b91be23ce72f0cc13dfa38d13e657005ce842eafb6b172@65.109.103.149:30303",
@@ -129,72 +124,24 @@ var ChiadoBootnodes = []string{
 
 const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
 
+var knownDNSNetwork = make(map[common.Hash]string)
+
 // KnownDNSNetwork returns the address of a public DNS-based node list for the given
-// genesis hash and protocol. See https://github.com/ethereum/discv4-dns-lists for more
-// information.
-func KnownDNSNetwork(genesis common.Hash, protocol string) string {
-	var net string
-	switch genesis {
-	case MainnetGenesisHash:
-		net = "mainnet"
-	case SepoliaGenesisHash:
-		net = "sepolia"
-	case HoleskyGenesisHash:
-		net = "holesky"
-	case HoodiGenesisHash:
-		net = "hoodi"
-	case BorMainnetGenesisHash:
-		return "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
-	default:
-		return ""
-	}
-	return dnsPrefix + protocol + "." + net + ".ethdisco.net"
+// genesis hash. See https://github.com/ethereum/discv4-dns-lists for more information.
+func KnownDNSNetwork(genesis common.Hash) string {
+	return knownDNSNetwork[genesis]
 }
+
+var bootNodeURLsByGenesisHash = make(map[common.Hash][]string)
 
 func BootnodeURLsByGenesisHash(genesis common.Hash) []string {
-	switch genesis {
-	case MainnetGenesisHash:
-		return MainnetBootnodes
-	case HoleskyGenesisHash:
-		return HoleskyBootnodes
-	case HoodiGenesisHash:
-		return HoodiBootnodes
-	case SepoliaGenesisHash:
-		return SepoliaBootnodes
-	case AmoyGenesisHash:
-		return AmoyBootnodes
-	case BorMainnetGenesisHash:
-		return BorMainnetBootnodes
-	case GnosisGenesisHash:
-		return GnosisBootnodes
-	case ChiadoGenesisHash:
-		return ChiadoBootnodes
-	default:
-		return []string{}
-	}
+	return bootNodeURLsByGenesisHash[genesis]
 }
 
+var bootNodeURLsByChainName = make(map[string][]string)
+
 func BootnodeURLsOfChain(chain string) []string {
-	switch chain {
-	case networkname.Mainnet:
-		return MainnetBootnodes
-	case networkname.Holesky:
-		return HoleskyBootnodes
-	case networkname.Hoodi:
-		return HoodiBootnodes
-	case networkname.Sepolia:
-		return SepoliaBootnodes
-	case networkname.Amoy:
-		return AmoyBootnodes
-	case networkname.BorMainnet:
-		return BorMainnetBootnodes
-	case networkname.Gnosis:
-		return GnosisBootnodes
-	case networkname.Chiado:
-		return ChiadoBootnodes
-	default:
-		return []string{}
-	}
+	return bootNodeURLsByChainName[chain]
 }
 
 func StaticPeerURLsOfChain(chain string) []string {

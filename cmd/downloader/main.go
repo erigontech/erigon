@@ -60,10 +60,13 @@ import (
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 
 	_ "github.com/erigontech/erigon-db/snaptype"      //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
@@ -299,7 +302,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
-	d.HandleTorrentClientStatus()
+	d.HandleTorrentClientStatus(nil)
 
 	err = d.AddTorrentsFromDisk(ctx)
 	if err != nil {
@@ -727,7 +730,7 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	defer db.Close()
 
 	if cc := tool.ChainConfigFromDB(db); cc != nil {
-		chainConfig := params.ChainConfigByChainName(chainName)
+		chainConfig := chainspec.ChainConfigByChainName(chainName)
 		if chainConfig == nil {
 			return fmt.Errorf("unknown chain: %s", chainName)
 		}

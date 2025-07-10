@@ -19,6 +19,7 @@ package chain
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"sync"
 	"time"
@@ -94,6 +95,8 @@ type Config struct {
 	// (Optional) deposit contract of PoS chains
 	// See also EIP-6110: Supply validator deposits on chain
 	DepositContract common.Address `json:"depositContractAddress,omitempty"`
+
+	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -353,7 +356,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
+func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
 		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
@@ -408,7 +411,7 @@ func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	return c.getBlobConfig(time).Max
+	return c.GetBlobConfig(time).Max
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
@@ -416,11 +419,18 @@ func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
 }
 
 func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
-	return c.getBlobConfig(time).Target
+	return c.GetBlobConfig(time).Target
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
-	return c.getBlobConfig(time).BaseFeeUpdateFraction
+	return c.GetBlobConfig(time).BaseFeeUpdateFraction
+}
+
+func (c *Config) GetMaxRlpBlockSize(time uint64) int {
+	if c.IsOsaka(time) {
+		return params.MaxRlpBlockSize
+	}
+	return math.MaxInt
 }
 
 func (c *Config) SecondsPerSlot() uint64 {

@@ -473,7 +473,7 @@ func (s txEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPo
 	}
 
 	defer cursor.Close()
-	lastEntityToKeep, ok, err := s.EntityIdFromBlockNum(ctx, unwindPoint)
+	firstEntityToDelete, ok, err := s.EntityIdFromBlockNum(ctx, unwindPoint+1)
 	if err != nil {
 		return 0, err
 	}
@@ -482,7 +482,7 @@ func (s txEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPo
 		return 0, nil
 	}
 
-	var entityKey = entityStoreKey(lastEntityToKeep + 1)
+	var entityKey = entityStoreKey(firstEntityToDelete)
 	var k []byte
 	var deleted int
 	for k, _, err = cursor.Seek(entityKey[:]); err == nil && k != nil; k, _, err = cursor.Next() {

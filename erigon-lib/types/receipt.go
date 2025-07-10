@@ -596,7 +596,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 
 // DeriveFieldsV4ForCachedReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum uint64, txnHash common.Hash) {
+func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum uint64, txnHash common.Hash, calcBloom bool) {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	r.BlockHash = blockHash
@@ -611,6 +611,9 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum
 		r.Logs[j].TxIndex = r.TransactionIndex
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
+	}
+	if calcBloom {
+		r.Bloom = CreateBloom(Receipts{r})
 	}
 }
 

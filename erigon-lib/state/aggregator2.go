@@ -187,6 +187,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.AccountsDomain.String(), keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultWordLvlCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -210,6 +211,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.StorageDomain.String(), keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultWordLvlCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -234,6 +236,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.CodeDomain.String(), keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultWordLvlCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -262,6 +265,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultWordLvlCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -283,6 +287,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.ReceiptDomain.String(), keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultWordLvlCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -308,6 +313,7 @@ var Schema = SchemaGen{
 				disable:      true, // disable everything by default
 				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultWordLvlCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -317,24 +323,28 @@ var Schema = SchemaGen{
 
 		Compression: seg.CompressNone,
 		name:        kv.LogAddrIdx,
+		Accessors:   AccessorHashMap,
 	},
 	LogTopicIdx: iiCfg{
 		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.LogTopicIdx,
+		Accessors:   AccessorHashMap,
 	},
 	TracesFromIdx: iiCfg{
 		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.TracesFromIdx,
+		Accessors:   AccessorHashMap,
 	},
 	TracesToIdx: iiCfg{
 		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
+		Accessors:   AccessorHashMap,
 	},
 }
 

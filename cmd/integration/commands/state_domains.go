@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -40,13 +41,14 @@ import (
 	downloadertype "github.com/erigontech/erigon-lib/snaptype"
 	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/node/nodecfg"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 func init() {
@@ -95,7 +97,7 @@ var readDomains = &cobra.Command{
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = core.GenesisBlockByChainName(chain)
+		ethConfig.Genesis = chainspec.GenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 
 		var readFromDomain string
@@ -266,8 +268,9 @@ func makeCompactableIndexDB(ctx context.Context, db kv.RwDB, files []string, dir
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	fileInfos := []downloadertype.FileInfo{}
-	for _, file := range files {
-		res, ok, _ := downloadertype.ParseFileName("", file)
+	for _, f := range files {
+		dirPart, fileName := filepath.Split(f)
+		res, ok, _ := downloadertype.ParseFileName(dirPart, fileName)
 		if !ok {
 			panic("invalid file name")
 		}
@@ -358,8 +361,9 @@ func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs da
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	fileInfos := []downloadertype.FileInfo{}
-	for _, file := range files {
-		res, ok, _ := downloadertype.ParseFileName("", file)
+	for _, f := range files {
+		dirPart, fileName := filepath.Split(f)
+		res, ok, _ := downloadertype.ParseFileName(dirPart, fileName)
 		if !ok {
 			panic("invalid file name")
 		}
