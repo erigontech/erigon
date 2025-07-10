@@ -21,9 +21,25 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/klauspost/compress/zstd"
+)
+
+var (
+	zstdEncPool = sync.Pool{
+		New: func() interface{} {
+			enc, _ := zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
+			return enc
+		},
+	}
+	zstdDecPool = sync.Pool{
+		New: func() interface{} {
+			dec, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
+			return dec
+		},
+	}
 )
 
 var be = binary.BigEndian
@@ -134,8 +150,15 @@ func NewPagedReader(r ReaderI, pageSize int, snappy bool) *PagedReader {
 	if pageSize == 0 {
 		pageSize = 1
 	}
-	a, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
+	a, _ := zstdDecPool.Get().(*zstd.Decoder)
 	return &PagedReader{file: r, pageSize: pageSize, isCompressed: snappy, page: &Page{decoder: a}, decoder: a}
+}
+
+func (g *PagedReader) Close() {
+	if g.decoder != nil {
+		zstdDecPool.Put(g.decoder)
+		g.decoder = nil
+	}
 }
 
 func (g *PagedReader) Reset(offset uint64) {
@@ -231,7 +254,7 @@ func (g *PagedReader) Skip() (uint64, int) {
 }
 
 func NewPagedWriter(parent CompressorI, pageSize int, compressionEnabled bool) *PagedWriter {
-	a, _ := zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
+	a, _ := zstdEncPool.Get().(*zstd.Encoder)
 	return &PagedWriter{parent: parent, pageSize: pageSize, compressionEnabled: compressionEnabled, encoder: a}
 }
 
@@ -256,7 +279,13 @@ type PagedWriter struct {
 }
 
 func (c *PagedWriter) Empty() bool { return c.pairs == 0 }
-func (c *PagedWriter) Close()      { c.parent.Close() }
+func (c *PagedWriter) Close() {
+	if c.encoder != nil {
+		zstdEncPool.Put(c.encoder)
+		c.encoder = nil
+	}
+	c.parent.Close()
+}
 func (c *PagedWriter) Compress() error {
 	if err := c.Flush(); err != nil {
 		return err
