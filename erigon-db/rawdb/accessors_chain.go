@@ -24,6 +24,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"time"
@@ -1238,9 +1239,10 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	}
 	if len(v) > 30_000 {
 		log.Warn("[dbg] big", "blockNum", query.BlockNum, "len(v)", len(v))
+		//return nil, false, nil
+	} else {
 		return nil, false, nil
 	}
-	return nil, false, nil
 
 	// Convert the receipts from their storage form to their internal representation
 	receipt := &types.ReceiptForStorage{}
@@ -1249,6 +1251,8 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	}
 	res := (*types.Receipt)(receipt)
 	res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
+	d, _ := json.Marshal(receipt)
+	fmt.Printf("%s\n", d)
 	return res, true, nil
 }
 
