@@ -1238,7 +1238,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	if len(v) == 0 {
 		return nil, false, nil
 	}
-	if len(v) > 20_000 {
+	if len(v) > 30_000 {
 		log.Warn("[dbg] big", "blockNum", query.BlockNum, "len(v)", len(v))
 		//return nil, false, nil
 	} else {
