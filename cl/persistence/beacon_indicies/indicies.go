@@ -53,6 +53,11 @@ var zstdWriterPool = &sync.Pool{
 	},
 }
 
+func putWriter(v *zstd.Encoder) {
+	v.Reset(nil)
+	zstdWriterPool.Put(v)
+}
+
 func WriteHighestFinalized(tx kv.RwTx, slot uint64) error {
 	return tx.Put(kv.HighestFinalized, kv.HighestFinalizedKey, base_encoding.Encode64ToBytes4(slot))
 }
@@ -318,7 +323,7 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 	buf := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(buf)
 	encoder := zstdWriterPool.Get().(*zstd.Encoder)
-	defer zstdWriterPool.Put(encoder)
+	defer putWriter(encoder)
 	buf.Reset()
 	encoder.Reset(buf)
 	_, err = snapshot_format.WriteBlockForSnapshot(encoder, block, nil)

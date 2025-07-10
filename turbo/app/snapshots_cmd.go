@@ -1489,8 +1489,8 @@ func doCompress(cliCtx *cli.Context) error {
 			concatBuf = concatBuf[:0]
 		}
 
-		compressionPageBuf, word = compress.EncodeZstdIfNeed(compressionPageBuf, word, doSnappyEachWord)
-		decompressionPageBuf, word, err = compress.DecodeZstdIfNeed(decompressionPageBuf, word, doUnSnappyEachWord)
+		compressionPageBuf, word = compress.EncodeZstdIfNeed(compressionPageBuf[:0], word, doSnappyEachWord)
+		decompressionPageBuf, word, err = compress.DecodeZstdIfNeed(decompressionPageBuf[:0], word, doUnSnappyEachWord)
 		if err != nil {
 			return err
 		}
