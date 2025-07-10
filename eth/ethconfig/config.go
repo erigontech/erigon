@@ -276,6 +276,8 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	L2RPCAddr string
 }
 
 type Sync struct {
