@@ -1271,6 +1271,9 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		if len(v) == 0 {
 			continue
 		}
+		if len(v) > 10_000 {
+			log.Warn("[dbg] big", "blockNum", blockNum, "txnID", txnID, "len(v)", len(v))
+		}
 
 		// Convert the receipts from their storage form to their internal representation
 		receipt := &types.ReceiptForStorage{}
