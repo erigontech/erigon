@@ -41,10 +41,9 @@ func EncodeZstdIfNeed(buf, v []byte, enabled bool) (outBuf []byte, compressed []
 	buf = growslice(buf, bound)
 
 	enc := zstdEncPool.Get().(*zstd.Encoder)
-	defer zstdEncPool.Put(enc)
-
-	// EncodeAll uses buf[:0] to reuse the backing array
 	buf = enc.EncodeAll(v, buf[:0])
+	enc.Reset(nil)
+	zstdEncPool.Put(enc)
 	return buf, buf
 }
 
@@ -57,9 +56,10 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	buf = growslice(buf, len(v))
 
 	dec := zstdDecPool.Get().(*zstd.Decoder)
-	defer zstdDecPool.Put(dec)
-
 	out, err := dec.DecodeAll(v, buf[:0])
+	dec.Reset(nil)
+	zstdDecPool.Put(dec)
+
 	if err != nil {
 		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
 	}
