@@ -23,6 +23,7 @@ import (
 	"io"
 
 	"github.com/erigontech/erigon-lib/common/compress"
+	"github.com/klauspost/compress/zstd"
 )
 
 var be = binary.BigEndian
@@ -69,6 +70,7 @@ type Page struct {
 	kOffset, vOffset   uint32
 
 	compressionBuf []byte
+	decoder        *zstd.Decoder
 }
 
 func FromBytes(buf []byte, compressionEnabled bool) *Page {
@@ -79,7 +81,7 @@ func FromBytes(buf []byte, compressionEnabled bool) *Page {
 
 func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 	var err error
-	r.compressionBuf, v, err = compress.DecodeZstdIfNeed(r.compressionBuf[:0], v, compressionEnabled)
+	r.compressionBuf, v, err = compress.DecodeZstdIfNeed2(r.compressionBuf[:0], v, compressionEnabled, r.decoder)
 	if err != nil {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}
@@ -123,6 +125,8 @@ type PagedReader struct {
 	pageSize     int
 	page         *Page
 
+	decoder *zstd.Decoder
+
 	currentPageOffset, nextPageOffset uint64
 }
 
@@ -130,7 +134,8 @@ func NewPagedReader(r ReaderI, pageSize int, snappy bool) *PagedReader {
 	if pageSize == 0 {
 		pageSize = 1
 	}
-	return &PagedReader{file: r, pageSize: pageSize, isCompressed: snappy, page: &Page{}}
+	a, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
+	return &PagedReader{file: r, pageSize: pageSize, isCompressed: snappy, page: &Page{decoder: a}, decoder: a}
 }
 
 func (g *PagedReader) Reset(offset uint64) {
@@ -145,7 +150,7 @@ func (g *PagedReader) Reset(offset uint64) {
 	g.file.Reset(offset)
 	g.currentPageOffset = offset
 	g.nextPageOffset = offset
-	g.page = &Page{} // TODO: optimize
+	g.page = &Page{decoder: g.decoder} // TODO: optimize
 	if g.file.HasNext() {
 		g.NextPage()
 	}
@@ -226,7 +231,8 @@ func (g *PagedReader) Skip() (uint64, int) {
 }
 
 func NewPagedWriter(parent CompressorI, pageSize int, compressionEnabled bool) *PagedWriter {
-	return &PagedWriter{parent: parent, pageSize: pageSize, compressionEnabled: compressionEnabled}
+	a, _ := zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
+	return &PagedWriter{parent: parent, pageSize: pageSize, compressionEnabled: compressionEnabled, encoder: a}
 }
 
 type CompressorI interface {
@@ -244,6 +250,7 @@ type PagedWriter struct {
 
 	compressionBuf     []byte
 	compressionEnabled bool
+	encoder            *zstd.Encoder
 
 	pairs int
 }
@@ -326,7 +333,7 @@ func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
 	}
 
 	wholePage = append(wholePage, keysAndVals...)
-	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], wholePage, c.compressionEnabled)
+	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed2(c.compressionBuf[:0], wholePage, c.compressionEnabled, c.encoder)
 
 	return wholePage, true
 }

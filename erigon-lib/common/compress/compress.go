@@ -2,7 +2,6 @@ package compress
 
 import (
 	"fmt"
-	"runtime"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -17,7 +16,7 @@ func growslice(b []byte, wantLength int) []byte {
 }
 
 var (
-	zstdEnc, _ = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true), zstd.WithEncoderConcurrency(runtime.GOMAXPROCS(-1)*10))
+	zstdEnc, _ = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
 	zstdDec, _ = zstd.NewReader(nil, zstd.IgnoreChecksum(true))
 )
 
@@ -33,9 +32,34 @@ func EncodeZstdIfNeed(buf, v []byte, enabled bool) (outBuf []byte, compressed []
 	return buf, buf
 }
 
+// EncodeZstdIfNeed compresses v into buf if enabled, otherwise returns buf and v unchanged.
+// It pre-allocates buf to ZSTD’s worst-case bound (src + src/255 + 16) and reuses encoders.
+func EncodeZstdIfNeed2(buf, v []byte, enabled bool, zstdEnc *zstd.Encoder) (outBuf []byte, compressed []byte) {
+	if !enabled {
+		return buf, v
+	}
+	bound := len(v) + len(v)/255 + 16
+	buf = growslice(buf, bound)
+	buf = zstdEnc.EncodeAll(v, buf[:0])
+	return buf, buf
+}
+
 // DecodeZstdIfNeed decompresses v into buf if enabled, otherwise returns buf and v unchanged.
 // It reuses decoders from the pool and writes into buf (grown to at least len(v)).
 func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
+	if !enabled {
+		return buf, v, nil
+	}
+	buf = growslice(buf, len(v))
+
+	out, err := zstdDec.DecodeAll(v, buf[:0])
+	if err != nil {
+		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
+	}
+	return out, out, nil
+}
+
+func DecodeZstdIfNeed2(buf, v []byte, enabled bool, zstdDec *zstd.Decoder) ([]byte, []byte, error) {
 	if !enabled {
 		return buf, v, nil
 	}
