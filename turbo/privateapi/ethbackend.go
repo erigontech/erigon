@@ -310,7 +310,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	}
 
 	var sendersBytes []byte
-	if sendersBytes != nil {
+	if senders != nil {
 		sendersBytes = make([]byte, 20*len(senders))
 		for i, sender := range senders {
 			copy(sendersBytes[i*20:], sender[:])
