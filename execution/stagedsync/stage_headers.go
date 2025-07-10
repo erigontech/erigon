@@ -153,7 +153,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	if curBlock > 0 {
 		curBlock++
 	}
-	fmt.Printf("requesting headerd from %d to %d\n", curBlock, latestBlock.Uint64())
+	fmt.Printf("requesting headers from %d to %d\n", curBlock, latestBlock.Uint64())
 
 	var blockNumber big.Int
 	// Process blocks from the starting block up to the latest.
@@ -184,7 +184,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
 			return err
 		}
-
 		// Update the progress counter.
 		// i = blockNum + 1
 		select {
@@ -204,6 +203,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			// fmt.Printf("Wrote block %d with hash %s\n", blockNum, blk.Hash().Hex())
 			if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
 				return err
+			}
+			if err = s.Update(tx, blockNum); err != nil {
+				return fmt.Errorf("saving Headers progress: %w", err)
 			}
 
 			blkSec := float64(blockNum-prev) / 40.0
