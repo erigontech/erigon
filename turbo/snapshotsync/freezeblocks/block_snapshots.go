@@ -212,12 +212,12 @@ func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
-	if curBlockNum <= keep {
-		return
-	}
+	// var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
+	// if curBlockNum <= keep {
+	// 	return
+	// }
 	blockFrom = blocksInSnapshots + 1
-	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, chainConfig)
+	return snapshotsync.CanRetire(blockFrom, curBlockNum, snapType, chainConfig)
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
