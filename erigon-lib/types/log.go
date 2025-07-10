@@ -288,8 +288,8 @@ func decodeTopics(s *rlp.Stream) (list []common.Hash, err error) {
 	if l == 0 {
 		return nil, s.ListEnd()
 	}
-
-	list = make([]common.Hash, l/(1+32)) // rlpLenPrefix+32bytes
+	listLen := l / (1 + 32) // rlpLenPrefix+32bytes
+	list = make([]common.Hash, listLen)
 	var i int
 	for ; s.MoreDataInList(); i++ {
 		if i == len(list) {
