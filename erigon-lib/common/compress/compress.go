@@ -44,9 +44,11 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	}
 	buf = growslice(buf, len(v))
 
+	t := time.Now()
 	out, err := zstdDec.DecodeAll(v, buf[:0])
 	if err != nil {
 		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
 	}
+	log.Info("[dbg] EncodeZstdIfNeed", "len(v)", len(v), "len(buf)", len(buf), "took", time.Since(t).String())
 	return out, out, nil
 }
