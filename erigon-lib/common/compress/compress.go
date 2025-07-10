@@ -2,9 +2,7 @@ package compress
 
 import (
 	"fmt"
-	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -30,9 +28,7 @@ func EncodeZstdIfNeed(buf, v []byte, enabled bool) (outBuf []byte, compressed []
 	}
 	bound := len(v) + len(v)/255 + 16
 	buf = growslice(buf, bound)
-	t := time.Now()
 	buf = zstdEnc.EncodeAll(v, buf[:0])
-	log.Info("[dbg] EncodeZstdIfNeed", "len(v)", len(v), "len(buf)", len(buf), "took", time.Since(t).String())
 	return buf, buf
 }
 
@@ -44,11 +40,9 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	}
 	buf = growslice(buf, len(v))
 
-	t := time.Now()
 	out, err := zstdDec.DecodeAll(v, buf[:0])
 	if err != nil {
 		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
 	}
-	log.Info("[dbg] EncodeZstdIfNeed", "len(v)", len(v), "len(buf)", len(buf), "took", time.Since(t).String())
 	return out, out, nil
 }
