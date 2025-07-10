@@ -160,6 +160,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 		}
 		if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
 			return false, err
+
 		}
 
 		// MA applystate
