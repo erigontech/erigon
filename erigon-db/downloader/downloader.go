@@ -31,7 +31,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +38,7 @@ import (
 
 	"github.com/anacrolix/chansync"
 	"github.com/anacrolix/torrent/types/infohash"
+	"github.com/anacrolix/torrent/webseed"
 	"github.com/c2h5oh/datasize"
 	"github.com/puzpuzpuz/xsync/v4"
 	"golang.org/x/sync/semaphore"
@@ -66,6 +66,13 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
 )
+
+var debugWebseed = false
+
+func init() {
+	_, debugWebseed = os.LookupEnv("DOWNLOADER_DEBUG_WEBSEED")
+	webseed.PrintDebug = true
+}
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
 type Downloader struct {
