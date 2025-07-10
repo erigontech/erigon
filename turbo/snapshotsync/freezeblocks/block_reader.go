@@ -193,6 +193,7 @@ func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash
 	if reply.BlockNumber == 0 && reply.TxNumber == 0 {
 		return reply.BlockNumber, reply.TxNumber, false, nil
 	}
+
 	return reply.BlockNumber, reply.TxNumber, true, nil
 }
 
@@ -229,13 +230,12 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	if err != nil {
 		return nil, nil, err
 	}
-
-	block = &types.Block{}
-	if (len(reply.BlockRlp)) == 0 {
+	if len(reply.BlockRlp) == 0 {
 		// block not found
 		return nil, nil, nil
 	}
 
+	block = &types.Block{}
 	err = rlp.DecodeBytes(reply.BlockRlp, block)
 	if err != nil {
 		return nil, nil, err
