@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb/utils"
@@ -1253,6 +1254,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
 	d, _ := json.Marshal(receipt)
 	fmt.Printf("%s\n", d)
+	os.Exit(0)
 	return res, true, nil
 }
 
