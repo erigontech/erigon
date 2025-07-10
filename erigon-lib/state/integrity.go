@@ -154,7 +154,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 				if item.src != nil && item.src.decompressor != nil {
 					fileName = item.src.decompressor.FileName()
 				}
-				err = fmt.Errorf("panic in file: %s\n%s", fileName, dbg.Stack())
+				err = fmt.Errorf("panic in file: %s. Stack: %s", fileName, dbg.Stack())
 			}
 		}()
 		item.src.decompressor.MadvSequential()
