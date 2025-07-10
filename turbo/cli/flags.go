@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -276,7 +275,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	if persistenceReceiptsV2 {
 		cfg.PersistReceiptsCacheV2 = true
-		state.EnableHistoricalRCache()
 	}
 
 	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance)
