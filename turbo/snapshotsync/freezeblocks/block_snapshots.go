@@ -633,8 +633,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			txn2.SetSender(senders[j])
 			sender = senders[j]
 		} else {
-			signer := types.LatestSignerForChainID(chainConfig.ChainID)
-			sender, err = txn2.Sender(*signer)
+			signerEth := types.LatestSignerForChainID(chainConfig.ChainID)
+			signerArb := types.NewArbitrumSigner(*signerEth)
+
+			sender, err = signerArb.Sender(txn2)
 			if err != nil {
 				return nil, err
 			}
