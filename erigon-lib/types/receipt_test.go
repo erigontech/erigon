@@ -21,11 +21,9 @@ package types
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
-	"os"
 	"reflect"
 	"testing"
 
@@ -626,40 +624,47 @@ func TestReceiptEncode(t *testing.T) {
 	})
 }
 
-func makeTestLog() *Log {
+func makeTestLog(topics int) *ReceiptForStorage {
 	// Create 20 topics
-	topics := make([]common.Hash, 20)
-	for i := 0; i < 20; i++ {
-		topics[i] = common.BytesToHash([]byte("topic" + string(rune(i+48))))
+	tl := make([]common.Hash, topics)
+	for i := 0; i < topics; i++ {
+		tl[i] = common.BytesToHash([]byte("topic" + string(rune(i+48))))
 	}
 	// Create 1024 bytes of data
 	data := make([]byte, 1024)
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
-	return &Log{
-		Address: common.BytesToAddress([]byte("testaddress123456")),
-		Topics:  topics,
-		Data:    data,
+	return &ReceiptForStorage{
+		Logs: Logs{
+			&Log{
+				Address: common.BytesToAddress([]byte("testaddress123456")),
+				Topics:  tl,
+				Data:    data,
+			},
+		},
 	}
 }
 
 func BenchmarkDecodeRLP(b *testing.B) {
-	//log := makeTestLog()
-	dataJson, err := os.ReadFile("./../../1.json")
-	require.NoError(b, err)
-	r := &ReceiptForStorage{}
-	err = json.Unmarshal(dataJson, r)
-	require.NoError(b, err)
+	for i := 0; i < 300; i++ {
+		r := makeTestLog(20)
+		dataRlp, err := rlp.EncodeToBytes(r)
+		require.NoError(b, err)
+		var l ReceiptForStorage
+		err = rlp.DecodeBytes(dataRlp, &l)
+		require.NoError(b, err)
+	}
 
+	r := makeTestLog(20)
 	dataRlp, err := rlp.EncodeToBytes(r)
 	require.NoError(b, err)
 
 	b.ResetTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		s := rlp.NewStream(bytes.NewReader(dataRlp), 0)
 		var l ReceiptForStorage
-		if err := s.Decode(&l); err != nil {
+		if err := rlp.DecodeBytes(dataRlp, &l); err != nil {
 			b.Fatalf("DecodeRLP failed: %v", err)
 		}
 	}
