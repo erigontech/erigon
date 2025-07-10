@@ -299,27 +299,27 @@ func decodeTopics(appendList *[]common.Hash, s *rlp.Stream) (err error) {
 	return checkErrListEnd(s, err)
 }
 
-// DecodeRLP implements rlp.Decoder.
-//
-// Note some redundant fields(e.g. block number, txn hash etc) will be assembled later.
-func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return err
-	}
-	var b []byte
-	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Address: %w", err)
-	}
-	if len(b) != 20 {
-		return fmt.Errorf("wrong size for Address: %d", len(b))
-	}
-	copy(l.Address[:], b)
-	if err := decodeTopics(&l.Topics, s); err != nil {
-		return err
-	}
-	if l.Data, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Data: %w", err)
-	}
-	return s.ListEnd()
-}
+//// DecodeRLP implements rlp.Decoder.
+////
+//// Note some redundant fields(e.g. block number, txn hash etc) will be assembled later.
+//func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
+//	_, err := s.List()
+//	if err != nil {
+//		return err
+//	}
+//	var b []byte
+//	if b, err = s.Bytes(); err != nil {
+//		return fmt.Errorf("read Address: %w", err)
+//	}
+//	if len(b) != 20 {
+//		return fmt.Errorf("wrong size for Address: %d", len(b))
+//	}
+//	copy(l.Address[:], b)
+//	if err := decodeTopics(&l.Topics, s); err != nil {
+//		return err
+//	}
+//	if l.Data, err = s.Bytes(); err != nil {
+//		return fmt.Errorf("read Data: %w", err)
+//	}
+//	return s.ListEnd()
+//}
