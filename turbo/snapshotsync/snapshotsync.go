@@ -167,6 +167,8 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 		if !canSnapshotBePruned(name) {
 			continue
 		}
+		var to uint64
+		var err error
 		if isStateSnapshot(name) {
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
@@ -177,7 +179,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			if err != nil {
 				return nil, err
 			}
-			if stepPrune < res.To {
+			if stepPrune < to {
 				continue
 			}
 			blackList[name] = struct{}{}
