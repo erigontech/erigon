@@ -159,8 +159,15 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 				}
 			}
 		}
+<<<<<<< Updated upstream
 		if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
 			return false, err
+=======
+		if !txTask.HistoryExecution {
+			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
+				return false, err
+			}
+>>>>>>> Stashed changes
 		}
 
 		// MA applystate
