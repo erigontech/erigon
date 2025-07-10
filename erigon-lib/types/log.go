@@ -283,19 +283,20 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 func decodeTopics(s *rlp.Stream) (list []common.Hash, err error) {
 	l, err := s.List()
 	if err != nil {
-		return list, err
+		return nil, err
 	}
 	if l == 0 {
-		return list, s.ListEnd()
+		return nil, s.ListEnd()
 	}
 
-	list = make([]common.Hash, (l-1)/32)
-	for i := 0; s.MoreDataInList(); i++ {
+	list = make([]common.Hash, l/(1+32)) // rlpLenPrefix+32bytes
+	var i int
+	for ; s.MoreDataInList(); i++ {
 		if err = s.ReadBytes(list[i][:]); err != nil {
-			return list, err
+			return nil, err
 		}
 	}
-	return list, s.ListEnd()
+	return list[:i], s.ListEnd()
 }
 
 // DecodeRLP implements rlp.Decoder.
