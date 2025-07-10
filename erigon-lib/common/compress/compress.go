@@ -66,8 +66,8 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	}
 	buf = growslice(buf, len(v))
 
-	dec := zstdDecPool.Get().(*zstd.Decoder)
-	defer putDec(dec)
+	dec, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
+	defer dec.Close()
 
 	out, err := dec.DecodeAll(v, buf[:0])
 	if err != nil {
