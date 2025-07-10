@@ -168,35 +168,10 @@ func insertCloudflareHeaders(req *http.Request) {
 	}
 }
 
-// retryBackoff performs exponential backoff based on the attempt number and limited
-// by the provided minimum and maximum durations.
-//
-// It also tries to parse Retry-After response header when a http.StatusTooManyRequests
-// (HTTP Code 429) is found in the resp parameter. Hence it will return the number of
-// seconds the server states it may be ready to process more requests from this client.
-func calcBackoff(_min, _max time.Duration, attemptNum int, resp *http.Response) time.Duration {
-	if resp != nil {
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
-			if s, ok := resp.Header["Retry-After"]; ok {
-				if sleep, err := strconv.ParseInt(s[0], 10, 64); err == nil {
-					return time.Second * time.Duration(sleep)
-				}
-			}
-		}
-	}
-
-	mult := math.Pow(2, float64(attemptNum)) * float64(_min)
-	sleep := time.Duration(mult)
-	if float64(sleep) != mult || sleep > _max {
-		sleep = _max
-	}
-
-	return sleep
-}
-
 // TODO(anacrolix): Upstream any logic that works reliably.
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	r.downloader.lock.RLock()
+	// Peak
 	webseedMaxActiveTrips := r.downloader.stats.WebseedMaxActiveTrips
 	webseedActiveTrips := r.downloader.stats.WebseedActiveTrips
 	webseedTripCount := r.downloader.stats.WebseedTripCount
@@ -211,83 +186,50 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 	}
 
 	defer func() {
-		if r := recover(); r != nil {
-			if resp != nil && resp.Body != nil {
-				resp.Body.Close()
-				resp.Body = nil
-			}
-
-			err = fmt.Errorf("http client panic: %s", r)
-		}
-
 		webseedActiveTrips.Add(-1)
 	}()
 
 	insertCloudflareHeaders(req)
 
+	webseedTripCount.Add(1)
 	resp, err = r.Transport.RoundTrip(req)
+	if err != nil {
+		return
+	}
 
-	attempts := 1
-	retry := true
-
-	const minDelay = 500 * time.Millisecond
-	const maxDelay = 5 * time.Second
-	const maxAttempts = 10
-
-	for err == nil && retry {
-		webseedTripCount.Add(1)
-
-		switch resp.StatusCode {
-		case http.StatusOK:
-			if req.Header.Get("Range") != "" {
-				// the torrent lib is expecting http.StatusPartialContent so it will discard this
-				// if this count is higher than 0, it's likely there is a server side config issue
-				// as it implies that the server is not handling range requests correctly and is just
-				// returning the whole file - which the torrent lib can't handle
-				//
-				// TODO: We could count the bytes - probably need to take this from the req though
-				// as its not clear the amount of the content which will be read.  This needs
-				// further investigation - if required.
-				webseedDiscardCount.Add(1)
-			}
-
-			webseedBytesDownload.Add(resp.ContentLength)
-			retry = false
-
-		// the first two statuses here have been observed from cloudflare
-		// during testing.  The remainder are generally understood to be
-		// retry-able http responses, calcBackoff will use the Retry-After
-		// header if it's available
-		case http.StatusInternalServerError, http.StatusBadGateway,
-			http.StatusRequestTimeout, http.StatusTooEarly,
-			http.StatusTooManyRequests, http.StatusServiceUnavailable,
-			http.StatusGatewayTimeout:
-
-			WebseedServerFails.Add(1)
-
-			if resp.Body != nil {
-				resp.Body.Close()
-				resp.Body = nil
-			}
-
-			attempts++
-			delayTimer := time.NewTimer(calcBackoff(minDelay, maxDelay, attempts, resp))
-
-			select {
-			case <-delayTimer.C:
-				// Note this assumes the req.Body is nil
-				resp, err = r.Transport.RoundTrip(req)
-				webseedTripCount.Add(1)
-
-			case <-req.Context().Done():
-				err = req.Context().Err()
-			}
-			retry = attempts < maxAttempts
-
-		default:
-			webseedBytesDownload.Add(resp.ContentLength)
-			retry = false
+	switch resp.StatusCode {
+	case http.StatusOK:
+		if req.Header.Get("Range") != "" {
+			// the torrent lib is expecting http.StatusPartialContent so it will discard this
+			// if this count is higher than 0, it's likely there is a server side config issue
+			// as it implies that the server is not handling range requests correctly and is just
+			// returning the whole file - which the torrent lib can't handle
+			//
+			// TODO: We could count the bytes - probably need to take this from the req though
+			// as its not clear the amount of the content which will be read.  This needs
+			// further investigation - if required.
+			webseedDiscardCount.Add(1)
 		}
+
+		webseedBytesDownload.Add(resp.ContentLength)
+
+	// the first two statuses here have been observed from cloudflare
+	// during testing.  The remainder are generally understood to be
+	// retry-able http responses, calcBackoff will use the Retry-After
+	// header if it's available
+	case http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusRequestTimeout, http.StatusTooEarly,
+		http.StatusTooManyRequests, http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+
+		if debugWebseed {
+			// An error that's not handled by the torrent lib?
+			panic(resp.StatusCode)
+		}
+
+		WebseedServerFails.Add(1)
+	default:
+		webseedBytesDownload.Add(resp.ContentLength)
 	}
 
 	return resp, err
