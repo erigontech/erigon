@@ -292,6 +292,9 @@ func decodeTopics(s *rlp.Stream) (list []common.Hash, err error) {
 	list = make([]common.Hash, l/(1+32)) // rlpLenPrefix+32bytes
 	var i int
 	for ; s.MoreDataInList(); i++ {
+		if i == len(list) {
+			return nil, fmt.Errorf("too many elements in list")
+		}
 		if err = s.ReadBytes(list[i][:]); err != nil {
 			return nil, err
 		}
