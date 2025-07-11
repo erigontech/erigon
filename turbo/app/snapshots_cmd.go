@@ -1718,7 +1718,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
 		err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if deletedBlocks, err = br.PruneAncientBlocks(tx, 100); err != nil {
+			if deletedBlocks, err = br.PruneAncientBlocks(tx, 100, time.Hour); err != nil {
 				return err
 			}
 			return nil
