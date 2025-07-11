@@ -903,7 +903,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHash metainfo.Hash,
 	name string,
 ) (err error) {
@@ -920,7 +920,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHashHint g.Option[metainfo.Hash],
 	name string,
 ) (t *torrent.Torrent, err error) {
@@ -1352,7 +1352,7 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	p := "/downloader/torrentClientStatus"
 	http.Handle(p, h)
 	if debugMux != nil {
-		debugMux.Handle(p, h)
+		//debugMux.Handle(p, h)
 	}
 }
 
