@@ -251,16 +251,16 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		Transport: http.Transport{
 			ReadBufferSize: 64 << 10,
 			// Note this does nothing in go1.24.
-			HTTP2: &http.HTTP2Config{
-				MaxConcurrentStreams: 1,
-			},
+			//HTTP2: &http.HTTP2Config{
+			//	MaxConcurrentStreams: 1,
+			//},
 			// Big hammer to achieve one request per connection.
 			//DisableKeepAlives: true,
 		},
 	}
 
 	// Disable HTTP2. See above.
-	g.MakeMap(&requestHandler.Transport.TLSNextProto)
+	//g.MakeMap(&requestHandler.Transport.TLSNextProto)
 
 	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
 	cfg.ClientConfig.WebTransport = &requestHandler
