@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"path/filepath"
 	"time"
 
@@ -146,7 +147,16 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	iterStep := func(item visibleFile) error {
+	iterStep := func(item visibleFile) (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				fileName := "not found"
+				if item.src != nil && item.src.decompressor != nil {
+					fileName = item.src.decompressor.FileName()
+				}
+				err = fmt.Errorf("panic in file: %s. Stack: %s", fileName, dbg.Stack())
+			}
+		}()
 		item.src.decompressor.MadvSequential()
 		defer item.src.decompressor.DisableReadAhead()
 

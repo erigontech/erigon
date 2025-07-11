@@ -656,6 +656,9 @@ type BeaconChainConfig struct {
 
 	// EIP7892 - Blob Schedule
 	BlobSchedule []BlobParameters `yaml:"BLOB_SCHEDULE" spec:"true" json:"BLOB_SCHEDULE"` // Schedule of blob limits per epoch
+	// Fulu
+	ValidatorCustodyRequirement      uint64 `yaml:"VALIDATOR_CUSTODY_REQUIREMENT" spec:"true" json:"VALIDATOR_CUSTODY_REQUIREMENT,string"`               // ValidatorCustodyRequirement defines the custody requirement for validators.
+	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
 }
 
 // GetBlobParameters returns the blob parameters at a given epoch
@@ -972,6 +975,10 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DepositRequestType:             0x00,
 	WithdrawalRequestType:          0x01,
 	ConsolidationRequestType:       0x02,
+
+	// Fulu
+	ValidatorCustodyRequirement:      8,
+	BalancePerAdditionalCustodyGroup: 32_000_000_000,
 }
 
 func mainnetConfig() BeaconChainConfig {

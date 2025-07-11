@@ -62,14 +62,6 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 	defer cancel()
 	defer s.d.resetLogInterval.Broadcast()
 
-	//for _, item := range request.Items {
-	//	fmt.Printf("%v: %v\n", Proto2InfoHash(item.TorrentHash), item.Path)
-	//}
-
-	if len(s.d.torrentClient.Torrents()) == 0 || s.d.startTime.IsZero() {
-		s.d.startTime = time.Now()
-	}
-
 	var progress atomic.Int32
 
 	go func() {

@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
 	"golang.org/x/sync/errgroup"
 )
@@ -39,7 +40,17 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 		log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 		accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
 		if accProgress != rcacheDomainProgress {
-			err := fmt.Errorf("[integrity] RCacheDomain=%d is behind AccountDomain=%d", rcacheDomainProgress, accProgress)
+			var execProgressBlock, execStartTxNum, execEndTxNum uint64
+			if execProgressBlock, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+				return err
+			}
+			if execStartTxNum, err = txNumsReader.Min(tx, execProgressBlock); err != nil {
+				return nil
+			}
+			if execEndTxNum, err = txNumsReader.Max(tx, execProgressBlock); err != nil {
+				return nil
+			}
+			err := fmt.Errorf("[integrity] RCacheDomain=%d (block=%d) not equal AccountDomain=%d, while execBlockProgress(block=%d, startTxNum=%d, endTxNum=%d)", rcacheDomainProgress, toBlock, accProgress, execProgressBlock, execStartTxNum, execEndTxNum)
 			log.Warn(err.Error())
 			return err
 		}
@@ -104,7 +115,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 
 		logIdx := r.FirstLogIndexWithinBlock
 		exactLogIdx := logIdx == expectedFirstLogIdx
-		if !exactLogIdx {
+		if !exactLogIdx && txNum != _max {
 			err := fmt.Errorf("RCacheNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, expectedFirstLogIdx=%d", txNum, blockNum, _min, _max, logIdx, expectedFirstLogIdx)
 			if failFast {
 				return err
@@ -115,7 +126,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 
 		cumUsedGas := r.CumulativeGasUsed
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
-		if !strongMonotonicCumGasUsed { // system tx can be skipped
+		if !strongMonotonicCumGasUsed && txNum != _max { // system tx can be skipped
 			err := fmt.Errorf("RCacheNoDups: non-monotonic cumUsedGas at txnum: %d, block: %d(%d-%d), cumUsedGas=%d, prevCumUsedGas=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
 			if failFast {
 				return err
@@ -125,7 +136,6 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 		prevCumUsedGas = int(cumUsedGas)
 
 		if txNum == _max {
-			fmt.Printf("never here: block %d, txNum %d, cumUsedGas %d, logIdx %d\n", blockNum, txNum, cumUsedGas, logIdx)
 			blockNum++
 			_min = _max + 1
 			_max, _ = txNumsReader.Max(tx, blockNum)
