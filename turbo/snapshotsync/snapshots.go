@@ -907,21 +907,16 @@ func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	return _max
 }
 
-func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) uint64 {
-	tx := s.ViewType(segtype.Type())
-	defer tx.Close()
+func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
 
-	var _max uint64
-
-	for _, seg := range tx.Segments {
-		if !seg.IsIndexed() {
-			break
-		}
-
-		_max = seg.to - 1
+	visibleFiles := s.visible[segtype]
+	if len(visibleFiles) > 0 {
+		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
 	}
 
-	return _max
+	return
 }
 
 func (s *RoSnapshots) Ls() {
