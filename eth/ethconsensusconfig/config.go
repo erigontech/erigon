@@ -46,7 +46,7 @@ import (
 
 func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
 	heimdallClient heimdall.Client, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
-	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
+	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service, spanScraper bor.MissedSpanHandler,
 ) consensus.Engine {
 	var eng consensus.Engine
 
@@ -128,7 +128,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 				panic(err)
 			}
 
-			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, stateReceiver, logger, polygonBridge, heimdallService)
+			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, stateReceiver, logger, polygonBridge, heimdallService, spanScraper)
 		}
 	}
 
@@ -159,5 +159,5 @@ func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Conf
 	}
 
 	return CreateConsensusEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
-		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil)
+		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil, nil)
 }

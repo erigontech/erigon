@@ -331,6 +331,10 @@ func BorRLP(header *types.Header, c *borcfg.BorConfig) []byte {
 	return b.Bytes()
 }
 
+type MissedSpanHandler interface {
+	HandleMissedSpan(ctx context.Context, spanID uint64) error
+}
+
 // Bor is the matic-bor consensus engine
 type Bor struct {
 	chainConfig *chain.Config     // Chain config
@@ -350,6 +354,7 @@ type Bor struct {
 	HeimdallClient  heimdall.Client
 	useSpanReader   bool
 	spanReader      spanReader
+	spanScraper     MissedSpanHandler
 	useBridgeReader bool
 	bridgeReader    bridgeReader
 
@@ -381,6 +386,7 @@ func New(
 	logger log.Logger,
 	bridgeReader bridgeReader,
 	spanReader spanReader,
+	spanScraper MissedSpanHandler,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -411,6 +417,7 @@ func New(
 		bridgeReader:    bridgeReader,
 		useSpanReader:   spanReader != nil && !reflect.ValueOf(spanReader).IsNil(), // needed for interface nil caveat
 		spanReader:      spanReader,
+		spanScraper:     spanScraper,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1513,7 +1520,18 @@ func (c *Bor) fetchAndCommitSpan(
 			return err
 		}
 		if !ok {
-			return errors.New(fmt.Sprintf("error fetching span %v", newSpanID))
+			// This could be an exception caused by Heimdall V2 migration. Needs to be handled in the following way:
+			if err = c.spanScraper.HandleMissedSpan(context.Background(), newSpanID); err != nil {
+				return err
+			}
+
+			span, ok, err = c.spanReader.Span(context.Background(), newSpanID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errors.New(fmt.Sprintf("error fetching span %v", newSpanID))
+			}
 		}
 
 		heimdallSpan = span
