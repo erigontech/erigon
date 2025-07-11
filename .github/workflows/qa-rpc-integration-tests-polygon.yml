@@ -1,4 +1,4 @@
-name: QA - RPC Integration Tests
+name: QA - RPC Integration Tests (Polygon)
 
 on:
   workflow_dispatch:     # Run manually
@@ -11,11 +11,15 @@ on:
       - main
       - 'release/3.*'
     types:
+      - opened
+      - reopened
+      - synchronize
       - ready_for_review
 
 
 jobs:
-  mainnet-rpc-integ-tests:
+  bor-mainnet-rpc-integ-tests:
+    if: false  # DISABLED WORKFLOW
     concurrency:
       group: >-
         ${{
@@ -24,14 +28,14 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [ self-hosted, qa, RpcSpecific ]
+    runs-on: [ self-hosted, qa, Polygon ]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       ERIGON_ASSERT: true
-      CHAIN: mainnet
+      RPC_PAST_TEST_DIR: /opt/rpc-past-tests
+      CHAIN: bor-mainnet
 
     steps:
       - name: Check out repository
@@ -62,7 +66,7 @@ jobs:
         run: |
           echo "Starting RpcDaemon..."
           
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api bor,admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           RPC_DAEMON_EXIT_STATUS=$?
@@ -99,13 +103,13 @@ jobs:
         id: test_step
         run: |
           commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
-          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
+          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/polygon_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
-          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum.sh
+          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_polygon.sh
           
           set +e # Disable exit on error for test run
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum.sh ${{ runner.workspace }} $TEST_RESULT_DIR
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_polygon.sh ${{ runner.workspace }} $TEST_RESULT_DIR
           test_exit_status=$? # Capture test runner script exit status
           set -e # Re-enable exit on error after test run
 
