@@ -22,7 +22,7 @@ var (
 	zstdEnc, _  = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
 	zstdDecPool = sync.Pool{
 		New: func() interface{} {
-			dec, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
+			dec, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true), zstd.WithDecoderConcurrency(1))
 			return dec
 		},
 	}
