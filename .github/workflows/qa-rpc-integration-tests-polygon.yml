@@ -19,7 +19,6 @@ on:
 
 jobs:
   bor-mainnet-rpc-integ-tests:
-    if: false  # DISABLED WORKFLOW
     concurrency:
       group: >-
         ${{
