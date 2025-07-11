@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/exec3"
@@ -168,6 +169,11 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		fromTxNum, err = txNumsReader.Min(tx, begin)
 		if err != nil {
 			return out, err
+		}
+		r := state.NewHistoryReaderV3()
+		r.SetTx(tx)
+		if fromTxNum < r.StateHistoryStartFrom() {
+			return out, state.PrunedError
 		}
 	}
 
