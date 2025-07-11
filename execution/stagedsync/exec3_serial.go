@@ -122,7 +122,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 					cumGasUsed = receipt.CumulativeGasUsed
 				}
 			}
-
 		} else {
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
 				// get last receipt and store the last log index + 1
