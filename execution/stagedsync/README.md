@@ -63,7 +63,7 @@ This optimization sometimes leads to dramatic (orders of magnitude) write speed 
 In the Proof-of-Stake world staged sync becomes somewhat more complicated, as the following diagram shows.
 ![Staged Sync in PoS](/docs/assets/pos_downloader.png)
 
-## Stages (for the up to date list see [`stages.go`](/eth/stagedsync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go))
+## Stages (for the up to date list see [`stages.go`](/execution/stagedsync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go))
 
 Each stage consists of 2 functions `ExecFunc` that progresses the stage forward and `UnwindFunc` that unwinds the stage backwards.
 
@@ -71,15 +71,15 @@ Most of the stages can work offline though it isn't implemented in the current v
 
 We can add/remove stages, so exact stage numbers may change - but order and names stay the same.
 
-### Stage 1: [Snapshots](/eth/stagedsync/stage_snapshots.go)
+### Stage 1: [Snapshots](/execution/stagedsync/stage_snapshots.go)
 
 Download Snapshots (segments)
 
-### Stage 2: [Block Hashes](/eth/stagedsync/stage_blockhashes.go)
+### Stage 2: [Block Hashes](/execution/stagedsync/stage_blockhashes.go)
 
 Creates an index of blockHash -> blockNumber extracted from the headers for faster lookups and making the sync friendlier for HDDs.
 
-### Stage 3: [Recover Senders Stage](/eth/stagedsync/stage_senders.go)
+### Stage 3: [Recover Senders Stage](/execution/stagedsync/stage_senders.go)
 
 This stage recovers and stores senders for each transaction in each downloaded block.
 
@@ -87,7 +87,7 @@ This is also a CPU intensive stage and also benefits from multi-core CPUs.
 
 This stage doesn't use any network connection.
 
-### Stage 4: [Execute Blocks Stage](/eth/stagedsync/stage_execute.go)
+### Stage 4: [Execute Blocks Stage](/execution/stagedsync/stage_execute.go)
 
 During this stage, we execute block-by-block everything that we downloaded before.
 
