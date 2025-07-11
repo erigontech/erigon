@@ -62,7 +62,7 @@ type EngineBlockDownloader struct {
 	bodyReqSend RequestBodyFunction
 
 	// current status of the downloading process, aka: is it doing anything?
-	status atomic.Value // it is a headerdownload.SyncStatus
+	status atomic.Value // it is a Status
 
 	// data reader
 	blockPropagator adapter.BlockPropagator
@@ -96,7 +96,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 ) *EngineBlockDownloader {
 	timeout := syncCfg.BodyDownloadTimeoutSeconds
 	var s atomic.Value
-	s.Store(headerdownload.Idle)
+	s.Store(Idle)
 	var bbdV2 *bbd.BackwardBlockDownloader
 	if v2 {
 		hr := headerReader{db: db, blockReader: blockReader}

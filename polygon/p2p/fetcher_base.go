@@ -488,5 +488,5 @@ func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMes
 }
 
 func filter(requestPeerId, responsePeerId *PeerId, requestId, responseId uint64) bool {
-	return !requestPeerId.Equal(responsePeerId) && requestId != responseId
+	return !requestPeerId.Equal(responsePeerId) || requestId != responseId
 }
