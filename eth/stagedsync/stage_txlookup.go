@@ -317,7 +317,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		}
 	}
 
-	log.Warn("[dbg] TxLookup1", "duration", time.Since(tt).String(), "pruneFrom", blockFrom, "pruneTo", blockTo, "isInitialCycle", s.CurrentSyncCycle.IsInitialCycle)
+	log.Warn("[dbg] TxLookup1", "duration", time.Since(tt).String(), "pruneFrom", blockFrom, "pruneTo", blockTo, "isInitialCycle", s.CurrentSyncCycle.IsInitialCycle, "useExternalTx", useExternalTx)
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
