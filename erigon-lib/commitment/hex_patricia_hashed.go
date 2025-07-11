@@ -2202,13 +2202,13 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
-		//hph.PrintGrid()
-		//hph.updateCell(plainKey, hashedKey, update)
+		hph.PrintGrid()
+		// hph.updateCell(plainKey, hashedKey, update)
 
 		// convert grid to trie.Trie
 
 		if hph.trace {
-			fmt.Printf("ToWitness for key %x, currentKey %x, activeRows %d\n", hashedKey, hph.currentKey[:hph.currentKeyLen], hph.activeRows)
+			fmt.Printf("ToWitness for key (%d) %x, currentKey %x, activeRows %d\n", len(hashedKey), hashedKey, hph.currentKey[:hph.currentKeyLen], hph.activeRows)
 		}
 		tr, err = hph.toWitnessTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {

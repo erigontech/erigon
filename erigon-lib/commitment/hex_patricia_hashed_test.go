@@ -1925,7 +1925,13 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	require.NoError(t, err)
 
 	toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
-	toWitness.TouchPlainKey(common.Bytes2Hex(addrWithSingleton), nil, toProcess.TouchAccount)
+	defer toWitness.Close()
+	toWitness.TouchPlainKey(string(addrWithSingleton), nil, toProcess.TouchAccount)
+
+	// toWitness.HashSort(context.Background(), func(hk []byte, pk []byte, update *Update) error {
+	// 	fmt.Printf("toWitness %x -> %x\n", pk, hk)
+	// 	return nil
+	// })
 
 	witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, root, "")
 	require.NoError(t, err)
