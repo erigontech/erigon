@@ -192,7 +192,7 @@ func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req Backwa
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // need to cancel the ctx so that we cancel the download request processing if we err out prematurely
-	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash)
+	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash, opts...)
 	if err != nil {
 		return err
 	}
@@ -249,20 +249,37 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 	if err != nil {
 		return err
 	}
-	if status == execution.ExecutionStatus_BadBlock {
+	switch status {
+	case execution.ExecutionStatus_BadBlock:
 		e.hd.ReportBadHeaderPoS(block.Hash(), lastValidHash)
 		e.hd.ReportBadHeaderPoS(requested, lastValidHash)
 		return fmt.Errorf("bad block when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
+	case execution.ExecutionStatus_TooFarAway:
+		e.logger.Debug(
+			"[EngineBlockDownloader] skipping validation of block batch download due to exec status too far away",
+			"tip", block.Hash(),
+			"latestValidHash", lastValidHash,
+		)
+	case execution.ExecutionStatus_Success: // proceed to UpdateForkChoice
+	default:
+		return fmt.Errorf(
+			"unsuccessful status when validating batch download: status=%s, tip=%s, latestValidHash=%s",
+			status,
+			block.Hash(),
+			lastValidHash,
+		)
 	}
-	if status != execution.ExecutionStatus_Success {
-		return fmt.Errorf("unsuccessful status when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
-	}
-	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{})
+	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
 	if err != nil {
 		return err
 	}
 	if fcuStatus != execution.ExecutionStatus_Success {
-		return fmt.Errorf("unsuccessful status when updating fork choice for batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
+		return fmt.Errorf(
+			"unsuccessful status when updating fork choice for batch download: status=%s, tip=%s, latestValidHash=%s",
+			fcuStatus,
+			block.Hash(),
+			lastValidHash,
+		)
 	}
 	return nil
 }
