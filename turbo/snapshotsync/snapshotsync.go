@@ -304,7 +304,6 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 	// We use the pre-merge data policy.
 	s, _, ok := snaptype.ParseFileName("", p.Name)
 	if !ok {
-		fmt.Println(snaptype.ParseFileName("", p.Name))
 		return false
 	}
 	minTxNum, err := txNumsReader.Min(tx, pruneHeight)
@@ -313,7 +312,6 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 		return false
 	}
 	minStep := minTxNum / config3.DefaultStepSize
-	fmt.Println("Checking if receipts segment is pruned for", p.Name, "prune mode:", pruneMode, "frozen blocks:", head, "pruned", s.From < minStep, "min step:", minStep, "s.From:", s.From, "pruneHeight:", pruneHeight, "minTxNum:", minTxNum)
 	return s.From < minStep
 }
 
