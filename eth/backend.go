@@ -307,12 +307,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 		var notChanged bool
-		notChanged, config.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, config.PersistReceiptsCacheV2)
+
+		inConfig := config.PersistReceiptsCacheV2
+		notChanged, config.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, inConfig)
 		if err != nil {
 			return err
 		}
 		if !notChanged {
-			return fmt.Errorf("cli flag changed: %s", kvcfg.PersistReceipts)
+			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
+		}
+		if config.PersistReceiptsCacheV2 {
+			libstate.EnableHistoricalRCache()
 		}
 
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
