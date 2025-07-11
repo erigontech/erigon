@@ -1128,6 +1128,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
+	if chainConfig.IsArbitrum() && config.ArbitrumSync {
+		
+	}
+
 	go func() {
 		if err := agg.MergeLoop(ctx); err != nil {
 			logger.Error("snapashot merge loop error", "err", err)
