@@ -936,7 +936,6 @@ func (s *RoSnapshots) Ls() {
 func (s *RoSnapshots) Files() (list []string) {
 	view := s.View()
 	defer view.Close()
-
 	for _, t := range s.enums {
 		for _, seg := range view.segments[t].Segments {
 			list = append(list, seg.src.FileName())
