@@ -278,7 +278,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 	pruneTimeout := time.Hour // aggressive pruning at non-chain-tip
 	if !s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 250 * time.Millisecond
+		pruneTimeout = 125 * time.Millisecond
 		// can't prune much on non-chain-tip: because tx_lookup has crypto-hashed-keys. 1 block producing hundreds of random deletes: ~2pages updated per delete
 		blockTo = min(blockTo, blockFrom+10)
 	}
@@ -318,7 +318,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			return err
 		}
 
-		if !s.CurrentSyncCycle.IsInitialCycle && time.Since(t) > pruneTimeout*2 { // in case slow prune - warmup tbl
+		if !s.CurrentSyncCycle.IsInitialCycle && time.Since(t) > pruneTimeout*4 { // in case slow prune - warmup tbl
 			txnLokupTblWarmup(cfg.db)
 		}
 	}
