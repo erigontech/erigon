@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"runtime"
 	"time"
 
@@ -130,7 +131,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	}
 
 	jsonRpcAddr := cfg.L2RPCAddr
-	// Connect to RPC.
 	client, err := rpc.Dial(jsonRpcAddr, log.Root())
 	if err != nil {
 		log.Warn("Error connecting to RPC", "err", err)
@@ -176,7 +176,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
 			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 		}
-		if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+		if err = cfg.blockWriter.MakeBodiesCanonical(tx, blockNum); err != nil {
 			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
 		}
 
@@ -184,8 +184,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
 			return err
 		}
-		// Update the progress counter.
-		// i = blockNum + 1
 		select {
 		case <-timer.C:
 			if err := stages.SaveStageProgress(tx, stages.Snapshots, blockNum); err != nil {
@@ -209,8 +207,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			}
 
 			blkSec := float64(blockNum-prev) / 40.0
-			log.Info("Block processed", "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec))
-			prev = blockNum
+			log.Info(fmt.Sprintf("[%s] Header and Block processed", s.LogPrefix()), "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec))
 
 			if !useExternalTx {
 				err := tx.Commit()
@@ -223,7 +220,14 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 					return err
 				}
 				defer tx.Rollback()
+				cfg.hd.ReadProgressFromDb(tx)
+
+				if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), prev, blockNum+1, ctx, logger); err != nil {
+					return err
+				}
 			}
+
+			prev = blockNum
 		default:
 			// continue processing without waiting
 		}
@@ -234,12 +238,10 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return err
 	}
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
+		err = tx.Commit()
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
 	}
 	return nil
 	// return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
