@@ -277,7 +277,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 
 	if s.CurrentSyncCycle.IsInitialCycle {
-		txnLokupTblWarmup(cfg.db)
+		txnLokupTblWarmup(ctx, cfg.db)
 	}
 
 	pruneTimeout := time.Hour // aggressive pruning at non-chain-tip
@@ -320,7 +320,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		}
 
 		if !s.CurrentSyncCycle.IsInitialCycle && time.Since(t) > pruneTimeout*4 { // in case slow prune - warmup tbl
-			txnLokupTblWarmup(cfg.db)
+			txnLokupTblWarmup(ctx, cfg.db)
 		}
 	}
 
@@ -332,10 +332,16 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	return nil
 }
 
-func txnLokupTblWarmup(db kv.RoDB) {
+func txnLokupTblWarmup(ctx context.Context, db kv.RoDB) {
 	go func() {
-		_ = db.View(context.Background(), func(tx kv.Tx) error {
+		_ = db.View(ctx, func(tx kv.Tx) error {
 			return tx.ForEach(kv.TxLookup, nil, func(k, v []byte) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+
 				if len(k) > 0 {
 					_, _ = k[0], k[len(k)-1]
 				}
