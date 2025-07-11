@@ -238,7 +238,6 @@ Loop:
 
 		j := &senderRecoveryJob{
 			body:        body,
-			key:         k,
 			blockNumber: blockNumber,
 			blockTime:   header.Time,
 			blockHash:   blockHash,
@@ -316,7 +315,6 @@ type senderRecoveryError struct {
 
 type senderRecoveryJob struct {
 	body        *types.Body
-	key         []byte
 	senders     []byte
 	blockHash   libcommon.Hash
 	blockNumber uint64
@@ -344,7 +342,7 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		}
 
 		body := job.body
-		job.body = nil // help GC
+		job.body = nil // reduce ram usage and help GC
 		signer := types.MakeSigner(config, job.blockNumber, job.blockTime)
 		job.senders = make([]byte, len(body.Transactions)*length.Addr)
 		for i, txn := range body.Transactions {
