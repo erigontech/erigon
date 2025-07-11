@@ -151,7 +151,7 @@ func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 func canSnapshotBePruned(name string) bool {
-	return isStateHistory(name) || strings.Contains(name, "transactions")
+	return (isStateHistory(name) || strings.Contains(name, "transactions")) && !strings.Contains(name, "rcache")
 }
 
 func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
@@ -282,11 +282,37 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 	return cc.IsPreMerge(s.From)
 }
 
+// isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
+func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem) bool {
+	if strings.Contains(p.Name, "domain") {
+		return false // domain snapshots are never pruned
+	}
+	pruneHeight := pruneMode.Blocks.PruneTo(head) // if a receipt is below this height, it is pruned
+	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc.MergeHeight != nil {
+		pruneHeight = cc.MergeHeight.Uint64()
+	}
+
+	// We use the pre-merge data policy.
+	s, _, ok := snaptype.ParseFileName("", p.Name)
+	if !ok {
+		return false
+	}
+	minTxNum, err := txNumsReader.Min(tx, pruneHeight)
+	if err != nil {
+		log.Crit("Failed to get minimum transaction number", "err", err)
+		return false
+	}
+	minStep := minTxNum / config3.DefaultStepSize
+	return s.From < minStep
+}
+
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
+
+	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 
 	// Find minimum block to download.
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
@@ -355,6 +381,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
 			continue
 		}
+
 		if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
 			continue
 		}
@@ -366,7 +393,14 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			continue
 		}
 
-		downloadRequest = append(downloadRequest, NewDownloadRequest(p.Name, p.Hash))
+		if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
+			continue
+		}
+
+		downloadRequest = append(downloadRequest, DownloadRequest{
+			Path:        p.Name,
+			TorrentHash: p.Hash,
+		})
 	}
 
 	if headerchain {
