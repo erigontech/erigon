@@ -159,6 +159,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	// Process blocks from the starting block up to the latest.
 	prev := curBlock
 	timer := time.NewTicker(40 * time.Second)
+	latestProcessedBlock := uint64(0)
 	// latestBlock.SetUint64(curBlock + 6000)
 	for blockNum := curBlock; blockNum < latestBlock.Uint64(); blockNum++ {
 		blockNumber.SetUint64(blockNum)
@@ -184,6 +185,8 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
 			return err
 		}
+		latestProcessedBlock = blockNum
+
 		select {
 		case <-timer.C:
 			if err := stages.SaveStageProgress(tx, stages.Snapshots, blockNum); err != nil {
@@ -236,6 +239,25 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	if err != nil {
 		log.Warn("Error updating db", "err", err)
 		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Snapshots, latestProcessedBlock); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Headers, latestProcessedBlock); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.BlockHashes, latestProcessedBlock); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Bodies, latestProcessedBlock); err != nil {
+		return err
+	}
+	// fmt.Printf("Wrote block %d with hash %s\n", latestProcessedBlock, blk.Hash().Hex())
+	if err := stages.SaveStageProgress(tx, stages.Senders, latestProcessedBlock); err != nil {
+		return err
+	}
+	if err = s.Update(tx, latestProcessedBlock); err != nil {
+		return fmt.Errorf("saving Headers progress: %w", err)
 	}
 	if !useExternalTx {
 		err = tx.Commit()
