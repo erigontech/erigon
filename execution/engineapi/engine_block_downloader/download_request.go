@@ -18,8 +18,7 @@ type BackwardDownloadRequest struct {
 func (r BackwardDownloadRequest) LogArgs() []interface{} {
 	args := []interface{}{"hash", r.MissingHash, "trigger", r.Trigger}
 	if r.ValidateChainTip != nil {
-		args = append(args, "chainTipNum", r.ValidateChainTip.Number().Uint64())
-		args = append(args, "chainTipHash", r.ValidateChainTip.Hash())
+		args = append(args, "chainTipNum", r.ValidateChainTip.Number().Uint64(), "chainTipHash", r.ValidateChainTip.Hash())
 	}
 	return args
 }
@@ -35,7 +34,7 @@ func (s Trigger) String() string {
 	case FcuTrigger:
 		return "FcuTrigger"
 	default:
-		panic(fmt.Sprintf("unknown trigger: %v", s))
+		panic(fmt.Sprintf("unknown trigger: %d", s))
 	}
 }
 

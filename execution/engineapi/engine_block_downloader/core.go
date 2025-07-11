@@ -233,15 +233,8 @@ func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req Backwa
 			}
 			insertedBlocksWithoutExec = 0
 		}
-		blocks = nil
 	}
-	if err != nil {
-		return err
-	}
-	if len(blocks) == 0 {
-		return nil
-	}
-	return e.chainRW.InsertBlocksAndWait(ctx, blocks)
+	return err
 }
 
 func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
