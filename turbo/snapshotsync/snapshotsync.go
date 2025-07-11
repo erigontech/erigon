@@ -291,11 +291,11 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 	return cc.IsPreMerge(s.From)
 }
 
-// WaitForDownloader - wait for Downloader service to download all expected snapshots
-// for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(
+// SyncSnapshots - Check snapshot states, determine what needs to be requested from the downloader
+// then wait for downloads to complete.
+func SyncSnapshots(
 	ctx context.Context,
-	logPrefix string,
+	logPrefix, task string,
 	dirs datadir.Dirs,
 	headerchain, blobs, caplinState bool,
 	prune prune.Mode,
@@ -307,6 +307,7 @@ func WaitForDownloader(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
+	log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
@@ -396,6 +397,7 @@ func WaitForDownloader(
 
 	// Only add the preverified hashes until the initial sync completed for the first time.
 	if !snapCfg.Local {
+		log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
 		for {
 			select {
 			case <-ctx.Done():
@@ -427,6 +429,7 @@ func WaitForDownloader(
 			}
 			interval = min(interval*2, 20*time.Second)
 		}
+		log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
 	}
 
 	if !headerchain {
@@ -460,5 +463,6 @@ func WaitForDownloader(
 			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
 		}
 	}
+	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
 	return nil
 }
