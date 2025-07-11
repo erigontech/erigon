@@ -7,7 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/stretchr/testify/require"
 )
 
 const forkId7BlockGasLimit = 18446744073709551615
@@ -52,14 +54,14 @@ func BenchmarkConvertBigIntToHex(b *testing.B) {
 
 func BenchmarkHashContractBytecode(b *testing.B) {
 	str := strings.Repeat("e", 1000)
-	b.Run("1", func(b *testing.B) {
-		for n := 0; n < b.N; n++ {
-			HashContractBytecode(str)
-		}
-	})
-	b.Run("2", func(b *testing.B) {
+	b.Run("New", func(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			HashContractBytecodeBigInt(str)
+		}
+	})
+	b.Run("Old", func(b *testing.B) {
+		for n := 0; n < b.N; n++ {
+			HashContractBytecodeBigIntV1(str)
 		}
 	})
 }
@@ -800,4 +802,99 @@ func TestKeyContractStorageWithoutBig(t *testing.T) {
 	if key != key2 {
 		t.Errorf("key doesn't match, expected: %v, got: %v", key, key2)
 	}
+}
+
+func TestCreateInterimBytecodeHash(t *testing.T) {
+	tests := []struct {
+		name     string
+		bytecode string
+	}{
+		{
+			name:     "empty bytecode",
+			bytecode: "",
+		},
+		{
+			name:     "empty bytecode with 0x prefix",
+			bytecode: "0x",
+		},
+		{
+			name:     "simple bytecode",
+			bytecode: "0x60806040",
+		},
+		{
+			name:     "bytecode without 0x prefix",
+			bytecode: "60806040",
+		},
+		{
+			name:     "odd length bytecode",
+			bytecode: "0x608060", // Odd length, should be padded with leading zero
+		},
+		{
+			name:     "long bytecode",
+			bytecode: "0x608060405234801561001057600080fd5b50600436106100365760003560e01c8063c6888fa11461003b578063d09de08a14610057575b600080fd5b610055600480360381019061005091906100a3565b610061565b005b61005f610070565b005b8060008190555050565b60016000808282546100829190610102565b9250508190555050565b60008135905061009b81610158565b92915050565b6000602082840312156100b757600080fd5b60006100c58482850161008c565b91505092915050565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052601160045260246000fd5b600061010d82610138565b915061011883610138565b9250827fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0382111561014d5761014c6100ce565b5b828201905092915050565b6000819050919050565b61016181610158565b811461016c57600080fd5b50",
+		},
+		{
+			name:     "exact 56-byte chunk (even hex)",
+			bytecode: "0x" + strings.Repeat("aa", 55), // 55 bytes → 110 hex chars
+		},
+		{
+			name: "exact 56-byte chunk (odd hex)",
+			// drop one hex char from the above so it’s 109 chars
+			bytecode: "0x" + strings.Repeat("aa", 54) + "a", // 54*2+1=109 hex chars
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HashContractBytecodeBigInt(tt.bytecode)
+			result2 := HashContractBytecodeBigIntV1(tt.bytecode)
+			require.True(t, result.Cmp(result2) == 0, "CreateInterimBytecodeHash should be deterministic")
+		})
+	}
+}
+
+func TestCreateInterimBytecodeHashPanic(t *testing.T) {
+	tests := []struct {
+		name     string
+		bytecode string
+	}{
+		{
+			name:     "invalid hex characters",
+			bytecode: "0xzzzz",
+		},
+		{
+			name:     "invalid hex without prefix",
+			bytecode: "gggg",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Panics(t, func() {
+				CreateInterimBytecodeHash(tt.bytecode)
+			}, "CreateInterimBytecodeHash should panic on invalid hex")
+		})
+	}
+}
+
+func TestCreateInterimBytecodeHashConsistency(t *testing.T) {
+	// Test that bytecode with and without 0x prefix produce the same result
+	bytecode1 := "0x60806040"
+	bytecode2 := "60806040"
+
+	result1 := CreateInterimBytecodeHash(bytecode1)
+	result2 := CreateInterimBytecodeHash(bytecode2)
+
+	require.Equal(t, result1, result2, "Bytecode with and without 0x prefix should produce same hash")
+}
+
+func TestCreateInterimBytecodeHashOddLength(t *testing.T) {
+	// Test that odd length hex strings are handled correctly
+	oddBytecode := "0x60806"   // 5 characters after 0x
+	evenBytecode := "0x060806" // 6 characters after 0x (padded)
+
+	result1 := CreateInterimBytecodeHash(oddBytecode)
+	result2 := CreateInterimBytecodeHash(evenBytecode)
+
+	require.Equal(t, result1, result2, "Odd length bytecode should be padded and produce same result")
 }

@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -35,6 +36,9 @@ const (
 	BYTECODE_BYTES_ELEMENT = 7
 
 	HASH_POSEIDON_ALL_ZEROES = "0xc71603f33a1144ca7953db0ab48808f4c4055e3364a246c33c18a9786cb0b359"
+
+	maxBytesPerChunk  = BYTECODE_ELEMENTS_HASH * BYTECODE_BYTES_ELEMENT
+	maxContractBuffer = 32 * 1024 // 32 KiB
 )
 
 var (
@@ -63,6 +67,14 @@ var (
 	LeafCapacity   = [4]uint64{1, 0, 0, 0}
 	BranchCapacity = [4]uint64{0, 0, 0, 0}
 	hashFunc       = poseidon.HashWithResult
+
+	byteBufPool = &sync.Pool{
+		New: func() any {
+			b := make([]byte, 0, maxContractBuffer)
+			return &b
+		},
+	}
+	zeroPad = [maxBytesPerChunk]byte{}
 )
 
 func Hash(in [8]uint64, capacity [4]uint64) [4]uint64 {
@@ -855,7 +867,7 @@ func HashContractBytecodeBigInt(bc string) *big.Int {
 	return ArrayToScalar(interim[:])
 }
 
-func CreateInterimBytecodeHash(bc string) [4]uint64 {
+func HashContractBytecodeBigIntV1(bc string) *big.Int {
 	bytecode := bc
 
 	if strings.HasPrefix(bc, "0x") {
@@ -921,6 +933,69 @@ func CreateInterimBytecodeHash(bc string) [4]uint64 {
 		tmpHash = Hash(in, capacity)
 	}
 
+	return ArrayToScalar(tmpHash[:])
+}
+
+func CreateInterimBytecodeHash(bc string) [4]uint64 {
+	s := strings.TrimPrefix(bc, "0x")
+	if len(s)&1 == 1 {
+		s = "0" + s
+	}
+
+	// compute final length: hex bytes + 1 marker + pad to maxBytesPerChunk
+	rawLen := len(s) / 2
+	if len(s)%2 != 0 {
+		rawLen++
+	}
+	rawLen++ // for 0x01
+	pad := (maxBytesPerChunk - rawLen%maxBytesPerChunk) % maxBytesPerChunk
+	total := rawLen + pad
+
+	pbuf := byteBufPool.Get().(*[]byte)
+	buf := *pbuf
+	if cap(buf) < total {
+		buf = make([]byte, total)
+	}
+	buf = buf[:total]
+
+	// decode hex into buf[0:rawLen-1]
+	n, err := hex.Decode(buf[:rawLen-1], []byte(s))
+	if err != nil {
+		panic(err)
+	}
+
+	// marker and padding
+	buf[n] = 0x01
+	// zero just the padding region in one go
+	// the padding region runs from n+1 up to total-1
+	if pad := total - (n + 1); pad > 0 {
+		copy(buf[n+1:], zeroPad[:pad])
+	}
+
+	// flip the top bit of the very last byte
+	buf[total-1] |= 0x80
+
+	var capacity [4]uint64
+	var tmpHash [4]uint64
+	var in [8]uint64
+	for i := 0; i < total; i += maxBytesPerChunk {
+		capacity = tmpHash
+		chunk := buf[i:min(i+maxBytesPerChunk, total)]
+		for j := range BYTECODE_ELEMENTS_HASH {
+			var w uint64
+			off := j * BYTECODE_BYTES_ELEMENT
+			for k := range BYTECODE_BYTES_ELEMENT {
+				if b := off + k; b < len(chunk) {
+					w |= uint64(chunk[b]) << (8 * k)
+				}
+			}
+			in[j] = w
+		}
+		tmpHash = Hash(in, capacity)
+	}
+
+	*pbuf = buf[:0]
+	byteBufPool.Put(pbuf)
 	return tmpHash
 }
 

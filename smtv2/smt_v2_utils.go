@@ -3,7 +3,6 @@ package smtv2
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -319,97 +318,6 @@ func BytesToSmtValue8(bytes []byte) SmtValue8 {
 	return result
 }
 
-func InterimBytecodeHash(bc string) [4]uint64 {
-	bytecode := bc
-
-	if strings.HasPrefix(bc, "0x") {
-		bytecode = bc[2:]
-	}
-
-	if len(bytecode)%2 != 0 {
-		bytecode = "0" + bytecode
-	}
-
-	bytecode += "01"
-
-	for len(bytecode)%(56*2) != 0 {
-		bytecode += "00"
-	}
-
-	// Convert last byte from hex to int directly
-	lastByteHex := bytecode[len(bytecode)-2:]
-	var lastByteInt int64
-	for i := 0; i < 2; i++ {
-		c := lastByteHex[i]
-		var v byte
-		switch {
-		case c >= '0' && c <= '9':
-			v = c - '0'
-		case c >= 'a' && c <= 'f':
-			v = c - 'a' + 10
-		case c >= 'A' && c <= 'F':
-			v = c - 'A' + 10
-		}
-		lastByteInt = (lastByteInt << 4) | int64(v)
-	}
-
-	// Convert back to hex string
-	lastByteInt |= 0x80
-	hexChars := "0123456789abcdef"
-	lastByte := string([]byte{
-		hexChars[(lastByteInt>>4)&0xF],
-		hexChars[lastByteInt&0xF],
-	})
-
-	bytecode = bytecode[:len(bytecode)-2] + lastByte
-
-	numBytes := float64(len(bytecode)) / 2
-	numHashes := int(math.Ceil(numBytes / (BYTECODE_ELEMENTS_HASH * BYTECODE_BYTES_ELEMENT)))
-
-	tmpHash := [4]uint64{0, 0, 0, 0}
-	bytesPointer := 0
-
-	maxBytesToAdd := BYTECODE_ELEMENTS_HASH * BYTECODE_BYTES_ELEMENT
-	var elementsToHash []uint64
-	var in [8]uint64
-	var capacity [4]uint64
-	var byteToAdd string
-	for i := 0; i < numHashes; i++ {
-		elementsToHash = tmpHash[:]
-
-		subsetBytecode := bytecode[bytesPointer : bytesPointer+maxBytesToAdd*2]
-		bytesPointer += maxBytesToAdd * 2
-
-		tmpElem := ""
-		counter := 0
-
-		for j := 0; j < maxBytesToAdd; j++ {
-			byteToAdd = "00"
-			if j < len(subsetBytecode)/2 {
-				byteToAdd = subsetBytecode[j*2 : (j+1)*2]
-			}
-
-			tmpElem = byteToAdd + tmpElem
-			counter += 1
-
-			if counter == BYTECODE_BYTES_ELEMENT {
-				// Convert hex string directly to uint64
-				val, _ := strconv.ParseUint(tmpElem, 16, 64)
-				elementsToHash = append(elementsToHash, val)
-				tmpElem = ""
-				counter = 0
-			}
-		}
-
-		copy(in[:], elementsToHash[4:12])
-		copy(capacity[:], elementsToHash[:4])
-
-		tmpHash = utils.Hash(in, capacity)
-	}
-
-	return tmpHash
-}
-
 func HashToBytes(arr [4]uint64) []byte {
 	// Allocate maximum possible size (4 uint64s = 32 bytes)
 	result := make([]byte, 32)
@@ -462,7 +370,7 @@ func GetCodeAndLengthNoBig(code []byte) (SmtValue8, SmtValue8, error) {
 
 	asHex := hexutils.BytesToHex(code)
 
-	interimHash := InterimBytecodeHash(asHex)
+	interimHash := utils.CreateInterimBytecodeHash(asHex)
 	interimBytes := HashToBytes(interimHash)
 	codeValue := BytesToSmtValue8(interimBytes)
 

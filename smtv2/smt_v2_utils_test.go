@@ -1,7 +1,6 @@
 package smtv2
 
 import (
-	"bytes"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/smt/pkg/utils"
-	"github.com/status-im/keycard-go/hexutils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -141,36 +139,6 @@ func Test_BytesToSmtValue8_Comparison(t *testing.T) {
 			if fromBig[i] != fromBytes[i] {
 				t.Errorf("BytesToSmtValue8(%v) = %v; expected %v", test.bytes, fromBytes, fromBig)
 			}
-		}
-	}
-}
-
-func Test_InterimBytecodeHash(t *testing.T) {
-	tests := []struct {
-		code []byte
-	}{
-		{[]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}},
-		{common.Hex2Bytes("0x1233459845676739438575623497394545968734592354837456948576498567948576")},
-	}
-
-	for _, test := range tests {
-		asHex := hexutils.BytesToHex(test.code)
-		oldInterim := utils.CreateInterimBytecodeHash(asHex)
-		newInterim := InterimBytecodeHash(asHex)
-
-		for i := 0; i < 4; i++ {
-			if newInterim[i] != oldInterim[i] {
-				t.Errorf("InterimBytecodeHash(%v) = %v; expected %v", test.code, newInterim, oldInterim)
-			}
-		}
-
-		asBigInt := utils.ArrayToScalar(oldInterim[:])
-		oldBytes := asBigInt.Bytes()
-
-		newBytes := HashToBytes(newInterim)
-
-		if !bytes.Equal(oldBytes, newBytes) {
-			t.Errorf("HashToBytes(%v) = %v; expected %v", newInterim, newBytes, oldBytes)
 		}
 	}
 }
