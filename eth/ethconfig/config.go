@@ -248,6 +248,9 @@ type Config struct {
 	WithHeimdallWaypointRecording bool
 	// Use polygon checkpoint sync in preference to POW downloader
 	PolygonSync bool
+	
+	// Use arbitrum chain reader in preference to POW downloader
+	ArbitrumSync bool
 
 	// Ethstats service
 	Ethstats string
