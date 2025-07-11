@@ -94,6 +94,10 @@ func (s *SnapshotConfig) LoadPreverified(pre snapcfg.PreverifiedItems) {
 	}
 }
 
+func (s *SnapshotConfig) SetIntegrity(integrity *DependencyIntegrityChecker) {
+	s.Integrity = integrity
+}
+
 // common representation for any snapshot files
 // seg, .v or indexes and existence filters, accessors.
 type SnapInfo struct {
