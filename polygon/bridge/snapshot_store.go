@@ -231,9 +231,11 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash libcom
 		}).blockEventIdsRange(ctx, blockHash, blockNum, s.LastFrozenEventId())
 	}
 
-	tx := s.snapshots.ViewType(heimdall.Events)
-	defer tx.Close()
-	segments := tx.Segments
+	sn, ok, close := s.snapshots.ViewSingleFile(heimdall.Events, blockNum)
+	defer close()
+	if !ok {
+		return 0, 0, false, nil
+	}
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
@@ -276,8 +278,9 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash libcom
 					}
 					end = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 				}
-				return start, end, true, nil
+				end = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 			}
+			return start, end, true, nil
 		}
 	}
 
