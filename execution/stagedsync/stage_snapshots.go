@@ -51,7 +51,6 @@ import (
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
@@ -281,7 +280,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
-		rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.blockReader)),
+		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
@@ -308,7 +307,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
-		rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.TxBlockIndexFromBlockReader(ctx, cfg.blockReader)),
+		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
