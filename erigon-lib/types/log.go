@@ -255,13 +255,13 @@ func (l *Log) Copy() *Log {
 		return nil
 	}
 	return &Log{
-		Address:     common.BytesToAddress(l.Address.Bytes()),
+		Address:     l.Address,
 		Topics:      slices.Clone(l.Topics),
 		Data:        slices.Clone(l.Data),
 		BlockNumber: l.BlockNumber,
-		TxHash:      common.BytesToHash(l.TxHash.Bytes()),
+		TxHash:      l.TxHash,
 		TxIndex:     l.TxIndex,
-		BlockHash:   common.BytesToHash(l.BlockHash.Bytes()),
+		BlockHash:   l.BlockHash,
 		Index:       l.Index,
 		Removed:     l.Removed,
 	}
