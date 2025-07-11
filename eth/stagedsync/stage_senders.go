@@ -50,8 +50,6 @@ import (
 type SendersCfg struct {
 	db              kv.RwDB
 	batchSize       int
-	blockSize       int
-	bufferSize      int
 	numOfGoroutines int
 	readChLen       int
 	badBlockHalt    bool
@@ -64,15 +62,12 @@ type SendersCfg struct {
 }
 
 func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
-	const sendersBatchSize = 10000
-	const sendersBlockSize = 4096
+	const sendersBatchSize = 1000
 
 	return SendersCfg{
 		db:              db,
 		batchSize:       sendersBatchSize,
-		blockSize:       sendersBlockSize,
-		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
-		numOfGoroutines: secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
+		numOfGoroutines: secp256k1.NumOfContexts(), // we can only be as parallels as our crypto library supports,
 		readChLen:       4,
 		badBlockHalt:    badBlockHalt,
 		tmpdir:          tmpdir,
@@ -243,7 +238,6 @@ Loop:
 
 		j := &senderRecoveryJob{
 			body:        body,
-			key:         k,
 			blockNumber: blockNumber,
 			blockTime:   header.Time,
 			blockHash:   blockHash,
@@ -321,7 +315,6 @@ type senderRecoveryError struct {
 
 type senderRecoveryJob struct {
 	body        *types.Body
-	key         []byte
 	senders     []byte
 	blockHash   libcommon.Hash
 	blockNumber uint64
@@ -349,6 +342,7 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		}
 
 		body := job.body
+		job.body = nil // reduce ram usage and help GC
 		signer := types.MakeSigner(config, job.blockNumber, job.blockTime)
 		job.senders = make([]byte, len(body.Transactions)*length.Addr)
 		for i, txn := range body.Transactions {
