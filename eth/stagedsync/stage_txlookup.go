@@ -283,6 +283,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = min(blockTo, blockFrom+10)
 	}
 
+	tt := time.Now()
 	if blockFrom < blockTo {
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
@@ -315,6 +316,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			return err
 		}
 	}
+
+	log.Warn("[dbg] TxLookup1", "duration", time.Since(tt).String(), "save", blockFrom, "blockTo", blockTo, "isInitialCycle", s.CurrentSyncCycle.IsInitialCycle, "useExternalTx", useExternalTx)
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
