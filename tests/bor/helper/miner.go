@@ -85,7 +85,7 @@ func InitMiner(
 	privKey *ecdsa.PrivateKey,
 	withoutHeimdall bool,
 	minerID int,
-) (*node.Node, *eth.Ethereum, error) {
+) (_ *node.Node, _ *eth.Ethereum, err error) {
 	// Define the basic configurations for the Ethereum node
 
 	nodeCfg := &nodecfg.Config{
@@ -114,14 +114,14 @@ func InitMiner(
 		return nil, nil, err
 	}
 
-	downloadRate, err := datasize.ParseString("16mb")
+	downloadRate, err := utils.GetStringFlagRateLimit("16mb")
 	if err != nil {
-		return nil, nil, err
+		return
 	}
 
-	uploadRate, err := datasize.ParseString("4mb")
+	uploadRate, err := utils.GetStringFlagRateLimit("4mb")
 	if err != nil {
-		return nil, nil, err
+		return
 	}
 
 	torrentLogLevel, err := downloadercfg.Int2LogLevel(3)
@@ -134,15 +134,15 @@ func InitMiner(
 		datadir.New(dirName),
 		nodeCfg.Version,
 		torrentLogLevel,
-		downloadRate,
-		uploadRate,
 		utils.TorrentPortFlag.Value,
 		utils.TorrentConnsPerFileFlag.Value,
 		[]string{},
-		[]string{},
 		"",
 		utils.DbWriteMapFlag.Value,
-		downloadercfg.NewCfgOpts{},
+		downloadercfg.NewCfgOpts{
+			DownloadRateLimit: downloadRate.TorrentRateLimit(),
+			UploadRateLimit:   uploadRate.TorrentRateLimit(),
+		},
 	)
 	if err != nil {
 		return nil, nil, err
