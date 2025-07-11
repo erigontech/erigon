@@ -19,6 +19,7 @@ package engine_block_downloader
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
@@ -196,16 +197,24 @@ func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req Backwa
 		return err
 	}
 
+	logProgressTicker := time.NewTicker(30 * time.Second)
+	defer logProgressTicker.Stop()
+
 	var blocks []*types.Block
 	var insertedBlocksWithoutExec int
 	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
-		e.logger.Debug(
-			"[EngineBlockDownloader] processing downloaded blocks",
+		progressLogArgs := []interface{}{
 			"from", blocks[0].NumberU64(),
 			"fromHash", blocks[0].Hash(),
 			"to", blocks[len(blocks)-1].NumberU64(),
 			"toHash", blocks[len(blocks)-1].Hash(),
-		)
+		}
+		select {
+		case <-logProgressTicker.C:
+			e.logger.Info("[EngineBlockDownloader] processing downloaded blocks periodic progress", progressLogArgs...)
+		default:
+			e.logger.Trace("[EngineBlockDownloader] processing downloaded blocks", progressLogArgs...)
+		}
 		err := e.chainRW.InsertBlocksAndWait(ctx, blocks)
 		if err != nil {
 			return err

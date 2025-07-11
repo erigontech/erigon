@@ -295,16 +295,11 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			"amount", amount,
 			"peerId", peerId.String(),
 		}
-		debugLogging := bbd.logger.Enabled(ctx, log.LvlDebug)
-		if debugLogging {
-			bbd.logger.Debug("[backward-block-downloader] fetching headers backward", progressLogArgs...)
-		}
 		select {
 		case <-logProgressTicker.C:
-			if !debugLogging {
-				bbd.logger.Info("[backward-block-downloader] fetching headers backward periodic progress", progressLogArgs...)
-			}
-		default: // carry on
+			bbd.logger.Info("[backward-block-downloader] fetching headers backward periodic progress", progressLogArgs...)
+		default:
+			bbd.logger.Trace("[backward-block-downloader] fetching headers backward", progressLogArgs...)
 		}
 
 		peerIndex := peers.peerIdToIndex[peerId]
@@ -424,16 +419,11 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 		"batchSize", batchSize,
 		"batchesCount", batchesCount,
 	}
-	debugLogging := bbd.logger.Enabled(ctx, log.LvlDebug)
-	if debugLogging {
-		bbd.logger.Debug("[backward-block-downloader] downloading blocks for headers batch", progressLogArgs...)
-	}
 	select {
 	case <-logProgressTicker.C:
-		if !debugLogging {
-			bbd.logger.Info("[backward-block-downloader] downloading blocks for headers batch periodic progress", progressLogArgs...)
-		}
-	default: // carry on
+		bbd.logger.Info("[backward-block-downloader] downloading blocks for headers batch periodic progress", progressLogArgs...)
+	default:
+		bbd.logger.Trace("[backward-block-downloader] downloading blocks for headers batch", progressLogArgs...)
 	}
 	headerBatches := make([][]*types.Header, batchesCount)
 	for i := range headerBatches {
@@ -473,7 +463,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			peerId := assignment.peerId
 			batchIndex := assignment.batchIndex
 			headerBatch := headerBatches[batchIndex]
-			bbd.logger.Debug(
+			bbd.logger.Trace(
 				"[backward-block-downloader] fetching bodies for headerBatch",
 				"attempt", attempts,
 				"fromNum", headerBatch[0].Number.Uint64(),
