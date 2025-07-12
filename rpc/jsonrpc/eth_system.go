@@ -267,10 +267,15 @@ type EthHardForkConfig struct {
 
 // EthConfigResp is the response type of eth_config
 type EthConfigResp struct {
-	Current     *EthHardForkConfig `json:"current"`
-	CurrentHash string             `json:"currentHash"`
-	Next        *EthHardForkConfig `json:"next"`
-	NextHash    *string            `json:"nextHash"`
+	Current       *EthHardForkConfig `json:"current"`
+	CurrentHash   string             `json:"currentHash"`
+	CurrentForkId string             `json:"currentForkId"`
+	Next          *EthHardForkConfig `json:"next"`
+	NextHash      *string            `json:"nextHash"`
+	NextForkId    *string            `json:"nextForkId"`
+	Last          *EthHardForkConfig `json:"last"`
+	LastHash      *string            `json:"lastHash"`
+	LastForkId    *string            `json:"lastForkId"`
 }
 
 // SystemContractsMap maps system contract addresses to names expected in eth_config
@@ -303,8 +308,9 @@ var PrecompileNamesMap = map[string]string{
 	"bls12381MapFp2ToG2":     "BLS12_MAP_FP2_TO_G2",
 }
 
-// Config returns the HardFork config for current and upcoming forks:
-// assuming linear fork progression and ethereum-like schedule
+// Config implements eth_config and returns the HardFork config for current,
+// upcoming and last forks: assuming linear fork progression and
+// ethereum-like schedule
 func (api *APIImpl) Config(ctx context.Context) (*EthConfigResp, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -322,29 +328,40 @@ func (api *APIImpl) Config(ctx context.Context) (*EthConfigResp, error) {
 		Current: &EthHardForkConfig{},
 	}
 	switch {
+	// case config.Bpo
 	case config.IsOsaka(tt):
 		fillOsakaForkConfig(ret.Current, config)
 		ret.Next = nil
+		ret.Last = &EthHardForkConfig{}
+		fillPragueForkConfig(ret.Last, config)
 	case config.IsPrague(tt):
 		fillPragueForkConfig(ret.Current, config)
 		if config.OsakaTime != nil {
 			ret.Next = &EthHardForkConfig{}
 			fillOsakaForkConfig(ret.Next, config)
 		}
+		ret.Last = &EthHardForkConfig{}
+		fillCancunForkConfig(ret.Last, config)
 	case config.IsCancun(tt):
 		fillCancunForkConfig(ret.Current, config)
 		if config.PragueTime != nil {
 			ret.Next = &EthHardForkConfig{}
 			fillPragueForkConfig(ret.Next, config)
 		}
+		ret.Last = nil
 	default:
 	}
 	if ret.Current != nil {
 		ret.CurrentHash = checkSumConfig(ret.Current)
+		ret.CurrentForkId = 
 	}
 	if ret.Next != nil {
 		cs := checkSumConfig(ret.Next)
 		ret.NextHash = &cs
+	}
+	if ret.Last != nil {
+		cs := checkSumConfig(ret.Last)
+		ret.LastHash = &cs
 	}
 	return ret, nil
 }
@@ -366,9 +383,27 @@ func fillPragueForkConfig(ret *EthHardForkConfig, config *chain.Config) {
 	}
 }
 
+func 
+
+func fillBpoConfig(ret *EthHardForkConfig, config *chain.Config) {
+	timeNow := uint64(time.Now().Unix())
+	switch {
+	case config.Bpo5Time != nil && timeNow > config.Bpo5Time.Uint64():
+		ret.ActivationTime = hexutil.Uint(config.Bpo5Time.Uint64())
+	case config.Bpo4Time != nil && timeNow > config.Bpo4Time.Uint64():
+		ret.ActivationTime = hexutil.Uint(config.Bpo4Time.Uint64())
+	case config.Bpo3Time != nil && timeNow > config.Bpo3Time.Uint64():
+		ret.ActivationTime = hexutil.Uint(config.Bpo3Time.Uint64())
+	case config.Bpo2Time != nil && timeNow > config.Bpo2Time.Uint64():
+		ret.ActivationTime = hexutil.Uint(config.Bpo2Time.Uint64())
+	case config.Bpo1Time != nil && timeNow > config.Bpo1Time.Uint64():
+		ret.ActivationTime = hexutil.Uint(config.Bpo1Time.Uint64())
+	default:
+	}
+}
+
 func fillOsakaForkConfig(ret *EthHardForkConfig, config *chain.Config) {
 	ret.ActivationTime = hexutil.Uint(config.OsakaTime.Uint64())
-	ret.BlobSchedule = *config.GetBlobConfig(config.OsakaTime.Uint64())
 	ret.ChainId = hexutil.Uint(config.ChainID.Uint64())
 	ret.SystemContracts = makeSystemContractsConfigMap([]common.Address{
 		params.BeaconRootsAddress,
@@ -380,6 +415,11 @@ func fillOsakaForkConfig(ret *EthHardForkConfig, config *chain.Config) {
 	ret.Precompiles = make(map[common.Address]string)
 	for k, v := range vm.PrecompiledContractsOsaka {
 		ret.Precompiles[k] = PrecompileNamesMap[reflect.TypeOf(v).Elem().Name()]
+	}
+	timeNow := uint64(time.Now().Unix())
+	ret.BlobSchedule = *config.GetBlobConfig(timeNow)
+	if config.Bpo1Time != nil && timeNow > config.Bpo1Time.Uint64() {
+		fillBpoConfig(ret, config)
 	}
 }
 
