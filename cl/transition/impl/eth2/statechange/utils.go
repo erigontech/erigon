@@ -36,7 +36,7 @@ func IsValidDepositSignature(
 	valid, err := bls.Verify(depositData.Signature[:], signedRoot[:], depositData.PubKey[:])
 	if err != nil || !valid {
 		// ignore err here
-		log.Warn("Validator BLS verification failed", "valid", valid, "err", err)
+		log.Warn("Validator BLS verification failed", "valid", valid, "err", err, "pubkey", depositData.PubKey, "signature", depositData.Signature, "messageRoot", depositMessageRoot, "domain", domain)
 		return false, nil
 	}
 	return true, nil
