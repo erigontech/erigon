@@ -10,6 +10,9 @@ RESULT_DIR="$2"
 DISABLED_TEST_LIST=(
   bor_getAuthor
   bor_getSnapshot
+  # Temporarily disabled because of pruned node on runner n-4 (should be archive instead)
+  debug_traceTransaction/test_02
+  eth_getTransactionReceipt/test_01
 )
 # Transform the array into a comma-separated string
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
