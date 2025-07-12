@@ -105,6 +105,82 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 	})
 }
 
+func TestTrackingFetcherFetchHeadersBackwardsUpdatesPeerTracker(t *testing.T) {
+	t.Parallel()
+
+	peerId1 := PeerIdFromUint64(1)
+	requestId1 := uint64(1235)
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId1.H512(),
+			// peer returns 0 headers for requestId2 - peer does not have this header range [10,15)
+			Data: newMockBlockHeadersPacket66Bytes(t, requestId1, 0),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId1,
+		wantRequestOriginNumber:     10,
+		wantRequestAmount:           5,
+	}
+	mockHeaders := newMockBlockHeaders(12)
+	mockHash := mockHeaders[11].Hash()
+	requestId2 := uint64(1236)
+	mockInboundMessages2 := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId1.H512(),
+			// peer returns 3 headers from block height 12 backwards using a reverse lookup by hash
+			Data: blockHeadersPacket66Bytes(t, requestId2, []*types.Header{mockHeaders[11], mockHeaders[10], mockHeaders[9]}),
+		},
+	}
+	mockRequestResponse2 := requestResponseMock{
+		requestId:                   requestId2,
+		mockResponseInboundMessages: mockInboundMessages2,
+		wantRequestPeerId:           peerId1,
+		wantRequestOriginHash:       mockHash,
+		wantRequestAmount:           3,
+		wantReverse:                 true,
+	}
+
+	test := newTrackingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
+	test.run(func(ctx context.Context, t *testing.T) {
+		test.simulateDefaultPeerEvents()
+		var peerIds []*PeerId // peers which may have blocks 1 and 2
+		require.Eventuallyf(t, func() bool {
+			peerIds = test.peerTracker.ListPeersMayHaveBlockNum(2)
+			return len(peerIds) == 2
+		}, time.Second, 100*time.Millisecond, "expected number of initial peers never satisfied: want=2, have=%d", len(peerIds))
+
+		// fetch headers [10,15) - peer doesn't have them
+		var errIncompleteHeaders *ErrIncompleteHeaders
+		headers, err := test.trackingFetcher.FetchHeaders(ctx, 10, 15, peerId1)
+		require.ErrorAs(t, err, &errIncompleteHeaders)
+		require.Equal(t, uint64(10), errIncompleteHeaders.start)
+		require.Equal(t, uint64(5), errIncompleteHeaders.requested)
+		require.Equal(t, uint64(0), errIncompleteHeaders.received)
+		require.Equal(t, uint64(10), errIncompleteHeaders.LowestMissingBlockNum())
+		require.Nil(t, headers.Data)
+
+		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(10) // peer1 doesn't - so one peer less
+		require.Len(t, peerIds, 1)
+
+		// now fetch headers backwards by hash H which starts at block 12 - this time the peer has this
+		headers, err = test.trackingFetcher.FetchHeadersBackwards(ctx, mockHash, 3, peerId1)
+		require.NoError(t, err)
+		require.Len(t, headers.Data, 3)
+		require.Equal(t, uint64(10), headers.Data[0].Number.Uint64())
+		require.Equal(t, uint64(11), headers.Data[1].Number.Uint64())
+		require.Equal(t, uint64(12), headers.Data[2].Number.Uint64())
+
+		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(10) // peer1 has block num 10 now - so one peer more
+		require.Len(t, peerIds, 2)
+	})
+}
+
 func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

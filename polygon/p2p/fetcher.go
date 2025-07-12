@@ -33,6 +33,16 @@ type Fetcher interface {
 		opts ...FetcherOption,
 	) (FetcherResponse[[]*types.Header], error)
 
+	// FetchHeadersBackwards fetches a given number of headers backwards from a hash from a peer.
+	// Blocks until data is received.
+	FetchHeadersBackwards(
+		ctx context.Context,
+		hash common.Hash,
+		amount uint64,
+		peerId *PeerId,
+		opts ...FetcherOption,
+	) (FetcherResponse[[]*types.Header], error)
+
 	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
 	FetchBodies(
 		ctx context.Context,

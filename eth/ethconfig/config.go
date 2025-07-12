@@ -274,6 +274,8 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	ElBlockDownloaderV2 bool
 }
 
 type Sync struct {
