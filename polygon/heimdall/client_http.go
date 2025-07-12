@@ -61,7 +61,7 @@ const (
 	SpansFetchLimit       = 150
 	CheckpointsFetchLimit = 10_000
 
-	apiHeimdallTimeout = 10 * time.Second
+	apiHeimdallTimeout = 30 * time.Second
 	retryBackOff       = time.Second
 	maxRetries         = 5
 )
@@ -495,6 +495,24 @@ func (c *HttpClient) FetchChainManagerStatus(ctx context.Context) (*ChainManager
 	ctx = withRequestType(ctx, statusRequest)
 
 	return FetchWithRetry[ChainManagerStatus](ctx, c, url, c.logger)
+}
+
+func (c *HttpClient) IsOnline(ctx context.Context) (bool, error) {
+	url, err := statusURL(c.urlString)
+	if err != nil {
+		return false, err
+	}
+
+	request := &HttpRequest{handler: c.handler, url: url, start: time.Now()}
+	_, err = Fetch[struct{}](ctx, request, c.logger)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, ErrServiceUnavailable) {
+		return false, nil
+	}
+
+	return false, err
 }
 
 func (c *HttpClient) FetchStatus(ctx context.Context) (*Status, error) {

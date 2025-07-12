@@ -164,6 +164,40 @@ func NewSpanFetcher(client Client, logger log.Logger) *EntityFetcher[*Span] {
 	)
 }
 
+func (s *Service) HandleMissedSpan(ctx context.Context, spanID uint64) error {
+	s.logger.Warn("HandleMissedSpan: ", spanID)
+
+	isOnline, err := s.client.IsOnline(ctx)
+	if err != nil {
+		return err
+	}
+
+	if isOnline {
+		s.logger.Warn("HandleMissedSpan: heimdall is online. All spans should be synced")
+
+		// if heimdall is online, we expect all spans to be synced without the next hack
+		return nil
+	}
+
+	span, ok, err := s.store.Spans().Entity(ctx, spanID-1)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("failed to previous span in HandleMissedSpan")
+	}
+
+	span.Id = SpanId(spanID)
+	span.StartBlock, span.EndBlock = span.EndBlock+1, span.EndBlock+1+(span.EndBlock-span.StartBlock)
+
+	if err := s.store.Spans().PutEntity(ctx, spanID, span); err != nil {
+		return err
+	}
+
+	s.spanScraper.observers.NotifySync([]*Span{span})
+	return nil
+}
+
 func (s *Service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return s.reader.Span(ctx, id)
 }
