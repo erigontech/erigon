@@ -21,20 +21,20 @@ import (
 )
 
 //Reader and Writer - decorators on Getter and Compressor - which
-//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
+//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `WordLevelCompression` passed to constructor
 
 // Maybe in future will add support of io.Reader/Writer interfaces to this decorators
 // Maybe in future will merge decorators into it's parents
 
-type FileCompression uint8
+type WordLevelCompression uint8
 
 const (
-	CompressNone FileCompression = 0b0  // no compression
-	CompressKeys FileCompression = 0b1  // compress keys only
-	CompressVals FileCompression = 0b10 // compress values only
+	CompressNone WordLevelCompression = 0b0  // no compression
+	CompressKeys WordLevelCompression = 0b1  // compress keys only
+	CompressVals WordLevelCompression = 0b10 // compress values only
 )
 
-func ParseFileCompression(s string) (FileCompression, error) {
+func ParseFileCompression(s string) (WordLevelCompression, error) {
 	switch s {
 	case "none", "":
 		return CompressNone, nil
@@ -48,8 +48,8 @@ func ParseFileCompression(s string) (FileCompression, error) {
 		return 0, fmt.Errorf("invalid file compression type: %s", s)
 	}
 }
-func (c FileCompression) Has(flag FileCompression) bool { return c&flag != 0 }
-func (c FileCompression) String() string {
+func (c WordLevelCompression) Has(flag WordLevelCompression) bool { return c&flag != 0 }
+func (c WordLevelCompression) String() string {
 	switch c {
 	case CompressNone:
 		return "none"
@@ -66,11 +66,11 @@ func (c FileCompression) String() string {
 
 type Reader struct {
 	*Getter
-	nextValue bool            // if nextValue true then getter.Next() expected to return value
-	c         FileCompression // compressed
+	nextValue bool                 // if nextValue true then getter.Next() expected to return value
+	c         WordLevelCompression // compressed
 }
 
-func NewReader(g *Getter, c FileCompression) *Reader {
+func NewReader(g *Getter, c WordLevelCompression) *Reader {
 	return &Reader{Getter: g, c: c}
 }
 
@@ -135,22 +135,24 @@ type ReaderI interface {
 	Count() int
 	Reset(offset uint64)
 	HasNext() bool
-	Skip() (uint64, int)
+	Skip() (nextOffset uint64, currentWordLen int)
 	FileName() string
 	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
 	MadvNormal() MadvDisabler
 	DisableReadAhead()
 }
+
 type MadvDisabler interface {
 	DisableReadAhead()
 }
+
 type Writer struct {
 	*Compressor
 	keyWritten bool
-	c          FileCompression
+	c          WordLevelCompression
 }
 
-func NewWriter(kv *Compressor, compress FileCompression) *Writer {
+func NewWriter(kv *Compressor, compress WordLevelCompression) *Writer {
 	return &Writer{kv, false, compress}
 }
 
@@ -186,7 +188,7 @@ func (c *Writer) Close() {
 	}
 }
 
-func DetectCompressType(getter *Getter) (compressed FileCompression) {
+func DetectCompressType(getter *Getter) (compressed WordLevelCompression) {
 	keyCompressed := func() (compressed bool) {
 		defer func() {
 			if rec := recover(); rec != nil {

@@ -424,12 +424,13 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 					bt := strings.Replace(res.Path, ".kv", ".bt", 1)
 					_, eb := os.Stat(bt)
 					if eb == nil {
-						rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
+						compCfg := libstate.Schema.CommitmentDomain.CompressCfg
+						rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, compCfg, false)
 						if err != nil {
 							return err
 						}
 
-						getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
+						getter := seg.NewPagedReader(seg.NewReader(rd.MakeGetter(), compCfg.WordLvl), compCfg.PageLvl)
 						//for getter.HasNext() {
 						//	k, _ := getter.Next(nil)
 						//	if bytes.Equal(k, []byte(trieStateKey)) {
@@ -591,8 +592,8 @@ func doBtSearch(cliCtx *cli.Context) error {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	compress := seg.CompressKeys | seg.CompressVals
-	kv, idx, err := libstate.OpenBtreeIndexAndDataFile(srcF, dataFilePath, libstate.DefaultBtreeM, compress, false)
+	compCfg := seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg}
+	kv, idx, err := libstate.OpenBtreeIndexAndDataFile(srcF, dataFilePath, libstate.DefaultBtreeM, compCfg, false)
 	if err != nil {
 		return err
 	}
@@ -605,9 +606,8 @@ func doBtSearch(cliCtx *cli.Context) error {
 
 	seek := common.FromHex(cliCtx.String("key"))
 
-	getter := seg.NewReader(kv.MakeGetter(), compress)
-
-	cur, err := idx.Seek(getter, seek)
+	r := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compCfg.WordLvl), compCfg.PageLvl)
+	cur, err := idx.Seek(r, seek)
 	if err != nil {
 		return err
 	}
@@ -1266,7 +1266,10 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
+
+		compCfg := seg.Cfg{}
+		r := seg.NewPagedReader(seg.NewReader(src.MakeGetter(), compCfg.WordLvl), compCfg.PageLvl)
+		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, r)
 		if err != nil {
 			return err
 		}
@@ -1567,7 +1570,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 
-	compressCfg := seg.DefaultCfg
+	compressCfg := seg.DefaultWordLvlCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
 	compressCfg.MinPatternScore = uint64(dbg.EnvInt("MinPatternScore", int(compressCfg.MinPatternScore)))
 	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", compressCfg.MinPatternLen)
@@ -1602,7 +1605,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	word := make([]byte, 0, int(1*datasize.MB))
-	var snappyBuf, unSnappyBuf []byte
+	var pageLevelCompBuf, pageLevelDecompBuf []byte
 	var concatBuf []byte
 	concatI := 0
 
@@ -1639,12 +1642,12 @@ func doCompress(cliCtx *cli.Context) error {
 			concatBuf = concatBuf[:0]
 		}
 
-		snappyBuf, word = compress.EncodeZstdIfNeed(snappyBuf[:0], word, doSnappyEachWord)
-		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf[:0], word, doUnSnappyEachWord)
+		pageLevelCompBuf, word = compress.EncodeZstdIfNeed(pageLevelCompBuf[:0], word, doSnappyEachWord)
+		pageLevelDecompBuf, word, err = compress.DecodeZstdIfNeed(pageLevelDecompBuf[:0], word, doUnSnappyEachWord)
 		if err != nil {
 			return err
 		}
-		_, _ = snappyBuf, unSnappyBuf
+		_, _ = pageLevelCompBuf, pageLevelDecompBuf
 
 		if _, err := w.Write(word); err != nil {
 			return err
@@ -1715,7 +1718,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	blockFrom, blockTo := info.From, info.To
 	var compressor *seg.Compressor
-	compresCfg := seg.DefaultCfg
+	compresCfg := seg.DefaultWordLvlCfg
 	workers := estimate.CompressSnapshot.Workers()
 	compresCfg.Workers = workers
 	var word = make([]byte, 0, 4096)
