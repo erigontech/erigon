@@ -96,15 +96,15 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize:   1000,
-			chainConfig: polychain.BorDevnetChainConfig,
+			chainConfig: polychain.BorDevnet.Config,
 		},
 		{
 			chainSize:   2000,
-			chainConfig: polychain.BorDevnetChainConfig,
+			chainConfig: polychain.BorDevnet.Config,
 		},
 		{
 			chainSize: 1000,
-			chainConfig: withConfig(polychain.BorDevnetChainConfig,
+			chainConfig: withConfig(polychain.BorDevnet.Config,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -113,7 +113,7 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize: 2000,
-			chainConfig: withConfig(polychain.BorDevnetChainConfig,
+			chainConfig: withConfig(polychain.BorDevnet.Config,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,

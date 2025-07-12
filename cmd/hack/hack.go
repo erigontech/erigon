@@ -667,8 +667,8 @@ func devTx(chaindata string) error {
 }
 
 func chainConfig(name string) error {
-	chainConfig := chainspec.ChainConfigByChainName(name)
-	if chainConfig == nil {
+	spec := chainspec.ChainSpecByName(name)
+	if spec.IsEmpty() {
 		return fmt.Errorf("unknown name: %s", name)
 	}
 	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
@@ -678,7 +678,7 @@ func chainConfig(name string) error {
 	w := bufio.NewWriter(f)
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	if err = encoder.Encode(chainConfig); err != nil {
+	if err = encoder.Encode(spec.Config); err != nil {
 		return err
 	}
 	if err = w.Flush(); err != nil {

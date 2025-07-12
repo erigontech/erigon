@@ -31,7 +31,7 @@ var allocs embed.FS
 // AmoyGenesisBlock returns the Amoy network genesis block.
 func AmoyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     AmoyChainConfig,
+		Config:     readBorChainSpec("chainspecs/amoy.json"),
 		Nonce:      0,
 		Timestamp:  1700225065,
 		GasLimit:   10000000,
@@ -45,7 +45,7 @@ func AmoyGenesisBlock() *types.Genesis {
 // BorMainnetGenesisBlock returns the Bor Mainnet network genesis block.
 func BorMainnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     BorMainnetChainConfig,
+		Config:     readBorChainSpec("chainspecs/bor-mainnet.json"),
 		Nonce:      0,
 		Timestamp:  1590824836,
 		GasLimit:   10000000,
@@ -58,7 +58,7 @@ func BorMainnetGenesisBlock() *types.Genesis {
 
 func BorDevnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     BorDevnetChainConfig,
+		Config:     readBorChainSpec("chainspecs/bor-devnet.json"),
 		Nonce:      0,
 		Timestamp:  1558348305,
 		GasLimit:   10000000,
