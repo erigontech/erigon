@@ -162,7 +162,7 @@ func isValidDepositSignature(depositData *cltypes.DepositData, cfg *clparams.Bea
 	valid, err := bls.Verify(depositData.Signature[:], signedRoot[:], depositData.PubKey[:])
 	if err != nil || !valid {
 		// ignore err here
-		log.Debug("Validator BLS verification failed", "valid", valid, "err", err)
+		log.Debug("Validator BLS verification failed", "valid", valid, "err", err, "pubkey", depositData.PubKey)
 		return false, nil
 	}
 	return true, nil
