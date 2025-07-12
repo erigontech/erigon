@@ -486,10 +486,12 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	pruneLimit := 10
+	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneLimit = 10_000
+		pruneTimeout = time.Hour
 	}
-	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {

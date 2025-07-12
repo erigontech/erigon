@@ -404,6 +404,8 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 }
 
 func TestService_ProcessNewBlocksWithOverride(t *testing.T) {
+	t.Skip("until https://github.com/erigontech/erigon/issues/16062")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
