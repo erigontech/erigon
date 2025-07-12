@@ -1,7 +1,7 @@
 Tutorial: Build a personalized daemon
 =====================================
 
-For the following tutorial, we will make references to https://github.com/Giulio2002/hello-tg-daemon.
+For the following tutorial, we will make references to https://github.com/sambacha/hello-tg-daemon.
 
 We are going to build our daemon using golang and Erigon packages, so first of all we are going to create a file in which we are going to store our API methods and informations. (`api.go`).
 
