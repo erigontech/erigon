@@ -29,7 +29,7 @@ jobs:
       cancel-in-progress: true
     runs-on: [ self-hosted, qa, Polygon ]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ERIGON_ASSERT: true
