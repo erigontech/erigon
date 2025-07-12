@@ -69,8 +69,19 @@ type StageState struct {
 	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
-func (s *StageState) LogPrefix() string     { return s.state.LogPrefix() }
-func (s *StageState) SyncMode() stages.Mode { return s.state.mode }
+func (s *StageState) LogPrefix() string {
+	if s == nil {
+		return ""
+	}
+	return s.state.LogPrefix()
+}
+
+func (s *StageState) SyncMode() stages.Mode {
+	if s == nil {
+		return stages.ModeUnknown
+	}
+	return s.state.mode
+}
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {

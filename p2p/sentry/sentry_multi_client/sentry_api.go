@@ -18,6 +18,7 @@ package sentry_multi_client
 
 import (
 	"context"
+	"encoding/hex"
 	"math/rand"
 
 	"google.golang.org/grpc"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
@@ -62,10 +64,11 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 		//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 		var bytes []byte
 		var err error
-		bytes, err = rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
+		packet := eth.GetBlockBodiesPacket66{
 			RequestId:            rand.Uint64(), // nolint: gosec
 			GetBlockBodiesPacket: req.Hashes,
-		})
+		}
+		bytes, err = rlp.EncodeToBytes(&packet)
 		if err != nil {
 			cs.logger.Error("Could not encode block bodies request", "err", err)
 			return [64]byte{}, false
@@ -85,7 +88,33 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			fromNum, toNum := req.FromBlockNum(), req.ToBlockNum()
+			fromHash, toHash := req.FromBlockHash(), req.ToBlockHash()
+			cs.logger.Trace(
+				"body request not sent to any peers",
+				"reqId", packet.RequestId,
+				"fromNum", fromNum,
+				"fromHash", fromHash,
+				"toNum", toNum,
+				"toHash", toHash,
+			)
 			continue
+		}
+		if cs.logger.Enabled(ctx, log.LvlTrace) {
+			fromNum, toNum := req.FromBlockNum(), req.ToBlockNum()
+			fromHash, toHash := req.FromBlockHash(), req.ToBlockHash()
+			for _, p := range sentPeers.Peers {
+				pid := sentry.ConvertH512ToPeerID(p)
+				cs.logger.Trace(
+					"body request sent to peer",
+					"reqId", packet.RequestId,
+					"fromNum", fromNum,
+					"fromHash", fromHash,
+					"toNum", toNum,
+					"toHash", toHash,
+					"peer", hex.EncodeToString(pid[:]),
+				)
+			}
 		}
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
@@ -132,7 +161,29 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			cs.logger.Trace(
+				"header request not sent to any peers",
+				"reqId", reqData.RequestId,
+				"height", req.Number,
+				"hash", req.Hash,
+				"length", req.Length,
+				"reverse", req.Reverse,
+			)
 			continue
+		}
+		if cs.logger.Enabled(ctx, log.LvlTrace) {
+			for _, p := range sentPeers.Peers {
+				pid := sentry.ConvertH512ToPeerID(p)
+				cs.logger.Trace(
+					"header request sent to peer",
+					"reqId", reqData.RequestId,
+					"height", req.Number,
+					"hash", req.Hash,
+					"length", req.Length,
+					"reverse", req.Reverse,
+					"peer", hex.EncodeToString(pid[:]),
+				)
+			}
 		}
 		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}

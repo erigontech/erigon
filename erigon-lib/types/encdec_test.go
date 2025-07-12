@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -85,21 +84,6 @@ func (tr *TRand) RandBoolean() bool {
 
 func (tr *TRand) RandBloom() Bloom {
 	return Bloom(tr.RandBytes(BloomByteLength))
-}
-
-func (tr *TRand) RandVerkleKeyValuePairs(count int) []verkle.KeyValuePair {
-	res := make([]verkle.KeyValuePair, count)
-	for i := 0; i < count; i++ {
-		res[i] = tr.RandVerkleKeyValuePair()
-	}
-	return res
-}
-
-func (tr *TRand) RandVerkleKeyValuePair() verkle.KeyValuePair {
-	return verkle.KeyValuePair{
-		Key:   tr.RandBytes(tr.RandIntInRange(1, 32)),
-		Value: tr.RandBytes(tr.RandIntInRange(1, 32)),
-	}
 }
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
@@ -183,8 +167,6 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 			field.Set(reflect.ValueOf(tr.RandBytes(tr.RandIntInRange(128, 1024))))
 		case reflect.TypeOf(false):
 			field.Set(reflect.ValueOf(tr.RandBoolean()))
-		case reflect.TypeOf([]verkle.KeyValuePair{}):
-			field.Set(reflect.ValueOf(tr.RandVerkleKeyValuePairs(tr.RandIntInRange(1, 3))))
 		default:
 			panic(fmt.Sprintf("don't know how to generate rand value for Header field type %v - please add handler", field.Type()))
 		}
@@ -675,11 +657,22 @@ func BenchmarkHeaderRLP(b *testing.B) {
 	tr := NewTRand()
 	header := tr.RandHeader()
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	b.Run(`Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			header.EncodeRLP(&buf)
+		}
+	})
+	b.Run(`Decode`, func(b *testing.B) {
+		b.ReportAllocs()
 		buf.Reset()
 		header.EncodeRLP(&buf)
-	}
+		var v Header
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &v)
+		}
+	})
 }
 
 func BenchmarkLegacyTxRLP(b *testing.B) {

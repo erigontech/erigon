@@ -616,6 +616,21 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 }
 
+type testLogHandler struct {
+	lprefix string
+	lfmt    log.Format
+	t       *testing.T
+}
+
+func (h testLogHandler) Log(r *log.Record) error {
+	h.t.Logf("%s %s", h.lprefix, h.lfmt.Format(r))
+	return nil
+}
+
+func (h testLogHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
+}
+
 func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.Logger) *UDPv4 {
 	t.Helper()
 
@@ -631,10 +646,7 @@ func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.
 	lprefix := fmt.Sprintf("(%s)", ln.ID().TerminalString())
 	lfmt := log.TerminalFormat()
 	cfg.Log = testlog.Logger(t, log.LvlError)
-	cfg.Log.SetHandler(log.FuncHandler(func(r *log.Record) error {
-		t.Logf("%s %s", lprefix, lfmt.Format(r))
-		return nil
-	}))
+	cfg.Log.SetHandler(testLogHandler{lprefix: lprefix, lfmt: lfmt, t: t})
 
 	// Listen.
 	socket, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP{127, 0, 0, 1}})

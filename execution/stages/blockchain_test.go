@@ -50,10 +50,10 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	params2 "github.com/erigontech/erigon/params"
 )
 
 // So we can deterministically seed different blockchains
@@ -944,7 +944,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 }
 
 func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, prune.Mode) error) {
-	err := runPermutation(t, testFunc, 0, prune.DefaultMode)
+	err := runPermutation(t, testFunc, 0, prune.MockMode)
 	if err != nil {
 		t.Errorf("error while testing stuff: %v", err)
 	}
@@ -2190,7 +2190,7 @@ func TestEIP1559Transition(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(common.Ether))
 		gspec   = &types.Genesis{
-			Config: params2.SepoliaChainConfig,
+			Config: chainspec.SepoliaChainConfig,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: funds.ToBig()},
 				addr2: {Balance: funds.ToBig()},

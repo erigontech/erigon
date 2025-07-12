@@ -25,6 +25,7 @@ const (
 	InvertedIndex      Check = "InvertedIndex"
 	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
 	ReceiptsNoDups     Check = "ReceiptsNoDups"
+	RCacheNoDups       Check = "RCacheNoDups"
 	BorEvents          Check = "BorEvents"
 	BorSpans           Check = "BorSpans"
 	BorCheckpoints     Check = "BorCheckpoints"
@@ -37,4 +38,5 @@ var AllChecks = []Check{
 
 var NonDefaultChecks = []Check{
 	BorMilestones,
+	RCacheNoDups,
 }
