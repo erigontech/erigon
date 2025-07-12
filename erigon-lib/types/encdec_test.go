@@ -657,11 +657,22 @@ func BenchmarkHeaderRLP(b *testing.B) {
 	tr := NewTRand()
 	header := tr.RandHeader()
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	b.Run(`Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			header.EncodeRLP(&buf)
+		}
+	})
+	b.Run(`Decode`, func(b *testing.B) {
+		b.ReportAllocs()
 		buf.Reset()
 		header.EncodeRLP(&buf)
-	}
+		var v Header
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &v)
+		}
+	})
 }
 
 func BenchmarkLegacyTxRLP(b *testing.B) {

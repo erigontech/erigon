@@ -1,16 +1,16 @@
-package das
+package peerdasutils
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/p2p/enode"
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+	"github.com/holiman/uint256"
 )
 
 // CustodyIndex represents the index of a custody group
@@ -23,7 +23,7 @@ type ColumnIndex = cltypes.ColumnIndex
 type RowIndex = cltypes.RowIndex
 
 var (
-	maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	maxUint256 = new(uint256.Int).Sub(new(uint256.Int).Lsh(uint256.NewInt(1), 256), uint256.NewInt(1))
 )
 
 // GetCustodyGroups generates custody groups for a given node ID.
@@ -33,34 +33,31 @@ func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 	if custodyGroupCount > cfg.NumberOfCustodyGroups {
 		return nil, fmt.Errorf("custody group count %d exceeds maximum allowed %d", custodyGroupCount, cfg.NumberOfCustodyGroups)
 	}
-	currentID, ok := new(big.Int).SetString(nodeID.String(), 16)
-	if !ok {
-		return nil, fmt.Errorf("failed to convert nodeID %s to big int", nodeID.String())
-	}
+	currentID := uint256.NewInt(0).SetBytes(nodeID.Bytes())
 	custodyGroups := make([]CustodyIndex, 0)
+	custodyGroupLookup := make(map[CustodyIndex]bool)
 	for uint64(len(custodyGroups)) < custodyGroupCount {
 		// Hash current ID and take first 8 bytes
-		hash := crypto.Keccak256(currentID.Bytes())
+		idBytes := currentID.Bytes32()
+		// Reverse the bytes to convert from big-endian to little-endian.
+		// This ensures compatibility with the hashing process that follows.
+		for i := 0; i < len(idBytes)/2; i++ {
+			idBytes[i], idBytes[len(idBytes)-i-1] = idBytes[len(idBytes)-i-1], idBytes[i]
+		}
+		hash := sha256.Sum256(idBytes[:])
 		custodyGroup := binary.LittleEndian.Uint64(hash[:8]) % cfg.NumberOfCustodyGroups
 
 		// Check if custody group already exists
-		exists := false
-		for _, g := range custodyGroups {
-			if g == custodyGroup {
-				exists = true
-				break
-			}
-		}
-
-		if !exists {
+		if _, ok := custodyGroupLookup[custodyGroup]; !ok {
 			custodyGroups = append(custodyGroups, custodyGroup)
+			custodyGroupLookup[custodyGroup] = true
 		}
 
 		// Increment currentID with overflow protection
 		if currentID.Cmp(maxUint256) == 0 {
-			currentID.SetInt64(0)
+			currentID = uint256.NewInt(0)
 		} else {
-			currentID.Add(currentID, big.NewInt(1))
+			currentID.Add(currentID, uint256.NewInt(1))
 		}
 	}
 
@@ -108,7 +105,7 @@ func ComputeMatrix(blobs [][]byte) ([]cltypes.MatrixEntry, error) {
 			matrix = append(matrix, cltypes.MatrixEntry{
 				Cell:        cells[cellIndex],
 				KzgProof:    proofs[cellIndex],
-				RowIndex:    RowIndex(blobIndex),
+				RowIndex:    uint64(blobIndex),
 				ColumnIndex: ColumnIndex(cellIndex),
 			})
 		}
@@ -118,9 +115,8 @@ func ComputeMatrix(blobs [][]byte) ([]cltypes.MatrixEntry, error) {
 }
 
 // RecoverMatrix takes a partial matrix and the total blob count and returns a complete matrix.
-func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([]cltypes.MatrixEntry, error) {
-	numberOfColumns := clparams.GetBeaconConfig().NumberOfColumns
-	matrix := make([]cltypes.MatrixEntry, 0, blobCount*numberOfColumns)
+func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]cltypes.MatrixEntry, error) {
+	matrix := make([][]cltypes.MatrixEntry, 0, blobCount)
 
 	// Process each blob row
 	for blobIndex := uint64(0); blobIndex < blobCount; blobIndex++ {
@@ -141,14 +137,16 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([]clt
 		}
 
 		// Add recovered entries to matrix
-		for cellIndex := range recoveredCells {
-			matrix = append(matrix, cltypes.MatrixEntry{
-				Cell:        recoveredCells[cellIndex],
-				KzgProof:    recoveredProofs[cellIndex],
+		blobEntries := make([]cltypes.MatrixEntry, 0, len(recoveredCells))
+		for index := range recoveredCells {
+			blobEntries = append(blobEntries, cltypes.MatrixEntry{
+				Cell:        recoveredCells[index],
+				KzgProof:    recoveredProofs[index],
 				RowIndex:    blobIndex,
-				ColumnIndex: ColumnIndex(cellIndex),
+				ColumnIndex: ColumnIndex(index),
 			})
 		}
+		matrix = append(matrix, blobEntries)
 	}
 
 	return matrix, nil
@@ -202,4 +200,25 @@ func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, 
 	}
 
 	return convertCells, convertProofs, nil
+}
+
+func GetCustodyColumns(nodeID enode.ID, cgc uint64) (map[cltypes.CustodyIndex]bool, error) {
+	// TODO: cache the following computations in terms of custody columns
+	sampleSize := max(clparams.GetBeaconConfig().SamplesPerSlot, cgc)
+	groups, err := GetCustodyGroups(nodeID, sampleSize)
+	if err != nil {
+		return nil, err
+	}
+	// compute all required custody columns
+	custodyColumns := map[cltypes.CustodyIndex]bool{}
+	for _, group := range groups {
+		columns, err := ComputeColumnsForCustodyGroup(group)
+		if err != nil {
+			return nil, err
+		}
+		for _, column := range columns {
+			custodyColumns[column] = true
+		}
+	}
+	return custodyColumns, nil
 }

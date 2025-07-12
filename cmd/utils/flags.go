@@ -31,10 +31,12 @@ import (
 	"time"
 
 	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain/networkname"
@@ -682,16 +684,17 @@ var (
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name: "torrent.download.rate",
-		// TODO: Set this higher to demonstrate effectiveness. This should exceed 128 MB (256 might
-		// be good) to demonstrate when webseeding is working optimally. A separate rate limit could
-		// be used for peers.
-		Value: "128mb",
-		Usage: "Bytes per second, example: 32mb",
+		// I'm not sure what we want here. How fast to typical users get with webseeds? Let's try no
+		// limit.
+		Usage: "Bytes per second, example: 32mb. Shared with webseeds unless that rate is set separately.",
+	}
+	TorrentWebseedDownloadRateFlag = cli.StringFlag{
+		Name:  "torrent.webseed.download.rate",
+		Usage: "Bytes per second for webseeds, example: 32mb. If not set, rate limit is shared with torrent.download.rate",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
-		Name: "torrent.upload.rate",
-		// TODO: Set this higher to demonstrate effectiveness?
-		Value: "4mb",
+		Name:  "torrent.upload.rate",
+		Value: "32mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
 	// Deprecated. Shouldn't do anything. TODO: Remove.
@@ -1928,10 +1931,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.KeepExecutionProofs = true
 		state.EnableHistoricalCommitment()
 	}
-	if ctx.Bool(PersistReceiptsV2Flag.Name) {
-		cfg.PersistReceiptsCacheV2 = true
-		state.EnableHistoricalRCache()
-	}
+
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
@@ -2075,15 +2075,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Do this after chain config as there are chain type registration
 	// dependencies for know config which need to be set-up
 	if cfg.Snapshot.DownloaderAddr == "" {
-		downloadRateStr := ctx.String(TorrentDownloadRateFlag.Name)
-		uploadRateStr := ctx.String(TorrentUploadRateFlag.Name)
-		var downloadRate, uploadRate datasize.ByteSize
-		if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
-			panic(err)
-		}
-		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
-			panic(err)
-		}
 		lvl, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
@@ -2098,17 +2089,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			cfg.Dirs,
 			version,
 			lvl,
-			downloadRate,
-			uploadRate,
 			ctx.Int(TorrentPortFlag.Name),
 			ctx.Int(TorrentConnsPerFileFlag.Name),
-			common.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)),
 			webseedsList,
 			chain,
 			ctx.Bool(DbWriteMapFlag.Name),
 			downloadercfg.NewCfgOpts{
-				DisableTrackers: boolFlagOpt(ctx, &TorrentDisableTrackers),
-				Verify:          DownloaderVerifyFlag.Get(ctx),
+				DisableTrackers:          boolFlagOpt(ctx, &TorrentDisableTrackers),
+				Verify:                   DownloaderVerifyFlag.Get(ctx),
+				DownloadRateLimit:        MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentDownloadRateFlag.Name)),
+				UploadRateLimit:          MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentUploadRateFlag.Name)),
+				WebseedDownloadRateLimit: MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentWebseedDownloadRateFlag.Name)),
 			},
 		)
 		if err != nil {
@@ -2116,6 +2107,46 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader.ClientConfig, logger)
 	}
+}
+
+// Convenience type for optional flag value representing a rate limit that should print nicely for
+// humans too.
+type RateLimitFlagValue g.Option[rate.Limit]
+
+// Human-readable representation of the rate limit value, or "Inf" if the value is not set.
+func (me RateLimitFlagValue) String() string {
+	if !me.Ok {
+		return "Inf"
+	}
+	return datasize.ByteSize(me.Value).String()
+}
+
+// Converts the parsed rate limit to the type expected by the Downloader torrent configuration.
+func (me RateLimitFlagValue) TorrentRateLimit() g.Option[rate.Limit] {
+	return g.Option[rate.Limit](me)
+}
+
+func GetStringFlagRateLimit(value string) (_ RateLimitFlagValue, err error) {
+	switch value {
+	case "":
+		return
+	case "Inf":
+		return RateLimitFlagValue(g.Some(rate.Inf)), nil
+	}
+	var size datasize.ByteSize
+	err = size.UnmarshalText([]byte(value))
+	if err != nil {
+		return
+	}
+	return RateLimitFlagValue(g.Some(rate.Limit(size))), nil
+}
+
+// Takes a string value from a flag, in a human readable byte rate format, and converts it to a
+// Downloader rate limit option value. Panics on parse errors per the old package behaviour.
+func MustGetStringFlagDownloaderRateLimit(value string) (_ g.Option[rate.Limit]) {
+	hiho, err := GetStringFlagRateLimit(value)
+	panicif.Err(err)
+	return hiho.TorrentRateLimit()
 }
 
 // Converts flag value to an Option for packages that abstract over flag handling.

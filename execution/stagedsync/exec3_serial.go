@@ -117,9 +117,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
-			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
-				return false, err
-			}
 		} else {
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
 				// get last receipt and store the last log index + 1
@@ -140,6 +137,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 						prevTask.Final = false
 						prevTask.HistoryExecution = true
 						se.applyWorker.RunTxTaskNoLock(&prevTask, se.isMining, se.skipPostEvaluation)
+						if prevTask.Error != nil {
+							return false, fmt.Errorf("error while finding last receipt: %w", prevTask.Error)
+						}
 						prevTask.CreateReceipt(se.applyTx.(kv.TemporalTx))
 						lastReceipt = txTask.BlockReceipts[txTask.TxIndex-1]
 					} else {
@@ -157,6 +157,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 		}
 		if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
 			return false, err
+
 		}
 
 		// MA applystate

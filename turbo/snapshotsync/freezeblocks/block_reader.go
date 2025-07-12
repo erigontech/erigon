@@ -23,6 +23,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon-db/rawdb"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
@@ -188,6 +190,12 @@ func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash
 	if reply == nil {
 		return 0, 0, false, nil
 	}
+
+	// Not a perfect solution, assumes there are no transactions in block 0 (same check on server side)
+	if reply.BlockNumber == 0 && reply.TxNumber == 0 {
+		return reply.BlockNumber, reply.TxNumber, false, nil
+	}
+
 	return reply.BlockNumber, reply.TxNumber, true, nil
 }
 
@@ -223,6 +231,10 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	reply, err := r.client.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
 		return nil, nil, err
+	}
+	if len(reply.BlockRlp) == 0 {
+		// block not found
+		return nil, nil, nil
 	}
 
 	block = &types.Block{}
@@ -410,12 +422,18 @@ type BlockReader struct {
 	borBridgeStore bridge.Store
 	heimdallStore  heimdall.Store
 	txBlockIndex   *txBlockIndexWithBlockReader
+
+	//files are immutable: no reorgs, on updates - means no invalidation needed
+	headerByNumCache *lru.Cache[uint64, *types.Header]
 }
+
+var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 
 func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store, borBridge bridge.Store) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
 	br := &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore, borBridgeStore: borBridge}
+	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
 	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
 	br.txBlockIndex = txnumReader
 	return br
@@ -926,6 +944,10 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 }
 
 func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.Header, []byte, error) {
+	if h, ok := r.headerByNumCache.Get(blockHeight); ok {
+		return h, buf, nil
+	}
+
 	index := sn.Src().Index()
 	if index == nil {
 		return nil, buf, nil
@@ -944,6 +966,8 @@ func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *snapshotsync.Vi
 	if err := rlp.DecodeBytes(buf[1:], h); err != nil {
 		return nil, buf, err
 	}
+
+	r.headerByNumCache.Add(blockHeight, h)
 	return h, buf, nil
 }
 

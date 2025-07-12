@@ -177,6 +177,10 @@ func (s *Sentinel) updateENROnSubscription(topicName string, subscribe bool) {
 		return
 	}
 	part := parts[3]
+	if !strings.Contains(part, "beacon_attestation") &&
+		!strings.Contains(part, "sync_committee") {
+		return
+	}
 	for i := 0; i < int(s.cfg.NetworkConfig.AttestationSubnetCount); i++ {
 		if part == gossip.TopicNameBeaconAttestation(uint64(i)) {
 			log.Info("[Sentinel] Update ENR on subscription", "subnet", i, "subscribe", subscribe, "type", "attestation")

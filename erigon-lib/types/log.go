@@ -20,6 +20,7 @@
 package types
 
 import (
+	"fmt"
 	"io"
 	"slices"
 
@@ -254,13 +255,13 @@ func (l *Log) Copy() *Log {
 		return nil
 	}
 	return &Log{
-		Address:     common.BytesToAddress(l.Address.Bytes()),
+		Address:     l.Address,
 		Topics:      slices.Clone(l.Topics),
 		Data:        slices.Clone(l.Data),
 		BlockNumber: l.BlockNumber,
-		TxHash:      common.BytesToHash(l.TxHash.Bytes()),
+		TxHash:      l.TxHash,
 		TxIndex:     l.TxIndex,
-		BlockHash:   common.BytesToHash(l.BlockHash.Bytes()),
+		BlockHash:   l.BlockHash,
 		Index:       l.Index,
 		Removed:     l.Removed,
 	}
@@ -279,24 +280,46 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 	})
 }
 
+func decodeTopics2(s *rlp.Stream) (list []common.Hash, err error) {
+	l, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	if l == 0 {
+		return nil, s.ListEnd()
+	}
+	listLen := int(l / (1 + 32))  // rlpLenPrefix+32bytes
+	preAlloc := min(128, listLen) // attacker may craft rlp prefix - which will trigger hube pre-alloc. so, add hard-limit
+	list = make([]common.Hash, 0, preAlloc)
+	var i int
+	var b common.Hash
+	for ; s.MoreDataInList(); i++ {
+		if err = s.ReadBytes(b[:]); err != nil {
+			return nil, err
+		}
+		list = append(list, b)
+	}
+	return list[:i], s.ListEnd()
+}
+
 // DecodeRLP implements rlp.Decoder.
 //
 // Note some redundant fields(e.g. block number, txn hash etc) will be assembled later.
 func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
-	blob, err := s.Raw()
+	_, err := s.List()
 	if err != nil {
 		return err
 	}
-	var dec rlpStorageLog
-	err = rlp.DecodeBytes(blob, &dec)
+	err = s.ReadBytes(l.Address[:])
+	if err != nil {
+		return fmt.Errorf("read Address: %w", err)
+	}
+	l.Topics, err = decodeTopics2(s)
 	if err != nil {
 		return err
 	}
-
-	*l = LogForStorage{
-		Address: dec.Address,
-		Topics:  dec.Topics,
-		Data:    dec.Data,
+	if l.Data, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Data: %w", err)
 	}
-	return nil
+	return s.ListEnd()
 }

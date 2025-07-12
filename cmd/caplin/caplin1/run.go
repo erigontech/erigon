@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/service"
@@ -269,10 +270,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	// create the public keys registry
 	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
-
+	validatorParameters := validator_params.NewValidatorParams()
 	forkChoice, err := forkchoice.NewForkChoiceStore(
 		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters),
-		emitters, syncedDataManager, blobStorage, pksRegistry, doLMDSampling)
+		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -285,6 +286,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
+	peerDasState := peerdasstate.NewPeerDasState(beaconConfig)
 	columnStorage := blob_storage.NewDataColumnStore(indexDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock)
 	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:                       config.CaplinDiscoveryAddr,
@@ -312,14 +314,14 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconConfig.SlotsPerEpoch,
 			HeadRoot:       state.FinalizedCheckpoint().Root,
 		},
-	}, ethClock, forkChoice, columnStorage, logger)
+	}, ethClock, forkChoice, columnStorage, peerDasState, logger)
 	if err != nil {
 		return err
 	}
+	peerDasState.SetNodeID(localNode.ID())
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
-	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, columnStorage, sentinel)
-	peerDas.InitLocalNodeId(localNode.ID()) // hack init
-	forkChoice.InitPeerDas(peerDas)         // hack init
+	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState)
+	forkChoice.InitPeerDas(peerDas) // hack init
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, aggregationPool, syncedDataManager)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
@@ -420,7 +422,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState, stateSnapshots, syncedDataManager)
-	validatorParameters := validator_params.NewValidatorParams()
 	if config.BeaconAPIRouter.Active {
 		apiHandler := handler.NewApiHandler(
 			logger,

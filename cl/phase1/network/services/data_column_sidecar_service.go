@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -58,6 +60,7 @@ type seenSidecarKey struct {
 
 func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
 	if s.syncDataManager.Syncing() {
+		// maybe later processing
 		return ErrIgnore
 	}
 
@@ -74,7 +77,28 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		return ErrIgnore
 	}
 
+	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to get block root: %v", err)
+	}
 	s.seenSidecar.Add(seenKey, struct{}{})
+
+	if s.forkChoice.GetPeerDas().IsArchivedMode() {
+		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockRoot) ||
+			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
+			// already processed
+			return ErrIgnore
+		}
+	} else {
+		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
+		if err != nil {
+			return fmt.Errorf("failed to get my custody columns: %v", err)
+		}
+		if _, ok := myCustodyColumns[msg.Index]; !ok {
+			// not my custody column
+			return ErrIgnore
+		}
+	}
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
 	if !das.VerifyDataColumnSidecar(msg) {
@@ -135,13 +159,15 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
-	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("failed to get block root: %v", err)
-	}
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
 	}
+	if s.forkChoice.GetPeerDas().IsArchivedMode() {
+		if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
+			log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
+		}
+	}
+	log.Trace("[dataColumnSidecarService] processed data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index)
 	return nil
 }
 

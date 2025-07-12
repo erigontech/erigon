@@ -334,55 +334,27 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		// return fmt.Errorf("open header struct: %w", err)
 	}
 	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(h.ParentHash[:]); err != nil {
 		return fmt.Errorf("read ParentHash: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for ParentHash: %d", len(b))
-	}
-	copy(h.ParentHash[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(h.UncleHash[:]); err != nil {
 		return fmt.Errorf("read UncleHash: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for UncleHash: %d", len(b))
-	}
-	copy(h.UncleHash[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(h.Coinbase[:]); err != nil {
 		return fmt.Errorf("read Coinbase: %w", err)
 	}
-	if len(b) != 20 {
-		return fmt.Errorf("wrong size for Coinbase: %d", len(b))
-	}
-	copy(h.Coinbase[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(h.Root[:]); err != nil {
 		return fmt.Errorf("read Root: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for Root: %d", len(b))
-	}
-	copy(h.Root[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(h.TxHash[:]); err != nil {
 		return fmt.Errorf("read TxHash: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for TxHash: %d", len(b))
-	}
-	copy(h.TxHash[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(h.ReceiptHash[:]); err != nil {
 		return fmt.Errorf("read ReceiptHash: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for ReceiptHash: %d", len(b))
-	}
-	copy(h.ReceiptHash[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(h.Bloom[:]); err != nil {
 		return fmt.Errorf("read Bloom: %w", err)
 	}
-	if len(b) != 256 {
-		return fmt.Errorf("wrong size for Bloom: %d", len(b))
-	}
-	copy(h.Bloom[:], b)
 	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Difficulty: %w", err)
 	}
@@ -416,17 +388,12 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("read AuRaSeal: %w", err)
 		}
 	} else {
-		if b, err = s.Bytes(); err != nil {
+		if err = s.ReadBytes(h.MixDigest[:]); err != nil {
 			return fmt.Errorf("read MixDigest: %w", err)
 		}
-		copy(h.MixDigest[:], b)
-		if b, err = s.Bytes(); err != nil {
+		if err = s.ReadBytes(h.Nonce[:]); err != nil {
 			return fmt.Errorf("read Nonce: %w", err)
 		}
-		if len(b) != 8 {
-			return fmt.Errorf("wrong size for Nonce: %d", len(b))
-		}
-		copy(h.Nonce[:], b)
 	}
 
 	// BaseFee

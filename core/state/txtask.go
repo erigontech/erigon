@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -148,7 +147,7 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 
 	cumulativeGasUsed += t.GasUsed
 	if t.GasUsed == 0 {
-		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
+		msg := fmt.Sprintf("assert: no gas used, bn=%d, tn=%d, ti=%d", t.BlockNum, t.TxNum, t.TxIndex)
 		panic(msg)
 	}
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
