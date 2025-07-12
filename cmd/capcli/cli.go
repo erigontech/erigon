@@ -1355,9 +1355,15 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 		// Signature:             nil, // will be set later
 	}
 
+	// trim 0x prefix if present
+	if len(m.DomainDeposit) > 2 && m.DomainDeposit[:2] == "0x" {
+		m.DomainDeposit = m.DomainDeposit[2:]
+	}
+
 	domainDeposit := common.Hex2Bytes(m.DomainDeposit)
 
 	fmt.Println(uint32(genesisForkVersion))
+	fmt.Println(domainDeposit, m.DomainDeposit)
 
 	domain, err := fork.ComputeDomain(
 		domainDeposit[:],
