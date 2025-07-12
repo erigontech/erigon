@@ -224,35 +224,27 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 		}).blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
 	}
 
-	tx := s.snapshots.ViewType(heimdall.Events)
-	defer tx.Close()
-	segments := tx.Segments
+	sn, ok, close := s.snapshots.ViewSingleFile(heimdall.Events, blockNum)
+	defer close()
+	if !ok {
+		return 0, 0, false, nil
+	}
 
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-		if sn.From() > blockNum {
-			continue
-		}
-		if sn.To() <= blockNum {
-			break
-		}
-
-		gg := sn.Src().MakeGetter()
-		var buf []byte
-		for gg.HasNext() {
-			buf, _ = gg.Next(buf[:0])
-			if blockNum == binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
-				start := binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
-				end := start
-				for gg.HasNext() {
-					buf, _ = gg.Next(buf[:0])
-					if blockNum != binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
-						break
-					}
-					end = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+	gg := sn.Src().MakeGetter()
+	var buf []byte
+	for gg.HasNext() {
+		buf, _ = gg.Next(buf[:0])
+		if blockNum == binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
+			start := binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+			end := start
+			for gg.HasNext() {
+				buf, _ = gg.Next(buf[:0])
+				if blockNum != binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
+					break
 				}
-				return start, end, true, nil
+				end = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 			}
+			return start, end, true, nil
 		}
 	}
 

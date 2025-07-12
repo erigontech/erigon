@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -58,21 +57,29 @@ type BeaconRpcP2P struct {
 	beaconConfig *clparams.BeaconChainConfig
 	// ethClock handles all time-related operations.
 	ethClock eth_clock.EthereumClock
+
+	columnDataPeers *columnDataPeers
 }
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
 // It takes a context, a sentinel.Sent
 func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) *BeaconRpcP2P {
-	return &BeaconRpcP2P{
+	rpc := &BeaconRpcP2P{
 		ctx:          ctx,
 		sentinel:     sentinel,
 		beaconConfig: beaconConfig,
 		ethClock:     ethClock,
 	}
+	rpc.columnDataPeers = newColumnPeers(
+		sentinel,
+		beaconConfig,
+		ethClock,
+	)
+	return rpc
 }
 
-func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
-	responses, pid, err := b.sendRequest(ctx, topic, reqData, count)
+func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte) ([]*cltypes.SignedBeaconBlock, string, error) {
+	responses, pid, err := b.sendRequest(ctx, topic, reqData)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -90,7 +97,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 }
 
 func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, count uint64) ([]*cltypes.BlobSidecar, string, error) {
-	responses, pid, err := b.sendRequest(ctx, topic, reqData, count)
+	responses, pid, err := b.sendRequest(ctx, topic, reqData)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -110,31 +117,33 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
-) ([]*cltypes.DataColumnSidecar, string, error) {
+) ([]*cltypes.DataColumnSidecar, string, uint64, error) {
+	filteredReq, pid, cgc, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	if err != nil {
+		return nil, pid, 0, err
+	}
+
 	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
-		return nil, "", err
+	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
+		return nil, "", 0, err
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, uint64(req.Len()))
+	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
 	if err != nil {
-		return nil, pid, err
+		return nil, pid, 0, err
 	}
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, data := range responsePacket {
 		columnSidecar := &cltypes.DataColumnSidecar{}
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
+			return nil, pid, 0, err
 		}
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
 
-	bytes, _ := json.Marshal(ColumnSidecars)
-	log.Info("[test] success to send column sidecars", "bytes", string(bytes))
-
-	return ColumnSidecars, pid, nil
+	return ColumnSidecars, pid, cgc, nil
 }
 
 func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
@@ -155,7 +164,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes(), count)
+	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes())
 	if err != nil {
 		return nil, pid, err
 	}
@@ -216,7 +225,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRangeProtocolV2, data, count)
+	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRangeProtocolV2, data)
 }
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
@@ -230,7 +239,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][3
 		return nil, "", err
 	}
 	data := common.CopyBytes(buffer.Bytes())
-	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRootProtocolV2, data, uint64(len(roots)))
+	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRootProtocolV2, data)
 }
 
 // Peers retrieves peer count.
@@ -267,22 +276,8 @@ type responseData struct {
 	raw     []byte
 }
 
-// sendRequest sends a request to the sentinel and helps with decoding the response.
-func (b *BeaconRpcP2P) sendRequest(
-	ctx context.Context,
-	topic string,
-	reqPayload []byte,
-	dataCount uint64,
-) ([]responseData, string, error) {
-	ctx, cn := context.WithTimeout(ctx, time.Second*2)
-	defer cn()
-	message, err := b.sentinel.SendRequest(ctx, &sentinel.RequestData{
-		Data:  reqPayload,
-		Topic: topic,
-	})
-	if err != nil {
-		return nil, "", err
-	}
+// parseResponseData parses the response data from a sentinel message and returns the parsed response data.
+func (b *BeaconRpcP2P) parseResponseData(message *sentinel.ResponseData) ([]responseData, string, error) {
 	if message.Error {
 		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
 		errBytes, _ := io.ReadAll(rd)
@@ -292,19 +287,21 @@ func (b *BeaconRpcP2P) sendRequest(
 
 	responsePacket := []responseData{}
 	r := bytes.NewReader(message.Data)
-	for i := 0; i < int(dataCount); i++ {
+	for {
 		forkDigest := make([]byte, 4)
-		if _, err := r.Read(forkDigest); err != nil {
+		if n, err := r.Read(forkDigest); err != nil {
 			if err == io.EOF {
 				break
 			}
 			return nil, message.Peer.Pid, err
+		} else if n == 0 {
+			break
 		}
 
 		// Read varint for length of message.
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
-			return nil, message.Peer.Pid, fmt.Errorf("unable to read varint from message prefix: %w", err)
+			return nil, message.Peer.Pid, fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err)
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {
@@ -340,4 +337,41 @@ func (b *BeaconRpcP2P) sendRequest(
 		r.ReadByte()
 	}
 	return responsePacket, message.Peer.Pid, nil
+}
+
+// sendRequest sends a request to the sentinel and helps with decoding the response.
+func (b *BeaconRpcP2P) sendRequest(
+	ctx context.Context,
+	topic string,
+	reqPayload []byte,
+) ([]responseData, string, error) {
+	ctx, cn := context.WithTimeout(ctx, time.Second*2)
+	defer cn()
+	message, err := b.sentinel.SendRequest(ctx, &sentinel.RequestData{
+		Data:  reqPayload,
+		Topic: topic,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return b.parseResponseData(message)
+}
+
+func (b *BeaconRpcP2P) sendRequestWithPeer(
+	ctx context.Context,
+	topic string,
+	reqPayload []byte,
+	peerId string,
+) ([]responseData, string, error) {
+	ctx, cn := context.WithTimeout(ctx, time.Second*2)
+	defer cn()
+	message, err := b.sentinel.SendPeerRequest(ctx, &sentinel.RequestDataWithPeer{
+		Pid:   peerId,
+		Data:  reqPayload,
+		Topic: topic,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return b.parseResponseData(message)
 }

@@ -267,10 +267,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
-	log.Info(fmt.Sprintf("[%s] Syncing header-chain", s.LogPrefix()))
-	if err := snapshotsync.WaitForDownloader(
+	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
+		"header-chain",
 		cfg.dirs,
 		true, /*headerChain=*/
 		cfg.blobs,
@@ -280,23 +280,23 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
+		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Header-chain synced", s.LogPrefix()))
 
 	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true, false); err != nil {
 		return err
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	log.Info(fmt.Sprintf("[%s] Syncing remaining snapshots", s.LogPrefix()))
-	if err := snapshotsync.WaitForDownloader(
+	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
+		"remaining snapshots",
 		cfg.dirs,
 		false, /*headerChain=*/
 		cfg.blobs,
@@ -306,13 +306,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
+		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Remaining snapshots synced", s.LogPrefix()))
 
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
 	// hashes next time.
