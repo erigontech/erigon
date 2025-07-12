@@ -276,9 +276,13 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 
+	if s.CurrentSyncCycle.IsInitialCycle {
+		txnLokupTblWarmup(ctx, cfg.db)
+	}
+
 	pruneTimeout := time.Hour // aggressive pruning at non-chain-tip
 	if !s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 250 * time.Millisecond
+		pruneTimeout = 125 * time.Millisecond
 		// can't prune much on non-chain-tip: because tx_lookup has crypto-hashed-keys. 1 block producing hundreds of random deletes: ~2pages updated per delete
 		blockTo = min(blockTo, blockFrom+10)
 	}
@@ -314,6 +318,10 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		if err = s.DoneAt(tx, pruneBlockNum); err != nil {
 			return err
 		}
+
+		if !s.CurrentSyncCycle.IsInitialCycle && time.Since(t) > pruneTimeout*4 { // in case slow prune - warmup tbl
+			txnLokupTblWarmup(ctx, cfg.db)
+		}
 	}
 
 	if !useExternalTx {
@@ -322,6 +330,28 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		}
 	}
 	return nil
+}
+
+func txnLokupTblWarmup(ctx context.Context, db kv.RoDB) {
+	go func() {
+		_ = db.View(ctx, func(tx kv.Tx) error {
+			return tx.ForEach(kv.TxLookup, nil, func(k, v []byte) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+
+				if len(k) > 0 {
+					_, _ = k[0], k[len(k)-1]
+				}
+				if len(v) > 0 {
+					_, _ = v[0], v[len(v)-1]
+				}
+				return nil
+			})
+		})
+	}()
 }
 
 // deleteTxLookupRange - [blockFrom, blockTo)
