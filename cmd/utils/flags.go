@@ -1136,7 +1136,7 @@ var (
 		Usage: "Enabling Polygon PoS Single Slot Finality since block",
 	}
 	ExperimentalConcurrentCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.concurrent-commitment",
+		Name:  "experimental.commitment-concurrent",
 		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
 		Value: false,
 	}

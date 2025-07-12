@@ -61,7 +61,6 @@ func (s *ExecutionClientDirect) InsertBlocks(ctx context.Context, in *execution.
 // Chain Validation and ForkChoice.
 func (s *ExecutionClientDirect) ValidateChain(ctx context.Context, in *execution.ValidationRequest, opts ...grpc.CallOption) (*execution.ValidationReceipt, error) {
 	return s.server.ValidateChain(ctx, in)
-
 }
 
 func (s *ExecutionClientDirect) UpdateForkChoice(ctx context.Context, in *execution.ForkChoice, opts ...grpc.CallOption) (*execution.ForkChoiceReceipt, error) {
