@@ -17,6 +17,8 @@
 package statechange
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -44,6 +46,7 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 
 // ProcessEpoch process epoch transition.
 func ProcessEpoch(s abstract.BeaconState) error {
+	fmt.Println(uint32(s.BeaconConfig().GenesisForkVersion))
 	defer monitor.ObserveElaspedTime(monitor.EpochProcessingTime).End()
 	eligibleValidators := state.EligibleValidatorsIndicies(s)
 	var unslashedIndiciesSet [][]bool

@@ -1357,6 +1357,8 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 
 	domainDeposit := common.Hex2Bytes(m.DomainDeposit)
 
+	fmt.Println(uint32(genesisForkVersion))
+
 	domain, err := fork.ComputeDomain(
 		domainDeposit[:],
 		utils.Uint32ToBytes4(uint32(genesisForkVersion)),
