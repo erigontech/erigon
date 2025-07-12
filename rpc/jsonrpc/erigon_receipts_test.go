@@ -38,8 +38,8 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestGetLogs(t *testing.T) {

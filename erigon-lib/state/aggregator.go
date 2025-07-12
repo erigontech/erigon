@@ -248,13 +248,12 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
 	}
 
-	ue := FromDomain(dependent)
-	a.checker.AddDependency(ue, &DependentInfo{
-		entity:      ue,
+	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
+		entity:      FromDomain(dependent),
 		filesGetter: func() *btree.BTreeG[*FilesItem] { return dd.dirtyFiles },
 		accessors:   dd.Accessors,
 	})
-	dd.SetChecker(a.checker)
+	a.d[dependency].SetChecker(a.checker)
 }
 
 func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
@@ -526,7 +525,8 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
 	}
 
-	if err := g.Wait(); err != nil {
+	err := g.Wait()
+	if err != nil {
 		return err
 	}
 
@@ -752,26 +752,30 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
-	defer a.buildingFiles.Store(false)
-	if toStep > fromStep {
-		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
-	}
-	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-		if err := a.buildFiles(ctx, step); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer a.buildingFiles.Store(false)
+		if toStep > fromStep {
+			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+		}
+		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+			if err := a.buildFiles(ctx, step); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+					panic(err)
+				}
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				panic(err)
 			}
-			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-			panic(err)
+			a.onFilesChange(nil)
 		}
-		a.onFilesChange(nil)
-	}
 
-	go func() {
-		if err := a.MergeLoop(ctx); err != nil {
-			panic(err)
-		}
-		a.onFilesChange(nil)
+		go func() {
+			if err := a.MergeLoop(ctx); err != nil {
+				panic(err)
+			}
+			a.onFilesChange(nil)
+		}()
 	}()
 	return nil
 }

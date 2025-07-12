@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -165,6 +166,10 @@ func (ph PanicHandler) Log(r *log.Record) error {
 	fmt.Printf("Msg: %s\nStack: %s\n", r.Msg, dbg.Stack())
 	os.Exit(2)
 	return nil
+}
+
+func (ph PanicHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
 }
 
 func main() {

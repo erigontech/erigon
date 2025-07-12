@@ -400,7 +400,7 @@ DB. That reduces write amplification and DB inserts are orders of magnitude quic
 
 **Single accounts/state trie**. Erigon uses a single Merkle trie for both accounts and the storage.
 
-<code> 🔬 [Staged Sync Readme](/eth/stagedsync/README.md)</code>
+<code> 🔬 [Staged Sync Readme](/docs/readthedocs/source/stagedsync.rst)</code>
 
 ### JSON-RPC daemon
 

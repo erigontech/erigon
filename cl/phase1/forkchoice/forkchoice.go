@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
@@ -101,9 +103,11 @@ type ForkChoiceStore struct {
 	equivocatingIndicies []byte
 	forkGraph            fork_graph.ForkGraph
 	blobStorage          blob_storage.BlobStorage
+	peerDas              das.PeerDas
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
+	localValidators    *validator_params.ValidatorParams
 
 	latestMessages    *latestMessagesStore
 	syncedDataManager *synced_data.SyncedDataManager
@@ -158,6 +162,7 @@ func NewForkChoiceStore(
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry,
+	localValidators *validator_params.ValidatorParams,
 	probabilisticHeadGetter bool,
 ) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
@@ -256,6 +261,7 @@ func NewForkChoiceStore(
 		probabilisticHeadGetter:  probabilisticHeadGetter,
 		publicKeysRegistry:       publicKeysRegistry,
 		verifiedExecutionPayload: verifiedExecutionPayload,
+		localValidators:          localValidators,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -266,6 +272,15 @@ func NewForkChoiceStore(
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 	return f, nil
+}
+
+func (f *ForkChoiceStore) InitPeerDas(peerDas das.PeerDas) {
+	// this is a hack to inject the peer das
+	f.peerDas = peerDas
+}
+
+func (f *ForkChoiceStore) GetPeerDas() das.PeerDas {
+	return f.peerDas
 }
 
 // Highest seen returns highest seen slot

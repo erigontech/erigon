@@ -19,7 +19,7 @@ package testhelpers
 import (
 	"context"
 
-	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 

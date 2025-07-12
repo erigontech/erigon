@@ -19,13 +19,12 @@ package services
 import (
 	"context"
 
-	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -34,6 +33,26 @@ import (
 
 type All struct {
 	BlockReader FullBlockReader
+}
+
+type BlockReader interface {
+	BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error)
+	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
+	CurrentBlock(db kv.Tx) (*types.Block, error)
+	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
+	IterateFrozenBodies(f func(blockNum, baseTxNum, txCount uint64) error) error
+}
+
+type HeaderReader interface {
+	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error)
+	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
+	HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error)
+	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
+	ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64)
+
+	// HeadersRange - TODO: change it to `stream`
+	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
+	Integrity(ctx context.Context) error
 }
 
 type BorEventReader interface {
@@ -67,6 +86,15 @@ type CanonicalReader interface {
 	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error)
 }
 
+type BodyReader interface {
+	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error)
+	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error)
+	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
+	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error)
+	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
+	BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error)
+}
+
 type TxnReader interface {
 	TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error)
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error)
@@ -75,19 +103,25 @@ type TxnReader interface {
 }
 
 type HeaderAndCanonicalReader interface {
-	interfaces.HeaderReader
+	HeaderReader
 	CanonicalReader
 }
 
 type BlockAndTxnReader interface {
-	interfaces.BlockReader
+	BlockReader
 	TxnReader
 }
 
+type HeaderAndBodyReader interface {
+	BlockReader
+	BodyReader
+	HeaderReader
+}
+
 type FullBlockReader interface {
-	interfaces.BlockReader
-	interfaces.BodyReader
-	interfaces.HeaderReader
+	BlockReader
+	BodyReader
+	HeaderReader
 	BorEventReader
 	BorSpanReader
 	BorMilestoneReader

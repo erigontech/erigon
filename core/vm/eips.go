@@ -276,9 +276,9 @@ func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 }
 
 func opCLZ(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	x := scope.Stack.pop()
+	x := scope.Stack.peek()
 	// count leading zero bits in x
-	scope.Stack.push(new(uint256.Int).SetUint64(256 - uint64(x.BitLen())))
+	x.SetUint64(256 - uint64(x.BitLen()))
 	return nil, nil
 }
 
@@ -345,4 +345,14 @@ func enable7939(jt *JumpTable) {
 		numPop:      1,
 		numPush:     1,
 	}
+}
+
+func enable7907(jt *JumpTable) {
+	jt[CALL].dynamicGas = gasCallEIP7907
+	jt[CALLCODE].dynamicGas = gasCallCodeEIP7907
+	jt[STATICCALL].dynamicGas = gasStaticCallEIP7907
+	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7907
+	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP7907
+	jt[CREATE].dynamicGas = gasCreateEIP7907
+	jt[CREATE2].dynamicGas = gasCreate2EIP7907
 }

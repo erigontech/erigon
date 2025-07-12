@@ -27,7 +27,7 @@ import (
 
 	"github.com/nxadm/tail"
 
-	"github.com/erigontech/erigon-p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 type Log struct {

@@ -7,14 +7,15 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -39,7 +40,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
 		Miner                               params.MiningConfig
 		Ethash                              ethashcfg.Config
-		Clique                              params.ConsensusSnapshotConfig
+		Clique                              chainspec.ConsensusSnapshotConfig
 		Aura                                chain.AuRaConfig
 		TxPool                              txpoolcfg.Config
 		Shutter                             shuttercfg.Config
@@ -137,7 +138,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
 		Miner                               *params.MiningConfig
 		Ethash                              *ethashcfg.Config
-		Clique                              *params.ConsensusSnapshotConfig
+		Clique                              *chainspec.ConsensusSnapshotConfig
 		Aura                                *chain.AuRaConfig
 		TxPool                              *txpoolcfg.Config
 		Shutter                             *shuttercfg.Config

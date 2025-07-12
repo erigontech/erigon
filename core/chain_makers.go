@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // BlockGen creates blocks for testing.
@@ -372,7 +371,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		txNumIncrement()
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
+			if _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -502,4 +501,3 @@ func (cr *FakeChainReader) BorEventsByBlock(hash common.Hash, number uint64) []r
 func (cr *FakeChainReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
 	return 0
 }
-func (cr *FakeChainReader) BorSpan(spanId uint64) *heimdall.Span { return nil }

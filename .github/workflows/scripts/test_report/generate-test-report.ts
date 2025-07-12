@@ -60,8 +60,8 @@ function mapConclusionToIcon(conclusion: string | null, status: string | null): 
     switch (conclusion) {
         case 'success': return '✅';
         case 'failure': return '❌';
-        case 'cancelled': return '🚫';  // The run was cancelled before it completed.
-        case 'skipped': return '⏭️';  // The run was skipped.
+        case 'cancelled': return '⏭️';  // The run was cancelled before it completed.
+        case 'skipped': return '⏩';  // The run was skipped.
         case 'timed_out': return '⏰️';
         case 'neutral': return '⚪️';
         case 'stale': return '🕸️';  // The run was marked stale by GitHub because it took too long.
@@ -125,8 +125,9 @@ async function run() {
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
         const branch= process.env.BRANCH_NAME ?? github.context.ref.replace(/^refs\/\w+\//, '');   // The branch name, defaults to the current branch
+        //const branch= 'main';   // For testing purposes
         const { owner, repo } = github.context.repo;
-        //const {owner, repo} = {owner: 'erigontech', repo: 'erigon'};  // For testing purposes, you can hardcode the owner and repo
+        //const {owner, repo} = {owner: 'erigontech', repo: 'erigon'};  // For testing purposes
 
         endDate.setUTCHours(23, 59, 59, 999);
 
@@ -217,7 +218,7 @@ async function run() {
         const days = getDateStringsBetween(start, end);
 
         // Prepare the summary table header
-        const table: SummaryRow[] = [
+        const table: SummaryRow[] = [  // format: [Test, Job, Date1, Date2, ...]
             [ // header row
                 {data: 'Test', header: true},
                 {data: 'Job', header: true},
@@ -242,7 +243,8 @@ async function run() {
                     jobName = mapChain(jobSummary.name);
                 }
 
-                let row = [removeQAAndChainInfo(workflowSummary.name), jobName]
+                let testName = removeQAAndChainInfo(workflowSummary.name)
+                let row = [testName, jobName]
                 let jobConclusions = [];
 
                 for (const day of days) {
@@ -266,6 +268,22 @@ async function run() {
                 table.push(row);
             }
         }
+
+        // Order the table by the first column (Test name) except for the header row
+        const isHeaderRow = (row: SummaryRow): boolean => {
+            return typeof row[0] === 'object' && 'header' in row[0] && row[0].header === true;
+        };
+
+        table.sort((a, b) => {
+            // If row 'a' is the header row, it should always come before any other row
+            if (isHeaderRow(a)) return -1;
+            // If row 'b' is the header row, it should always come after any other row
+            if (isHeaderRow(b)) return 1;
+            // Otherwise, sort normally
+            if (a[0] < b[0]) return -1;
+            if (a[0] > b[0]) return 1;
+            return 0;
+        });
 
         // Write the summary table to the GitHub Actions summary
         await core.summary

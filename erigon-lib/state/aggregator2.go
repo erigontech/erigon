@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 )
 
 // this is supposed to register domains/iis
@@ -28,9 +28,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 }
 
 func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, salt *uint32, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	err := Compatibility(dirs)
+	err := checkSnapshotsCompatibility(dirs)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
@@ -183,6 +183,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.AccountsDomain.String(), keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -202,12 +203,13 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.StorageDomain.String(), keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
 	CodeDomain: domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compressing Code with keys doesn't show any benefits. Compression of values shows 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
 		Accessors:   AccessorBTree | AccessorExistence,
 		largeValues: true,
@@ -222,6 +224,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.CodeDomain.String(), keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -238,7 +241,7 @@ var Schema = SchemaGen{
 			historyIdx: kv.CommitmentHistoryIdx,
 
 			historyLargeValues:            false,
-			historyValuesOnCompressedPage: 16,
+			historyValuesOnCompressedPage: 64,
 
 			snapshotsDisabled: true,
 			historyDisabled:   true,
@@ -246,6 +249,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -266,6 +270,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.ReceiptDomain.String(), keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -290,6 +295,7 @@ var Schema = SchemaGen{
 				disable:      true, // disable everything by default
 				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -299,24 +305,28 @@ var Schema = SchemaGen{
 
 		Compression: seg.CompressNone,
 		name:        kv.LogAddrIdx,
+		Accessors:   AccessorHashMap,
 	},
 	LogTopicIdx: iiCfg{
 		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.LogTopicIdx,
+		Accessors:   AccessorHashMap,
 	},
 	TracesFromIdx: iiCfg{
 		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.TracesFromIdx,
+		Accessors:   AccessorHashMap,
 	},
 	TracesToIdx: iiCfg{
 		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
+		Accessors:   AccessorHashMap,
 	},
 }
 
@@ -357,7 +367,7 @@ func EnableHistoricalRCache() {
 
 var SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{}
 
-func Compatibility(d datadir.Dirs) error {
+func checkSnapshotsCompatibility(d datadir.Dirs) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
@@ -372,8 +382,10 @@ func Compatibility(d datadir.Dirs) error {
 			if !entry.IsDir() {
 				name := entry.Name()
 				if strings.HasPrefix(name, "v1-") {
-					return errors.New("bad incompatible snapshots with current erigon version. " +
-						"Check twice version or run `erigon seg update-to-new-ver-format` command")
+					return errors.New("The datadir has bad snapshot files or they are " +
+						"incompatible with the current erigon version. If you want to upgrade from an" +
+						"older version, you may run the following to rename files to the " +
+						"new version: `erigon seg update-to-new-ver-format`")
 				}
 				fileInfo, _, _ := snaptype.ParseFileName("", name)
 
@@ -390,8 +402,10 @@ func Compatibility(d datadir.Dirs) error {
 				}
 
 				if currentFileVersion.Major < requiredVersion.Major {
-					return fmt.Errorf("version mismatch: need files at least version %d for file %s to start Erigon "+
-						"properly. Doublecheck the version pls. Probably should downgrade to some version of Erigon later than 3.1", requiredVersion.Major, fileInfo.Name())
+					return fmt.Errorf("snapshot file major version mismatch for file %s, "+
+						" requiredVersion: %d, currentVersion: %d"+
+						" You may want to downgrade to an older version (not older than 3.1)",
+						fileInfo.Name(), requiredVersion.Major, currentFileVersion.Major)
 				}
 			}
 			return nil

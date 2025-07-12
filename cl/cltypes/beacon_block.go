@@ -412,6 +412,10 @@ func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 	return append(branch, kzgCommitmentsProof...), nil
 }
 
+func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
+	return merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
+}
+
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	var (
 		maxAttSlashing = MaxAttesterSlashings
@@ -555,8 +559,11 @@ type DenebBeaconBlock struct {
 	Blobs     *solid.ListSSZ[*Blob]     `json:"blobs"`
 }
 
-func NewDenebBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *DenebBeaconBlock {
+func NewDenebBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion, slot uint64) *DenebBeaconBlock {
 	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlockByVersion(version))
+	if version >= clparams.FuluVersion {
+		maxBlobsPerBlock = int(beaconCfg.GetBlobParameters(slot / beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock)
+	}
 	b := &DenebBeaconBlock{
 		Block:     NewBeaconBlock(beaconCfg, version),
 		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
