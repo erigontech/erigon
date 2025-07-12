@@ -1932,12 +1932,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.KeepExecutionProofs = true
 		state.EnableHistoricalCommitment()
 	}
-	if ctx.Bool(PersistReceiptsV2Flag.Name) {
-		cfg.PersistReceiptsCacheV2 = true
-		state.EnableHistoricalRCache()
-	}
-	cfg.PersistReceiptsV1 = ctx.Uint64(PersistReceiptsFlag.Name)
-
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
