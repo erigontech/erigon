@@ -263,6 +263,16 @@ func (test *snapshotTest) run() bool {
 		return false
 	}
 	defer tx.Rollback()
+
+	//domains, err := stateLib.NewSharedDomains(tx, log.New())
+	//if err != nil {
+	//	test.err = err
+	//	return false
+	//}
+	//defer domains.Close()
+	//
+	//domains.SetTxNum(1)
+	//domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		test.err = err

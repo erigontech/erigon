@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/execution/stages/mock"
 )
 
 // Create revival problem
@@ -933,8 +933,6 @@ func TestReproduceCrash(t *testing.T) {
 	txNum := uint64(1)
 	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	tsr := state.NewReaderV3(sd.AsGetter(tx))
-	sd.SetTxNum(txNum)
-	sd.SetBlockNum(txNum)
 
 	intraBlockState := state.New(tsr)
 	// Start the 1st transaction
@@ -1372,9 +1370,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	rh1, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
 	require.NoError(t, err)
 	//t.Logf("stateRoot %x", rh1)
-
-	sd.SetTxNum(2)
-	sd.SetBlockNum(1)
 
 	trieCode, tcErr := r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")

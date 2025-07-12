@@ -19,7 +19,7 @@ import (
 	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	types "github.com/erigontech/erigon-lib/types"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
-	engine_types "github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	engine_types "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -87,18 +87,18 @@ func (c *MockExecutionEngineCurrentHeaderCall) DoAndReturn(f func(context.Contex
 }
 
 // ForkChoiceUpdate mocks base method.
-func (m *MockExecutionEngine) ForkChoiceUpdate(ctx context.Context, finalized, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+func (m *MockExecutionEngine) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ForkChoiceUpdate", ctx, finalized, head, attributes)
+	ret := m.ctrl.Call(m, "ForkChoiceUpdate", ctx, finalized, safe, head, attributes)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ForkChoiceUpdate indicates an expected call of ForkChoiceUpdate.
-func (mr *MockExecutionEngineMockRecorder) ForkChoiceUpdate(ctx, finalized, head, attributes any) *MockExecutionEngineForkChoiceUpdateCall {
+func (mr *MockExecutionEngineMockRecorder) ForkChoiceUpdate(ctx, finalized, safe, head, attributes any) *MockExecutionEngineForkChoiceUpdateCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForkChoiceUpdate", reflect.TypeOf((*MockExecutionEngine)(nil).ForkChoiceUpdate), ctx, finalized, head, attributes)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForkChoiceUpdate", reflect.TypeOf((*MockExecutionEngine)(nil).ForkChoiceUpdate), ctx, finalized, safe, head, attributes)
 	return &MockExecutionEngineForkChoiceUpdateCall{Call: call}
 }
 
@@ -114,13 +114,13 @@ func (c *MockExecutionEngineForkChoiceUpdateCall) Return(arg0 []byte, arg1 error
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineForkChoiceUpdateCall) Do(f func(context.Context, common.Hash, common.Hash, *engine_types.PayloadAttributes) ([]byte, error)) *MockExecutionEngineForkChoiceUpdateCall {
+func (c *MockExecutionEngineForkChoiceUpdateCall) Do(f func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes) ([]byte, error)) *MockExecutionEngineForkChoiceUpdateCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineForkChoiceUpdateCall) DoAndReturn(f func(context.Context, common.Hash, common.Hash, *engine_types.PayloadAttributes) ([]byte, error)) *MockExecutionEngineForkChoiceUpdateCall {
+func (c *MockExecutionEngineForkChoiceUpdateCall) DoAndReturn(f func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes) ([]byte, error)) *MockExecutionEngineForkChoiceUpdateCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

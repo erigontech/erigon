@@ -25,6 +25,11 @@ type MockDownloaderClient struct {
 	isgomock struct{}
 }
 
+func (m *MockDownloaderClient) CommitPreverified(ctx context.Context, in *CommitPreverifiedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // MockDownloaderClientMockRecorder is the mock recorder for MockDownloaderClient.
 type MockDownloaderClientMockRecorder struct {
 	mock *MockDownloaderClient

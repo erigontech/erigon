@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/accounts"
 	state2 "github.com/erigontech/erigon/core/state"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
@@ -316,17 +316,15 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		domains, err := state.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
-		domains.SetTxNum(txNum)
-
 		rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
+		domains.SetTxNum(txNum)
 		writer := state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 		for i := testStartedFromTxNum; i <= txs; i++ {
 			txNum = i
 			blockNum = txNum / blockSize
 			domains.SetTxNum(txNum)
-			domains.SetBlockNum(blockNum)
 			binary.BigEndian.PutUint64(aux[:], txNum)
 
 			n, err := rnd.Read(loc[:])
@@ -416,7 +414,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		rh, err := domains.ComputeCommitment(ctx, false, blockNum, txNum, "")
 		require.NoError(t, err)
-		require.Equal(t, params.TestGenesisStateRoot, common.BytesToHash(rh))
+		require.Equal(t, chainspec.TestGenesisStateRoot, common.BytesToHash(rh))
 		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 		//common.BytesToHash(rh))
 

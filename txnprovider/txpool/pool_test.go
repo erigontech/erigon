@@ -23,6 +23,7 @@ import (
 	"math"
 	"testing"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
@@ -859,12 +860,13 @@ func TestTxnPoke(t *testing.T) {
 	}
 }
 
-func TestShanghaiValidateTxn(t *testing.T) {
+func TestValidateTxn(t *testing.T) {
 	asrt := assert.New(t)
 	tests := map[string]struct {
 		expected   txpoolcfg.DiscardReason
 		dataLen    int
 		isShanghai bool
+		isOsaka    bool
 		creation   bool
 	}{
 		"no shanghai": {
@@ -903,6 +905,36 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			isShanghai: true,
 			creation:   false,
 		},
+		"osaka within bounds": {
+			expected: txpoolcfg.Success,
+			dataLen:  32,
+			isOsaka:  true,
+			creation: true,
+		},
+		"osaka exactly on bound - create tx": {
+			expected: txpoolcfg.Success,
+			dataLen:  params.MaxInitCodeSizeEip7907,
+			isOsaka:  true,
+			creation: true,
+		},
+		"osaka one over bound - create tx": {
+			expected: txpoolcfg.InitCodeTooLarge,
+			dataLen:  params.MaxInitCodeSizeEip7907 + 1,
+			isOsaka:  true,
+			creation: true,
+		},
+		"osaka exactly on bound - calldata tx": {
+			expected: txpoolcfg.Success,
+			dataLen:  params.MaxInitCodeSizeEip7907,
+			isOsaka:  true,
+			creation: false,
+		},
+		"osaka one over bound - calldata tx": {
+			expected: txpoolcfg.Success,
+			dataLen:  params.MaxInitCodeSizeEip7907 + 1,
+			isOsaka:  true,
+			creation: false,
+		},
 	}
 
 	logger := log.New()
@@ -917,6 +949,9 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			chainConfig := testutil.Forks["Paris"]
 			if test.isShanghai {
 				chainConfig = testutil.Forks["Shanghai"]
+			}
+			if test.isOsaka {
+				chainConfig = testutil.Forks["Osaka"]
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -942,7 +977,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			txn := &TxnSlot{
 				DataLen:  test.dataLen,
 				FeeCap:   *uint256.NewInt(21000),
-				Gas:      500000,
+				Gas:      6000000,
 				SenderID: 0,
 				Creation: test.creation,
 			}
@@ -1526,12 +1561,22 @@ func TestGetBlobsV1(t *testing.T) {
 	}
 	blobHashes = append(blobHashes, blobTxn.BlobHashes...)
 
-	blobs, proofs := pool.GetBlobs(blobHashes)
-	require.Equal(len(blobs), len(blobHashes))
+	blobBundles := pool.GetBlobs(blobHashes)
+	require.Equal(len(blobBundles), len(blobHashes))
+	blobs := make([][]byte, 0, len(blobBundles))
+	proofs := make([]gokzg4844.KZGProof, 0, len(blobBundles))
+	for _, bb := range blobBundles {
+		blobs = append(blobs, bb.Blob)
+		for _, p := range bb.Proofs {
+			proofs = append(proofs, p)
+		}
+
+	}
 	require.Equal(len(proofs), len(blobHashes))
-	assert.Equal(blobTxn.Blobs, blobs)
-	assert.Equal(blobTxn.Proofs[0][:], proofs[0])
-	assert.Equal(blobTxn.Proofs[1][:], proofs[1])
+	assert.Equal(blobTxn.BlobBundles[0].Blob, blobs[0])
+	assert.Equal(blobTxn.BlobBundles[1].Blob, blobs[1])
+	assert.Equal(blobTxn.BlobBundles[0].Proofs[0], proofs[0])
+	assert.Equal(blobTxn.BlobBundles[1].Proofs[0], proofs[1])
 }
 
 func TestGasLimitChanged(t *testing.T) {

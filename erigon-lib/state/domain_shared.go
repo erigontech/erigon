@@ -118,7 +118,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv, aggTx.a.tmpdir)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv, aggTx.a.dirs.Tmp)
 
 	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
@@ -199,29 +199,6 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 		}, true, nil
 	}
 	return ReadDiffSet(tx, blockNumber, blockHash)
-}
-
-// aggregator context should call aggTx.Unwind before this one.
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
-	step := txUnwindTo / sd.stepSize
-	sd.logger.Info("aggregator unwind", "step", step,
-		"txUnwindTo", txUnwindTo)
-	//fmt.Printf("aggregator unwind step %d txUnwindTo %d\n", step, txUnwindTo)
-	sf := time.Now()
-	defer mxUnwindSharedTook.ObserveDuration(sf)
-
-	if err := sd.Flush(ctx, rwTx); err != nil {
-		return err
-	}
-
-	if err := rwTx.Unwind(ctx, txUnwindTo, changeset); err != nil {
-		return err
-	}
-
-	sd.ClearRam(true)
-	sd.SetTxNum(txUnwindTo)
-	sd.SetBlockNum(blockUnwindTo)
-	return sd.Flush(ctx, rwTx)
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
@@ -433,14 +410,12 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, roTx kv.Tx, it func
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
 	sd.muMaps.RLock()
 	defer sd.muMaps.RUnlock()
-	var haveRamUpdates bool
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
-		haveRamUpdates = sd.storage.Len() > 0
 		ramIter = sd.storage.Iter()
 	}
 
-	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, haveRamUpdates, ramIter, it, sd.stepSize, roTx)
+	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, sd.stepSize, roTx)
 }
 
 func (sd *SharedDomains) Close() {
@@ -516,10 +491,10 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
-	_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
-	if err != nil {
-		return err
-	}
+	//_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
+	//if err != nil {
+	//	return err
+	//}
 
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err

@@ -102,6 +102,8 @@ type Compressor struct {
 	uncompressedFile *RawWordsFile
 	tmpDir           string // temporary directory to use for ETL when building dictionary
 	logPrefix        string
+
+	outputFileName   string
 	outputFile       string // File where to output the dictionary and compressed data
 	tmpOutFilePath   string // File where to output the dictionary and compressed data
 	suffixCollectors []*etl.Collector
@@ -147,12 +149,13 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		suffixCollectors[i] = collector
 		go extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, wg, logger)
 	}
-
+	_, outputFileName := filepath.Split(outputFile)
 	return &Compressor{
 		Cfg:              cfg,
 		uncompressedFile: uncompressedFile,
 		tmpOutFilePath:   tmpOutFilePath,
 		outputFile:       outputFile,
+		outputFileName:   outputFileName,
 		tmpDir:           tmpDir,
 		logPrefix:        logPrefix,
 		ctx:              ctx,
@@ -173,6 +176,7 @@ func (c *Compressor) Close() {
 }
 
 func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
+func (c *Compressor) FileName() string    { return c.outputFileName }
 func (c *Compressor) WorkersAmount() int  { return c.Workers }
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }

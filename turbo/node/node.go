@@ -24,6 +24,9 @@ import "C"
 
 import (
 	"context"
+	"net/http"
+
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/kv"
@@ -37,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
-	"github.com/urfave/cli/v2"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.
@@ -86,7 +88,7 @@ type Params struct {
 	CustomBuckets kv.TableCfg
 }
 
-func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, error) {
+func NewNodConfigUrfave(ctx *cli.Context, debugMux *http.ServeMux, logger log.Logger) (*nodecfg.Config, error) {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.String(utils.ChainFlag.Name)
 	switch chain {
@@ -116,7 +118,7 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 		logger.Info("Starting Erigon on", "devnet", chain)
 	}
 
-	nodeConfig := NewNodeConfig()
+	nodeConfig := NewNodeConfig(debugMux)
 	if err := utils.SetNodeConfig(ctx, nodeConfig, logger); err != nil {
 		return nil, err
 	}
@@ -128,6 +130,7 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 
 	return nodeConfig, nil
 }
+
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
 	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
 	utils.SetEthConfig(ctx, nodeConfig, &ethConfig, logger)
@@ -164,9 +167,9 @@ func New(
 	return &ErigonNode{stack: node, backend: ethereum}, nil
 }
 
-func NewNodeConfig() *nodecfg.Config {
+func NewNodeConfig(debugMux *http.ServeMux) *nodecfg.Config {
 	nodeConfig := nodecfg.DefaultConfig
-	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
+	// see similar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {
@@ -174,5 +177,6 @@ func NewNodeConfig() *nodecfg.Config {
 	}
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
+	nodeConfig.DebugMux = debugMux
 	return &nodeConfig
 }
