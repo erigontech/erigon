@@ -167,9 +167,9 @@ func TestFindMergeRange(t *testing.T) {
 		var RangesNew []Range
 		start := uint64(19_000_000)
 		for i := uint64(0); i < 24; i++ {
-			RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
+			RangesNew = append(RangesNew, NewRange(start+(i*snaptype.Erigon2MergeLimit), start+((i+1)*snaptype.Erigon2MergeLimit)))
 		}
-		found = merger.FindMergeRanges(RangesNew, uint64(24*100_000))
+		found = merger.FindMergeRanges(RangesNew, uint64(24*snaptype.Erigon2MergeLimit))
 
 		expect = Ranges{}
 		require.Equal(t, expect.String(), Ranges(found).String())
@@ -186,7 +186,7 @@ func TestFindMergeRange(t *testing.T) {
 			expect = append(expect, NewRange(i*snaptype.Erigon2OldMergeLimit, (i+1)*snaptype.Erigon2OldMergeLimit))
 		}
 		for i := uint64(0); i < 4; i++ {
-			expect = append(expect, NewRange(2_000_000+i*snaptype.Erigon2MergeLimit, 2_000_000+(i+1)*snaptype.Erigon2MergeLimit))
+			expect = append(expect, NewRange(2_000_000+i*100_000, 2_000_000+(i+1)*100_000))
 		}
 
 		require.Equal(t, expect.String(), Ranges(found).String())
@@ -198,8 +198,12 @@ func TestFindMergeRange(t *testing.T) {
 		}
 		found = merger.FindMergeRanges(RangesNew, uint64(240*10_000))
 		expect = nil
-		for i := uint64(0); i < 24; i++ {
+		for i := uint64(0); i < 4; i++ {
 			expect = append(expect, NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
+		}
+		start += 4 * snaptype.Erigon2MergeLimit
+		for i := uint64(0); i < 4; i++ {
+			expect = append(expect, NewRange(start+i*100_000, start+(i+1)*100_000))
 		}
 
 		require.Equal(t, expect.String(), Ranges(found).String())
@@ -441,7 +445,7 @@ func TestCanRetire(t *testing.T) {
 	}{
 		{0, 1234, 0, 1000, true},
 		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
-		{2_500_000, 4_100_000, 2_500_000, 2_600_000, true},
+		{2_500_000, 4_100_000, 2_500_000, 3_000_000, true},
 		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
 		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
 	}
