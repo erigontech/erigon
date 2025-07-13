@@ -1,8 +1,6 @@
 package statechange
 
 import (
-	"fmt"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/abstract"
@@ -24,7 +22,6 @@ func IsValidDepositSignature(
 		[32]byte{},
 	)
 	if err != nil {
-		fmt.Println(err)
 		return false, err
 	}
 	depositMessageRoot, err := depositData.MessageHash()
