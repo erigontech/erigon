@@ -88,7 +88,7 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeElectra
 	}
 	if b.Version() >= clparams.FuluVersion {
-		depth = 7
+		depth = 6
 		leafSize = StateLeafSizeFulu
 	}
 
