@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime/debug"
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -155,6 +156,7 @@ func MerkleProof(depth, proofIndex int, schema ...interface{}) ([][32]byte, erro
 	}
 
 	if depth != int(maxDepth) { // TODO: Add support for lower depths
+		debug.PrintStack()
 		return nil, fmt.Errorf("depth is different than maximum depth, have %d, want %d", depth, maxDepth)
 	}
 	var err error
