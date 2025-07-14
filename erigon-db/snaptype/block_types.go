@@ -80,10 +80,10 @@ var Indexes = struct {
 	TxnHash,
 	TxnHash2BlockNum snaptype.Index
 }{
-	HeaderHash:       snaptype.Index{Name: "headers"},
-	BodyHash:         snaptype.Index{Name: "bodies"},
-	TxnHash:          snaptype.Index{Name: "transactions"},
-	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Offset: 1},
+	HeaderHash:       snaptype.Index{Name: "headers", Version: version.V1_0_standart},
+	BodyHash:         snaptype.Index{Name: "bodies", Version: version.V1_0_standart},
+	TxnHash:          snaptype.Index{Name: "transactions", Version: version.V1_0_standart},
+	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Version: version.V1_0_standart, Offset: 1},
 }
 
 var (
@@ -232,7 +232,7 @@ var (
 					BucketSize: recsplit.DefaultBucketSize,
 					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
+					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.From, sn.To)),
 					BaseDataID: baseTxnID.U64(),
 				}, logger)
 				if err != nil {
@@ -246,7 +246,7 @@ var (
 					BucketSize: recsplit.DefaultBucketSize,
 					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, Indexes.TxnHash2BlockNum)),
+					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.From, sn.To, Indexes.TxnHash2BlockNum)),
 					BaseDataID: firstBlockNum,
 				}, logger)
 				if err != nil {

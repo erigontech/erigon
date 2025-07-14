@@ -133,8 +133,9 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 }
 
 type Index struct {
-	Name   string
-	Offset int
+	Name    string
+	Offset  int
+	Version Versions
 }
 
 var CaplinIndexes = struct {
@@ -174,8 +175,8 @@ type Type interface {
 	Name() string
 	FileName(version Version, from uint64, to uint64) string
 	FileInfo(dir string, from uint64, to uint64) FileInfo
-	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
-	IdxFileNames(version Version, from uint64, to uint64) []string
+	IdxFileName(from uint64, to uint64, index ...Index) string
+	IdxFileNames(from uint64, to uint64) []string
 	Indexes() []Index
 	HasIndexFiles(info FileInfo, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
@@ -284,16 +285,16 @@ func (s snapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
 	return true
 }
 
-func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string {
+func (s snapType) IdxFileNames(from uint64, to uint64) []string {
 	fileNames := make([]string, len(s.indexes))
 	for i, index := range s.indexes {
-		fileNames[i] = IdxFileName(version, from, to, index.Name)
+		fileNames[i] = IdxFileName(index.Version.Current, from, to, index.Name)
 	}
 
 	return fileNames
 }
 
-func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...Index) string {
+func (s snapType) IdxFileName(from uint64, to uint64, index ...Index) string {
 	if len(index) == 0 {
 		if len(s.indexes) == 0 {
 			return ""
@@ -316,7 +317,7 @@ func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...
 		}
 	}
 
-	return IdxFileName(version, from, to, index[0].Name)
+	return IdxFileName(index[0].Version.Current, from, to, index[0].Name)
 }
 
 func ParseFileType(s string) (Type, bool) {
@@ -431,7 +432,7 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 		p.Total.Store(uint64(d.Count()))
 	}
 	cfg.KeyCount = d.Count()
-	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To))
+	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(info.From, info.To))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err

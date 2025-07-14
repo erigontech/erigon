@@ -487,7 +487,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
+		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.From, sn.To)),
 		BaseDataID: baseId,
 		Salt:       &salt,
 	}, logger)

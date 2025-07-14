@@ -408,7 +408,7 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 }
 
 func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
+	if len(s.Type().IdxFileNames(s.from, s.to)) == 0 {
 		return nil
 	}
 
@@ -438,7 +438,7 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 		s.indexes = append(s.indexes, nil)
 	}
 
-	for i, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+	for i, fileName := range s.Type().IdxFileNames(s.from, s.to) {
 		if s.indexes[i] != nil {
 			continue
 		}
