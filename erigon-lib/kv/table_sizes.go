@@ -77,6 +77,7 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 		return
 	}
 
+	debugLogging := logger.Enabled(ctx, log.LvlDebug)
 	ticker := time.NewTicker(collectTableSizesFrequency)
 	defer ticker.Stop()
 
@@ -94,7 +95,7 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 			var sb strings.Builder
 			for _, t := range tableSizes {
 				dbTableSizeBytes.WithLabelValues(string(label), t.Name).Set(float64(t.Size))
-				if t.Size == 0 {
+				if t.Size == 0 || !debugLogging {
 					continue
 				}
 
