@@ -559,15 +559,15 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
-func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
-	loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
+func LoadRemotePreverified(ctx context.Context) (err error) {
+	err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
 	if err != nil {
 		log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
 
-		// Fallback to github if R2 fails
-		loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+		// Fallback to GitHub if R2 fails
+		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
 		if err != nil {
-			return false, err
+			return err
 		}
 	}
 
@@ -603,7 +603,7 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 		networkname.Chiado:     Chiado,
 		networkname.Hoodi:      Hoodi,
 	}
-	return loaded, nil
+	return
 }
 
 func SetToml(networkName string, toml []byte, local bool) {
