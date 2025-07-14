@@ -29,7 +29,7 @@ func (r *recoveryRequest) MarshalSSZ() ([]byte, error) {
 }
 
 func (r *recoveryRequest) UnmarshalSSZ(data []byte) error {
-	return ssz2.UnmarshalSSZ(data, 0, &r.slot, &r.blockRoot)
+	return ssz2.UnmarshalSSZ(data, 0, &r.slot, r.blockRoot[:])
 }
 
 func (r recoveryRequest) Filepath() (string, string) {
