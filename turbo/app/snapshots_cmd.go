@@ -19,6 +19,7 @@ package app
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -239,7 +240,11 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
-				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -248,7 +253,11 @@ var snapshotCommand = cli.Command{
 			Name:  "reset-to-old-ver-format",
 			Usage: "change all the snapshots to 3.0 file format",
 			Action: func(cliCtx *cli.Context) error {
-				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				return dirs.RenameNewVersions()
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -257,7 +266,11 @@ var snapshotCommand = cli.Command{
 			Name:  "update-to-new-ver-format",
 			Usage: "change all the snapshots to 3.1 file ver format",
 			Action: func(cliCtx *cli.Context) error {
-				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				return dirs.RenameOldVersions()
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -307,6 +320,11 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "integrity",
 			Action: func(cliCtx *cli.Context) error {
+				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				if err := doIntegrity(cliCtx); err != nil {
 					log.Error("[integrity]", "err", err)
 					return err
@@ -325,6 +343,11 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
+				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				if err := doPublishable(cliCtx); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
@@ -360,7 +383,11 @@ var (
 )
 
 func doRmStateSnapshots(cliCtx *cli.Context) error {
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 
 	removeLatest := cliCtx.Bool("latest")
 
@@ -579,6 +606,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
+	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
@@ -716,10 +748,12 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	blockReader, _ := blockRetire.IO()
+	found := false
 	for _, chk := range checks {
 		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
+		found = true
 		switch chk {
 		case integrity.BlocksTxnID:
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -784,6 +818,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
+	}
+
+	if !found {
+		return fmt.Errorf("not a valid check: %s", requestedCheck)
 	}
 
 	return nil
@@ -873,8 +911,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 }
 
 func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
-	var stepSum uint64
-	var maxStep uint64
+	var maxStepDomain uint64 // across all files in SnapDomain
+	var accFiles []snaptype.FileInfo
+
 	if err := filepath.Walk(dirs.SnapDomain, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -890,20 +929,43 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		if !ok {
 			return fmt.Errorf("failed to parse filename %s", info.Name())
 		}
-		from, to := res.From, res.To
-		maxStep = max(maxStep, to)
+		maxStepDomain = max(maxStepDomain, res.To)
 
 		if !strings.HasSuffix(info.Name(), ".kv") || !strings.Contains(info.Name(), "accounts") {
 			return nil
 		}
 
-		stepSum += to - from
+		accFiles = append(accFiles, res)
+		return nil
+	}); err != nil {
+		return err
+	}
 
+	sort.Slice(accFiles, func(i, j int) bool {
+		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
+	})
+
+	prevFrom, prevTo := accFiles[0].From, accFiles[0].To
+	for i := 1; i < len(accFiles); i++ {
+		res := accFiles[i]
+		if prevFrom == res.From {
+			return fmt.Errorf("state file %s is possibly overlapped by previous file %s (maybe run remove_overlaps)", accFiles[i-1].Path, res.Path)
+		}
+		if res.From < prevTo {
+			return fmt.Errorf("overlap detected between %s and %s", res.Path, accFiles[i-1].Path)
+		}
+		if res.From > prevTo {
+			return fmt.Errorf("gap detected between %s and %s", accFiles[i-1].Path, res.Path)
+		}
+		prevFrom, prevTo = res.From, res.To
+	}
+
+	for _, res := range accFiles {
 		oldVersion := res.Version
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range kv.StateDomains {
 			newVersion := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
-			expectedFileName := strings.Replace(info.Name(), "accounts", snapType.String(), 1)
+			expectedFileName := strings.Replace(res.Name(), "accounts", snapType.String(), 1)
 			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapDomain, expectedFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName))
@@ -948,10 +1010,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				}
 			}
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
+
+	if maxStepDomain != accFiles[len(accFiles)-1].To {
+		return fmt.Errorf("accounts domain max step (=%d) is different to SnapDomain files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepDomain)
+	}
+
+	var maxStepII uint64 // across all files in SnapIdx
+	accFiles = accFiles[:0]
 
 	if err := filepath.Walk(dirs.SnapIdx, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -970,12 +1036,40 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
 		}
 
-		maxStep = max(maxStep, res.To)
+		maxStepII = max(maxStepII, res.To)
 
 		if !strings.HasSuffix(info.Name(), ".ef") || !strings.Contains(info.Name(), "accounts") {
 			return nil
 		}
 
+		accFiles = append(accFiles, res)
+
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	sort.Slice(accFiles, func(i, j int) bool {
+		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
+	})
+
+	prevFrom, prevTo = accFiles[0].From, accFiles[0].To
+	for i := 1; i < len(accFiles); i++ {
+		res := accFiles[i]
+		if prevFrom == res.From {
+			return fmt.Errorf("state file %s is possibly overlapped by previous file %s (maybe run remove_overlaps)", accFiles[i-1].Path, res.Path)
+		}
+		if res.From < prevTo {
+			return fmt.Errorf("overlap detected between %s and %s", res.Path, accFiles[i-1].Path)
+		}
+		if res.From > prevTo {
+			return fmt.Errorf("gap detected between %s and %s", accFiles[i-1].Path, res.Path)
+		}
+
+		prevFrom, prevTo = res.From, res.To
+	}
+
+	for _, res := range accFiles {
 		viTypes := []string{"accounts", "storage", "code"}
 
 		// do a range check over all snapshots types (sanitizes domain and history folder)
@@ -985,7 +1079,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				return err
 			}
 			oldVersion := versioned.GetVersions().II.DataEF.Current
-			expectedFileName := strings.Replace(info.Name(), "accounts", snapType, 1)
+			expectedFileName := strings.Replace(res.Name(), "accounts", snapType, 1)
 
 			if _, err := os.Stat(filepath.Join(dirs.SnapIdx, expectedFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName))
@@ -1014,13 +1108,11 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dirs.SnapHistory, vFileName))
 			}
 		}
-		return nil
-	}); err != nil {
-		return err
+
 	}
 
-	if stepSum != maxStep {
-		return fmt.Errorf("stepSum %d != maxStep %d", stepSum, maxStep)
+	if maxStepII != accFiles[len(accFiles)-1].To {
+		return fmt.Errorf("accounts idx max step (=%d) is different to SnapIdx files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepII)
 	}
 	return nil
 }
@@ -1099,7 +1191,11 @@ func doPublishable(cliCtx *cli.Context) error {
 }
 
 func doClearIndexing(cliCtx *cli.Context) error {
-	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dat, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 	accessorsDir := dat.SnapAccessors
 	domainDir := dat.SnapDomain
 	snapDir := dat.Snap
@@ -1434,8 +1530,12 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 }
 
 func doUncompress(cliCtx *cli.Context) error {
+	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 	var logger log.Logger
-	var err error
 	if logger, _, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
@@ -1494,7 +1594,12 @@ func doCompress(cliCtx *cli.Context) error {
 		log.Info("done", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	}()
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dirs, lck, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer lck.Unlock()
+
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -1579,8 +1684,8 @@ func doCompress(cliCtx *cli.Context) error {
 			concatBuf = concatBuf[:0]
 		}
 
-		snappyBuf, word = compress.EncodeZstdIfNeed(snappyBuf, word, doSnappyEachWord)
-		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf, word, doUnSnappyEachWord)
+		snappyBuf, word = compress.EncodeZstdIfNeed(snappyBuf[:0], word, doSnappyEachWord)
+		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf[:0], word, doUnSnappyEachWord)
 		if err != nil {
 			return err
 		}
@@ -1831,7 +1936,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
 		err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if deletedBlocks, err = br.PruneAncientBlocks(tx, 100); err != nil {
+			if deletedBlocks, err = br.PruneAncientBlocks(tx, 100, time.Hour); err != nil {
 				return err
 			}
 			return nil
@@ -1900,9 +2005,13 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doUploaderCommand(cliCtx *cli.Context) error {
+	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 	var logger log.Logger
 	var tracer *tracers.Tracer
-	var err error
 	var metricsMux *http.ServeMux
 	var pprofMux *http.ServeMux
 
@@ -1910,13 +2019,15 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
+	debugMux := cmp.Or(metricsMux, pprofMux)
+
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)
 	if err != nil {
 		return err
 	}

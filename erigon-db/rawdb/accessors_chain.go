@@ -1107,7 +1107,7 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 
 		select {
 		case <-logEvery.C:
-			logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), table, "blockNum", blockNum)
+			logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), "table", table, "blockNum", blockNum)
 		default:
 		}
 

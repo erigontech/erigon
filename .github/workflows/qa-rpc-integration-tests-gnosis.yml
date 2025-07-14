@@ -27,7 +27,7 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [ self-hosted, qa, rpc-integration, Gnosis ]
+    runs-on: [ self-hosted, qa, Gnosis, rpc-integration ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -39,13 +39,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Checkout RPC Tests Repository & Install Requirements
-        run: |
-          rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.67.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
-          cd ${{ runner.workspace }}/rpc-tests
-          pip3 install -r requirements.txt
 
       - name: Clean Erigon Build Directory
         run: |
@@ -108,33 +101,26 @@ jobs:
       - name: Run RPC Integration Tests
         id: test_step
         run: |
-          set +e # Disable exit on error
           commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
+          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/gnosis_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
+          echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
-          cd ${{ runner.workspace }}/rpc-tests/integration
-          rm -rf ./gnosis/results/
-                    
-          # Run RPC integration test runner via http
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_gnosis.sh
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_gnosis.sh
-          
-          # Capture test runner script exit status
-          test_exit_status=$?
-          
-          # Save the subsection reached status
+
+          set +e # Disable exit on error for test run
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_gnosis.sh ${{ runner.workspace }} $TEST_RESULT_DIR
+          test_exit_status=$? # Capture test runner script exit status
+          set -e # Re-enable exit on error after test run
+
           echo "test_executed=true" >> $GITHUB_OUTPUT
-          
-          # Check test runner exit status
+
+          echo
           if [ $test_exit_status -eq 0 ]; then
-            echo "tests completed successfully"
-            echo
+            echo "RPC tests completed successfully"
             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
-            echo "error detected during tests"
+            echo "Error detected during RPC tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-          
-            # Save failed results to a directory with timestamp and commit hash
-            cp -r ${{ runner.workspace }}/rpc-tests/integration/gnosis/results/ $RPC_PAST_TEST_DIR/gnosis_$(date +%Y%m%d_%H%M%S)_integration_$commit_http/
           fi
 
       - name: Stop Erigon RpcDaemon
@@ -169,7 +155,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: ${{ runner.workspace }}/rpc-tests/integration/gnosis/results/
+          path: ${{ env.TEST_RESULT_DIR }}
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'

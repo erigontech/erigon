@@ -307,12 +307,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 		var notChanged bool
-		notChanged, config.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, config.PersistReceiptsCacheV2)
+
+		inConfig := config.PersistReceiptsCacheV2
+		notChanged, config.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, inConfig)
 		if err != nil {
 			return err
 		}
 		if !notChanged {
-			return fmt.Errorf("cli flag changed: %s", kvcfg.PersistReceipts)
+			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
+		}
+		if config.PersistReceiptsCacheV2 {
+			libstate.EnableHistoricalRCache()
 		}
 
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
@@ -420,7 +425,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, config.Downloader, chainConfig); err != nil {
+	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader, chainConfig); err != nil {
 		return nil, err
 	}
 
@@ -1474,7 +1479,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
+func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Config, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
 	var err error
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
 		s.logger.Warn("files changed...sending notification")
@@ -1519,7 +1524,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 			return err
 		}
 
-		s.downloader.HandleTorrentClientStatus()
+		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
 		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 		if err != nil {

@@ -583,4 +583,33 @@ func TestReceiptEncode(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int(r1.Logs[0].Index), int(r2.FirstLogIndexWithinBlock))
 	})
+
+	t.Run("Enc.EmptyLogs", func(t *testing.T) {
+		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1,
+			Logs: Logs{
+				&Log{Index: 1},
+			},
+		}
+		buf, err := rlp.EncodeToBytes(r1)
+		require.NoError(t, err)
+		r2 := &ReceiptForStorage{}
+		err = rlp.DecodeBytes(buf, r2)
+		require.NoError(t, err)
+		require.Equal(t, r1.FirstLogIndexWithinBlock, r2.FirstLogIndexWithinBlock)
+	})
+	t.Run("Enc.List", func(t *testing.T) {
+		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1}
+		for i := 0; i < 13; i++ {
+			r1.Logs = append(r1.Logs, &Log{Topics: make([]common.Hash, 300)})
+		}
+
+		buf, err := rlp.EncodeToBytes(r1)
+		require.NoError(t, err)
+		r2 := &ReceiptForStorage{}
+		err = rlp.DecodeBytes(buf, r2)
+		require.NoError(t, err)
+		require.Equal(t, r1.FirstLogIndexWithinBlock, r2.FirstLogIndexWithinBlock)
+		require.Equal(t, len(r1.Logs), len(r2.Logs))
+		require.Equal(t, len(r1.Logs[0].Topics), len(r2.Logs[0].Topics))
+	})
 }
