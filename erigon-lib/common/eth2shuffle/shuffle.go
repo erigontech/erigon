@@ -40,7 +40,7 @@ Return `p(index)` in a pseudorandom permutation `p` of `0...list_size-1` with ``
     See the 'generalized domain' algorithm on page 3.
 
 Eth 2.0 spec implementation here:
-	https://github.com/ethereum/eth2.0-specs/blob/dev/specs/core/0_beacon-chain.md#get_permuted_index
+	https://ethereum.github.io/consensus-specs/specs/phase0/beacon-chain/#compute_shuffled_index
 */
 
 // Permute index, i.e. shuffle an individual list item without allocating a complete list.
