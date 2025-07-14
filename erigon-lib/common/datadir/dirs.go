@@ -87,9 +87,23 @@ func New(datadir string) Dirs {
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 	}
 
-	dir.MustExist(dirs.Chaindata, dirs.Tmp,
-		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin,
-		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis, dirs.CaplinColumnData)
+	dir.MustExist(
+		dirs.Chaindata,
+		dirs.Tmp,
+		dirs.SnapIdx,
+		dirs.SnapHistory,
+		dirs.SnapDomain,
+		dirs.SnapAccessors,
+		dirs.SnapCaplin,
+		dirs.Downloader,
+		dirs.TxPool,
+		dirs.Nodes,
+		dirs.CaplinBlobs,
+		dirs.CaplinIndexing,
+		dirs.CaplinLatest,
+		dirs.CaplinGenesis,
+		dirs.CaplinColumnData,
+	)
 
 	return dirs
 }
