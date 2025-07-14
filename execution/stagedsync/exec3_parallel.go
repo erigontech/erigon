@@ -147,10 +147,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	txIndex := task.Version().TxIndex
 
-	if txIndex < 0 {
-		return nil, nil
-	}
-
 	txIncarnation := task.Version().Incarnation
 	// we want to force a re-read of the conbiase & burnt contract address
 	// if thay where referenced by the tx
@@ -170,29 +166,16 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		return nil, nil
 	}
 
-	if task.IsBlockEnd() {
+	if task.IsBlockEnd() || txIndex < 0 {
+		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
 		return nil, nil
 	}
 
 	blockNum := txTask.BlockNumber()
-	for _, l := range result.Logs {
-		ibs.AddLog(l)
-	}
 
 	if task.shouldDelayFeeCalc {
 		if txTask.Config.IsLondon(blockNum) {
 			ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
-		}
-
-		coinbaseBalance, err := ibs.GetBalance(result.Coinbase)
-
-		if err != nil {
-			return nil, err
-		}
-
-		if traceTx(blockNum, txIndex) {
-			nonce, _ := ibs.GetNonce(result.Coinbase)
-			fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, task.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbaseBalance), "nonce", nonce)
 		}
 
 		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
@@ -200,7 +183,18 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				execResult := *result.ExecutionResult
-				execResult.CoinbaseInitBalance = coinbaseBalance
+				// to generate logs we want the initial balance
+				coinbase, err := stateReader.ReadAccountData(result.Coinbase)
+
+				if err != nil {
+					return nil, err
+				}
+
+				if traceTx(blockNum, txIndex) {
+					fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, task.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
+				}
+
+				execResult.CoinbaseInitBalance = coinbase.Balance
 
 				message, err := task.TxMessage()
 				if err != nil {
@@ -215,7 +209,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 				)
 
 				// capture postApplyMessageFunc side affects
-				result.Logs = append([]*types.Log{}, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
+				result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
 			}
 		}
 	}
