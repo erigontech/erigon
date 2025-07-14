@@ -87,7 +87,7 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 		case <-ticker.C:
 			tableSizes, err := CollectTableSizes(ctx, db)
 			if err != nil {
-				logger.Error("[dbstats] failed to collect table sizes", "err", err)
+				logger.Error("[kv] failed to collect table sizes", "err", err)
 				continue
 			}
 
@@ -104,7 +104,7 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 				sb.WriteRune(',')
 			}
 
-			logger.Debug("[dbstats] table sizes", "all", sb.String())
+			logger.Debug("[kv] table sizes", "all", sb.String())
 		}
 	}
 }
