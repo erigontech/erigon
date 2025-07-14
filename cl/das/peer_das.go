@@ -39,8 +39,9 @@ type PeerDas interface {
 	StateReader() peerdasstate.PeerDasStateReader
 }
 
-var (
-	numOfBlobRecoveryWorkers = 8
+const (
+	numOfBlobRecoveryWorkers   = 8
+	maxNumberOfCellsPerRequest = 4096 // 4096*2KB = 8MB
 )
 
 type peerdas struct {
@@ -381,7 +382,19 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*clty
 	if err != nil {
 		return err
 	}
-	return d.runDownload(ctx, req, false)
+	requests := req.splitRequest(maxNumberOfCellsPerRequest)
+	wg := sync.WaitGroup{}
+	for _, req := range requests {
+		wg.Add(1)
+		go func(req *downloadRequest) {
+			defer wg.Done()
+			if err := d.runDownload(ctx, req, false); err != nil {
+				log.Warn("failed to download columns", "err", err)
+			}
+		}(req)
+	}
+	wg.Wait()
+	return nil
 }
 
 func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
@@ -423,7 +436,20 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 		return err
 	}
 
-	return d.runDownload(ctx, req, true)
+	// split the request into multiple requests to avoid overwhelming the peer
+	wg := sync.WaitGroup{}
+	requests := req.splitRequest(maxNumberOfCellsPerRequest)
+	for _, req := range requests {
+		wg.Add(1)
+		go func(req *downloadRequest) {
+			defer wg.Done()
+			if err := d.runDownload(ctx, req, true); err != nil {
+				log.Warn("failed to download columns", "err", err)
+			}
+		}(req)
+	}
+	wg.Wait()
+	return nil
 }
 
 func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) error {
@@ -642,6 +668,40 @@ func initializeDownloadRequest(
 		downloadTable:          downloadTable,
 		blockRootToBeaconBlock: blockRootToBeaconBlock,
 	}, nil
+}
+
+func (d *downloadRequest) splitRequest(limit int) []*downloadRequest {
+	requests := []*downloadRequest{}
+	curTable := make(map[common.Hash]map[uint64]bool)
+	tableCount := 0
+	for blockRoot, columns := range d.downloadTable {
+		if _, ok := curTable[blockRoot]; !ok {
+			curTable[blockRoot] = make(map[uint64]bool)
+		}
+		numberOfCells := d.blockRootToBeaconBlock[blockRoot].Block.Body.BlobKzgCommitments.Len()
+		for column := range columns {
+			curTable[blockRoot][column] = true
+			tableCount += numberOfCells
+			if tableCount >= limit {
+				// cut the table and add it to the requests
+				requests = append(requests, &downloadRequest{
+					beaconConfig:           d.beaconConfig,
+					downloadTable:          curTable,
+					blockRootToBeaconBlock: d.blockRootToBeaconBlock,
+				})
+				curTable = make(map[common.Hash]map[uint64]bool)
+				tableCount = 0
+			}
+		}
+	}
+	if tableCount > 0 {
+		requests = append(requests, &downloadRequest{
+			beaconConfig:           d.beaconConfig,
+			downloadTable:          curTable,
+			blockRootToBeaconBlock: d.blockRootToBeaconBlock,
+		})
+	}
+	return requests
 }
 
 func (d *downloadRequest) remainingBlockRoots() []common.Hash {
