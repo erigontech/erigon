@@ -675,11 +675,11 @@ func (d *downloadRequest) splitRequest(limit int) []*downloadRequest {
 	curTable := make(map[common.Hash]map[uint64]bool)
 	tableCount := 0
 	for blockRoot, columns := range d.downloadTable {
-		if _, ok := curTable[blockRoot]; !ok {
-			curTable[blockRoot] = make(map[uint64]bool)
-		}
 		numberOfCells := d.blockRootToBeaconBlock[blockRoot].Block.Body.BlobKzgCommitments.Len()
 		for column := range columns {
+			if _, ok := curTable[blockRoot]; !ok {
+				curTable[blockRoot] = make(map[uint64]bool)
+			}
 			curTable[blockRoot][column] = true
 			tableCount += numberOfCells
 			if tableCount >= limit {
