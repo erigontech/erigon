@@ -1350,8 +1350,10 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 		d.torrentClient.WriteStatus(w)
 	})
 	p := "/downloader/torrentClientStatus"
-	http.Handle(p, h)
-	if debugMux != nil {
+	// This is for gopprof.
+	defaultMux := http.DefaultServeMux
+	defaultMux.Handle(p, h)
+	if debugMux != nil && debugMux != defaultMux {
 		debugMux.Handle(p, h)
 	}
 }
