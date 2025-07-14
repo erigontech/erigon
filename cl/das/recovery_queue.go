@@ -231,15 +231,15 @@ func (q *fileBasedQueue) Done(r *recoveryRequest) error {
 		return err
 	}
 	defer dirFh.Close()
-	dirFiles, err := dirFh.Readdir(1)
+	/*dirFiles, err := dirFh.Readdir(3)
 	if err != nil {
 		return err
 	}
-	if len(dirFiles) == 0 {
+	if len(dirFiles) == 1 {
 		if err := q.fs.Remove(dir); err != nil {
 			return err
 		}
-	}
+	}*/
 	// remove from ongoing map
 	delete(q.ongoing, r.blockRoot)
 	return nil
