@@ -2,7 +2,6 @@ package das
 
 import (
 	"context"
-	"errors"
 	"math"
 	"sync"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/p2p/enode"
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+	"github.com/spf13/afero"
 )
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
@@ -52,10 +52,7 @@ type peerdas struct {
 	blobStorage       blob_storage.BlobStorage
 	sentinel          sentinelproto.SentinelClient
 	ethClock          eth_clock.EthereumClock
-	recoverBlobsQueue chan recoverBlobsRequest
-
-	recoveringMutex sync.Mutex
-	isRecovering    map[common.Hash]bool
+	recoverBlobsQueue RecoveryQueue
 }
 
 func NewPeerDas(
@@ -69,6 +66,7 @@ func NewPeerDas(
 	nodeID enode.ID,
 	ethClock eth_clock.EthereumClock,
 	peerDasState *peerdasstate.PeerDasState,
+	fs afero.Fs,
 ) PeerDas {
 	kzg.InitKZG()
 	p := &peerdas{
@@ -81,10 +79,7 @@ func NewPeerDas(
 		blobStorage:       blobStorage,
 		sentinel:          sentinel,
 		ethClock:          ethClock,
-		recoverBlobsQueue: make(chan recoverBlobsRequest, 32),
-
-		recoveringMutex: sync.Mutex{},
-		isRecovering:    make(map[common.Hash]bool),
+		recoverBlobsQueue: NewFileBasedQueue(fs),
 	}
 	p.resubscribeGossip()
 	for range numOfBlobRecoveryWorkers {
@@ -206,13 +201,8 @@ func (d *peerdas) Prune(keepSlotDistance uint64) error {
 	return nil
 }
 
-type recoverBlobsRequest struct {
-	slot      uint64
-	blockRoot common.Hash
-}
-
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
-	recover := func(toRecover recoverBlobsRequest) {
+	recover := func(toRecover *recoveryRequest) {
 		begin := time.Now()
 		log.Trace("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
 		ctx := context.Background()
@@ -320,25 +310,13 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case toRecover := <-d.recoverBlobsQueue:
-			d.recoveringMutex.Lock()
-			if _, ok := d.isRecovering[toRecover.blockRoot]; ok {
-				// recovering, skip
-				d.recoveringMutex.Unlock()
-				continue
-			}
-			d.isRecovering[toRecover.blockRoot] = true
-			d.recoveringMutex.Unlock()
-
+		case toRecover := <-d.recoverBlobsQueue.Take():
 			// check if the blobs are already recovered
 			if !d.IsBlobAlreadyRecovered(toRecover.blockRoot) {
 				// recover the blobs
 				recover(toRecover)
 			}
-			// remove the block from the recovering map
-			d.recoveringMutex.Lock()
-			delete(d.isRecovering, toRecover.blockRoot)
-			d.recoveringMutex.Unlock()
+			d.recoverBlobsQueue.Done(toRecover)
 		}
 	}
 }
@@ -354,26 +332,12 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 		return nil
 	}
 
-	// early check if the blobs are recovering
-	d.recoveringMutex.Lock()
-	if _, ok := d.isRecovering[blockRoot]; ok {
-		d.recoveringMutex.Unlock()
-		return nil
-	}
-	d.recoveringMutex.Unlock()
-
 	// schedule
 	log.Debug("[blobsRecover] scheduling recover", "slot", slot, "blockRoot", blockRoot)
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
-	select {
-	case d.recoverBlobsQueue <- recoverBlobsRequest{
+	d.recoverBlobsQueue.Add(&recoveryRequest{
 		slot:      slot,
 		blockRoot: blockRoot,
-	}:
-	case <-timer.C:
-		return errors.New("failed to schedule recover: timeout")
-	}
+	})
 	return nil
 }
 

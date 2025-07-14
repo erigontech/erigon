@@ -6,16 +6,16 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/spf13/afero"
 )
 
 type RecoveryQueue interface {
 	Add(r *recoveryRequest) error
-	Take() (*recoveryRequest, error)
+	Take() <-chan *recoveryRequest
 	Done(r *recoveryRequest) error
 }
 
@@ -46,25 +46,44 @@ var (
 
 const (
 	recoveryQueueDir = "recovery_queue"
-	cacheSize        = 2048
+	inMemCacheSize   = 2048
 )
 
 type fileBasedQueue struct {
-	fs afero.Fs
+	fs     afero.Fs
+	takeCh chan *recoveryRequest
 
-	mutex        sync.Mutex
-	cache        []*recoveryRequest
-	cacheIndex   int
-	ongoing      map[common.Hash]struct{}
-	countCanTake atomic.Int64
+	mutex          sync.Mutex
+	cache          []*recoveryRequest
+	cacheIndex     int
+	ongoing        map[common.Hash]struct{}
+	waitNewRequest chan struct{}
 }
 
 func NewFileBasedQueue(fs afero.Fs) RecoveryQueue {
-	return &fileBasedQueue{
-		fs:      fs,
-		cache:   make([]*recoveryRequest, 0),
-		ongoing: make(map[common.Hash]struct{}),
+	q := &fileBasedQueue{
+		fs:             fs,
+		takeCh:         make(chan *recoveryRequest, 16),
+		cache:          make([]*recoveryRequest, 0),
+		ongoing:        make(map[common.Hash]struct{}),
+		waitNewRequest: make(chan struct{}, 1),
 	}
+	go func() {
+		for {
+			r, err := q.take()
+			if err != nil {
+				log.Error("take", "err", err)
+				continue
+			}
+			if r == nil {
+				// no more requests in cache, wait for new request
+				<-q.waitNewRequest
+				continue
+			}
+			q.takeCh <- r
+		}
+	}()
+	return q
 }
 
 func (q *fileBasedQueue) Add(r *recoveryRequest) error {
@@ -96,11 +115,15 @@ func (q *fileBasedQueue) Add(r *recoveryRequest) error {
 		return err
 	}
 	fh.Close()
-	q.countCanTake.Add(1)
+	// notify the take goroutine to take a new request
+	select {
+	case q.waitNewRequest <- struct{}{}:
+	default:
+	}
 	return nil
 }
 
-func (q *fileBasedQueue) Take() (*recoveryRequest, error) {
+func (q *fileBasedQueue) take() (*recoveryRequest, error) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
 	for q.cacheIndex < len(q.cache) {
@@ -108,7 +131,6 @@ func (q *fileBasedQueue) Take() (*recoveryRequest, error) {
 		q.cacheIndex++
 		if _, ok := q.ongoing[r.blockRoot]; !ok {
 			q.ongoing[r.blockRoot] = struct{}{}
-			q.countCanTake.Add(-1)
 			return r, nil
 		}
 	}
@@ -130,6 +152,10 @@ func (q *fileBasedQueue) Take() (*recoveryRequest, error) {
 		}
 		return slotI < slotJ
 	})
+
+	// put them back to cache
+	q.cache = make([]*recoveryRequest, 0)
+	q.cacheIndex = 0
 loop:
 	for _, dirName := range dirNames {
 		if !dirName.IsDir() {
@@ -153,9 +179,6 @@ loop:
 			}
 			return slotI < slotJ
 		})
-		// put them back to cache
-		q.cache = make([]*recoveryRequest, 0)
-		q.cacheIndex = 0
 		for _, file := range files {
 			if file.IsDir() {
 				// impossible
@@ -173,7 +196,7 @@ loop:
 				// skip if which is already taken
 				q.cache = append(q.cache, r)
 			}
-			if len(q.cache) >= cacheSize {
+			if len(q.cache) >= inMemCacheSize {
 				break loop
 			}
 		}
@@ -185,8 +208,11 @@ loop:
 	r := q.cache[0]
 	q.cacheIndex++
 	q.ongoing[r.blockRoot] = struct{}{}
-	q.countCanTake.Add(-1)
 	return r, nil
+}
+
+func (q *fileBasedQueue) Take() <-chan *recoveryRequest {
+	return q.takeCh
 }
 
 func (q *fileBasedQueue) Done(r *recoveryRequest) error {
