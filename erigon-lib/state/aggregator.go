@@ -525,22 +525,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
 	}
 
-	err := func() error {
-		defer func() {
-			r := recover()
-			if err, ok := r.(error); ok {
-				var pe errgroup.PanicError
-				if errors.As(err, &pe) {
-					a.logger.Crit("panic error in Aggregator errgroup", "err", pe, "stack", string(pe.Stack))
-					os.Stderr.Write(pe.Stack)
-				}
-			}
-			if r != nil {
-				panic(r)
-			}
-		}()
-		return g.Wait()
-	}()
+	err := g.Wait()
 	if err != nil {
 		return err
 	}
@@ -991,7 +976,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	furiousPrune := timeout > 5*time.Hour
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
 
-	var pruneLimit uint64 = 1_000
+	var pruneLimit uint64 = 100
 	if furiousPrune {
 		pruneLimit = 1_000_000
 	}

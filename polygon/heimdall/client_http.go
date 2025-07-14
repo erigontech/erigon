@@ -65,7 +65,7 @@ const (
 	SpansFetchLimit       = 150
 	CheckpointsFetchLimit = 10_000
 
-	apiHeimdallTimeout = 10 * time.Second
+	apiHeimdallTimeout = 30 * time.Second
 	retryBackOff       = time.Second
 	maxRetries         = 5
 )
