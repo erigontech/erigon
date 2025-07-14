@@ -25,6 +25,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/gofrs/flock"
@@ -123,14 +124,20 @@ func convertFileLockError(err error) error {
 }
 
 func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
-	// Lock the instance directory to prevent concurrent use by another instance as well as
-	// accidental use of the instance directory as a database.
-	l := flock.New(filepath.Join(dirs.DataDir, "LOCK"))
+	l := dirs.newFlock()
 	locked, err := l.TryLock()
 	if err != nil {
 		return nil, false, convertFileLockError(err)
 	}
 	return l, locked, nil
+}
+
+// Dirs is huge, use pointer receiver to avoid copying it around. Returns a new flock.Flock for the
+// datadir.
+func (dirs *Dirs) newFlock() *flock.Flock {
+	// Lock the instance directory to prevent concurrent use by another instance as well as
+	// accidental use of the instance directory as a database.
+	return flock.New(filepath.Join(dirs.DataDir, "LOCK"))
 }
 
 func (dirs Dirs) MustFlock() (Dirs, *flock.Flock, error) {
@@ -142,6 +149,31 @@ func (dirs Dirs) MustFlock() (Dirs, *flock.Flock, error) {
 		return dirs, l, ErrDataDirLocked
 	}
 	return dirs, l, nil
+}
+
+// Tries a non-blocking lock on the data directory. Converts failure to lock into ErrDataDirLocked.
+// If err is nil, the unlock function must be called to release and close the flock.
+func (dirs *Dirs) TryFlock() (unlock func(), err error) {
+	f := dirs.newFlock()
+	defer func() {
+		if err != nil {
+			f.Close()
+		}
+	}()
+	locked, err := f.TryLock()
+	if err != nil {
+		err = convertFileLockError(err)
+		return
+	}
+	if locked {
+		unlock = func() {
+			// If we fail to unlock the application is in a bad state (we can't recover from this).
+			panicif.Err(f.Unlock())
+		}
+	} else {
+		err = ErrDataDirLocked
+	}
+	return
 }
 
 // ApplyMigrations - if can get flock.
