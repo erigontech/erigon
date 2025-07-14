@@ -143,12 +143,14 @@ func (e *EngineServer) Start(
 		e.logger.Error(err.Error())
 	}
 
-	go func() {
-		err := e.blockDownloader.Run(ctx)
-		if err != nil {
-			e.logger.Error("[EngineBlockDownloader] background goroutine failed", "err", err)
-		}
-	}()
+	if e.blockDownloader != nil {
+		go func() {
+			err := e.blockDownloader.Run(ctx)
+			if err != nil {
+				e.logger.Error("[EngineBlockDownloader] background goroutine failed", "err", err)
+			}
+		}()
+	}
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
