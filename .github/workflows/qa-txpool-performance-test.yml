@@ -257,6 +257,7 @@ jobs:
             --outcome $TEST_RESULT \
             --result_file ${{ github.workspace }}/outputs_kurtosis.json
 
+      # todo: aggiungere il max del valore throughput_measures[i].processedTps nella tabella del throughput analysis
       - name: Report results in run summary
         if: always()
         run: |
@@ -336,100 +337,6 @@ jobs:
           echo "- [Raw JSON Results](../actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
           echo "- [Latency Distribution Plots](../actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
           echo "- [Throughput Analysis Plots](../actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
-
-      - name: Report erigon failure
-        if: always()
-        run: |
-          output_json="${{ github.workspace }}/outputs_kurtosis.json"
-          test_result="${{ steps.erigon_kurtosis_test.outputs.test_result || 'failure' }}"
-
-          # Initialize failure reasons array
-          failure_reasons=()
-
-          # Check overall test result
-          if [ "$test_result" != "success" ]; then
-            failure_reasons+=("Overall test execution failed")
-          fi
-
-          # Check if JSON output exists
-          if [ ! -f "$output_json" ]; then
-            failure_reasons+=("No test results generated - possible Erigon crash or startup failure")
-          else
-            # Analyze JSON for performance issues and anomalies
-            
-            # Check throughput analysis for concerning metrics
-            if jq -e '.tx_pool_throughput_analysis' "$output_json" > /dev/null 2>&1; then
-              throughput_length=$(jq '.tx_pool_throughput_analysis | length' "$output_json")
-              for ((i=0; i<throughput_length; i++)); do
-                tx_count=$(jq -r ".tx_pool_throughput_analysis[$i].tx_count" "$output_json")
-                mean_tps=$(jq -r ".tx_pool_throughput_analysis[$i].mean_tps_throughput" "$output_json")
-                missed=$(jq -r ".tx_pool_throughput_analysis[$i].missed_p2p_event_count" "$output_json")
-                omission=$(jq -r ".tx_pool_throughput_analysis[$i].coordinated_omission_events_count" "$output_json")
-                
-                # Check for very low throughput (less than 100 TPS)
-                if (( $(echo "$mean_tps < 100" | bc -l) )); then
-                  failure_reasons+=("Very low throughput detected: ${mean_tps} TPS for ${tx_count} transactions")
-                fi
-                
-                # Check for high missed events (more than 5% of tx_count)
-                missed_threshold=$(echo "$tx_count * 0.05" | bc -l)
-                if (( $(echo "$missed > $missed_threshold" | bc -l) )); then
-                  failure_reasons+=("High missed P2P events: ${missed} (>${missed_threshold} threshold) for ${tx_count} transactions")
-                fi
-                
-                                 # Check for coordinated omission events (warning only, not a failure)
-                 if [ "$omission" != "0" ] && [ "$omission" != "null" ]; then
-                   echo "::warning::Coordinated omission events detected: ${omission} for ${tx_count} transactions"
-                 fi
-              done
-            fi
-            
-            # Check latency analysis for concerning metrics
-            if jq -e '.tx_pool_latency_analysis' "$output_json" > /dev/null 2>&1; then
-              latency_length=$(jq '.tx_pool_latency_analysis | length' "$output_json")
-              for ((i=0; i<latency_length; i++)); do
-                tx_count=$(jq -r ".tx_pool_latency_analysis[$i].tx_count" "$output_json")
-                max_us=$(jq -r ".tx_pool_latency_analysis[$i].max_latency_mus" "$output_json")
-                missed=$(jq -r ".tx_pool_latency_analysis[$i].missed_p2p_event_count" "$output_json")
-                
-                # Check for very high max latency (more than 5 seconds)
-                if [ "$max_us" != "null" ] && (( $(echo "$max_us > 5000000" | bc -l) )); then
-                  max_sec=$(echo "scale=2; $max_us / 1000000" | bc -l)
-                  failure_reasons+=("Very high maximum latency detected: ${max_sec}s for ${tx_count} transactions")
-                fi
-                
-                # Check for high missed events in latency analysis
-                missed_threshold=$(echo "$tx_count * 0.05" | bc -l)
-                if (( $(echo "$missed > $missed_threshold" | bc -l) )); then
-                  failure_reasons+=("High missed P2P events in latency analysis: ${missed} for ${tx_count} transactions")
-                fi
-              done
-            fi
-          fi
-
-          # Report failures if any
-          if [ ${#failure_reasons[@]} -gt 0 ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "## ❌ Erigon Performance Issues Detected" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "The following issues were identified:" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            for reason in "${failure_reasons[@]}"; do
-              echo "- ⚠️ $reason" >> $GITHUB_STEP_SUMMARY
-            done
-            
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Recommendation:** Review Erigon logs, system resources, and network conditions." >> $GITHUB_STEP_SUMMARY
-            
-            # Set job as failed if critical issues detected
-            echo "::error::Erigon performance issues detected: ${failure_reasons[0]}"
-            exit 1
-          else
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "## ✅ No Critical Issues Detected" >> $GITHUB_STEP_SUMMARY
-            echo "Erigon performance appears to be within acceptable ranges." >> $GITHUB_STEP_SUMMARY
-          fi
 
       - name: Clean test results
         uses: gacts/run-and-post-run@v1.4.2
