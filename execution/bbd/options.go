@@ -18,6 +18,7 @@ package bbd
 
 import (
 	"math"
+	"time"
 
 	"github.com/erigontech/erigon/polygon/p2p"
 )
@@ -45,6 +46,13 @@ func WithChainLengthLimit(limit uint64) Option {
 	}
 }
 
+func WithChainLengthCurrentHead(head uint64) Option {
+	return func(config requestConfig) requestConfig {
+		config.chainLengthCurrentHead = &head
+		return config
+	}
+}
+
 func applyOptions(opts ...Option) requestConfig {
 	config := defaultRequestConfig
 	for _, opt := range opts {
@@ -54,15 +62,28 @@ func applyOptions(opts ...Option) requestConfig {
 }
 
 type requestConfig struct {
-	peerId                   *p2p.PeerId
-	blocksBatchSize          uint64
-	chainLengthLimit         uint64
-	maxParallelBodyDownloads int
+	peerId                       *p2p.PeerId
+	blocksBatchSize              uint64
+	chainLengthLimit             uint64
+	chainLengthCurrentHead       *uint64
+	maxParallelBodyDownloads     int
+	initialHeaderFetchTimeout    time.Duration
+	initialHeaderFetchRetries    uint64
+	headerChainBatchFetchTimeout time.Duration
+	headerChainBatchFetchRetries uint64
+	bodiesBatchFetchTimeout      time.Duration
+	bodiesBatchFetchRetries      uint64
 }
 
 var defaultRequestConfig = requestConfig{
-	peerId:                   nil,
-	blocksBatchSize:          500,
-	chainLengthLimit:         math.MaxUint64,
-	maxParallelBodyDownloads: 10,
+	peerId:                       nil,
+	blocksBatchSize:              500,
+	chainLengthLimit:             math.MaxUint64,
+	maxParallelBodyDownloads:     10,
+	initialHeaderFetchTimeout:    time.Second, // note we want initial header fetch to be quick, so we terminate quickly
+	initialHeaderFetchRetries:    0,           // in case of chainLengthLimit+chainLengthCurrentHead early termination
+	headerChainBatchFetchTimeout: 10 * time.Second,
+	headerChainBatchFetchRetries: 1,
+	bodiesBatchFetchTimeout:      30 * time.Second,
+	bodiesBatchFetchRetries:      1,
 }

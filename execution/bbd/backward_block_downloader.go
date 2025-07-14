@@ -107,11 +107,15 @@ func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
 //
 // There are a number of Option-s that can be passed in to customise the behaviour of the request:
 //   - WithPeerId - in case the backward needs to happen from a specific peer only
-//     (default: distributes requests across all all that have the initial block hash)
+//     (default: distributes requests across all that have the initial block hash)
 //   - WithBlocksBatchSize - controls the size of the block batch that we fetch from all and send to the result feed
 //     (default: 500 blocks)
 //   - WithChainLengthLimit - terminate the download if the backward header chain goes beyond a certain length.
 //     (default: unlimited)
+//   - WithChainLengthCurrentHead - optional, can be used in conjunction with WithChainLengthLimit to enable a quick
+//     validation of chain length limit breach. With this we can terminate early after fetching the initial header from
+//     peers if the fetched header is too far ahead than the current head. This will prevent further batched backward
+//     fetches of headers until such a chain length limit is breached.
 func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...Option) (ResultFeed, error) {
 	if bbd.stopped.Load() {
 		return ResultFeed{}, errors.New("backward block downloader is stopped")
@@ -139,7 +143,7 @@ func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Conte
 	// 2. Check which peers have the header to build knowledge about which peers we can use for syncing
 	//    and to also terminate early if none of the peers have seen it
 	bbd.logger.Info("[backward-block-downloader] downloading initial header from all peers", "hash", hash)
-	initialHeader, err := bbd.downloadInitialHeader(ctx, hash, peers)
+	initialHeader, err := bbd.downloadInitialHeader(ctx, hash, peers, config)
 	if err != nil {
 		return err
 	}
@@ -190,13 +194,18 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 	ctx context.Context,
 	hash common.Hash,
 	peers peersContext,
+	config requestConfig,
 ) (*types.Header, error) {
 	peersHeadersResponses := make([][]*types.Header, len(peers.all))
 	eg := errgroup.Group{}
+	fetcherOpts := []p2p.FetcherOption{
+		p2p.WithResponseTimeout(config.initialHeaderFetchTimeout),
+		p2p.WithMaxRetries(config.initialHeaderFetchRetries),
+	}
 	for _, peer := range peers.all {
 		eg.Go(func() error {
 			peerIndex := peers.peerIdToIndex[*peer]
-			resp, err := bbd.fetcher.FetchHeadersBackwards(ctx, hash, 1, peer)
+			resp, err := bbd.fetcher.FetchHeadersBackwards(ctx, hash, 1, peer, fetcherOpts...)
 			if err != nil {
 				bbd.logger.Trace(
 					"[backward-block-downloader] peer does not have initial header",
@@ -215,20 +224,31 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 	if err := eg.Wait(); err != nil {
 		panic(err) // err not expected since we don't return any errors in the above goroutines
 	}
-	var initialHeader *types.Header
+	var header *types.Header
 	for _, headers := range peersHeadersResponses {
 		if len(headers) > 0 {
-			initialHeader = headers[0]
+			header = headers[0]
 			break
 		}
 	}
-	if initialHeader == nil {
+	if header == nil {
 		return nil, fmt.Errorf("no peers have initial header hash for backward download: %s", hash)
 	}
-	if initialHeader.Number.Uint64() == 0 {
+	headerNum := header.Number.Uint64()
+	if headerNum == 0 {
 		return nil, fmt.Errorf("asked to download hash at num 0: %s", hash)
 	}
-	return initialHeader, nil
+	currentHead := config.chainLengthCurrentHead
+	if currentHead != nil && *currentHead > headerNum && *currentHead-headerNum >= config.chainLengthLimit {
+		return nil, fmt.Errorf(
+			"chain length limit breach: num=%d, hash=%s, currentHead=%d, limit=%d",
+			headerNum,
+			hash,
+			*config.chainLengthCurrentHead,
+			config.chainLengthLimit,
+		)
+	}
+	return header, nil
 }
 
 func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
@@ -247,6 +267,10 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		return nil, err
 	}
 
+	fetcherOpts := []p2p.FetcherOption{
+		p2p.WithResponseTimeout(config.headerChainBatchFetchTimeout),
+		p2p.WithMaxRetries(config.headerChainBatchFetchRetries),
+	}
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
 	chainLen := uint64(1)
@@ -256,11 +280,12 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	for connectionPoint == nil && lastHeader.Number.Uint64() > 0 {
 		if chainLen >= config.chainLengthLimit {
 			return nil, fmt.Errorf(
-				"%w: num=%d, hash=%s, len=%d",
+				"%w: num=%d, hash=%s, len=%d, limit=%d",
 				ErrChainLengthExceedsLimit,
 				initialHeader.Number.Uint64(),
 				initialHeader.Hash(),
 				chainLen,
+				config.chainLengthLimit,
 			)
 		}
 
@@ -303,7 +328,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		}
 
 		peerIndex := peers.peerIdToIndex[peerId]
-		resp, err := bbd.fetcher.FetchHeadersBackwards(ctx, parentHash, amount, &peerId)
+		resp, err := bbd.fetcher.FetchHeadersBackwards(ctx, parentHash, amount, &peerId, fetcherOpts...)
 		if err != nil {
 			bbd.logger.Debug(
 				"[backward-block-downloader] could not fetch headers batch from peer",
@@ -433,6 +458,10 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 
 	// download from available peers until all batches are downloaded
+	fetcherOpts := []p2p.FetcherOption{
+		p2p.WithResponseTimeout(config.bodiesBatchFetchTimeout),
+		p2p.WithMaxRetries(config.bodiesBatchFetchRetries),
+	}
 	type batchAssignment struct {
 		peerId     p2p.PeerId
 		batchIndex int
@@ -474,7 +503,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			)
 
 			eg.Go(func() error {
-				bodiesResponse, err := bbd.fetcher.FetchBodies(ctx, headerBatch, &peerId)
+				bodiesResponse, err := bbd.fetcher.FetchBodies(ctx, headerBatch, &peerId, fetcherOpts...)
 				if err != nil {
 					bbd.logger.Debug(
 						"[backward-block-downloader] could not fetch bodies batch",
