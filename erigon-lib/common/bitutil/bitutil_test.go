@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Adapted from: https://golang.org/src/crypto/cipher/xor_test.go
+// Adapted from: https://cs.opensource.google/go/go/+/refs/tags/go1.21.5:src/crypto/cipher/xor_test.go
 
 package bitutil
 
