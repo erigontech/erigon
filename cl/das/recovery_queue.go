@@ -35,7 +35,7 @@ func (r *recoveryRequest) UnmarshalSSZ(data []byte) error {
 func (r recoveryRequest) Filepath() (string, string) {
 	// path: <base>/recovery_queue/<slot/10000>/<slot>_<block_root>.ssz
 	subdir := r.slot / 10000
-	dir := fmt.Sprintf("%s/%d", recoveryQueueDir, subdir)
+	dir := fmt.Sprintf("%d", subdir)
 	filepath := fmt.Sprintf("%s/%d_%s.ssz", dir, r.slot, r.blockRoot.Hex())
 	return dir, filepath
 }
@@ -45,8 +45,7 @@ var (
 )
 
 const (
-	recoveryQueueDir = "recovery_queue"
-	inMemCacheSize   = 2048
+	inMemCacheSize = 2048
 )
 
 type fileBasedQueue struct {
@@ -137,7 +136,7 @@ func (q *fileBasedQueue) take() (*recoveryRequest, error) {
 
 	// no more requests in cache, read from file
 	// read dir names in ascending order by slot
-	dirNames, err := afero.ReadDir(q.fs, recoveryQueueDir)
+	dirNames, err := afero.ReadDir(q.fs, ".")
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +160,7 @@ loop:
 		if !dirName.IsDir() {
 			continue
 		}
-		dirPath := fmt.Sprintf("%s/%s", recoveryQueueDir, dirName.Name())
+		dirPath := dirName.Name()
 		// read files in ascending order by slot
 		files, err := afero.ReadDir(q.fs, dirPath)
 		if err != nil {
