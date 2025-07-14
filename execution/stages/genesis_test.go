@@ -37,8 +37,9 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stages/mock"
-	"github.com/erigontech/erigon/params"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -54,20 +55,19 @@ func TestSetupGenesis(t *testing.T) {
 			},
 		}
 		oldcustomg = customg
-		tmpdir     = t.TempDir()
 	)
 	logger := log.New()
 	oldcustomg.Config = &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
 		wantErr    error
-		fn         func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error)
+		fn         func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error)
 		wantConfig *chain.Config
 		name       string
 		wantHash   common.Hash
 	}{
 		{
 			name: "genesis without ChainConfig",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				return core.CommitGenesisBlock(db, new(types.Genesis), datadir.New(tmpdir), logger)
 			},
 			wantErr:    types.ErrGenesisNoConfig,
@@ -75,23 +75,23 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "no block in DB, genesis == nil",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				return core.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
 			},
-			wantHash:   params.MainnetGenesisHash,
-			wantConfig: params.MainnetChainConfig,
+			wantHash:   chainspec.MainnetGenesisHash,
+			wantConfig: chainspec.MainnetChainConfig,
 		},
 		{
 			name: "mainnet block in DB, genesis == nil",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				return core.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
 			},
-			wantHash:   params.MainnetGenesisHash,
-			wantConfig: params.MainnetChainConfig,
+			wantHash:   chainspec.MainnetGenesisHash,
+			wantConfig: chainspec.MainnetChainConfig,
 		},
 		{
 			name: "custom block in DB, genesis == nil",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return core.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
 			},
@@ -100,37 +100,37 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == sepolia",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return core.CommitGenesisBlock(db, core.SepoliaGenesisBlock(), datadir.New(tmpdir), logger)
+				return core.CommitGenesisBlock(db, chainspec.SepoliaGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.SepoliaGenesisHash},
-			wantHash:   params.SepoliaGenesisHash,
-			wantConfig: params.SepoliaChainConfig,
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: chainspec.SepoliaGenesisHash},
+			wantHash:   chainspec.SepoliaGenesisHash,
+			wantConfig: chainspec.SepoliaChainConfig,
 		},
 		{
 			name: "custom block in DB, genesis == bor-mainnet",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return core.CommitGenesisBlock(db, core.BorMainnetGenesisBlock(), datadir.New(tmpdir), logger)
+				return core.CommitGenesisBlock(db, polychain.BorMainnetGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.BorMainnetGenesisHash},
-			wantHash:   params.BorMainnetGenesisHash,
-			wantConfig: params.BorMainnetChainConfig,
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: polychain.BorMainnetGenesisHash},
+			wantHash:   polychain.BorMainnetGenesisHash,
+			wantConfig: polychain.BorMainnetChainConfig,
 		},
 		{
 			name: "custom block in DB, genesis == amoy",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return core.CommitGenesisBlock(db, core.AmoyGenesisBlock(), datadir.New(tmpdir), logger)
+				return core.CommitGenesisBlock(db, polychain.AmoyGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.AmoyGenesisHash},
-			wantHash:   params.AmoyGenesisHash,
-			wantConfig: params.AmoyChainConfig,
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: polychain.AmoyGenesisHash},
+			wantHash:   polychain.AmoyGenesisHash,
+			wantConfig: polychain.AmoyChainConfig,
 		},
 		{
 			name: "compatible config in DB",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&oldcustomg, db, datadir.New(tmpdir), logger)
 				return core.CommitGenesisBlock(db, &customg, datadir.New(tmpdir), logger)
 			},
@@ -139,7 +139,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "incompatible config in DB",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				//if ethconfig.EnableHistoryV4InTest {
 				//	t.Skip("fix me")
 				//}
@@ -173,13 +173,14 @@ func TestSetupGenesis(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+			tmpdir := t.TempDir()
 			dirs := datadir.New(tmpdir)
 			db := temporaltest.NewTestDB(t, dirs)
 			//cc := tool.ChainConfigFromDB(db)
 			freezingCfg := ethconfig.Defaults.Snapshot
 			//freezingCfg.ChainName = cc.ChainName //TODO: nil-pointer?
 			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.New()), heimdall.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.New()), nil, nil)
-			config, genesis, err := test.fn(t, db)
+			config, genesis, err := test.fn(t, db, tmpdir)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
 				spew := spew.ConfigState{DisablePointerAddresses: true, DisableCapacities: true}

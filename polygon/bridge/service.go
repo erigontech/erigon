@@ -317,7 +317,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 			continue
 		}
 
-		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + s.borConfig.CalculateSprintLength(blockNum)
+		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + s.borConfig.CalculateSprintLength(lastProcessedBlockInfo.BlockNum)
 		if blockNum != expectedNextBlockNum {
 			return fmt.Errorf("nonsequential block in bridge processing: %d != %d", blockNum, expectedNextBlockNum)
 		}
@@ -328,26 +328,16 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 			return err
 		}
 
-		if err = s.waitForScraper(ctx, toTime); err != nil {
-			return err
-		}
-
 		startId := lastProcessedEventId + 1
-		endId, err := s.store.LastEventIdWithinWindow(ctx, startId, time.Unix(int64(toTime), 0))
-		if err != nil {
-			return err
-		}
+		var eventLimit *uint64
 
 		if s.borConfig.OverrideStateSyncRecords != nil {
-			if eventLimit, ok := s.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
-				if eventLimit == 0 {
-					endId = 0
-				} else {
-					endId = startId + uint64(eventLimit) - 1
-				}
+			if el, ok := s.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+				uel := uint64(el)
+				eventLimit = &uel
 			}
 
-			for k, eventLimit := range s.borConfig.OverrideStateSyncRecords {
+			for k, el := range s.borConfig.OverrideStateSyncRecords {
 				if len(k) == 0 {
 					continue
 				}
@@ -376,10 +366,32 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 					continue
 				}
 
-				if eventLimit == 0 {
-					endId = 0
-				} else {
-					endId = startId + uint64(eventLimit) - 1
+				if el == 0 {
+					uel := uint64(el)
+					eventLimit = &uel
+				}
+			}
+		}
+
+		var endId uint64
+
+		if eventLimit == nil || *eventLimit > 0 {
+			if err = s.waitForScraper(ctx, toTime); err != nil {
+				return err
+			}
+
+			endId, err = s.store.LastEventIdWithinWindow(ctx, startId, time.Unix(int64(toTime), 0))
+			if err != nil {
+				return err
+			}
+		}
+
+		if eventLimit != nil {
+			if *eventLimit == 0 {
+				endId = 0
+			} else {
+				if endId > startId && endId-startId >= *eventLimit {
+					endId = startId + *eventLimit - 1
 				}
 			}
 		}

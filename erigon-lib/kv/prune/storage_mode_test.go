@@ -78,10 +78,6 @@ func TestParseCLIMode(t *testing.T) {
 		assert.Equal(t, MinimalMode, mode)
 		assert.Equal(t, minimalModeStr, mode.String())
 	})
-	t.Run("minimal_override", func(t *testing.T) {
-		_, err := FromCli(minimalModeStr, 1, 2)
-		assert.ErrorIs(t, err, ErrDistanceOnlyForArchive)
-	})
 	t.Run("garbage", func(t *testing.T) {
 		_, err := FromCli("garb", 1, 2)
 		assert.ErrorIs(t, err, ErrUnknownPruneMode)

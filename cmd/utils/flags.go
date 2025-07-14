@@ -31,13 +31,14 @@ import (
 	"time"
 
 	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-db/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -57,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
@@ -69,6 +71,8 @@ import (
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 // These are all the command line flags we support.
@@ -680,16 +684,17 @@ var (
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name: "torrent.download.rate",
-		// TODO: Set this higher to demonstrate effectiveness. This should exceed 128 MB (256 might
-		// be good) to demonstrate when webseeding is working optimally. A separate rate limit could
-		// be used for peers.
-		Value: "128mb",
-		Usage: "Bytes per second, example: 32mb",
+		// I'm not sure what we want here. How fast to typical users get with webseeds? Let's try no
+		// limit.
+		Usage: "Bytes per second, example: 32mb. Shared with webseeds unless that rate is set separately.",
+	}
+	TorrentWebseedDownloadRateFlag = cli.StringFlag{
+		Name:  "torrent.webseed.download.rate",
+		Usage: "Bytes per second for webseeds, example: 32mb. If not set, rate limit is shared with torrent.download.rate",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
-		Name: "torrent.upload.rate",
-		// TODO: Set this higher to demonstrate effectiveness?
-		Value: "4mb",
+		Name:  "torrent.upload.rate",
+		Value: "32mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
 	// Deprecated. Shouldn't do anything. TODO: Remove.
@@ -747,7 +752,7 @@ var (
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
 		Usage: "DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
-		Value: "4KB",
+		Value: "16KB",
 	}
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
@@ -1214,7 +1219,7 @@ func GetBootnodesFromFlags(urlsStr, chain string) ([]*enode.Node, error) {
 	if urlsStr != "" {
 		urls = common.CliString2Array(urlsStr)
 	} else {
-		urls = params2.BootnodeURLsOfChain(chain)
+		urls = chainspec.BootnodeURLsOfChain(chain)
 	}
 	return enode.ParseNodesFromURLs(urls)
 }
@@ -1225,7 +1230,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		urls = common.CliString2Array(ctx.String(StaticPeersFlag.Name))
 	} else {
 		chain := ctx.String(ChainFlag.Name)
-		urls = params2.StaticPeerURLsOfChain(chain)
+		urls = chainspec.StaticPeerURLsOfChain(chain)
 	}
 
 	nodes, err := enode.ParseNodesFromURLs(urls)
@@ -1283,19 +1288,17 @@ func NewP2PConfig(
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:         fmt.Sprintf(":%d", port),
-		MaxPeers:           maxPeers,
-		MaxPendingPeers:    maxPendPeers,
-		NAT:                nat.Any(),
-		NoDiscovery:        nodiscover,
-		PrivateKey:         serverKey,
-		Name:               nodeName,
-		NodeDatabase:       enodeDBPath,
-		AllowedPorts:       allowedPorts,
-		TmpDir:             dirs.Tmp,
-		MetricsEnabled:     metricsEnabled,
-		LookupBootnodeURLs: params2.BootnodeURLsByGenesisHash,
-		LookupDNSNetwork:   params2.KnownDNSNetwork,
+		ListenAddr:      fmt.Sprintf(":%d", port),
+		MaxPeers:        maxPeers,
+		MaxPendingPeers: maxPendPeers,
+		NAT:             nat.Any(),
+		NoDiscovery:     nodiscover,
+		PrivateKey:      serverKey,
+		Name:            nodeName,
+		NodeDatabase:    enodeDBPath,
+		AllowedPorts:    allowedPorts,
+		TmpDir:          dirs.Tmp,
+		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1703,7 +1706,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params2.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *params2.ConsensusSnapshotConfig, datadir string) {
+func setClique(ctx *cli.Context, cfg *chainspec.ConsensusSnapshotConfig, datadir string) {
 	cfg.CheckpointInterval = ctx.Uint64(CliqueSnapshotCheckpointIntervalFlag.Name)
 	cfg.InmemorySnapshots = ctx.Int(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.Int(CliqueSnapshotInmemorySignaturesFlag.Name)
@@ -1728,7 +1731,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 
 	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync)
 
-	chainConfig := params2.ChainConfigByChainName(ctx.String(ChainFlag.Name))
+	chainConfig := chainspec.ChainConfigByChainName(ctx.String(ChainFlag.Name))
 	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
 		// override default max devp2p peers for polygon as per
 		// https://forum.polygon.technology/t/introducing-our-new-dns-discovery-for-polygon-pos-faster-smarter-more-connected/19871
@@ -1928,10 +1931,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.KeepExecutionProofs = true
 		state.EnableHistoricalCommitment()
 	}
-	if ctx.Bool(PersistReceiptsV2Flag.Name) {
-		cfg.PersistReceiptsCacheV2 = true
-		state.EnableHistoricalRCache()
-	}
+
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
@@ -1956,7 +1956,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
 		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
-			chainName, ok := networkid.NetworkNameByID[cfg.NetworkID]
+			chainName, ok := chainspec.NetworkNameByID[cfg.NetworkID]
 			if !ok {
 				chain = "" // don't default to mainnet if NetworkID != 1 and it's devchain or smth
 			} else {
@@ -1965,7 +1965,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 		}
 	} else {
-		cfg.NetworkID = params2.NetworkIDByChainName(chain)
+		cfg.NetworkID = chainspec.NetworkIDByChainName(chain)
 	}
 
 	cfg.Dirs = nodeConfig.Dirs
@@ -2032,8 +2032,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Override any default configs for hard coded networks.
 	switch chain {
 	default:
-		genesis := core.GenesisBlockByChainName(chain)
-		genesisHash := params2.GenesisHashByChainName(chain)
+		genesis := chainspec.GenesisBlockByChainName(chain)
+		genesisHash := chainspec.GenesisHashByChainName(chain)
 		if (genesis == nil) || (genesisHash == nil) {
 			Fatalf("ChainDB name is not recognized: %s", chain)
 			return
@@ -2042,7 +2042,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		SetDNSDiscoveryDefaults(cfg, *genesisHash)
 	case "":
 		if cfg.NetworkID == 1 {
-			SetDNSDiscoveryDefaults(cfg, params2.MainnetGenesisHash)
+			SetDNSDiscoveryDefaults(cfg, chainspec.MainnetGenesisHash)
 		}
 	case networkname.Dev:
 		// Create new developer account or reuse existing one
@@ -2053,7 +2053,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		logger.Info("Using developer account", "address", developer)
 
 		// Create a new developer genesis block or reuse existing one
-		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
+		cfg.Genesis = chainspec.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
 		logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
 		if !ctx.IsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
@@ -2075,15 +2075,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Do this after chain config as there are chain type registration
 	// dependencies for know config which need to be set-up
 	if cfg.Snapshot.DownloaderAddr == "" {
-		downloadRateStr := ctx.String(TorrentDownloadRateFlag.Name)
-		uploadRateStr := ctx.String(TorrentUploadRateFlag.Name)
-		var downloadRate, uploadRate datasize.ByteSize
-		if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
-			panic(err)
-		}
-		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
-			panic(err)
-		}
 		lvl, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
@@ -2098,17 +2089,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			cfg.Dirs,
 			version,
 			lvl,
-			downloadRate,
-			uploadRate,
 			ctx.Int(TorrentPortFlag.Name),
 			ctx.Int(TorrentConnsPerFileFlag.Name),
-			common.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)),
 			webseedsList,
 			chain,
 			ctx.Bool(DbWriteMapFlag.Name),
 			downloadercfg.NewCfgOpts{
-				DisableTrackers: boolFlagOpt(ctx, &TorrentDisableTrackers),
-				Verify:          DownloaderVerifyFlag.Get(ctx),
+				DisableTrackers:          boolFlagOpt(ctx, &TorrentDisableTrackers),
+				Verify:                   DownloaderVerifyFlag.Get(ctx),
+				DownloadRateLimit:        MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentDownloadRateFlag.Name)),
+				UploadRateLimit:          MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentUploadRateFlag.Name)),
+				WebseedDownloadRateLimit: MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentWebseedDownloadRateFlag.Name)),
 			},
 		)
 		if err != nil {
@@ -2116,6 +2107,46 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader.ClientConfig, logger)
 	}
+}
+
+// Convenience type for optional flag value representing a rate limit that should print nicely for
+// humans too.
+type RateLimitFlagValue g.Option[rate.Limit]
+
+// Human-readable representation of the rate limit value, or "Inf" if the value is not set.
+func (me RateLimitFlagValue) String() string {
+	if !me.Ok {
+		return "Inf"
+	}
+	return datasize.ByteSize(me.Value).String()
+}
+
+// Converts the parsed rate limit to the type expected by the Downloader torrent configuration.
+func (me RateLimitFlagValue) TorrentRateLimit() g.Option[rate.Limit] {
+	return g.Option[rate.Limit](me)
+}
+
+func GetStringFlagRateLimit(value string) (_ RateLimitFlagValue, err error) {
+	switch value {
+	case "":
+		return
+	case "Inf":
+		return RateLimitFlagValue(g.Some(rate.Inf)), nil
+	}
+	var size datasize.ByteSize
+	err = size.UnmarshalText([]byte(value))
+	if err != nil {
+		return
+	}
+	return RateLimitFlagValue(g.Some(rate.Limit(size))), nil
+}
+
+// Takes a string value from a flag, in a human readable byte rate format, and converts it to a
+// Downloader rate limit option value. Panics on parse errors per the old package behaviour.
+func MustGetStringFlagDownloaderRateLimit(value string) (_ g.Option[rate.Limit]) {
+	hiho, err := GetStringFlagRateLimit(value)
+	panicif.Err(err)
+	return hiho.TorrentRateLimit()
 }
 
 // Converts flag value to an Option for packages that abstract over flag handling.
@@ -2132,8 +2163,7 @@ func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
 	}
-	protocol := "all"
-	if url := params2.KnownDNSNetwork(genesis, protocol); url != "" {
+	if url := chainspec.KnownDNSNetwork(genesis); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
 }

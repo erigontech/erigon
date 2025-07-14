@@ -72,9 +72,10 @@ func (s *SequenceReader) EncodingType() EncodingType {
 }
 
 func (s *SequenceReader) Get(i uint64) uint64 {
-	if s.currentEnc == SimpleEncoding {
+	switch s.currentEnc {
+	case SimpleEncoding:
 		return s.sseq.Get(i)
-	} else if s.currentEnc == PlainEliasFano || s.currentEnc == RebasedEliasFano {
+	case PlainEliasFano, RebasedEliasFano:
 		return s.ref.Get(i)
 	}
 
@@ -82,9 +83,10 @@ func (s *SequenceReader) Get(i uint64) uint64 {
 }
 
 func (s *SequenceReader) Min() uint64 {
-	if s.currentEnc == SimpleEncoding {
+	switch s.currentEnc {
+	case SimpleEncoding:
 		return s.sseq.Min()
-	} else if s.currentEnc == PlainEliasFano || s.currentEnc == RebasedEliasFano {
+	case PlainEliasFano, RebasedEliasFano:
 		return s.ref.Min()
 	}
 
@@ -92,9 +94,10 @@ func (s *SequenceReader) Min() uint64 {
 }
 
 func (s *SequenceReader) Max() uint64 {
-	if s.currentEnc == SimpleEncoding {
+	switch s.currentEnc {
+	case SimpleEncoding:
 		return s.sseq.Max()
-	} else if s.currentEnc == PlainEliasFano || s.currentEnc == RebasedEliasFano {
+	case PlainEliasFano, RebasedEliasFano:
 		return s.ref.Max()
 	}
 
@@ -102,9 +105,10 @@ func (s *SequenceReader) Max() uint64 {
 }
 
 func (s *SequenceReader) Count() uint64 {
-	if s.currentEnc == SimpleEncoding {
+	switch s.currentEnc {
+	case SimpleEncoding:
 		return s.sseq.Count()
-	} else if s.currentEnc == PlainEliasFano || s.currentEnc == RebasedEliasFano {
+	case PlainEliasFano, RebasedEliasFano:
 		return s.ref.Count()
 	}
 
@@ -137,9 +141,10 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) {
 }
 
 func (s *SequenceReader) seek(v uint64) (uint64, bool) {
-	if s.currentEnc == SimpleEncoding {
+	switch s.currentEnc {
+	case SimpleEncoding:
 		return s.sseq.Seek(v)
-	} else if s.currentEnc == PlainEliasFano || s.currentEnc == RebasedEliasFano {
+	case PlainEliasFano, RebasedEliasFano:
 		return s.ref.Seek(v)
 	}
 
@@ -147,13 +152,14 @@ func (s *SequenceReader) seek(v uint64) (uint64, bool) {
 }
 
 func (s *SequenceReader) Iterator(from int) stream.U64 {
-	if s.currentEnc == SimpleEncoding {
+	switch s.currentEnc {
+	case SimpleEncoding:
 		it := s.sseq.Iterator()
 		if from > 0 {
 			it.Seek(uint64(from))
 		}
 		return it
-	} else if s.currentEnc == PlainEliasFano || s.currentEnc == RebasedEliasFano {
+	case PlainEliasFano, RebasedEliasFano:
 		it := s.ref.Iterator()
 		if from > 0 {
 			it.Seek(uint64(from))
@@ -165,13 +171,14 @@ func (s *SequenceReader) Iterator(from int) stream.U64 {
 }
 
 func (s *SequenceReader) ReverseIterator(v int) stream.U64 {
-	if s.currentEnc == SimpleEncoding {
+	switch s.currentEnc {
+	case SimpleEncoding:
 		it := s.sseq.ReverseIterator()
 		if v > 0 {
 			it.Seek(uint64(v))
 		}
 		return it
-	} else if s.currentEnc == PlainEliasFano || s.currentEnc == RebasedEliasFano {
+	case PlainEliasFano, RebasedEliasFano:
 		it := s.ref.ReverseIterator()
 		if v > 0 {
 			it.Seek(uint64(v))

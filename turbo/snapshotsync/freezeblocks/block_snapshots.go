@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -53,7 +54,6 @@ import (
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -339,7 +339,7 @@ var ErrNothingToPrune = errors.New("nothing to prune")
 
 var mxPruneTookBor = metrics.GetOrCreateSummary(`prune_seconds{type="bor"}`)
 
-func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error) {
+func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error) {
 	if br.blockReader.FreezingCfg().KeepBlocks {
 		return deleted, nil
 	}
@@ -347,17 +347,29 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, e
 	if err != nil {
 		return deleted, err
 	}
-	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
-		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
-		deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
-		if err != nil {
-			return deleted, err
-		}
-		deleted += deletedBlocks
-	}
 
-	if br.chainConfig.Bor != nil {
-		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
+	t := time.Now()
+	frozenBlocks := br.blockReader.FrozenBlocks()
+	isBor := br.chainConfig.Bor != nil
+
+	for i := 0; i < limit; i++ {
+		if time.Since(t) > timeout {
+			break
+		}
+		if canDeleteTo := CanDeleteTo(currentProgress, frozenBlocks); canDeleteTo > 0 {
+			br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
+			deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, 1)
+			if err != nil {
+				return deleted, err
+			}
+			deleted += deletedBlocks
+		}
+
+		if !isBor {
+			continue
+		}
+
+		if canDeleteTo := CanDeleteTo(currentProgress, frozenBlocks); canDeleteTo > 0 {
 			// PruneBorBlocks - [1, to) old blocks after moving it to snapshots.
 
 			deletedBorBlocks, err := func() (deleted int, err error) {
@@ -369,7 +381,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, e
 				}
 
 				return bordb.PruneHeimdall(context.Background(),
-					br.heimdallStore, br.bridgeStore, pruneTx, canDeleteTo, limit)
+					br.heimdallStore, br.bridgeStore, pruneTx, canDeleteTo, 1)
 			}()
 			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit, "deleted", deleted, "err", err)
 			if err != nil {
@@ -377,7 +389,6 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, e
 			}
 			deleted += deletedBorBlocks
 		}
-
 	}
 
 	return deleted, nil
@@ -548,7 +559,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 }
 
 type firstKeyGetter func(ctx context.Context) uint64
-type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collecter func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collector func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 
 var BlockCompressCfg = seg.Cfg{
 	MinPatternScore: 1_000,

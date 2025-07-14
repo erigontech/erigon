@@ -329,7 +329,7 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 		return context.DeadlineExceeded
 	}
 	if response.Result != execution.ExecutionStatus_Success {
-		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())
+		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", response.Result.String())
 	}
 	return nil
 }
