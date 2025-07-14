@@ -41,7 +41,7 @@ type PeerDas interface {
 
 const (
 	numOfBlobRecoveryWorkers   = 8
-	maxNumberOfCellsPerRequest = 4096 // 4096*2KB = 8MB
+	maxNumberOfCellsPerRequest = 512 // 512*2KB = 1MB
 )
 
 type peerdas struct {
