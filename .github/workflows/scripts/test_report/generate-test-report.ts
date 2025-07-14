@@ -249,9 +249,18 @@ export async function run() {
                 }
 
                 // order the results by date
-                if (jobSummary.results.length > 0)
+                if (jobSummary.results.length > 0) {
                     jobSummary.results.sort(
-                        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                        (a, b) => {
+                            const dateA = Date.parse(a.date);
+                            const dateB = Date.parse(b.date);
+                            if (isNaN(dateA) && isNaN(dateB)) return 0;
+                            if (isNaN(dateA)) return 1;
+                            if (isNaN(dateB)) return -1;
+                            if (dateA === dateB) return a.runId - b.runId;  // If dates are equal, sort by runId
+                            return dateA - dateB;
+                        })
+                }
 
                 // Create a row for the job
                 let testName = cleanJobName(workflowSummary.name)
