@@ -43,16 +43,16 @@ var (
 )
 
 type peerdas struct {
-	state             *peerdasstate.PeerDasState
-	nodeID            enode.ID
-	rpc               *rpc.BeaconRpcP2P
-	beaconConfig      *clparams.BeaconChainConfig
-	caplinConfig      *clparams.CaplinConfig
-	columnStorage     blob_storage.DataColumnStorage
-	blobStorage       blob_storage.BlobStorage
-	sentinel          sentinelproto.SentinelClient
-	ethClock          eth_clock.EthereumClock
-	recoverBlobsQueue RecoveryQueue
+	state         *peerdasstate.PeerDasState
+	nodeID        enode.ID
+	rpc           *rpc.BeaconRpcP2P
+	beaconConfig  *clparams.BeaconChainConfig
+	caplinConfig  *clparams.CaplinConfig
+	columnStorage blob_storage.DataColumnStorage
+	blobStorage   blob_storage.BlobStorage
+	sentinel      sentinelproto.SentinelClient
+	ethClock      eth_clock.EthereumClock
+	queue         RecoveryQueue
 }
 
 func NewPeerDas(
@@ -66,20 +66,20 @@ func NewPeerDas(
 	nodeID enode.ID,
 	ethClock eth_clock.EthereumClock,
 	peerDasState *peerdasstate.PeerDasState,
-	fs afero.Fs,
+	blobRecoveryRequestDir string,
 ) PeerDas {
 	kzg.InitKZG()
 	p := &peerdas{
-		state:             peerDasState,
-		nodeID:            nodeID,
-		rpc:               rpc,
-		beaconConfig:      beaconConfig,
-		caplinConfig:      caplinConfig,
-		columnStorage:     columnStorage,
-		blobStorage:       blobStorage,
-		sentinel:          sentinel,
-		ethClock:          ethClock,
-		recoverBlobsQueue: NewFileBasedQueue(fs),
+		state:         peerDasState,
+		nodeID:        nodeID,
+		rpc:           rpc,
+		beaconConfig:  beaconConfig,
+		caplinConfig:  caplinConfig,
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+		sentinel:      sentinel,
+		ethClock:      ethClock,
+		queue:         NewFileBasedQueue(afero.NewBasePathFs(afero.NewOsFs(), blobRecoveryRequestDir)),
 	}
 	p.resubscribeGossip()
 	for range numOfBlobRecoveryWorkers {
@@ -310,13 +310,13 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case toRecover := <-d.recoverBlobsQueue.Take():
+		case toRecover := <-d.queue.Take():
 			// check if the blobs are already recovered
 			if !d.IsBlobAlreadyRecovered(toRecover.blockRoot) {
 				// recover the blobs
 				recover(toRecover)
 			}
-			d.recoverBlobsQueue.Done(toRecover)
+			d.queue.Done(toRecover)
 		}
 	}
 }
@@ -334,7 +334,7 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 
 	// schedule
 	log.Debug("[blobsRecover] scheduling recover", "slot", slot, "blockRoot", blockRoot)
-	d.recoverBlobsQueue.Add(&recoveryRequest{
+	d.queue.Add(&recoveryRequest{
 		slot:      slot,
 		blockRoot: blockRoot,
 	})
