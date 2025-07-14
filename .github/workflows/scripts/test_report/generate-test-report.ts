@@ -64,7 +64,7 @@ function mapConclusionToIcon(conclusion: string | null, status: string | null): 
     switch (conclusion) {
         case 'success': return '✅';
         case 'failure': return '❌';
-        case 'cancelled': return '⏭️';  // The run was cancelled before it completed.
+        case 'cancelled': return '🗑️️';  // The run was cancelled before it completed.
         case 'skipped': return '⏩';  // The run was skipped.
         case 'timed_out': return '⏰️';
         case 'neutral': return '⚪️';
@@ -106,8 +106,8 @@ function mapChain(chain: string | null): string {
     return chain;
 }
 
-// Removes QA and chain information from a job name
-function removeQAAndChainInfo(jobName: string): string {
+// Removes 'QA' and chain information from a job name
+function cleanJobName(jobName: string): string {
     return jobName
         .replace(/^QA - /, '')
         .replace(/\s*\(Polygon\)/i, '')
@@ -241,21 +241,28 @@ async function run() {
         for (const workflowSummary of summaries) {
             for (const jobSummary of workflowSummary.jobs) {
 
+                // Map the job name to a more readable format
                 let jobName = mapChain(workflowSummary.name)
-
                 if (jobName == workflowSummary.name) {
                     jobName = mapChain(jobSummary.name);
                 }
 
-                let testName = removeQAAndChainInfo(workflowSummary.name)
+                // order the results by date
+                if (jobSummary.results.length > 0)
+                    jobSummary.results.sort(
+                        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+                // Create a row for the job
+                let testName = cleanJobName(workflowSummary.name)
                 let row = [testName, jobName]
                 let jobConclusions = [];
 
+                // Fill the row with conclusions for each day
                 for (const day of days) {
                     let dayConclusions = '';
 
+                    // find results for the current day
                     for (const result of jobSummary.results) {
-
                         if (result.date === day) {
                             if (dayConclusions !== '') {
                                 dayConclusions += ' ';
