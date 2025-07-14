@@ -1328,7 +1328,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 
 	publicKey := privateKeyBls.PublicKey()
 	if publicKey == nil {
-		return fmt.Errorf("failed to get public key from private key")
+		return errors.New("failed to get public key from private key")
 	}
 	// get the public key in compressed bytes format
 	publicKey48 := common.Bytes48(bls.CompressPublicKey(publicKey))
@@ -1336,7 +1336,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 	amountGwei := m.AmountEth * 1_000_000_000
 
 	var credentials common.Hash
-	credentials[0] = 0x1
+	credentials[0] = 0x2
 	copy(credentials[1:], make([]byte, 11))
 	copy(credentials[12:], withdrawalAddress[:])
 
@@ -1363,13 +1363,10 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 	domainDeposit := common.Hex2Bytes(m.DomainDeposit)
 
 	domain, err := fork.ComputeDomain(
-		domainDeposit[:],
+		domainDeposit,
 		utils.Uint32ToBytes4(uint32(genesisForkVersion)),
 		[32]byte{},
 	)
-	fmt.Println(uint32(genesisForkVersion))
-	fmt.Println(domainDeposit, m.DomainDeposit)
-	fmt.Println("Domain:", domain)
 
 	if err != nil {
 		return fmt.Errorf("failed to compute domain: %w", err)
