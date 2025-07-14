@@ -5,6 +5,7 @@ import * as github from '@actions/github';
 const acceptedWorkflows = [
     'QA - RPC Integration Tests',
     'QA - RPC Integration Tests (Polygon)',
+    'QA - RPC Integration Tests (Gnosis)',
     'QA - RPC Performance Tests',
     'QA - Snapshot Download',
     'QA - Sync from scratch',
@@ -16,6 +17,9 @@ const acceptedWorkflows = [
     'QA - Constrained Tip tracking',
     'QA - TxPool performance test',
     'QA - Clean exit (block downloading)',
+    'Kurtosis Assertoor GitHub Action',
+    'Hive EEST tests',
+    'Consensus spec',
 ];
 
 type SummaryRow = (string | { data: string; header?: true })[];
