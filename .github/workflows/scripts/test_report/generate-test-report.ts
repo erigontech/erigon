@@ -122,16 +122,17 @@ function cleanJobName(jobName: string): string {
 }
 
 // This script generates a summary of GitHub Actions workflow runs and jobs
-async function run() {
+export async function run() {
     try {
         // Input
         const token = process.env.GITHUB_TOKEN as string;  // The GitHub token for authentication
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
-        const branch= process.env.BRANCH_NAME ?? github.context.ref.replace(/^refs\/\w+\//, '');   // The branch name, defaults to the current branch
-        //const branch= 'main';   // For testing purposes
-        const { owner, repo } = github.context.repo;
-        //const {owner, repo} = {owner: 'erigontech', repo: 'erigon'};  // For testing purposes
+        // The branch name, defaults to the current branch or 'main' if not in GitHub Actions
+        const branch= process.env.BRANCH_NAME ?? (github.context.ref ? github.context.ref.replace(/^refs\/\w+\//, '') : 'main');
+        // Use github.context.repo if available, otherwise use default values
+        const repoArray = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/') : ['erigontech', 'erigon'];
+        const { owner, repo } = github.context.action ? github.context.repo : { owner: repoArray[0], repo: repoArray[1] };
 
         endDate.setUTCHours(23, 59, 59, 999);
 
@@ -308,6 +309,9 @@ async function run() {
     }
 }
 
-run();
+// If this script is run directly, execute the run function
+if (import.meta.url === `file://${process.argv[1]}`) {
+    run();
+}
 
 // see https://github.blog/news-insights/product-news/supercharging-github-actions-with-job-summaries/
