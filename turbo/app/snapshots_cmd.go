@@ -298,7 +298,7 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "sqeeze",
+			Name:   "squeeze",
 			Action: doSqueeze,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
