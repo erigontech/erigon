@@ -14,7 +14,7 @@ import (
 )
 
 type RecoveryQueue interface {
-	Add(r *recoveryRequest) error
+	Add(r *recoveryRequest) (bool, error)
 	Take() <-chan *recoveryRequest
 	Done(r *recoveryRequest) error
 }
@@ -85,33 +85,33 @@ func NewFileBasedQueue(fs afero.Fs) RecoveryQueue {
 	return q
 }
 
-func (q *fileBasedQueue) Add(r *recoveryRequest) error {
+func (q *fileBasedQueue) Add(r *recoveryRequest) (bool, error) {
 	dir, filepath := r.Filepath()
 	if err := q.fs.MkdirAll(dir, 0755); err != nil {
-		return err
+		return false, err
 	}
 	if _, err := q.fs.Stat(filepath); err == nil {
-		return nil
+		return false, nil
 	}
 	fh, err := q.fs.Create(filepath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	data, err := r.MarshalSSZ()
 	if err != nil {
 		fh.Close()
 		q.fs.Remove(filepath)
-		return err
+		return false, err
 	}
 	if _, err := fh.Write(data); err != nil {
 		fh.Close()
 		q.fs.Remove(filepath)
-		return err
+		return false, err
 	}
 	if err := fh.Sync(); err != nil {
 		fh.Close()
 		q.fs.Remove(filepath)
-		return err
+		return false, err
 	}
 	fh.Close()
 	// notify the take goroutine to take a new request
@@ -119,7 +119,7 @@ func (q *fileBasedQueue) Add(r *recoveryRequest) error {
 	case q.waitNewRequest <- struct{}{}:
 	default:
 	}
-	return nil
+	return true, nil
 }
 
 func (q *fileBasedQueue) take() (*recoveryRequest, error) {

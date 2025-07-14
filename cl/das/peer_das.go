@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -248,12 +249,13 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 
 		// Recover blobs from the matrix
 		blobSidecars := make([]*cltypes.BlobSidecar, 0, len(blobMatrix))
+		blobCommitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](int(d.beaconConfig.MaxBlobCommittmentsPerBlock), length.Bytes48)
 		for blobIndex, blobEntries := range blobMatrix {
 			var (
 				blob           cltypes.Blob
 				kzgCommitment  common.Bytes48
 				kzgProof       common.Bytes48
-				inclusionProof solid.HashVectorSSZ = solid.NewHashVector(cltypes.KzgCommitmentsInclusionProofDepth) // TODO
+				inclusionProof solid.HashVectorSSZ = solid.NewHashVector(cltypes.CommitmentBranchSize)
 			)
 			// blob
 			for i := range len(blobEntries) / 2 {
@@ -280,6 +282,19 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				anyColumnSidecar.SignedBlockHeader,
 				inclusionProof)
 			blobSidecars = append(blobSidecars, blobSidecar)
+			commitment := cltypes.KZGCommitment(kzgCommitment)
+			blobCommitments.Append(&commitment)
+		}
+		// proof = append(branchProof, inclusionProof...)
+		for i := range len(blobSidecars) {
+			branchProof := blobCommitments.ElementProof(i)
+			p := blobSidecars[i].CommitmentInclusionProof
+			for index := range branchProof {
+				p.Set(index, branchProof[index])
+			}
+			for index := range anyColumnSidecar.KzgCommitmentsInclusionProof.Length() {
+				p.Set(index+len(branchProof), anyColumnSidecar.KzgCommitmentsInclusionProof.Get(index))
+			}
 		}
 
 		// Save blobs
@@ -333,11 +348,16 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	}
 
 	// schedule
-	log.Debug("[blobsRecover] scheduling recover", "slot", slot, "blockRoot", blockRoot)
-	d.queue.Add(&recoveryRequest{
+	added, err := d.queue.Add(&recoveryRequest{
 		slot:      slot,
 		blockRoot: blockRoot,
 	})
+	if err != nil {
+		return err
+	}
+	if added {
+		log.Debug("[blobsRecover] scheduled recover", "slot", slot, "blockRoot", blockRoot)
+	}
 	return nil
 }
 
