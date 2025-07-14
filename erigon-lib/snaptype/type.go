@@ -148,7 +148,26 @@ var CaplinIndexes = struct {
 
 func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	dir := info.Dir()
-	fName := IdxFileName(info.Version, info.From, info.To, i.Name)
+	fNameMask := IdxFileMaskName(info.From, info.To, i.Name)
+	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, fNameMask))
+	if err != nil {
+		return false
+	}
+
+	if !ok {
+		_, fName := filepath.Split(fPath)
+		logger.Debug("[ind] HasFile: file does not exists", "f", fName)
+		return false
+	}
+
+	if !fileVer.Eq(i.Version.Current) {
+		if !fileVer.Less(i.Version.MinSupported) {
+			i.Version.Current = fileVer
+		} else {
+			panic("Version is too low, try to rm idx files")
+			//return false
+		}
+	}
 
 	segment, err := seg.NewDecompressor(info.Path)
 
@@ -158,7 +177,7 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 
 	defer segment.Close()
 
-	idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
+	idx, err := recsplit.OpenIndex(fPath)
 
 	if err != nil {
 		return false
@@ -289,6 +308,15 @@ func (s snapType) IdxFileNames(from uint64, to uint64) []string {
 	fileNames := make([]string, len(s.indexes))
 	for i, index := range s.indexes {
 		fileNames[i] = IdxFileName(index.Version.Current, from, to, index.Name)
+	}
+
+	return fileNames
+}
+
+func (s snapType) IdxFileMaskNames(from uint64, to uint64) []string {
+	fileNames := make([]string, len(s.indexes))
+	for i, index := range s.indexes {
+		fileNames[i] = IdxFileMaskName(from, to, index.Name)
 	}
 
 	return fileNames

@@ -39,11 +39,19 @@ func FileName(version Version, from, to uint64, fileType string) string {
 	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/1_000, to/1_000, fileType)
 }
 
+func FileMaskName(from, to uint64, fileType string) string {
+	return fmt.Sprintf("*-%06d-%06d-%s", from/1_000, to/1_000, fileType)
+}
+
 func SegmentFileName(version Version, from, to uint64, t Enum) string {
 	return FileName(version, from, to, t.String()) + ".seg"
 }
 func IdxFileName(version Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".idx"
+}
+
+func IdxFileMaskName(from, to uint64, fType string) string {
+	return FileMaskName(from, to, fType) + ".idx"
 }
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
