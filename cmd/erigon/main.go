@@ -17,6 +17,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"net/http"
 	"os"
@@ -68,13 +69,7 @@ func runErigon(cliCtx *cli.Context) error {
 		return err
 	}
 
-	debugMux := metricsMux
-
-	if debugMux == nil {
-		debugMux = pprofMux
-	} else {
-		debugMux = http.DefaultServeMux
-	}
+	debugMux := cmp.Or(metricsMux, pprofMux)
 
 	// initializing the node and providing the current git commit there
 
