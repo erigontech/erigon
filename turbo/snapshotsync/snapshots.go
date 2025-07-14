@@ -202,7 +202,8 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Confi
 		chainName = chainConfig.ChainName
 	}
 
-	mergeLimit := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, blockFrom)
+	snapCfg, _ := snapcfg.KnownCfg(chainName)
+	mergeLimit := snapcfg.MergeLimitFromCfg(snapCfg, snapType, blockFrom)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
@@ -1047,7 +1048,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
 
-	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
+	snConfig, _ := snapcfg.KnownCfg(s.cfg.ChainName)
 
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
