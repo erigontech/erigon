@@ -297,8 +297,12 @@ jobs:
               duplicated=$(jq -r ".tx_pool_throughput_analysis[$i].duplicated_p2p_event_count" "$output_json")
               omission=$(jq -r ".tx_pool_throughput_analysis[$i].coordinated_omission_events_count" "$output_json")
               
-              # Format TPS to 2 decimal places
-              mean_tps_formatted=$(printf "%.2f" "$mean_tps")
+              # Format TPS to 2 decimal places, handle null/invalid values
+              if [ "$mean_tps" != "null" ] && [ -n "$mean_tps" ] && [[ "$mean_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                mean_tps_formatted=$(printf "%.2f" "$mean_tps")
+              else
+                mean_tps_formatted="N/A"
+              fi
               
               echo "| $tx_count | $mean_tps_formatted | $missed | $duplicated | $omission |" >> $GITHUB_STEP_SUMMARY
             done
@@ -322,8 +326,12 @@ jobs:
               missed=$(jq -r ".tx_pool_latency_analysis[$i].missed_p2p_event_count" "$output_json")
               duplicated=$(jq -r ".tx_pool_latency_analysis[$i].duplicated_p2p_event_count" "$output_json")
               
-              # Convert max from microseconds to milliseconds
-              max_ms=$(echo "scale=2; $max_us / 1000" | bc -l)
+              # Convert max from microseconds to milliseconds, handle null/invalid values
+              if [ "$max_us" != "null" ] && [ -n "$max_us" ] && [[ "$max_us" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                max_ms=$(echo "scale=2; $max_us / 1000" | bc -l)
+              else
+                max_ms="N/A"
+              fi
               
               echo "| $tx_count | $min_us | $max_ms | $missed | $duplicated |" >> $GITHUB_STEP_SUMMARY
             done
