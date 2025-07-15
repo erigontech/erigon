@@ -629,7 +629,7 @@ func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version cl
 	b := &DenebSignedBeaconBlock{
 		SignedBlock: NewSignedBeaconBlock(beaconCfg, version),
 		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](cltypes.MaxBlobsCommittmentsPerBlock, BYTES_KZG_PROOF),
-		Blobs:       solid.NewStaticListSSZ[*Blob](cltypes.MaxBlobsPerBlock, int(BYTES_PER_BLOB)),
+		Blobs:       solid.NewStaticListSSZ[*Blob](cltypes.MaxBlobsCommittmentsPerBlock, int(BYTES_PER_BLOB)),
 	}
 	return b
 }
