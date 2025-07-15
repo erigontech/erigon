@@ -1374,12 +1374,10 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 
 // recentIterateRangeBySteps creates iterators for each step that contains data in the given txNum range
 func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) ([]stream.U64, error) {
-	// If roTx is nil, return empty result (only files will be used)
 	if roTx == nil {
 		return []stream.U64{}, nil
 	}
 
-	// Calculate step range
 	var fromStep, toStep uint64
 	if startTxNum >= 0 {
 		fromStep = uint64(startTxNum) / iit.aggStep
@@ -1397,7 +1395,6 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 
 	var iterators []stream.U64
 
-	// Create iterator for each step
 	if asc {
 		for step := fromStep; step <= toStep; step++ {
 			stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
