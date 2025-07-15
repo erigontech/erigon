@@ -32,11 +32,11 @@ var (
 )
 
 type columnDataPeers struct {
-	sentinel     sentinel.SentinelClient
-	beaconConfig *clparams.BeaconChainConfig
-	ethClock     eth_clock.EthereumClock
-	peerCache    *lru.CacheWithTTL[peerDataKey, *peerData]
-	beaconState  *state.CachingBeaconState
+	sentinel      sentinel.SentinelClient
+	beaconConfig  *clparams.BeaconChainConfig
+	ethClock      eth_clock.EthereumClock
+	peerMetaCache *lru.CacheWithTTL[peerDataKey, *peerData]
+	beaconState   *state.CachingBeaconState
 
 	peersMutex sync.RWMutex
 	peersQueue []peerData
@@ -50,13 +50,13 @@ func newColumnPeers(
 	beaconState *state.CachingBeaconState,
 ) *columnDataPeers {
 	s := &columnDataPeers{
-		sentinel:     sentinel,
-		beaconConfig: beaconConfig,
-		ethClock:     ethClock,
-		peerCache:    lru.NewWithTTL[peerDataKey, *peerData]("colum-peer-cache", 512, 5*time.Minute),
-		beaconState:  beaconState,
-		peersQueue:   []peerData{},
-		peersIndex:   0,
+		sentinel:      sentinel,
+		beaconConfig:  beaconConfig,
+		ethClock:      ethClock,
+		peerMetaCache: lru.NewWithTTL[peerDataKey, *peerData]("colum-peer-cache", 512, 5*time.Minute),
+		beaconState:   beaconState,
+		peersQueue:    []peerData{},
+		peersIndex:    0,
 	}
 	go s.refreshPeers(context.Background())
 	return s
@@ -91,7 +91,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		for _, peer := range peers.Peers {
 			pid := peer.Pid
 			peerKey := peerDataKey{pid: pid}
-			if data, ok := c.peerCache.Get(peerKey); ok {
+			if data, ok := c.peerMetaCache.Get(peerKey); ok {
 				newPeers = append(newPeers, *data)
 				continue
 			}
@@ -146,7 +146,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				continue
 			}
 			data := &peerData{pid: pid, mask: custodyIndices, earliestAvailableSlot: *status.EarliestAvailableSlot}
-			c.peerCache.Add(peerKey, data)
+			c.peerMetaCache.Add(peerKey, data)
 			newPeers = append(newPeers, *data)
 			log.Debug("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices), "earliestAvailableSlot", *status.EarliestAvailableSlot)
 		}
@@ -158,11 +158,11 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		c.peersQueue = newPeers
 		c.peersIndex = 0
 		c.peersMutex.Unlock()
-		cgcs := []uint64{}
+		custodies := []uint64{}
 		for _, peer := range newPeers {
-			cgcs = append(cgcs, uint64(len(peer.mask)))
+			custodies = append(custodies, uint64(len(peer.mask)))
 		}
-		log.Debug("[peerSelector] updated peers", "peerCount", len(newPeers), "cgcs", cgcs, "elapsedTime", time.Since(begin))
+		log.Debug("[peerSelector] updated peers", "peerCount", len(newPeers), "custodies", custodies, "elapsedTime", time.Since(begin))
 	}
 
 	// begin
@@ -202,8 +202,8 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, uint64, error) {
-	c.peersMutex.RLock()
-	defer c.peersMutex.RUnlock()
+	c.peersMutex.Lock()
+	defer c.peersMutex.Unlock()
 
 	for range len(c.peersQueue) {
 		c.peersIndex = (c.peersIndex + 1) % len(c.peersQueue)
