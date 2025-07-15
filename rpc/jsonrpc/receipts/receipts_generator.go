@@ -151,7 +151,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptFromDB, receipt *types.Receipt
-	var firstLogIndex uint32
+	var firstLogIndex, logIdxAfterTx uint32
 	var cumGasUsed uint64
 
 	defer func() {
@@ -161,6 +161,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				"txHash", txnHash.String(),
 				"blockNum", blockNum,
 				"firstLogIndex", firstLogIndex,
+				"logIdxAfterTx", logIdxAfterTx,
 				"nil receipt in db", receiptFromDB == nil)
 		}
 	}()
@@ -201,7 +202,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
-	cumGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+	cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +230,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 	}
 
+	firstLogIndex = logIdxAfterTx - uint32(len(receipt.Logs))
 	receipt.BlockHash = blockHash
 	receipt.CumulativeGasUsed = cumGasUsed
 	receipt.TransactionIndex = uint(index)
