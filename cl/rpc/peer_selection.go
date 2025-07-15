@@ -10,6 +10,7 @@ import (
 
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -58,8 +59,9 @@ type peerDataKey struct {
 }
 
 type peerData struct {
-	pid  string
-	mask map[uint64]bool
+	pid                   string
+	mask                  map[uint64]bool
+	earliestAvailableSlot uint64
 }
 
 func (c *columnDataPeers) refreshPeers(ctx context.Context) {
@@ -87,24 +89,23 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			}
 
 			// request metadata
-			topic := communication.MetadataProtocolV3
-			resp, err := c.sentinel.SendPeerRequest(ctx, &sentinel.RequestDataWithPeer{
-				Pid:   pid,
-				Data:  []byte{},
-				Topic: topic,
-			})
-			if err != nil {
-				log.Debug("[peerSelector] failed to request peer metadata", "peer", pid, "err", err)
-				continue
-			}
-			rawData := resp.GetData()
 			metadata := &cltypes.Metadata{}
-			if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(rawData), metadata, clparams.FuluVersion); err != nil {
-				log.Debug("[peerSelector] failed to decode peer metadata", "peer", pid, "err", err)
+			if err := c.simpleReuqest(ctx, pid, communication.MetadataProtocolV3, metadata); err != nil {
+				log.Debug("[peerSelector] failed to request peer metadata", "peer", pid, "err", err)
 				continue
 			}
 			if metadata.CustodyGroupCount == nil {
 				log.Debug("[peerSelector] empty cgc", "peer", pid)
+				continue
+			}
+			// request status
+			status := &cltypes.Status{}
+			if err := c.simpleReuqest(ctx, pid, communication.StatusProtocolV2, status); err != nil {
+				log.Debug("[peerSelector] failed to request peer status", "peer", pid, "err", err)
+				continue
+			}
+			if status.EarliestAvailableSlot == nil {
+				log.Debug("[peerSelector] empty earliest available slot", "peer", pid)
 				continue
 			}
 
@@ -115,7 +116,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
 				continue
 			}
-			data := &peerData{pid: pid, mask: custodyIndices}
+			data := &peerData{pid: pid, mask: custodyIndices, earliestAvailableSlot: *status.EarliestAvailableSlot}
 			c.peerCache.Add(peerKey, data)
 			newPeers = append(newPeers, *data)
 		}
@@ -148,6 +149,22 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 	}
 }
 
+func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic string, respContainer ssz.EncodableSSZ) error {
+	resp, err := c.sentinel.SendPeerRequest(ctx, &sentinel.RequestDataWithPeer{
+		Pid:   pid,
+		Data:  []byte{},
+		Topic: topic,
+	})
+	if err != nil {
+		return err
+	}
+	rawData := resp.GetData()
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(rawData), respContainer, clparams.FuluVersion); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (c *columnDataPeers) pickPeerRoundRobin(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
@@ -158,23 +175,32 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 	for range len(c.peersQueue) {
 		c.peersIndex = (c.peersIndex + 1) % len(c.peersQueue)
 		peer := c.peersQueue[c.peersIndex]
-		if len(peer.mask) == int(c.beaconConfig.NumberOfColumns) {
+		/*if len(peer.mask) == int(c.beaconConfig.NumberOfColumns) {
 			// full mask, no need to filter
 			return req, peer.pid, uint64(len(peer.mask)), nil
-		}
+		}*/
 		// matching
 		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](req.Len())
 		req.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, length int) bool {
-			identifier := cltypes.NewDataColumnsByRootIdentifier()
-			item.Columns.Range(func(_ int, column uint64, _ int) bool {
-				if peer.mask[column] {
-					identifier.Columns.Append(column)
-				}
+			if item.Slot < peer.earliestAvailableSlot {
+				log.Debug("skipping peer", "peer", peer.pid, "slot", item.Slot, "earliestAvailableSlot", peer.earliestAvailableSlot)
 				return true
-			})
-			if identifier.Columns.Length() > 0 {
-				identifier.BlockRoot = item.BlockRoot
-				newReq.Append(identifier)
+			}
+			if len(peer.mask) == int(c.beaconConfig.NumberOfColumns) {
+				// full mask, no need to filter
+				newReq.Append(item)
+			} else {
+				identifier := cltypes.NewDataColumnsByRootIdentifier()
+				item.Columns.Range(func(_ int, column uint64, _ int) bool {
+					if peer.mask[column] {
+						identifier.Columns.Append(column)
+					}
+					return true
+				})
+				if identifier.Columns.Length() > 0 {
+					identifier.BlockRoot = item.BlockRoot
+					newReq.Append(identifier)
+				}
 			}
 			return true
 		})

@@ -223,6 +223,8 @@ func (c *ColumnSidecarsByRangeRequest) Static() bool {
 type DataColumnsByRootIdentifier struct {
 	BlockRoot common.Hash
 	Columns   solid.Uint64ListSSZ
+
+	Slot uint64 // slot is helper for picking appropriate peer
 }
 
 func NewDataColumnsByRootIdentifier() *DataColumnsByRootIdentifier {
