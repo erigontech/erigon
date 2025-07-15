@@ -1261,12 +1261,17 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}()
 
+	lenBlobs := len(blobsSidecars)
+	if blk.Version() >= clparams.FuluVersion {
+		lenBlobs = len(columnsSidecars)
+	}
+
 	log.Info(
 		"BlockPublishing: publishing block and blobs",
 		"slot",
 		blk.Block.Slot,
 		"blobs",
-		len(blobsSidecars),
+		lenBlobs,
 	)
 	// Broadcast the block and its blobs
 	if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
