@@ -35,7 +35,7 @@ jobs:
         uses: erigontech/kurtosis-assertoor-github-action@v1.1.7
         with:
           enclave_name: ${{ env.ENCLAVE_NAME }}
-          ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
+          ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor-short.io"
           kurtosis_extra_args: --verbosity detailed --cli-log-level trace
           persistent_logs: "true"
           clean_docker: "true"
@@ -170,55 +170,55 @@ jobs:
           # Set an output to indicate we processed at least one element
           echo "processed=true" >> $GITHUB_OUTPUT
 
-      - name: Create throughput plots PNG artifacts
-        id: create_throughput_plots
-        if: always() && steps.parse_kurtosis_output.outputs.success == 'true'
-        run: |
-          # Check if the JSON file exists
-          output_json="${{ github.workspace }}/outputs_kurtosis.json"
-          if [ ! -f "$output_json" ]; then
-            echo "JSON file not found, skipping"
-            exit 0
-          fi
+      # - name: Create throughput plots PNG artifacts
+      #   id: create_throughput_plots
+      #   if: always() && steps.parse_kurtosis_output.outputs.success == 'true'
+      #   run: |
+      #     # Check if the JSON file exists
+      #     output_json="${{ github.workspace }}/outputs_kurtosis.json"
+      #     if [ ! -f "$output_json" ]; then
+      #       echo "JSON file not found, skipping"
+      #       exit 0
+      #     fi
 
-          # Check if tx_pool_throughput_analysis array exists in the JSON
-          if ! jq -e '.tx_pool_throughput_analysis' "$output_json" > /dev/null 2>&1; then
-            echo "tx_pool_throughput_analysis array not found in JSON, skipping"
-            exit 0
-          fi
+      #     # Check if tx_pool_throughput_analysis array exists in the JSON
+      #     if ! jq -e '.tx_pool_throughput_analysis' "$output_json" > /dev/null 2>&1; then
+      #       echo "tx_pool_throughput_analysis array not found in JSON, skipping"
+      #       exit 0
+      #     fi
 
-          # Get the array length
-          array_length=$(jq '.tx_pool_throughput_analysis | length' "$output_json")
+      #     # Get the array length
+      #     array_length=$(jq '.tx_pool_throughput_analysis | length' "$output_json")
 
-          # Loop through each element in the array
-          for ((i=0; i<array_length; i++)); do
-            # Get tx_count for this element
-            tx_count=$(jq -r ".tx_pool_throughput_analysis[$i].tx_count" "$output_json")
+      #     # Loop through each element in the array
+      #     for ((i=0; i<array_length; i++)); do
+      #       # Get tx_count for this element
+      #       tx_count=$(jq -r ".tx_pool_throughput_analysis[$i].tx_count" "$output_json")
             
-            # Check if throughput_measures exists for this element
-            if jq -e ".tx_pool_throughput_analysis[$i].throughput_measures" "$output_json" > /dev/null 2>&1; then
-              # Extract the throughput measures data to a CSV file
-              csv_file="tx_pool_throughput_analysis_${i}_${tx_count}.csv"
+      #       # Check if throughput_measures exists for this element
+      #       if jq -e ".tx_pool_throughput_analysis[$i].throughput_measures" "$output_json" > /dev/null 2>&1; then
+      #         # Extract the throughput measures data to a CSV file
+      #         csv_file="tx_pool_throughput_analysis_${i}_${tx_count}.csv"
               
-              # Extract the throughput_measures array and convert to CSV format
-              # Each measure contains load_tps and processed_tps
-              jq -r ".tx_pool_throughput_analysis[$i].throughput_measures[] | [.load_tps, .processed_tps] | @csv" "$output_json" > "$csv_file"
+      #         # Extract the throughput_measures array and convert to CSV format
+      #         # Each measure contains load_tps and processed_tps
+      #         jq -r ".tx_pool_throughput_analysis[$i].throughput_measures[] | [.load_tps, .processed_tps] | @csv" "$output_json" > "$csv_file"
               
-              # Call the Python script to process the CSV file
-              python3 $ERIGON_QA_PATH/test_system/qa-tests/tx-pool/throughput_plot.py \
-                --input_file "$csv_file" \
-                --output_file "tx_pool_throughput_analysis_${i}_${tx_count}.png"
+      #         # Call the Python script to process the CSV file
+      #         python3 $ERIGON_QA_PATH/test_system/qa-tests/tx-pool/throughput_plot.py \
+      #           --input_file "$csv_file" \
+      #           --output_file "tx_pool_throughput_analysis_${i}_${tx_count}.png"
               
-              # Delete the CSV file after processing
-              rm -f "$csv_file"
+      #         # Delete the CSV file after processing
+      #         rm -f "$csv_file"
               
-              echo "Processed tx_pool_throughput_analysis[$i] with tx_count=$tx_count"
-            else
-              echo "throughput_measures not found for element $i, skipping"
-            fi
-          done
-          # Set an output to indicate we processed at least one element
-          echo "processed=true" >> $GITHUB_OUTPUT
+      #         echo "Processed tx_pool_throughput_analysis[$i] with tx_count=$tx_count"
+      #       else
+      #         echo "throughput_measures not found for element $i, skipping"
+      #       fi
+      #     done
+      #     # Set an output to indicate we processed at least one element
+      #     echo "processed=true" >> $GITHUB_OUTPUT
 
       - name: Upload latency PNG images as artifacts
         if: always() && steps.create_hdr_plots.outputs.processed == 'true'
@@ -228,20 +228,20 @@ jobs:
           path: tx_pool_latency_analysis_*.png
           if-no-files-found: ignore
 
-      - name: Upload throughput PNG images as artifacts
-        if: always() && steps.create_throughput_plots.outputs.processed == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: tx-pool-throughput-plots
-          path: tx_pool_throughput_analysis_*.png
-          if-no-files-found: ignore
+      # - name: Upload throughput PNG images as artifacts
+      #   if: always() && steps.create_throughput_plots.outputs.processed == 'true'
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: tx-pool-throughput-plots
+      #     path: tx_pool_throughput_analysis_*.png
+      #     if-no-files-found: ignore
 
       - name: Clean up PNG files
         if: always() && (steps.create_hdr_plots.outputs.processed == 'true' || steps.create_throughput_plots.outputs.processed == 'true')
         run: |
           # Remove all generated PNG files
           rm -f tx_pool_latency_analysis_*.png
-          rm -f tx_pool_throughput_analysis_*.png
+          # rm -f tx_pool_throughput_analysis_*.png
 
       - name: Save test results
         if: always()
