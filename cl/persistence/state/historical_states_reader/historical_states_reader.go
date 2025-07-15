@@ -323,6 +323,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetPendingConsolidations(pendingConsolidations)
 	ret.SetPendingDeposits(pendingDeposits)
 	ret.SetPendingPartialWithdrawals(pendingWithdrawals)
+
+	if ret.Version() < clparams.FuluVersion {
+		return ret, nil
+	}
+
+	ret.SetProposerLookahead(epochData.ProposerLookahead)
 	return ret, nil
 }
 
