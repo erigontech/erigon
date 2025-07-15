@@ -127,7 +127,7 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, vmenv, cfg)
 }
 
-func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
+func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine consensus.EngineReader, author *common.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
 	// Create a new context to be used in the EVM environment
 
 	// Add addresses to access list if applicable
