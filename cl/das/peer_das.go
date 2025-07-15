@@ -459,6 +459,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 		cgc       uint64
 		reqLength int
 		err       error
+		elapsed   time.Duration
 	}
 	if len(req.remainingBlockRoots()) == 0 {
 		return nil
@@ -482,6 +483,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
+					begin := time.Now()
 					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
 					ids := req.requestData()
@@ -501,6 +503,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 						cgc:       cgc,
 						reqLength: reqLength,
 						err:       err,
+						elapsed:   time.Since(begin),
 					}:
 					default:
 						// just drop it if the channel is full
@@ -540,7 +543,7 @@ mainloop:
 			if len(result.sidecars) == 0 {
 				continue
 			}
-			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars), "cgc", result.cgc)
+			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars), "cgc", result.cgc, "elapsed", result.elapsed)
 			wg := sync.WaitGroup{}
 			for _, sidecar := range result.sidecars {
 				wg.Add(1)
