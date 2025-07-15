@@ -90,7 +90,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 
 			// request metadata
 			metadata := &cltypes.Metadata{}
-			if err := c.simpleReuqest(ctx, pid, communication.MetadataProtocolV3, metadata); err != nil {
+			if err := c.simpleReuqest(ctx, pid, communication.MetadataProtocolV3, metadata, []byte{}); err != nil {
 				log.Debug("[peerSelector] failed to request peer metadata", "peer", pid, "err", err)
 				continue
 			}
@@ -99,8 +99,21 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				continue
 			}
 			// request status
+			buf := new(bytes.Buffer)
+			forkDigest, err := c.ethClock.CurrentForkDigest()
+			if err != nil {
+				log.Debug("[peerSelector] failed to get fork digest", "peer", pid, "err", err)
+				continue
+			}
+			myStatus := &cltypes.Status{
+				ForkDigest: forkDigest,
+			}
+			if err := ssz_snappy.EncodeAndWrite(buf, myStatus); err != nil {
+				log.Debug("[peerSelector] failed to encode my status", "peer", pid, "err", err)
+				continue
+			}
 			status := &cltypes.Status{}
-			if err := c.simpleReuqest(ctx, pid, communication.StatusProtocolV2, status); err != nil {
+			if err := c.simpleReuqest(ctx, pid, communication.StatusProtocolV2, status, buf.Bytes()); err != nil {
 				log.Debug("[peerSelector] failed to request peer status", "peer", pid, "err", err)
 				continue
 			}
@@ -119,6 +132,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			data := &peerData{pid: pid, mask: custodyIndices, earliestAvailableSlot: *status.EarliestAvailableSlot}
 			c.peerCache.Add(peerKey, data)
 			newPeers = append(newPeers, *data)
+			log.Debug("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices), "earliestAvailableSlot", *status.EarliestAvailableSlot)
 		}
 		// sort by length of mask in descending order
 		sort.Slice(newPeers, func(i, j int) bool {
@@ -144,15 +158,18 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			run()
+			currentEpoch := c.ethClock.GetCurrentEpoch()
+			if currentEpoch >= c.beaconConfig.FuluForkEpoch {
+				run()
+			}
 		}
 	}
 }
 
-func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic string, respContainer ssz.EncodableSSZ) error {
+func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic string, respContainer ssz.EncodableSSZ, payload []byte) error {
 	resp, err := c.sentinel.SendPeerRequest(ctx, &sentinel.RequestDataWithPeer{
 		Pid:   pid,
-		Data:  []byte{},
+		Data:  payload,
 		Topic: topic,
 	})
 	if err != nil {
