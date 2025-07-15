@@ -308,28 +308,9 @@ var cmdPrintTableSizes = &cobra.Command{
 		}
 		defer db.Close()
 
-		allTablesCfg := db.AllTables()
-		allTables := make([]string, 0, len(allTablesCfg))
-		for table, cfg := range allTablesCfg {
-			if cfg.IsDeprecated {
-				continue
-			}
-
-			allTables = append(allTables, table)
-		}
-
-		var tableSizes []interface{}
-		err = db.View(cmd.Context(), func(tx kv.Tx) error {
-			tableSizes = stagedsync.CollectTableSizes(db, tx, allTables)
-			return nil
-		})
+		tableSizes, err := kv.CollectTableSizes(cmd.Context(), db)
 		if err != nil {
 			logger.Error("error while collecting table sizes", "err", err)
-			return
-		}
-
-		if len(tableSizes)%2 != 0 {
-			logger.Error("table sizes len not even", "len", len(tableSizes))
 			return
 		}
 
@@ -338,10 +319,10 @@ var cmdPrintTableSizes = &cobra.Command{
 		sb.WriteRune(',')
 		sb.WriteString("Size")
 		sb.WriteRune('\n')
-		for i := 0; i < len(tableSizes)/2; i++ {
-			sb.WriteString(tableSizes[i*2].(string))
+		for _, t := range tableSizes {
+			sb.WriteString(t.Name)
 			sb.WriteRune(',')
-			sb.WriteString(tableSizes[i*2+1].(string))
+			sb.WriteString(common.ByteCount(t.Size))
 			sb.WriteRune('\n')
 		}
 

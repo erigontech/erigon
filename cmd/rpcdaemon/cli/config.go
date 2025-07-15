@@ -401,17 +401,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, compatErr
 		}
 
-		if err := rawDB.View(context.Background(), func(tx kv.Tx) error {
-			genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
-			if err != nil {
-				return err
-			}
-			cc, err = core.ReadChainConfig(tx, genesisHash)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
+		cc, err = readChainConfigFromDB(context.Background(), rawDB)
+		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 		if cc == nil {
@@ -641,10 +632,15 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if !txPoolService.EnsureVersionCompatibility() {
 			rootCancel()
 		}
-		if remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
+		cc, err := readChainConfigFromDB(context.Background(), remoteKv)
+		if err != nil {
+			logger.Error("Failed to read remote chain config", "err", err)
 			rootCancel()
 		}
-		if remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
+		if cc.Bor != nil && remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
+			rootCancel()
+		}
+		if cc.Bor != nil && remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
 			rootCancel()
 		}
 		if remoteCE != nil {
@@ -658,6 +654,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	ff = rpchelper.New(ctx, cfg.RpcFiltersConfig, eth, txPool, mining, onNewSnapshot, logger)
 	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err
 }
+
 func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	if cfg.Enabled {
 		return startRegularRpcServer(ctx, cfg, rpcAPI, logger)
@@ -1019,19 +1016,8 @@ func (e *remoteConsensusEngine) validateEngineReady() error {
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
 func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) error {
-	var cc *chain.Config
-
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return err
-		}
-		cc, err = core.ReadChainConfig(tx, genesisHash)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+	cc, err := readChainConfigFromDB(context.Background(), db)
+	if err != nil {
 		return err
 	}
 
@@ -1176,4 +1162,25 @@ func (e *remoteConsensusEngine) APIs(_ consensus.ChainHeaderReader) []rpc.API {
 
 func (e *remoteConsensusEngine) TxDependencies(header *types.Header) [][]int {
 	panic("remoteConsensusEngine.TxDependencies not supported")
+}
+
+func readChainConfigFromDB(ctx context.Context, db kv.RoDB) (*chain.Config, error) {
+	var cc *chain.Config
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		cc, err = core.ReadChainConfig(tx, genesisHash)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if cc == nil {
+		return nil, errors.New("chain config not found in db")
+	}
+	return cc, nil
 }

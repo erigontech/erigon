@@ -129,7 +129,8 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 	if chainConfig != nil {
 		chainName = chainConfig.ChainName
 	}
-	blocksPerFile := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, from)
+	snapCfg, _ := snapcfg.KnownCfg(chainName)
+	blocksPerFile := snapcfg.MergeLimitFromCfg(snapCfg, snapType, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = min(next, to)

@@ -357,7 +357,7 @@ func SyncSnapshots(
 	// - After "download once" - Erigon will produce and seed new files
 
 	// send all hashes to the Downloader service
-	snapCfg := snapcfg.KnownCfg(cc.ChainName)
+	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
 

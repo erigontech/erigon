@@ -456,7 +456,8 @@ func (s *torrentSession) Label() string {
 
 func NewTorrentSession(cli *TorrentClient, chain string) *torrentSession {
 	session := &torrentSession{cli, map[string]snapcfg.PreverifiedItem{}}
-	for _, it := range snapcfg.KnownCfg(chain).Preverified.Items {
+	snapCfg, _ := snapcfg.KnownCfg(chain)
+	for _, it := range snapCfg.Preverified.Items {
 		session.items[it.Name] = it
 	}
 

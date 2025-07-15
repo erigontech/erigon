@@ -578,6 +578,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
 	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
+	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, kv.ChainDB, logger)
 
 	var currentBlock *types.Block
 	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
@@ -1555,7 +1556,8 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 
-	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3
+	_, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
+	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg
 	salt, err := libstate.GetStateIndicesSalt(dirs, createNewSaltFileIfNeeded, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err

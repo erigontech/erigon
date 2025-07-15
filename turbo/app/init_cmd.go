@@ -90,12 +90,6 @@ func initGenesis(cliCtx *cli.Context) error {
 		utils.Fatalf("Failed to open database: %v", err)
 	}
 
-	// need to call this to initialise the state-salt if not present
-	_, err = state.GetStateIndicesSalt(stack.Config().Dirs, true, logger)
-	if err != nil {
-		utils.Fatalf("Failed to get state indices salt: %v", err)
-	}
-
 	if tracer != nil {
 		if tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
 			tracer.Hooks.OnBlockchainInit(genesis.Config)
