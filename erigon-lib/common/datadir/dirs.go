@@ -57,6 +57,31 @@ type Dirs struct {
 }
 
 func New(datadir string) Dirs {
+	dirs := Open(datadir)
+
+	dir.MustExist(
+		dirs.Chaindata,
+		dirs.Tmp,
+		dirs.SnapIdx,
+		dirs.SnapHistory,
+		dirs.SnapDomain,
+		dirs.SnapAccessors,
+		dirs.SnapCaplin,
+		dirs.Downloader,
+		dirs.TxPool,
+		dirs.Nodes,
+		dirs.CaplinBlobs,
+		dirs.CaplinIndexing,
+		dirs.CaplinLatest,
+		dirs.CaplinGenesis,
+		dirs.CaplinColumnData,
+	)
+
+	return dirs
+}
+
+// Create new Dirs instance without forcing all the directories to exist.
+func Open(datadir string) Dirs {
 	relativeDataDir := datadir
 	if datadir != "" {
 		var err error
@@ -87,25 +112,6 @@ func New(datadir string) Dirs {
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 	}
-
-	dir.MustExist(
-		dirs.Chaindata,
-		dirs.Tmp,
-		dirs.SnapIdx,
-		dirs.SnapHistory,
-		dirs.SnapDomain,
-		dirs.SnapAccessors,
-		dirs.SnapCaplin,
-		dirs.Downloader,
-		dirs.TxPool,
-		dirs.Nodes,
-		dirs.CaplinBlobs,
-		dirs.CaplinIndexing,
-		dirs.CaplinLatest,
-		dirs.CaplinGenesis,
-		dirs.CaplinColumnData,
-	)
-
 	return dirs
 }
 
