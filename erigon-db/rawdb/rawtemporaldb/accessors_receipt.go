@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon/erigon-lib/kv"
-	"github.com/erigontech/erigon/erigon-lib/types"
 )
 
 var (

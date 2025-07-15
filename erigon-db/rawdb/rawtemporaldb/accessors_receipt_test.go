@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/state"
-	"github.com/erigontech/erigon/erigon-lib/types"
 )
 
 func TestAppendReceipt(t *testing.T) {

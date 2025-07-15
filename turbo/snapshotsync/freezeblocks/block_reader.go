@@ -23,7 +23,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	coresnaptype "github.com/erigontech/erigon/erigon-db/snaptype"
