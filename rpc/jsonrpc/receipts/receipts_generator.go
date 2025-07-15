@@ -219,18 +219,12 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 
-		//evm := core.CreateEVM(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vm.Config{})
-		//ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
-		//defer cancel()
-		//go func() {
-		//	<-ctx.Done()
-		//	evm.Cancel()
-		//}()
-		//
-		//receipt, _, err = core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{}, evm)
-		//if err != nil {
-		//	return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
-		//}
+		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
+		defer cancel()
+		go func() {
+			<-ctx.Done()
+			evm.Cancel()
+		}()
 
 		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, genEnv.gp, evm, header, genEnv.ibs)
 		if err != nil {
