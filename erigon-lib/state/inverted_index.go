@@ -749,11 +749,19 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 	if err != nil {
 		return nil, err
 	}
-	recentIt, err := iit.recentIterateRange(key, startTxNum, endTxNum, asc, limit, roTx)
+
+	// Get iterators for each relevant step (step-prefixed keys)
+	recentIterators, err := iit.recentIterateRangeBySteps(key, startTxNum, endTxNum, asc, limit, roTx)
 	if err != nil {
 		return nil, err
 	}
-	return stream.Union[uint64](frozenIt, recentIt, asc, limit), nil
+
+	// Union frozen iterator with all recent step iterators
+	var result stream.U64 = frozenIt
+	for _, recentIt := range recentIterators {
+		result = stream.Union[uint64](result, recentIt, asc, limit)
+	}
+	return result, nil
 }
 
 func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
@@ -1362,6 +1370,78 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	fi.index = sf.index
 	fi.existence = sf.existence
 	ii.dirtyFiles.Set(fi)
+}
+
+// recentIterateRangeBySteps creates iterators for each step that contains data in the given txNum range
+func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) ([]stream.U64, error) {
+	// If roTx is nil, return empty result (only files will be used)
+	if roTx == nil {
+		return []stream.U64{}, nil
+	}
+
+	// Calculate step range
+	var fromStep, toStep uint64
+	if startTxNum >= 0 {
+		fromStep = uint64(startTxNum) / iit.aggStep
+	} else {
+		// startTxNum is -1 (unbounded), start from step 0
+		fromStep = 0
+	}
+	if endTxNum >= 0 {
+		toStep = uint64(endTxNum) / iit.aggStep
+	} else {
+		// endTxNum is -1 (unbounded), find max step in DB
+		_, maxStepFloat := iit.stepsRangeInDB(roTx)
+		toStep = uint64(maxStepFloat) + 1
+	}
+
+	var iterators []stream.U64
+
+	// Create iterator for each step
+	if asc {
+		for step := fromStep; step <= toStep; step++ {
+			stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
+			if err != nil {
+				return nil, err
+			}
+			if stepIt != nil {
+				iterators = append(iterators, stepIt)
+			}
+		}
+	} else {
+		// For descending order, iterate from max step to min step
+		maxStep := toStep
+		minStep := fromStep
+		if fromStep > toStep {
+			maxStep = fromStep
+			minStep = toStep
+		}
+		for step := maxStep; step >= minStep; step-- {
+			stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
+			if err != nil {
+				return nil, err
+			}
+			if stepIt != nil {
+				iterators = append(iterators, stepIt)
+			}
+			// Prevent underflow when step is 0
+			if step == 0 {
+				break
+			}
+		}
+	}
+
+	return iterators, nil
+}
+
+// recentIterateRangeForStep creates an iterator for a specific step
+func (iit *InvertedIndexRoTx) recentIterateRangeForStep(key []byte, step uint64, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
+	invertedStep := ^step
+	stepKey := make([]byte, 8+len(key))
+	binary.BigEndian.PutUint64(stepKey[:8], invertedStep)
+	copy(stepKey[8:], key)
+
+	return iit.recentIterateRange(stepKey, startTxNum, endTxNum, asc, limit, roTx)
 }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
