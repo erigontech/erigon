@@ -171,7 +171,6 @@ func InitMiner(
 		RPCTxFeeCap:     1, // 1 ether
 		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
 		StateStream:     true,
-		PolygonSync:     true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.TxPool.CommitEvery = 15 * time.Second
