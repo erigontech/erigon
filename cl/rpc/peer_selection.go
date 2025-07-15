@@ -107,7 +107,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				continue
 			}
 			// request status
-			buf := new(bytes.Buffer)
+			/*buf := new(bytes.Buffer)
 			forkDigest, err := c.ethClock.CurrentForkDigest()
 			if err != nil {
 				log.Debug("[peerSelector] failed to get fork digest", "peer", pid, "err", err)
@@ -133,7 +133,10 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			if status.EarliestAvailableSlot == nil {
 				log.Debug("[peerSelector] empty earliest available slot", "peer", pid)
 				continue
-			}
+			}*/
+			status := &cltypes.Status{
+				EarliestAvailableSlot: new(uint64),
+			} // TODO: peer is not reliable for now
 
 			// get custody indices
 			enodeId := enode.HexID(peer.EnodeId)
