@@ -1,7 +1,7 @@
 participants_matrix:
   el:
     - el_type: erigon
-      el_image: test/erigon:current
+      el_image: test/erigon:blahblah3
   cl:
     - cl_type: lighthouse
       cl_image: sigp/lighthouse:v7.0.1
