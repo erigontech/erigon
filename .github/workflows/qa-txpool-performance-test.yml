@@ -114,6 +114,7 @@ jobs:
 
       - name: Upload outputs_kurtosis.json as artifact
         if: always() && steps.parse_kurtosis_output.outputs.success == 'true'
+        id: upload_outputs_kurtosis_json
         uses: actions/upload-artifact@v4
         with:
           name: outputs_kurtosis.json
@@ -222,6 +223,7 @@ jobs:
 
       - name: Upload latency PNG images as artifacts
         if: always() && steps.create_hdr_plots.outputs.processed == 'true'
+        id: upload_latency_plots
         uses: actions/upload-artifact@v4
         with:
           name: tx-pool-latency-plots
@@ -230,6 +232,7 @@ jobs:
 
       - name: Upload throughput PNG images as artifacts
         if: always() && steps.create_throughput_plots.outputs.processed == 'true'
+        id: upload_throughput_plots
         uses: actions/upload-artifact@v4
         with:
           name: tx-pool-throughput-plots
@@ -337,9 +340,21 @@ jobs:
 
           # Add artifact links
           echo "## 📈 Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- [Raw JSON Results](../actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
-          echo "- [Latency Distribution Plots](../actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
-          echo "- [Throughput Analysis Plots](../actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
+
+          # Add link to raw JSON results if available
+          if [ -f "$output_json" ]; then
+            echo "- [Raw JSON Results](${{ steps.upload_outputs_kurtosis_json.outputs.artifact-url }})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Add link to latency plots if they were generated
+          if [ "${{ steps.create_hdr_plots.outputs.processed }}" = "true" ]; then
+            echo "- [Latency Distribution Plots](${{ steps.upload_latency_plots.outputs.artifact-url }})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Add link to throughput plots if they were generated
+          if [ "${{ steps.create_throughput_plots.outputs.processed }}" = "true" ]; then
+            echo "- [Throughput Analysis Plots](${{ steps.upload_throughput_plots.outputs.artifact-url }})" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Clean test results
         uses: gacts/run-and-post-run@v1.4.2
