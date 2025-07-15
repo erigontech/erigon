@@ -1147,31 +1147,40 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		defer valsC.Close()
 	}
 
-	var pruned int
-	pruneValue := func(k, txnm []byte) error {
-		txNum := binary.BigEndian.Uint64(txnm)
-		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
-			return fmt.Errorf("history pruneValue: txNum %d not in pruning range [%d,%d)", txNum, txFrom, txTo)
-		}
+	var txFromBytes [8]byte
 
+	var pruned int
+	pruneValue := func(key []byte, minTxNum, maxTxNum uint64) error {
+		binary.BigEndian.PutUint64(txFromBytes[:], minTxNum)
 		if ht.h.historyLargeValues {
-			seek = append(bytes.Clone(k), txnm...)
-			if err := valsC.Delete(seek); err != nil {
-				return err
+			seek = append(bytes.Clone(key), txFromBytes[:]...)
+			for k, _, err := valsC.Seek(seek); k != nil; k, _, err = valsC.Next() {
+				if err != nil {
+					return fmt.Errorf("iterate over %s values cursor: %w", ht.iit.ii.filenameBase, err)
+				}
+				txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+				if txNum > maxTxNum {
+					break
+				}
+				if !bytes.HasPrefix(k, key) {
+					break
+				}
+				if err := valsC.DeleteCurrent(); err != nil {
+					return err
+				}
 			}
 		} else {
-			vv, err := valsCDup.SeekBothRange(k, txnm)
-			if err != nil {
-				return err
-			}
-			if len(vv) < 8 {
-				return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.filenameBase, len(vv))
-			}
-			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
-				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.filenameBase, vtx, txNum)
-			}
-			if err = valsCDup.DeleteCurrent(); err != nil {
-				return err
+			for v, err := valsCDup.SeekBothRange(key, txFromBytes[:]); v != nil; _, v, err = valsCDup.NextDup() {
+				if err != nil {
+					return fmt.Errorf("iterate over %s values cursor: %w", ht.iit.ii.filenameBase, err)
+				}
+				txNum := binary.BigEndian.Uint64(v)
+				if txNum > maxTxNum {
+					break
+				}
+				if err := valsCDup.DeleteCurrent(); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -1183,8 +1192,12 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	if !forced && ht.h.snapshotsDisabled {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
-
-	return ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
+	st, err := ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
+	if err != nil {
+		return nil, err
+	}
+	st.PruneCountValues = uint64(pruned)
+	return st, err
 }
 
 func (ht *HistoryRoTx) Close() {
