@@ -193,13 +193,10 @@ jobs:
 
           # Loop through each element in the array
           for ((i=0; i<array_length; i++)); do
-            # Get tx_count for this element
-            tx_count=$(jq -r ".tx_pool_throughput_analysis[$i].tx_count" "$output_json")
-
             # Check if throughput_measures exists for this element
             if jq -e ".tx_pool_throughput_analysis[$i].throughput_measures" "$output_json" > /dev/null 2>&1; then
               # Extract the throughput measures data to a CSV file
-              csv_file="tx_pool_throughput_analysis_${i}_${tx_count}.csv"
+              csv_file="tx_pool_throughput_analysis_${i}.csv"
 
               # Extract the throughput_measures array and convert to CSV format
               # Each measure contains load_tps and processed_tps
@@ -208,12 +205,12 @@ jobs:
               # Call the Python script to process the CSV file
               python3 $ERIGON_QA_PATH/test_system/qa-tests/tx-pool/throughput_plot.py \
                 --input_file "$csv_file" \
-                --output_file "tx_pool_throughput_analysis_${i}_${tx_count}.png"
+                --output_file "tx_pool_throughput_analysis_${i}.png"
 
               # Delete the CSV file after processing
               rm -f "$csv_file"
 
-              echo "Processed tx_pool_throughput_analysis[$i] with tx_count=$tx_count"
+              echo "Processed tx_pool_throughput_analysis[$i]"
             else
               echo "throughput_measures not found for element $i, skipping"
             fi
