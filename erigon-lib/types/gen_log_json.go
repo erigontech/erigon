@@ -62,9 +62,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	}
 	l.Address = *dec.Address
 	if dec.Topics == nil {
-		panic(fmt.Sprintf("missing required field 'topics' for Log: %s %s", dec.TxHash.String(), dbg.Stack()))
-		//log.Info("stack is", "stack", dbg.Stack())
-		return errors.New("missing required field 'topics' for Log")
+		return errors.New(fmt.Sprintf("missing required field 'topics' for Log %s", dbg.Stack()))
 	}
 	l.Topics = dec.Topics
 	if dec.Data == nil {
