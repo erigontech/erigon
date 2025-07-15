@@ -1247,7 +1247,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			for j := 0; j < len(bundle.KzgProofs); j++ {
 				cellsAndProof.Proofs = append(cellsAndProof.Proofs, cltypes.KZGProof(bundle.KzgProofs[j]))
 			}
-			cellsAndProofsPerBlob = append(cellsAndProofsPerBlob)
+			cellsAndProofsPerBlob = append(cellsAndProofsPerBlob, cellsAndProof)
 		}
 		columnsSidecars, err = peerdasutils.GetDataColumnSidecars(header, kzgCommitmentsCopy, commitmentInclusionProof, cellsAndProofsPerBlob)
 		if err != nil {
