@@ -632,18 +632,6 @@ func (sdb *IntraBlockState) ReadVersion(addr common.Address, path AccountPath, k
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
-	if sdb.trace || traceAccount(addr) {
-		prev0, _ := sdb.GetBalance(addr)
-
-		defer func() {
-			bal, _ := sdb.GetBalance(addr)
-			expected := (&uint256.Int{}).Add(&prev0, &amount)
-			if bal.Cmp(expected) != 0 {
-				panic(fmt.Sprintf("add failed: expected: %d got: %d", expected, &bal))
-			}
-			fmt.Printf("%d (%d.%d) AddBalance %x, %d+%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev0, &amount, &bal)
-		}()
-	}
 
 	if sdb.versionMap == nil {
 		// If this account has not been read, add to the balance increment map
@@ -688,14 +676,12 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		return err
 	}
 
-	prev := stateObject.Balance()
-
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
 		if stateObject.empty() {
 			if sdb.versionMap != nil {
-				sdb.versionWritten(addr, BalancePath, common.Hash{}, prev)
+				sdb.versionWritten(addr, BalancePath, common.Hash{}, *common.Num0)
 			}
 			if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
 				fmt.Printf("%d (%d.%d) Touch %x %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, AccountKey{Path: BalancePath})
@@ -704,6 +690,19 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		}
 
 		return nil
+	}
+
+	prev, _ := sdb.GetBalance(addr)
+
+	if sdb.trace || traceAccount(addr) {
+		defer func() {
+			bal, _ := sdb.GetBalance(addr)
+			expected := (&uint256.Int{}).Add(&prev, &amount)
+			if bal.Cmp(expected) != 0 {
+				panic(fmt.Sprintf("add failed: expected: %d got: %d", expected, &bal))
+			}
+			fmt.Printf("%d (%d.%d) AddBalance %x, %d+%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, &amount, &bal)
+		}()
 	}
 
 	update := new(uint256.Int).Add(&prev, &amount)
@@ -717,24 +716,23 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
+	if amount.IsZero() {
+		return nil
+	}
+
+	prev, _ := sdb.GetBalance(addr)
+
 	if sdb.trace || traceAccount(addr) {
-		prev, _ := sdb.GetBalance(addr)
 		defer func() {
 			bal, _ := sdb.GetBalance(addr)
 			fmt.Printf("%d (%d.%d) SubBalance %x, %d-%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, &amount, &bal)
 		}()
 	}
 
-	if amount.IsZero() {
-		return nil
-	}
-
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
 	}
-
-	prev := stateObject.Balance()
 	update := new(uint256.Int).Sub(&prev, &amount)
 	stateObject.SetBalance(*update, reason)
 	if sdb.versionMap != nil {
@@ -831,6 +829,10 @@ func (sdb *IntraBlockState) TraceAccount(addr common.Address) bool {
 
 func (sdb *IntraBlockState) Trace() bool {
 	return sdb.trace
+}
+
+func (sdb *IntraBlockState) BlockNumber() uint64 {
+	return sdb.blockNum
 }
 
 func (sdb *IntraBlockState) TxIndex() int {

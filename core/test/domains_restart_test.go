@@ -494,7 +494,7 @@ func TestCommit(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	domains.SetTrace(false)
+	domains.SetTrace(false,false)
 	domainsHash, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 	require.NoError(t, err)
 	err = domains.Flush(ctx, tx)

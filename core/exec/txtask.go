@@ -107,8 +107,6 @@ type TxResult struct {
 
 	TraceFroms map[common.Address]struct{}
 	TraceTos   map[common.Address]struct{}
-
-	ShouldRerunWithoutFeeDelay bool
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -524,18 +522,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 				if applyRes == nil {
 					return nil, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
-				}
-
-				reads := ibs.VersionedReads()
-
-				if _, ok := reads[applyRes.BurntContractAddress][state.AccountKey{Path: state.BalancePath}]; ok {
-					log.Debug("Coinbase is in versiopnedMap", "address", evm.Context.Coinbase)
-					result.ShouldRerunWithoutFeeDelay = true
-				}
-
-				if _, ok := reads[evm.Context.Coinbase][state.AccountKey{Path: state.BalancePath}]; ok {
-					log.Debug("BurntContractAddress is in versiopnedMap", "address", applyRes.BurntContractAddress)
-					result.ShouldRerunWithoutFeeDelay = true
 				}
 
 				return applyRes, err

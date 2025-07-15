@@ -1771,7 +1771,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) error {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount uint256.Int, bailout bool) error {
 	// get inputs before
 	input1, err := db.GetBalance(sender)
 	if err != nil {
@@ -1782,17 +1782,8 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 		return err
 	}
 
-	if !bailout {
-		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
-		if err != nil {
-			return err
-		}
-	}
-	err = db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
-	if err != nil {
-		return err
-	}
-	// get outputs after
+	consensus.Transfer(db, sender, recipient, amount, bailout)
+
 	output1, err := db.GetBalance(sender)
 	if err != nil {
 		return err
@@ -1802,7 +1793,7 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 		return err
 	}
 	// add transfer log into state
-	addTransferLog(db, transferLogSig, sender, recipient, amount, &input1, &input2, &output1, &output2)
+	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
 	return nil
 }
 
@@ -1813,18 +1804,18 @@ func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 // AddFeeTransferLog adds fee transfer log into state
 // Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender common.Address, coinbase common.Address, result *evmtypes.ExecutionResult) {
-	output1 := result.SenderInitBalance.Clone()
-	output2 := result.CoinbaseInitBalance.Clone()
+	output1 := result.SenderInitBalance
+	output2 := result.CoinbaseInitBalance
 	addTransferLog(
 		ibs,
 		transferFeeLogSig,
 		sender,
 		coinbase,
-		&result.FeeTipped,
-		&result.SenderInitBalance,
-		&result.CoinbaseInitBalance,
-		output1.Sub(output1, &result.FeeTipped),
-		output2.Add(output2, &result.FeeTipped),
+		result.FeeTipped,
+		result.SenderInitBalance,
+		result.CoinbaseInitBalance,
+		*output1.Sub(&output1, &result.FeeTipped),
+		*output2.Add(&output2, &result.FeeTipped),
 	)
 
 }

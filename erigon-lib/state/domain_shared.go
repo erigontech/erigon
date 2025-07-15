@@ -72,10 +72,11 @@ type SharedDomains struct {
 
 	logger log.Logger
 
-	txNum    uint64
-	blockNum atomic.Uint64
-	estSize  int
-	trace    bool //nolint
+	txNum             uint64
+	blockNum          atomic.Uint64
+	estSize           int
+	trace             bool //nolint
+	commitmentCapture bool
 	//walLock sync.RWMutex
 
 	muMaps  sync.RWMutex
@@ -384,8 +385,10 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) SetTrace(b bool) {
+func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
+	sd.commitmentCapture = capture
+	return sd.sdCtx.patriciaTrie.GetCapture(true)
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {

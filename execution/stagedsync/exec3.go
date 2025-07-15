@@ -29,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -817,13 +816,13 @@ func ExecV3(ctx context.Context,
 					return nil
 				}
 
-				if shouldGenerateChangesets {
+				if !dbg.BatchCommitments || shouldGenerateChangesets {
 					start := time.Now()
 					if traceBlock(blockNum) {
-						se.doms.SetTrace(true)
+						se.doms.SetTrace(true, false)
 					}
 					rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
-					se.doms.SetTrace(false)
+					se.doms.SetTrace(false, false)
 					if err != nil {
 						return err
 					}
@@ -1033,20 +1032,15 @@ func ExecV3(ctx context.Context,
 						flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
 
 						if !dbg.DiscardCommitment() {
-							if shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
+							if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 								var trace bool
 								if traceBlock(applyResult.BlockNum) {
 									trace = true
 								}
-								pe.doms.SetTrace(trace)
-								if !dbg.BatchCommitments {
-									commitment.Captured = []string{}
-								}
+								pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 								rh, err := pe.doms.ComputeCommitment(ctx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix)
-								pe.doms.SetTrace(false)
-								captured := commitment.Captured
-								commitment.Captured = nil
+								captured := pe.doms.SetTrace(false, false)
 								if err != nil {
 									return err
 								}

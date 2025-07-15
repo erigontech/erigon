@@ -154,6 +154,22 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 		p.mounts[i].SetTraceDomain(b)
 	}
 }
+func (p *ConcurrentPatriciaHashed) GetCapture(clear bool) []string {
+	capture := p.root.GetCapture(clear)
+	if clear {
+		for i := range p.mounts {
+			p.mounts[i].SetCapture(nil)
+		}
+	}
+	return capture
+}
+
+func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
+	p.root.SetCapture(capture)
+	for i := range p.mounts {
+		p.mounts[i].SetCapture(capture)
+	}
+}
 
 // pass -1 to enable trace just for root trie
 func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {

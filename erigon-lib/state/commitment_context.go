@@ -128,6 +128,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	// data accessing functions should be set when domain is opened/shared context updated
 	sdc.patriciaTrie.SetTrace(sdc.trace)
+	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.trace)
+	if sdc.sharedDomains.commitmentCapture {
+		if sdc.patriciaTrie.GetCapture(false)==nil {
+			sdc.patriciaTrie.SetCapture([]string{})
+		}
+	}
+
 	sdc.Reset()
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
