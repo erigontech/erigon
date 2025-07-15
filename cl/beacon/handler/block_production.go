@@ -1208,7 +1208,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	}
 
 	if blk.Version() >= clparams.FuluVersion && blk.Block.Body.BlobKzgCommitments.Len() > 0 {
-		kzgCommitmentsCopy := solid.NewStaticListSSZ[*cltypes.KZGCommitment](int(a.beaconChainCfg.MaxBlobsPerBlock), length.Bytes48)
+		kzgCommitmentsCopy := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, length.Bytes48)
 		for i := 0; i < blk.Block.Body.BlobKzgCommitments.Len(); i++ {
 			kzgCommitmentsCopy.Append(blk.Block.Body.BlobKzgCommitments.Get(i))
 		}
