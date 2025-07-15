@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -31,6 +32,7 @@ type columnDataPeers struct {
 	beaconConfig *clparams.BeaconChainConfig
 	ethClock     eth_clock.EthereumClock
 	peerCache    *lru.CacheWithTTL[peerDataKey, *peerData]
+	beaconState  *state.CachingBeaconState
 
 	peersMutex sync.RWMutex
 	peersQueue []peerData
@@ -41,12 +43,14 @@ func newColumnPeers(
 	sentinel sentinel.SentinelClient,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
+	beaconState *state.CachingBeaconState,
 ) *columnDataPeers {
 	s := &columnDataPeers{
 		sentinel:     sentinel,
 		beaconConfig: beaconConfig,
 		ethClock:     ethClock,
 		peerCache:    lru.NewWithTTL[peerDataKey, *peerData]("colum-peer-cache", 512, 5*time.Minute),
+		beaconState:  beaconState,
 		peersQueue:   []peerData{},
 		peersIndex:   0,
 	}
@@ -106,7 +110,12 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				continue
 			}
 			myStatus := &cltypes.Status{
-				ForkDigest: forkDigest,
+				ForkDigest:            forkDigest,
+				FinalizedRoot:         c.beaconState.FinalizedCheckpoint().Root,
+				FinalizedEpoch:        c.beaconState.FinalizedCheckpoint().Epoch,
+				HeadRoot:              c.beaconState.FinalizedCheckpoint().Root,
+				HeadSlot:              c.beaconState.FinalizedCheckpoint().Epoch * c.beaconConfig.SlotsPerEpoch,
+				EarliestAvailableSlot: new(uint64),
 			}
 			if err := ssz_snappy.EncodeAndWrite(buf, myStatus); err != nil {
 				log.Debug("[peerSelector] failed to encode my status", "peer", pid, "err", err)
