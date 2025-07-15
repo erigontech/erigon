@@ -626,14 +626,18 @@ func (pc *peersContext) nextAvailablePeer() (p2p.PeerId, error) {
 }
 
 func (pc *peersContext) nextAvailablePeers(n int) ([]p2p.PeerId, error) {
-	peers := make([]p2p.PeerId, 0, len(pc.exhaustedPeers))
-	for iteration := 0; iteration < len(pc.exhaustedPeers) && n > 0; iteration++ {
+	peers := make([]p2p.PeerId, 0, n)
+	unique := make(map[p2p.PeerId]struct{}, n)
+	for len(peers) < n {
 		pid, err := pc.nextAvailablePeer()
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := unique[pid]; ok {
+			break // we've done a full rotation across all available peers
+		}
+		unique[pid] = struct{}{}
 		peers = append(peers, pid)
-		n--
 	}
 	return peers, nil
 }
