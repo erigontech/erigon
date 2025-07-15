@@ -342,8 +342,8 @@ func (so *stateObject) Code() ([]byte, error) {
 
 	readStart := time.Now()
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
-	so.db.storageReadDuration += time.Since(readStart)
-	so.db.storageReadCount++
+	so.db.codeReadDuration += time.Since(readStart)
+	so.db.codeReadCount++
 
 	if err != nil {
 		return nil, fmt.Errorf("can't code for %x: %w", so.Address(), err)

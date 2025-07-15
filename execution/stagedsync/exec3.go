@@ -63,6 +63,15 @@ var (
 	mxExecGas          = metrics.NewCounter(`exec_gas`)
 	mxExecMgas         = metrics.NewGauge(`exec_mgas`)
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
+
+	mxExecReadCount            = metrics.NewGauge("exec_read_count")
+	mxExecReadDuration         = metrics.NewGauge("exec_read_dur")
+	mxExecAccountReadCount     = metrics.NewGauge("exec_account_read_count")
+	mxExecAccountReadDuration  = metrics.NewGauge("exec_account_read_dur")
+	mxExecStorageReadCount     = metrics.NewGauge("exec_storage_read_count")
+	mxExecStoreageReadDuration = metrics.NewGauge("exec_storage_read_dur")
+	mxExecCodeReadCount        = metrics.NewGauge("exec_code_read_count")
+	mxExecCodeReadDuration     = metrics.NewGauge("exec_code_read_dur")
 )
 
 const (
@@ -136,9 +145,18 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 	taskGas := te.taskExecMetrics.GasUsed.Total.Load()
 	taskDur := time.Duration(te.taskExecMetrics.Duration.Load())
-	readDur := time.Duration(te.taskExecMetrics.StorageReadDuration.Load())
-	readCount := te.taskExecMetrics.StorageReadCount.Load()
+	readDur := time.Duration(te.taskExecMetrics.ReadDuration.Load())
+	readCount := te.taskExecMetrics.ReadCount.Load()
 	activations := te.taskExecMetrics.Active.Total.Load()
+
+	mxExecReadCount.SetUint64(uint64(te.taskExecMetrics.ReadCount.Load()))
+	mxExecReadDuration.SetUint64(uint64(te.taskExecMetrics.ReadDuration.Load()))
+	mxExecAccountReadCount.SetUint64(uint64(te.taskExecMetrics.AccountReadCount.Load()))
+	mxExecAccountReadDuration.SetUint64(uint64(te.taskExecMetrics.AccountReadDuration.Load()))
+	mxExecStorageReadCount.SetUint64(uint64(te.taskExecMetrics.StorageReadCount.Load()))
+	mxExecStoreageReadDuration.SetUint64(uint64(te.taskExecMetrics.StorageReadDuration.Load()))
+	mxExecCodeReadCount.SetUint64(uint64(te.taskExecMetrics.CodeReadCount.Load()))
+	mxExecCodeReadDuration.SetUint64(uint64(te.taskExecMetrics.CodeReadDuration.Load()))
 
 	curTaskGas := taskGas - p.prevTaskGas
 	curTaskDur := taskDur - p.prevTaskDuration

@@ -49,8 +49,14 @@ type WorkerMetrics struct {
 	Active              activeCount
 	GasUsed             activeCount
 	Duration            activeDuration
+	ReadCount           atomic.Int64
+	ReadDuration        activeDuration
+	AccountReadCount    atomic.Int64
+	AccountReadDuration activeDuration
 	StorageReadCount    atomic.Int64
 	StorageReadDuration activeDuration
+	CodeReadCount       atomic.Int64
+	CodeReadDuration    activeDuration
 	WriteDuration       activeDuration
 }
 
@@ -280,9 +286,15 @@ func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
 		start := time.Now()
 		defer func() {
 			rw.metrics.Duration.Add(time.Since(start))
-			if readDuration := rw.ibs.StorageReadDuration(); readDuration > 0 {
+			if readDuration := rw.ibs.ReadDuration(); readDuration > 0 {
+				rw.metrics.ReadDuration.Add(rw.ibs.ReadDuration())
+				rw.metrics.ReadCount.Add(rw.ibs.ReadCount())
+				rw.metrics.AccountReadDuration.Add(rw.ibs.AccountReadDuration())
+				rw.metrics.AccountReadCount.Add(rw.ibs.AccountReadCount())
 				rw.metrics.StorageReadDuration.Add(rw.ibs.StorageReadDuration())
 				rw.metrics.StorageReadCount.Add(rw.ibs.StorageReadCount())
+				rw.metrics.CodeReadDuration.Add(rw.ibs.CodeReadDuration())
+				rw.metrics.CodeReadCount.Add(rw.ibs.CodeReadCount())
 			}
 			if result != nil && result.ExecutionResult != nil {
 				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.GasUsed))
