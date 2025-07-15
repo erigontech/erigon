@@ -10,9 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-
 	"github.com/erigontech/erigon/erigon-lib/commitment"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/assert"
 	"github.com/erigontech/erigon/erigon-lib/common/empty"
 	"github.com/erigontech/erigon/erigon-lib/crypto"

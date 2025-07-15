@@ -19,12 +19,13 @@ package raw
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestBeaconState_SetVersion(t *testing.T) {

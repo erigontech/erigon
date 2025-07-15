@@ -28,12 +28,11 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/core/state"
 )
 
 func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {

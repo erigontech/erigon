@@ -24,12 +24,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
-
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces/grpcutil"
 	txpooproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 type TxPoolService struct {

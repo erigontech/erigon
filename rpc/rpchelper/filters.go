@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/erigon-lib/common"

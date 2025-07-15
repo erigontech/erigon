@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/length"
 	"github.com/erigontech/erigon/erigon-lib/kv"
-
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/erigon-lib/types"

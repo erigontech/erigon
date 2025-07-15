@@ -25,12 +25,12 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stages/mock"

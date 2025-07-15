@@ -6,6 +6,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
@@ -17,9 +20,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/trie"
 	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"

@@ -28,6 +28,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
@@ -35,8 +37,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/erigon-lib/trie"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"

@@ -26,6 +26,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/cmd/utils"
 	snaptype2 "github.com/erigontech/erigon/erigon-db/snaptype"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/erigon-lib/common/dir"
@@ -35,8 +37,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/erigon-lib/state"
-	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"

@@ -26,8 +26,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/turbo/privateapi"
-
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/erigon-lib/common/paths"
@@ -40,10 +40,9 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv/remotedb"
 	"github.com/erigontech/erigon/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )

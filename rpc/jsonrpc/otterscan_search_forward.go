@@ -20,6 +20,7 @@ import (
 	"bytes"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
+
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/kv"
 )

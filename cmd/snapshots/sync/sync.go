@@ -32,6 +32,11 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/erigon-db/downloader"
 	"github.com/erigontech/erigon/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
@@ -41,12 +46,8 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/erigon-lib/version"
-	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
-	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/errgroup"
 )
 
 type LType int

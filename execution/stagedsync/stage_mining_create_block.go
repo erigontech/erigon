@@ -25,6 +25,8 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
@@ -34,8 +36,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"

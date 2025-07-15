@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/erigon-lib/chain/params"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/u256"
@@ -31,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/p2p/protocols/eth"

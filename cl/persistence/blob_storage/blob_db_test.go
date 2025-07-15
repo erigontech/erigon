@@ -20,14 +20,15 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/kv"
-	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/spf13/afero"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
 )
 
 func setupTestDB(t *testing.T) kv.RwDB {

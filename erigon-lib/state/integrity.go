@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon/erigon-lib/common/dbg"
 	"path/filepath"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/erigon-lib/common/dir"
 	"github.com/erigontech/erigon/erigon-lib/estimate"
 	"github.com/erigontech/erigon/erigon-lib/kv"
@@ -16,7 +18,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/erigon-lib/recsplit/multiencseq"
-	"golang.org/x/sync/errgroup"
 )
 
 // search key in all files of all domains and print file names

@@ -20,9 +20,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 var (

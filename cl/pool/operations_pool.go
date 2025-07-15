@@ -17,11 +17,11 @@
 package pool
 
 import (
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/crypto/blake2b"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto/blake2b"
 )
 
 const operationsPerPool = 512

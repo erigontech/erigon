@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	merkletree "github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	merkletree "github.com/erigontech/erigon/cl/merkle_tree"
 )
 
 var (

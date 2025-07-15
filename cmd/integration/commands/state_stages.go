@@ -28,6 +28,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/debugprint"
 	chain2 "github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
@@ -36,9 +39,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-lib/wrap"
-	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core/debugprint"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/chainspec"
@@ -46,11 +46,11 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
+	_ "github.com/erigontech/erigon/polygon/chain"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/shards"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+	// Register Polygon chains
 )
 
 var stateStages = &cobra.Command{

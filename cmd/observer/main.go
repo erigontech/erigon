@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/observer/database"
 	"github.com/erigontech/erigon/cmd/observer/observer"
 	"github.com/erigontech/erigon/cmd/observer/reports"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/chainspec"
 )
 

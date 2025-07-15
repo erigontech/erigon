@@ -19,10 +19,11 @@ package cltypes_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
-	"github.com/stretchr/testify/require"
 )
 
 func TestForkStatic(t *testing.T) {

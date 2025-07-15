@@ -43,9 +43,13 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
+	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/hack/tool"
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/erigon-db/downloader"
 	"github.com/erigontech/erigon/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/erigon-db/downloader/downloadergrpc"
+	_ "github.com/erigontech/erigon/erigon-db/snaptype"
 	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
@@ -56,19 +60,16 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
-	"github.com/erigontech/erigon/cmd/hack/tool"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
+	_ "github.com/erigontech/erigon/polygon/chain"
+	_ "github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
-
-	_ "github.com/erigontech/erigon/erigon-db/snaptype"      //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
+	// Register Polygon chains
+	//hack
+	//hack
 )
 
 func main() {

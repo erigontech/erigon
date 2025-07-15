@@ -19,14 +19,15 @@ package sync_contribution_pool
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 var testHash = common.Hash{0x01, 0x02, 0x03, 0x04}

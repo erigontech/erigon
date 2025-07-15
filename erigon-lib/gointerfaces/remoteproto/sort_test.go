@@ -20,9 +20,10 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
 	types "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestSort(t *testing.T) {

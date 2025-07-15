@@ -13,10 +13,11 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon/erigon-lib/common"
+	gomock "go.uber.org/mock/gomock"
+
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
-	gomock "go.uber.org/mock/gomock"
+	common "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // MockPeerDas is a mock of PeerDas interface.

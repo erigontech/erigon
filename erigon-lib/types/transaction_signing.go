@@ -25,9 +25,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/secp256k1"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"

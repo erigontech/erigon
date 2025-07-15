@@ -20,9 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"golang.org/x/sync/errgroup"
-
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"

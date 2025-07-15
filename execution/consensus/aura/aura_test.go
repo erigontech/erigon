@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/erigon-lib/abi"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
@@ -32,8 +34,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/trie"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/stages/mock"

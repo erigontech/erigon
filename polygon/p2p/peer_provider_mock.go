@@ -13,10 +13,11 @@ import (
 	context "context"
 	reflect "reflect"
 
-	sentryproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 	gomock "go.uber.org/mock/gomock"
 	grpc "google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+
+	sentryproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 )
 
 // MockpeerProvider is a mock of peerProvider interface.

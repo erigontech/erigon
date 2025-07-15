@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/chain/params"
 	"github.com/erigontech/erigon/erigon-lib/common"
@@ -33,8 +35,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"

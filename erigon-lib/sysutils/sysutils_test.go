@@ -3,8 +3,9 @@ package sysutils_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/sysutils"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/erigon-lib/sysutils"
 )
 
 func TestMergeProcesses(t *testing.T) {

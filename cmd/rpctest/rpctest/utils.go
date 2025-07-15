@@ -28,9 +28,9 @@ import (
 
 	"github.com/valyala/fastjson"
 
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/state"
 )
 
 func compareBlocks(b, bg *EthBlockByNumber) bool {

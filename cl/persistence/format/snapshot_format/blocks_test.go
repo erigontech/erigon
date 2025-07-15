@@ -21,11 +21,12 @@ import (
 	_ "embed"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
 )
 
 //go:embed test_data/phase0.ssz_snappy

@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/erigon-lib/diagnostics"
 )
 
 func TestParseData(t *testing.T) {

@@ -5,9 +5,10 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func PeerProtocols(sentry sentryproto.SentryClient, peer *typesproto.H512) []byte {

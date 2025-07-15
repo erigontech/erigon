@@ -19,8 +19,9 @@ package builder
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/erigon-lib/types"
 )
 
 func TestLatestBlockBuilt(t *testing.T) {

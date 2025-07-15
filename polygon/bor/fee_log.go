@@ -19,9 +19,9 @@ package bor
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	common "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 var transferLogSig = common.HexToHash("0xe6497e3ee548a3372136af2fcb0696db31fc6cf20260707645068bd3fe97f3c4")

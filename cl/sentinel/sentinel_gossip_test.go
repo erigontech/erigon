@@ -24,15 +24,15 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
+	gomock "go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	peerdasstatemock "github.com/erigontech/erigon/cl/das/state/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/chainspec"
-	gomock "go.uber.org/mock/gomock"
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {

@@ -24,13 +24,14 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
-	proto_downloader "github.com/erigontech/erigon/erigon-lib/gointerfaces/downloaderproto"
-	prototypes "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	proto_downloader "github.com/erigontech/erigon/erigon-lib/gointerfaces/downloaderproto"
+	prototypes "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 )
 
 func NewClient(ctx context.Context, downloaderAddr string) (proto_downloader.DownloaderClient, error) {

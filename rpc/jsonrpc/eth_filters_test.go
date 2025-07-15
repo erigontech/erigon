@@ -24,12 +24,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/length"
 	txpool "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/stages/mock"

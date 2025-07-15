@@ -28,11 +28,11 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/gdbme"
 	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core/gdbme"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"

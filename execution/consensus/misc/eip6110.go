@@ -20,11 +20,12 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/erigon-lib/abi"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/holiman/uint256"
 )
 
 const (

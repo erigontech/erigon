@@ -19,9 +19,9 @@ package calltracer
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 

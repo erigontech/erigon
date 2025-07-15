@@ -13,11 +13,12 @@ import (
 	context "context"
 	reflect "reflect"
 
+	gomock "go.uber.org/mock/gomock"
+
 	common "github.com/erigontech/erigon/erigon-lib/common"
 	remoteproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
 	kv "github.com/erigontech/erigon/erigon-lib/kv"
 	txpoolcfg "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	gomock "go.uber.org/mock/gomock"
 )
 
 // MockPool is a mock of Pool interface.

@@ -21,9 +21,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 var EnabledExpensive = false

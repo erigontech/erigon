@@ -20,8 +20,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/erigon-lib/diagnostics"
 )
 
 var mockInboundPeerStats = diagnostics.PeerStatistics{

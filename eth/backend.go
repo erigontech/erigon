@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
@@ -44,8 +45,13 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/mdbx-go/mdbx"
-
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
+	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cmd/caplin/caplin1"
+	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/erigon-db/downloader"
 	"github.com/erigontech/erigon/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/erigon-db/downloader/downloadergrpc"
@@ -85,13 +91,6 @@ import (
 	libstate "github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-lib/wrap"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
-	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cmd/caplin/caplin1"
-	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
@@ -123,6 +122,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/flags"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
+	_ "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/rpc"
@@ -138,8 +138,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+	// Register Polygon chains
 )
 
 // Config contains the configuration options of the ETH protocol.

@@ -23,12 +23,12 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"

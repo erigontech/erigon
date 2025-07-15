@@ -38,11 +38,10 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/erigon-lib/common/dir"

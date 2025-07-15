@@ -28,12 +28,12 @@ import (
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 	jsassets "github.com/erigontech/erigon/eth/tracers/js/internal/tracers"
 )

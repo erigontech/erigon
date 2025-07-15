@@ -4,12 +4,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/version"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/erigon-lib/config3"
 	"github.com/erigontech/erigon/erigon-lib/seg"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/erigon-lib/version"
 )
 
 func setup(tb testing.TB) datadir.Dirs {

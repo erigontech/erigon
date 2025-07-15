@@ -7,13 +7,15 @@
 package downloaderproto
 
 import (
-	typesproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
+
+	typesproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 )
 
 const (

@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/forkid"
 )

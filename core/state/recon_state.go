@@ -17,8 +17,6 @@
 package state
 
 import (
-	//"fmt"
-
 	"bytes"
 	"container/heap"
 	"context"
@@ -27,10 +25,10 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/google/btree"
-
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/erigon-lib/kv"
+	//"fmt"
 )
 
 type reconPair struct {

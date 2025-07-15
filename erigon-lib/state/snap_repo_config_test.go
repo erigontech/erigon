@@ -3,9 +3,10 @@ package state
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
-	"github.com/stretchr/testify/require"
 )
 
 // 1. safety margin is respected

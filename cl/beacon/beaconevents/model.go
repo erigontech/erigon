@@ -1,9 +1,9 @@
 package beaconevents
 
 import (
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 

@@ -25,9 +25,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/handler"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 type LayeredBeaconHandler struct {

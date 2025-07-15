@@ -22,9 +22,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	jsoniter "github.com/json-iterator/go"
+	"github.com/stretchr/testify/assert"
 )
 
 func (s *StackStream) closeAllPendingElements() error {

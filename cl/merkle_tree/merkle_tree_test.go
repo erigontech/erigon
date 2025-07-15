@@ -3,10 +3,11 @@ package merkle_tree_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/length"
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/stretchr/testify/require"
 )
 
 func getExpectedRoot(testBuffer []byte) common.Hash {

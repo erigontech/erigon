@@ -20,8 +20,9 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {

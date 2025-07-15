@@ -20,15 +20,16 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/kv"
-	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/stretchr/testify/require"
 )
 
 func setupStore(t *testing.T) (freezeblocks.BeaconSnapshotReader, kv.RwDB) {

@@ -22,9 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -39,6 +36,9 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 var (

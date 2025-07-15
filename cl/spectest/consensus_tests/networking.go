@@ -5,11 +5,12 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/spectest"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestGetCustodyGroups(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {

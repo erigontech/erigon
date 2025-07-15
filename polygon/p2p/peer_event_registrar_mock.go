@@ -12,10 +12,11 @@ package p2p
 import (
 	reflect "reflect"
 
+	gomock "go.uber.org/mock/gomock"
+
 	event "github.com/erigontech/erigon/erigon-lib/event"
 	sentryproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 	eth "github.com/erigontech/erigon/p2p/protocols/eth"
-	gomock "go.uber.org/mock/gomock"
 )
 
 // MockpeerEventRegistrar is a mock of peerEventRegistrar interface.

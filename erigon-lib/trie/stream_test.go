@@ -24,9 +24,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/crypto"
-
 	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/erigon-lib/types/accounts"
 )
 

@@ -26,6 +26,7 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"

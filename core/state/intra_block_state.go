@@ -30,6 +30,8 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/dbg"
@@ -39,8 +41,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/trie"
 	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check

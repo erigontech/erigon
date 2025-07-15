@@ -29,22 +29,21 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
+	_ "github.com/erigontech/erigon/eth/tracers/js"
+	_ "github.com/erigontech/erigon/eth/tracers/native"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/tests"
-
 	// Force-load native and js packages, to trigger registration
-	_ "github.com/erigontech/erigon/eth/tracers/js"
-	_ "github.com/erigontech/erigon/eth/tracers/native"
 )
 
 func TestPrestateTracerCreate2(t *testing.T) {

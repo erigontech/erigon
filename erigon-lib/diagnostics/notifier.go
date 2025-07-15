@@ -3,8 +3,9 @@ package diagnostics
 import (
 	"net/http"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/gorilla/websocket"
+
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 type DiagMessages struct {

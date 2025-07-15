@@ -29,6 +29,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
@@ -39,9 +42,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon/erigon-lib/state"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )

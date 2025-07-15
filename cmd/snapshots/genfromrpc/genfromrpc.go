@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
@@ -18,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/rpc"
 )
 

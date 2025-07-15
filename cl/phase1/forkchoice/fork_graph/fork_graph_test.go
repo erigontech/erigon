@@ -20,15 +20,15 @@ import (
 	_ "embed"
 	"testing"
 
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/spf13/afero"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
 )
 
 //go:embed test_data/block_0xe2a37a22d208ebe969c50e9d44bb3f1f63c5404787b9c214a5f2f28fb9835feb.ssz_snappy

@@ -20,8 +20,9 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/erigon-lib/types"
 )
 
 func TestRecentLogs(t *testing.T) {

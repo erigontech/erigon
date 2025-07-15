@@ -21,9 +21,8 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/erigontech/erigon/polygon/polygoncommon"
-
 	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type RangeIndex interface {

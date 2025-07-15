@@ -26,9 +26,9 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/cmd/observer/utils"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/observer/utils"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"

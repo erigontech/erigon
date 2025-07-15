@@ -24,14 +24,14 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/monitor"
 	common "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	execution "github.com/erigontech/erigon/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 )

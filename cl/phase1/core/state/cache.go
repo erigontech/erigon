@@ -21,15 +21,14 @@ import (
 	"encoding/binary"
 	"runtime"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/cl/utils/threading"
-
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 const (

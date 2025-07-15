@@ -20,9 +20,10 @@ import (
 	"context"
 	"encoding/hex"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"github.com/holiman/uint256"
 )
 
 type PoolChangeEvent struct {

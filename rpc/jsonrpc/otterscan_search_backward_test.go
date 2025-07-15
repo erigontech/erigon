@@ -20,12 +20,12 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
-
-	"github.com/RoaringBitmap/roaring/v2/roaring64"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/stretchr/testify/require"
 )
 
 func newMockBackwardChunkLocator(chunks [][]byte) ChunkLocator {

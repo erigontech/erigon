@@ -3,8 +3,9 @@ package bls_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 func TestAggregateSignatureCached(t *testing.T) {

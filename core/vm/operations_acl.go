@@ -24,11 +24,11 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/erigon-lib/chain/params"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/math"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
 )
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {

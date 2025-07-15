@@ -20,8 +20,9 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // transientStorage is a representation of EIP-1153 "Transient Storage".

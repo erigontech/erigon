@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/length"
 	"github.com/erigontech/erigon/erigon-lib/crypto"
-
 	"github.com/erigontech/erigon/erigon-lib/types/accounts"
 )
 

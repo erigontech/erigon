@@ -23,9 +23,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 )
 
 func TestReadBufferReset(t *testing.T) {

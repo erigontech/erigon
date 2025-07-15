@@ -12,11 +12,12 @@ package mock_services
 import (
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon/erigon-lib/common"
+	gomock "go.uber.org/mock/gomock"
+
 	synced_data "github.com/erigontech/erigon/cl/beacon/synced_data"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	state "github.com/erigontech/erigon/cl/phase1/core/state"
-	gomock "go.uber.org/mock/gomock"
+	common "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // MockSyncedData is a mock of SyncedData interface.

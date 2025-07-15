@@ -18,7 +18,6 @@ package downloader
 
 import (
 	"context"
-	//nolint:gosec
 	"errors"
 	"fmt"
 	"path"
@@ -30,11 +29,10 @@ import (
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/missinggo/v2/panicif"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
@@ -42,6 +40,8 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon/erigon-lib/common/dir"
+
+	//nolint:gosec
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/snaptype"

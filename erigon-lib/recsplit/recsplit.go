@@ -29,11 +29,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/erigon-lib/datastruct/fusefilter"
 	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/assert"
+	"github.com/erigontech/erigon/erigon-lib/datastruct/fusefilter"
 	"github.com/erigontech/erigon/erigon-lib/etl"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano16"

@@ -21,8 +21,6 @@ import (
 	"math"
 	"math/bits"
 
-	"github.com/erigontech/erigon/erigon-lib/types/accounts"
-
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
@@ -31,6 +29,7 @@ import (
 	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 

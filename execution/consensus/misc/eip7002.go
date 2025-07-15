@@ -19,9 +19,9 @@ package misc
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/erigon-lib/chain/params"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/consensus"
 )
 

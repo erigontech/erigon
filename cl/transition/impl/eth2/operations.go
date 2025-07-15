@@ -24,22 +24,17 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/monitor"
-
-	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
-
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-
-	"github.com/erigontech/erigon/cl/utils/bls"
-
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 const (

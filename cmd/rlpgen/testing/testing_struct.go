@@ -3,9 +3,10 @@ package testing
 import (
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/holiman/uint256"
 )
 
 type TestingStruct struct {

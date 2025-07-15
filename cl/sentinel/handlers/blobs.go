@@ -19,13 +19,14 @@ package handlers
 import (
 	"math"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/libp2p/go-libp2p/core/network"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 const maxBlobsThroughoutputPerRequest = 72

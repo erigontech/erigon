@@ -21,10 +21,11 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/stretchr/testify/require"
 )
 
 func TestAttestationProducer(t *testing.T) {

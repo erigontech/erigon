@@ -24,14 +24,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
+
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/finality/rawdb"
-	"github.com/stretchr/testify/require"
-
-	"pgregory.net/rapid"
 )
 
 // NewMockService creates a new mock whitelist service

@@ -12,11 +12,12 @@ package mock_services
 import (
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon/erigon-lib/common"
+	gomock "go.uber.org/mock/gomock"
+
 	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	solid "github.com/erigontech/erigon/cl/cltypes/solid"
-	gomock "go.uber.org/mock/gomock"
+	common "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // MockBeaconStateMutator is a mock of BeaconStateMutator interface.

@@ -21,9 +21,10 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestPush(t *testing.T) {

@@ -25,7 +25,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
-	_ "net/http/pprof" //nolint:gosec
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
@@ -35,31 +35,33 @@ import (
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/holiman/uint256"
 
+	hackdb "github.com/erigontech/erigon/cmd/hack/db"
+	"github.com/erigontech/erigon/cmd/hack/flow"
+	"github.com/erigontech/erigon/cmd/hack/tool"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+
+	//nolint:gosec
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/erigon-lib/seg"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	hackdb "github.com/erigontech/erigon/cmd/hack/db"
-	"github.com/erigontech/erigon/cmd/hack/flow"
-	"github.com/erigontech/erigon/cmd/hack/tool"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	_ "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+	// Register Polygon chains
 )
 
 var (

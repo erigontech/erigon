@@ -7,10 +7,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // RemoteCheckpointSync is a CheckpointSyncer that fetches the checkpoint state from a remote endpoint.

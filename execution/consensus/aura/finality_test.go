@@ -19,9 +19,10 @@ package aura
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestRollingFinality(t *testing.T) {

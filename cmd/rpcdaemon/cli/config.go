@@ -37,6 +37,16 @@ import (
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
@@ -59,18 +69,10 @@ import (
 	libstate "github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
+	_ "github.com/erigontech/erigon/eth/tracers/js"
+	_ "github.com/erigontech/erigon/eth/tracers/native"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -89,10 +91,7 @@ import (
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
 	// Force-load native and js packages, to trigger registration
-	_ "github.com/erigontech/erigon/eth/tracers/js"
-	_ "github.com/erigontech/erigon/eth/tracers/native"
 )
 
 var rootCmd = &cobra.Command{

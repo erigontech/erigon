@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 const FlagDone = 0

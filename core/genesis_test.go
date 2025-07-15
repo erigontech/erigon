@@ -27,6 +27,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon/erigon-lib/common"
@@ -37,8 +39,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/rpc/rpchelper"

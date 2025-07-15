@@ -26,9 +26,9 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {

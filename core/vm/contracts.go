@@ -31,7 +31,9 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/ripemd160"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/chain/params"
 	"github.com/erigontech/erigon/erigon-lib/common"
@@ -41,10 +43,7 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/crypto/bn256"
 	libkzg "github.com/erigontech/erigon/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon/erigon-lib/crypto/secp256r1"
-	"github.com/erigontech/erigon/core/tracing"
-
 	//lint:ignore SA1019 Needed for precompile
-	"golang.org/x/crypto/ripemd160"
 )
 
 // PrecompiledContract is the basic interface for native Go contracts. The implementation

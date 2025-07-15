@@ -19,10 +19,10 @@ package ethapi
 import (
 	"errors"
 
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 type BlockOverrides struct {

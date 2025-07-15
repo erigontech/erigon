@@ -20,9 +20,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	jsoniter "github.com/json-iterator/go"
+	"github.com/stretchr/testify/assert"
 )
 
 // Benchmark tests comparing the performance of JsoniterStream (thin jsoniter.Stream wrapper) and StackStream

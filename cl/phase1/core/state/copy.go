@@ -17,11 +17,12 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/erigon-lib/common"
+	"golang.org/x/exp/maps"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
-	"golang.org/x/exp/maps"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {

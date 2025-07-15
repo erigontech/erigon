@@ -22,8 +22,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -33,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
 )
 
 var (

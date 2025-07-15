@@ -6,6 +6,13 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/google/go-cmp/cmp"
+	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/erigon-lib/chain"
@@ -15,16 +22,10 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
-	"github.com/google/go-cmp/cmp"
-	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type Generator struct {

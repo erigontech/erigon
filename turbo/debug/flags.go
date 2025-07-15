@@ -23,7 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/pprof" //nolint:gosec
+	"net/http/pprof"
 	"os"
 	"path/filepath"
 
@@ -35,6 +35,8 @@ import (
 
 	"github.com/erigontech/erigon/erigon-lib/common/disk"
 	"github.com/erigontech/erigon/erigon-lib/common/fdlimit"
+
+	//nolint:gosec
 	"github.com/erigontech/erigon/erigon-lib/common/mem"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/metrics"

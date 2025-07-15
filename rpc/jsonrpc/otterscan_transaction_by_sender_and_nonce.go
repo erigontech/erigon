@@ -21,11 +21,10 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/kv/order"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types/accounts"
 )
 

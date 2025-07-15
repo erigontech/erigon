@@ -23,9 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/anacrolix/torrent/metainfo"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
 	proto_downloader "github.com/erigontech/erigon/erigon-lib/gointerfaces/downloaderproto"

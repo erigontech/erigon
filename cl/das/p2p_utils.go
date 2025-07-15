@@ -1,12 +1,13 @@
 package das
 
 import (
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 const (

@@ -24,8 +24,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // Context contains some contextual infos for a transaction execution that is not

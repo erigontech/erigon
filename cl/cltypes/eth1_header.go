@@ -22,15 +22,15 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 )
 
 // ETH1Header represents the ethereum 1 header structure CL-side.

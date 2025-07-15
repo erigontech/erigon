@@ -14,9 +14,10 @@ import (
 	reflect "reflect"
 	time "time"
 
+	gomock "go.uber.org/mock/gomock"
+
 	common "github.com/erigontech/erigon/erigon-lib/common"
 	types "github.com/erigontech/erigon/erigon-lib/types"
-	gomock "go.uber.org/mock/gomock"
 )
 
 // MockbridgeReader is a mock of bridgeReader interface.

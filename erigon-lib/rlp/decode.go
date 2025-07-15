@@ -31,9 +31,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
-
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 //lint:ignore ST1012 EOL is not an error.

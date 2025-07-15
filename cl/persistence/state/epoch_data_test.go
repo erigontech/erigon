@@ -20,9 +20,10 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/stretchr/testify/require"
 )
 
 func TestEpochData(t *testing.T) {

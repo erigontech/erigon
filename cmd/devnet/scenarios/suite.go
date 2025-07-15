@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 type SimulationContext struct {

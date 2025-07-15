@@ -24,15 +24,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	chain2 "github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/execution/chainspec"
+	_ "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+	// Register Polygon chains
 )
 
 var (

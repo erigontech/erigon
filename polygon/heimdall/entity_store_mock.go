@@ -13,8 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	snaptype "github.com/erigontech/erigon/erigon-lib/snaptype"
 	gomock "go.uber.org/mock/gomock"
+
+	snaptype "github.com/erigontech/erigon/erigon-lib/snaptype"
 )
 
 // MockEntityStore is a mock of EntityStore interface.

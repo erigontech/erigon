@@ -13,10 +13,11 @@ import (
 	context "context"
 	reflect "reflect"
 
-	typesproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 	gomock "go.uber.org/mock/gomock"
 	grpc "google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+
+	typesproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 )
 
 // MockKVClient is a mock of KVClient interface.

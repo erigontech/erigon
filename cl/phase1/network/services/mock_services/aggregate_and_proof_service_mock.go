@@ -13,8 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	services "github.com/erigontech/erigon/cl/phase1/network/services"
 	gomock "go.uber.org/mock/gomock"
+
+	services "github.com/erigontech/erigon/cl/phase1/network/services"
 )
 
 // MockAggregateAndProofService is a mock of AggregateAndProofService interface.

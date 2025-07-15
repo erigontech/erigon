@@ -20,12 +20,13 @@ import (
 	"math"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestValidatorSlashing(t *testing.T) {

@@ -24,17 +24,17 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	communication2 "github.com/erigontech/erigon/cl/sentinel/communication"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
-	"github.com/libp2p/go-libp2p/core/peer"
+	communication2 "github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // HandShaker is the data type which will handle handshakes and determine if

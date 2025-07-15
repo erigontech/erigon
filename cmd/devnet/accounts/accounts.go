@@ -19,9 +19,9 @@ package accounts
 import (
 	"crypto/ecdsa"
 
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core"
 )
 
 const DevAddress = "0x67b1d87101671b127f5f8714789C7192f7ad340e"

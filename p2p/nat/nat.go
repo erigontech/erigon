@@ -28,9 +28,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
-
 	natpmp "github.com/jackpal/go-nat-pmp"
+
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // An implementation of nat.Interface can map local ports to ports

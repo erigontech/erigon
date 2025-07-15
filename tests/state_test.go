@@ -28,10 +28,10 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 )
 

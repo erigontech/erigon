@@ -23,8 +23,8 @@ import (
 	"strings"
 	"unicode"
 
-	// Force-load native and js packages, to trigger registration
 	_ "github.com/erigontech/erigon/eth/tracers/js"
+	// Force-load native and js packages, to trigger registration
 )
 
 // To generate a new callTracer test, copy paste the makeTest method below into

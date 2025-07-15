@@ -17,8 +17,9 @@
 package sentinel
 
 import (
-	"github.com/erigontech/erigon/cl/utils"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
+
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 // Spec:BeaconConfig()

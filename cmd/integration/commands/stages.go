@@ -30,14 +30,18 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
+	"github.com/erigontech/secp256k1"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/mdbx-go/mdbx"
-	"github.com/erigontech/secp256k1"
-
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/erigon-db/downloader"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
@@ -54,11 +58,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-lib/wrap"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
@@ -78,14 +77,14 @@ import (
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
+	_ "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+	// Register Polygon chains
 )
 
 var cmdStageSnapshots = &cobra.Command{

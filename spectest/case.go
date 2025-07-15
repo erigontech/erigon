@@ -5,10 +5,10 @@ import (
 	"os"
 	"strings"
 
+	"gfx.cafe/util/go/generic"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/transition/machine"
-
-	"gfx.cafe/util/go/generic"
 )
 
 type TestCase struct {

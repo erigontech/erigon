@@ -20,9 +20,9 @@ import (
 	"context"
 	"encoding/binary"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/params"
 )

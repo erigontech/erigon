@@ -33,6 +33,8 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/chain/params"
@@ -49,8 +51,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chainspec"
 )
 

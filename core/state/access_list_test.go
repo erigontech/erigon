@@ -21,10 +21,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	stateLib "github.com/erigontech/erigon/erigon-lib/state"
 )
 

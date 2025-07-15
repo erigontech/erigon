@@ -24,6 +24,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	coresnaptype "github.com/erigontech/erigon/erigon-db/snaptype"
 	"github.com/erigontech/erigon/erigon-lib/common/background"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
@@ -31,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/snaptype"
-	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )

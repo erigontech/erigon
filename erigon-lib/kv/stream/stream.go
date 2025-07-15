@@ -21,9 +21,10 @@ import (
 	"fmt"
 	"slices"
 
+	"golang.org/x/exp/constraints"
+
 	"github.com/erigontech/erigon/erigon-lib/kv/order"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"golang.org/x/exp/constraints"
 )
 
 type (

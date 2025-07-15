@@ -29,18 +29,17 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
-
-	"github.com/libp2p/go-libp2p/core/peer"
-
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/utils"
 )
 
 const gracePeerCount = 8

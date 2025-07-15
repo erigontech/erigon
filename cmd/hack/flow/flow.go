@@ -30,11 +30,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/erigon-lib/common/dbg"
-
-	"github.com/erigontech/erigon/erigon-lib/common/debug"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/common/debug"
 )
 
 const (

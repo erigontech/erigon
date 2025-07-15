@@ -30,9 +30,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
-	"github.com/stretchr/testify/require"
 )
 
 var testBucket = kv.DatabaseInfo

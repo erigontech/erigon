@@ -58,8 +58,8 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+	_ "github.com/erigontech/erigon/polygon/chain"
+	// Register Polygon chains
 )
 
 const (

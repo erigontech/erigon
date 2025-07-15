@@ -20,10 +20,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	jsoniter "github.com/json-iterator/go"
 	"reflect"
 	"testing"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/erigon-lib/jsonstream"

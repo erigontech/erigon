@@ -38,6 +38,10 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/time/rate"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon/erigon-lib/chain/params"
@@ -52,10 +56,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
-	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/chainspec"
@@ -66,13 +66,13 @@ import (
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
 	params2 "github.com/erigontech/erigon/params"
+	_ "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+	// Register Polygon chains
 )
 
 // These are all the command line flags we support.

@@ -17,9 +17,9 @@
 package synced_data
 
 import (
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 type CancelFn func()

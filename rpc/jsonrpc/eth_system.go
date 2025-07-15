@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/chain/params"
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/execution/consensus/misc"

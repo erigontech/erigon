@@ -19,8 +19,9 @@ package cltypes_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 func TestParticipationFlags(t *testing.T) {

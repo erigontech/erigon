@@ -25,12 +25,10 @@ import (
 	"fmt"
 	"math/big"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
-
 	"github.com/erigontech/erigon/erigon-lib/common/length"
-
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/rpc"
 )
 

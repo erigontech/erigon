@@ -20,8 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/RoaringBitmap/roaring/v2"
 
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/kv"
@@ -30,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/exec3"

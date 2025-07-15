@@ -27,9 +27,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/erigon-lib/common/length"
-	"github.com/stretchr/testify/require"
 )
 
 // go test -trimpath -v -fuzz=Fuzz_ProcessUpdate -fuzztime=300s ./erigon-lib/commitment

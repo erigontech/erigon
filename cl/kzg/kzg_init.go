@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 var initOnce sync.Once

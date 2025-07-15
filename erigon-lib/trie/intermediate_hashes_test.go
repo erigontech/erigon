@@ -21,10 +21,10 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestCompressNibbles(t *testing.T) {

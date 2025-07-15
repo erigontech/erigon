@@ -20,11 +20,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/erigon-lib/common/length"
 	"github.com/erigontech/erigon/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
 // ExtraData type stores data as a byte slice and its length.

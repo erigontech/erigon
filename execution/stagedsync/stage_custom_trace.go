@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/erigon-lib/chain"
@@ -38,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/execution/consensus"

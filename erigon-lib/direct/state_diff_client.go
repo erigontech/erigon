@@ -20,8 +20,9 @@ import (
 	"context"
 	"io"
 
-	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
 	"google.golang.org/grpc"
+
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
 )
 
 type StateDiffClient interface {

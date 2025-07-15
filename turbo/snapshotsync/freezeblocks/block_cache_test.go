@@ -3,8 +3,9 @@ package freezeblocks
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 func TestCache2(t *testing.T) {

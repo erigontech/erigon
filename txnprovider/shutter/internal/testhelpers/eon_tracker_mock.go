@@ -13,8 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	shutter "github.com/erigontech/erigon/txnprovider/shutter"
 	gomock "go.uber.org/mock/gomock"
+
+	shutter "github.com/erigontech/erigon/txnprovider/shutter"
 )
 
 // MockEonTracker is a mock of EonTracker interface.

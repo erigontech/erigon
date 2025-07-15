@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/erigon-lib/seg"
-	"github.com/stretchr/testify/require"
-	"github.com/tidwall/btree"
 )
 
 func TestDependency(t *testing.T) {

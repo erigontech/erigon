@@ -24,14 +24,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	_ "github.com/erigontech/erigon/erigon-db/snaptype"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	_ "github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/turbo/debug"
-
-	_ "github.com/erigontech/erigon/erigon-db/snaptype"      //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
+	//hack
+	//hack
 )
 
 func main() {

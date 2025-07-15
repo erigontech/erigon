@@ -19,11 +19,11 @@ package jsonrpc
 import (
 	"context"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/exec3"
 )
 

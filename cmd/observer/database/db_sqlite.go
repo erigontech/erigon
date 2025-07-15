@@ -25,9 +25,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-
 	_ "modernc.org/sqlite"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 type DBSQLite struct {

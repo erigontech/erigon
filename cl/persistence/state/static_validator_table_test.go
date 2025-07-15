@@ -20,9 +20,10 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestStaticValidatorTable(t *testing.T) {

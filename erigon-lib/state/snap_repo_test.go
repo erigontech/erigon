@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon/erigon-lib/common/background"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/erigon-lib/datastruct/existence"
@@ -15,8 +18,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/erigon-lib/seg"
 	"github.com/erigontech/erigon/erigon-lib/version"
-	"github.com/stretchr/testify/require"
-	"github.com/tidwall/btree"
 )
 
 // 1. create folder with content; OpenFolder contains all dirtyFiles (check the dirty files)

@@ -28,15 +28,16 @@ import (
 	"sync/atomic"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/spf13/afero"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/spf13/afero"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 const (

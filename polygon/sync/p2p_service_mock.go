@@ -14,10 +14,11 @@ import (
 	big "math/big"
 	reflect "reflect"
 
+	gomock "go.uber.org/mock/gomock"
+
 	common "github.com/erigontech/erigon/erigon-lib/common"
 	types "github.com/erigontech/erigon/erigon-lib/types"
 	p2p "github.com/erigontech/erigon/polygon/p2p"
-	gomock "go.uber.org/mock/gomock"
 )
 
 // Mockp2pService is a mock of p2pService interface.

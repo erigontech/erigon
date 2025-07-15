@@ -12,9 +12,10 @@ package mock_services
 import (
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon/erigon-lib/common"
-	solid "github.com/erigontech/erigon/cl/cltypes/solid"
 	gomock "go.uber.org/mock/gomock"
+
+	solid "github.com/erigontech/erigon/cl/cltypes/solid"
+	common "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // MockAggregationPool is a mock of AggregationPool interface.

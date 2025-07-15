@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"sort"
 
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/p2p/enode"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
-	"github.com/holiman/uint256"
 )
 
 // CustodyIndex represents the index of a custody group

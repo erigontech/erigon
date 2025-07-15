@@ -27,7 +27,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
-
 	"github.com/erigontech/erigon/erigon-lib/common/length"
 )
 

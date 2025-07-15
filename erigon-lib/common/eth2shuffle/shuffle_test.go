@@ -26,8 +26,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common/eth2shuffle"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/erigon-lib/common/eth2shuffle"
 )
 
 func getStandardHashFn() eth2shuffle.HashFn {

@@ -13,8 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	types "github.com/erigontech/erigon/erigon-lib/types"
 	gomock "go.uber.org/mock/gomock"
+
+	types "github.com/erigontech/erigon/erigon-lib/types"
 )
 
 // MockStore is a mock of Store interface.

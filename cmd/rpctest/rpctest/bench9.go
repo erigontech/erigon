@@ -19,8 +19,8 @@ package rpctest
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // bench9 tests eth_getProof

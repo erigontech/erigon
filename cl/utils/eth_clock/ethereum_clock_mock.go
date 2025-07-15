@@ -13,9 +13,10 @@ import (
 	reflect "reflect"
 	time "time"
 
-	common "github.com/erigontech/erigon/erigon-lib/common"
-	clparams "github.com/erigontech/erigon/cl/clparams"
 	gomock "go.uber.org/mock/gomock"
+
+	clparams "github.com/erigontech/erigon/cl/clparams"
+	common "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // MockEthereumClock is a mock of EthereumClock interface.

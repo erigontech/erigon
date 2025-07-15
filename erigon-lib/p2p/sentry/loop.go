@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/erigontech/erigon/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type (

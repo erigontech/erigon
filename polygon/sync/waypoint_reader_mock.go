@@ -13,8 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	heimdall "github.com/erigontech/erigon/polygon/heimdall"
 	gomock "go.uber.org/mock/gomock"
+
+	heimdall "github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // MockwaypointReader is a mock of waypointReader interface.

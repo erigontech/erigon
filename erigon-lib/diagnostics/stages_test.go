@@ -19,8 +19,9 @@ package diagnostics_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/erigon-lib/diagnostics"
 )
 
 func TestInitSyncStages(t *testing.T) {

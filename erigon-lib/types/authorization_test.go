@@ -20,8 +20,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // Tests that the correct signer is recovered from an Authorization object

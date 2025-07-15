@@ -21,9 +21,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
-	"github.com/stretchr/testify/require"
 )
 
 func TestOverflowPages(t *testing.T) {

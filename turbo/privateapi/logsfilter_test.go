@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
-
 	"github.com/erigontech/erigon/turbo/shards"
 )
 

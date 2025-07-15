@@ -3,11 +3,11 @@ package state
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/erigon-lib/kv"
-	btree2 "github.com/tidwall/btree"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // high 16 bits: specify domain/ii/forkables identifier

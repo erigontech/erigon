@@ -21,12 +21,12 @@ import (
 	"encoding/json"
 	"unsafe"
 
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/length"
 	"github.com/erigontech/erigon/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/erigon-lib/types/ssz"
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 )
 
 // PublicKey 48

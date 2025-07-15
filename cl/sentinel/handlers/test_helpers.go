@@ -3,10 +3,11 @@ package handlers
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/execution/chainspec"
-	"github.com/stretchr/testify/require"
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {

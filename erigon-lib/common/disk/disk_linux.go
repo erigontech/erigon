@@ -22,8 +22,9 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/erigontech/erigon/erigon-lib/metrics"
 	"github.com/shirou/gopsutil/v4/process"
+
+	"github.com/erigontech/erigon/erigon-lib/metrics"
 )
 
 var (

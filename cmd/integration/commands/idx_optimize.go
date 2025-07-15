@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/spf13/cobra"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/background"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/erigon-lib/config3"
@@ -14,12 +17,9 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/erigon-lib/recsplit/multiencseq"
-	"github.com/erigontech/erigon/erigon-lib/state"
-
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/spf13/cobra"
 )
 
 // TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production

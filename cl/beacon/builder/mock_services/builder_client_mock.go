@@ -13,11 +13,12 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon/erigon-lib/common"
+	gomock "go.uber.org/mock/gomock"
+
 	builder "github.com/erigontech/erigon/cl/beacon/builder"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	common "github.com/erigontech/erigon/erigon-lib/common"
 	engine_types "github.com/erigontech/erigon/execution/engineapi/engine_types"
-	gomock "go.uber.org/mock/gomock"
 )
 
 // MockBuilderClient is a mock of BuilderClient interface.

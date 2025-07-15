@@ -22,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
-
 	"github.com/erigontech/erigon/cl/utils"
 )
 

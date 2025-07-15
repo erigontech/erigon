@@ -12,10 +12,11 @@ package mock_services
 import (
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon/erigon-lib/common"
+	gomock "go.uber.org/mock/gomock"
+
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	state "github.com/erigontech/erigon/cl/phase1/core/state"
-	gomock "go.uber.org/mock/gomock"
+	common "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // MockSyncContributionPool is a mock of SyncContributionPool interface.

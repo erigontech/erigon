@@ -19,8 +19,8 @@ package optimistic
 import (
 	"sync"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 type optimisticStoreImpl struct {

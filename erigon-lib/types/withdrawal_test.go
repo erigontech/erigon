@@ -19,8 +19,9 @@ package types
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestWithdrawalsHash(t *testing.T) {

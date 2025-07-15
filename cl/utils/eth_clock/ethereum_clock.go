@@ -21,9 +21,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 var maximumClockDisparity = 500 * time.Millisecond

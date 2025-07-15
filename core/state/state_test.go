@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/tracing"
 )
 
 var toAddr = common.BytesToAddress

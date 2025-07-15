@@ -21,10 +21,10 @@ import (
 	"errors"
 	"math/bits"
 
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
 // BitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!

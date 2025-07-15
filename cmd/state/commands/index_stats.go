@@ -17,8 +17,9 @@
 package commands
 
 import (
-	"github.com/erigontech/erigon/cmd/state/stats"
 	"github.com/spf13/cobra"
+
+	"github.com/erigontech/erigon/cmd/state/stats"
 )
 
 func init() {

@@ -21,8 +21,8 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/observer/utils"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 type DBRetrier struct {

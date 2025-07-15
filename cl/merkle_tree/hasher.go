@@ -19,9 +19,10 @@ package merkle_tree
 import (
 	"sync"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/prysmaticlabs/gohashtree"
+
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 var globalHasher *merkleHasher

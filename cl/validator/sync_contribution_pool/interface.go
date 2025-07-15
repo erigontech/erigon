@@ -17,9 +17,9 @@
 package sync_contribution_pool
 
 import (
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // SyncContributionPool is an interface for managing sync committee contributions and messages.

@@ -28,10 +28,9 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/common"
 	liberrors "github.com/erigontech/erigon/erigon-lib/common/errors"
 	"github.com/erigontech/erigon/erigon-lib/log/v3"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-
 	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 

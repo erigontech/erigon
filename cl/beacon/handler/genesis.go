@@ -19,9 +19,9 @@ package handler
 import (
 	"net/http"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 type genesisResponse struct {

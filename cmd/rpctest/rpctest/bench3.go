@@ -21,8 +21,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func Bench3(erigon_url, geth_url string) error {

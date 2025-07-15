@@ -22,10 +22,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
-	"github.com/stretchr/testify/require"
 )
 
 func TestCheckpointListResponse(t *testing.T) {

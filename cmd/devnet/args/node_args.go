@@ -25,15 +25,15 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/enode"
+	_ "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/rpc/requests"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+	// Register Polygon chains
 )
 
 type NodeArgs struct {

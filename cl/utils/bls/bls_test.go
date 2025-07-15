@@ -4,8 +4,9 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 func convertHexToPublicKey(h string) []byte {

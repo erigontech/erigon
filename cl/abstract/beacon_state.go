@@ -17,11 +17,11 @@
 package abstract
 
 import (
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/types/clonable"
 )
 
 //go:generate mockgen -typed=true -destination=./mock_services/beacon_state_mock.go -package=mock_services . BeaconState

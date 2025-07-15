@@ -26,12 +26,12 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/observer/database"
 	"github.com/erigontech/erigon/cmd/observer/observer/node_utils"
 	"github.com/erigontech/erigon/cmd/observer/observer/sentry_candidates"
 	"github.com/erigontech/erigon/cmd/observer/utils"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"

@@ -32,6 +32,8 @@ import (
 
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/erigon-lib/common/background"
 	"github.com/erigontech/erigon/erigon-lib/common/datadir"
@@ -42,8 +44,6 @@ import (
 	"github.com/erigontech/erigon/erigon-lib/seg"
 	"github.com/erigontech/erigon/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/erigon-lib/version"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 

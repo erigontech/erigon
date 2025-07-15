@@ -21,8 +21,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // THIS IS EXPERMIENTAL, IT MAY CHANGE
