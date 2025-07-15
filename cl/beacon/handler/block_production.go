@@ -1258,9 +1258,9 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}()
 
-	lenBlobs := len(blobsSidecars)
-	if blk.Version() >= clparams.FuluVersion {
-		lenBlobs = len(columnsSidecars)
+	lenBlobs := 0
+	if blk.Version() >= clparams.DenebVersion {
+		lenBlobs = blk.Block.Body.BlobKzgCommitments.Len()
 	}
 
 	log.Info(
