@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"sort"
 	"sync"
 	"time"
 
@@ -150,10 +149,6 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			newPeers = append(newPeers, *data)
 			log.Debug("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices), "earliestAvailableSlot", *status.EarliestAvailableSlot)
 		}
-		// sort by length of mask in descending order
-		sort.Slice(newPeers, func(i, j int) bool {
-			return len(newPeers[i].mask) > len(newPeers[j].mask)
-		})
 		c.peersMutex.Lock()
 		c.peersQueue = newPeers
 		c.peersIndex = 0
