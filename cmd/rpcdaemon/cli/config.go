@@ -102,7 +102,6 @@ var rootCmd = &cobra.Command{
 
 var (
 	stateCacheStr string
-	polygonSync   bool
 )
 
 type HeimdallReader interface {
@@ -125,7 +124,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.GraphQLEnabled, "graphql", false, "enables graphql endpoint (disabled by default)")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50_000_000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
-	rootCmd.PersistentFlags().BoolVar(&polygonSync, "polygon.sync", true, "Enable if Erigon has been synced using the new polygon sync component")
 
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, utils.RpcAccessListFlag.Name, "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, utils.RpcBatchConcurrencyFlag.Name, 2, utils.RpcBatchConcurrencyFlag.Usage)
@@ -434,14 +432,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 
-		if polygonSync {
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
-		} else {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(rawDB), allBorSnapshots, cc.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(rawDB), allBorSnapshots)
-		}
-
+		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
+		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		txNumsReader := blockReader.TxnumReader(ctx)
 
@@ -574,29 +566,27 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 	if cfg.WithDatadir {
 		if cc != nil && cc.Bor != nil {
-			if polygonSync {
-				stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
+			stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
 
-				bridgeConfig := bridge.ReaderConfig{
-					Store:                        bridgeStore,
-					Logger:                       logger,
-					StateReceiverContractAddress: stateReceiverContractAddress,
-					RoTxLimit:                    roTxLimit,
-				}
-				bridgeReader, err = bridge.AssembleReader(ctx, bridgeConfig)
-				if err != nil {
-					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
-				}
+			bridgeConfig := bridge.ReaderConfig{
+				Store:                        bridgeStore,
+				Logger:                       logger,
+				StateReceiverContractAddress: stateReceiverContractAddress,
+				RoTxLimit:                    roTxLimit,
+			}
+			bridgeReader, err = bridge.AssembleReader(ctx, bridgeConfig)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
 
-				heimdallConfig := heimdall.ReaderConfig{
-					Store:     heimdallStore,
-					BorConfig: cc.Bor.(*borcfg.BorConfig),
-					Logger:    logger,
-				}
-				heimdallReader, err = heimdall.AssembleReader(ctx, heimdallConfig)
-				if err != nil {
-					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
-				}
+			heimdallConfig := heimdall.ReaderConfig{
+				Store:     heimdallStore,
+				BorConfig: cc.Bor.(*borcfg.BorConfig),
+				Logger:    logger,
+			}
+			heimdallReader, err = heimdall.AssembleReader(ctx, heimdallConfig)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 			}
 
 			// NOTE: bor_* RPCs are not fully supported when using polygon.sync (https://github.com/erigontech/erigon/issues/11171)
@@ -630,13 +620,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}
 		}
 	} else {
-		if polygonSync {
-			remoteBridgeReader = bridge.NewRemoteReader(remoteBridgeClient)
-			bridgeReader = remoteBridgeReader
-
-			remoteHeimdallReader = heimdall.NewRemoteReader(remoteHeimdallClient)
-			heimdallReader = remoteHeimdallReader
-		}
+		remoteBridgeReader = bridge.NewRemoteReader(remoteBridgeClient)
+		bridgeReader = remoteBridgeReader
+		remoteHeimdallReader = heimdall.NewRemoteReader(remoteHeimdallClient)
+		heimdallReader = remoteHeimdallReader
 
 		remoteCE = &remoteConsensusEngine{}
 		engine = remoteCE
