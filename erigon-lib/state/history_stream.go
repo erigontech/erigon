@@ -24,6 +24,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
@@ -147,7 +148,8 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			g.Reset(offset)
 			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
+
+				histKey := hi.hc.keyInDB(hi.nextKey, txNum)
 				if bytes.Equal(histKey, k) {
 					hi.nextVal = v
 					break
@@ -213,6 +215,7 @@ type HistoryRangeAsOfDB struct {
 
 	startTxNum uint64
 	startTxKey [8]byte
+	step       uint64
 
 	k, v, kBackup, vBackup []byte
 	err                    error
@@ -232,82 +235,94 @@ func (hi *HistoryRangeAsOfDB) Trace(prefix string) *stream.TracedDuo[[]byte, []b
 }
 
 func (hi *HistoryRangeAsOfDB) advance() (err error) {
-	// not large:
-	//   keys: txNum -> key1+key2
-	//   vals: key1+key2 -> txNum + value (DupSort)
-	// large:
-	//   keys: txNum -> key1+key2
-	//   vals: key1+key2+txNum -> value (not DupSort)
 	if hi.largeValues {
 		return hi.advanceLargeVals()
 	}
 	return hi.advanceSmallVals()
 }
+
 func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 	var seek []byte
 	var err error
+
+	// Step-prefix: [^step][addr][txNum] -> [v]
+	stepPrefix := make([]byte, 8)
+	invertedStep := ^hi.step
+	binary.BigEndian.PutUint64(stepPrefix, invertedStep)
+
 	if hi.valsC == nil {
 		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
 			return err
 		}
-		firstKey, _, err := hi.valsC.Seek(hi.from)
-		if err != nil {
-			return err
-		}
-		if firstKey == nil {
-			hi.nextKey = nil
-			return nil
-		}
-		seek = append(common.Copy(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
+		seek = append(append([]byte{}, stepPrefix...), hi.from...)
+		seek = append(seek, hi.startTxKey[:]...)
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
 			hi.nextKey = nil
 			return nil
 		}
-
-		seek = append(next, hi.startTxKey[:]...)
+		seek = append(append([]byte{}, stepPrefix...), next...)
+		seek = append(seek, hi.startTxKey[:]...)
 	}
+
 	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
 		if err != nil {
 			return err
 		}
-		if hi.toPrefix != nil && bytes.Compare(k[:len(k)-8], hi.toPrefix) >= 0 {
+		if len(k) < 8 || !bytes.Equal(k[:8], stepPrefix) {
 			break
 		}
-		if !bytes.Equal(seek[:len(k)-8], k[:len(k)-8]) {
-			copy(seek[:len(k)-8], k[:len(k)-8])
+		addrKey := k[8 : len(k)-8]
+		if hi.toPrefix != nil && bytes.Compare(addrKey, hi.toPrefix) >= 0 {
+			break
+		}
+		if !bytes.Equal(seek[8:len(seek)-8], addrKey) {
+			copy(seek[8:len(seek)-8], addrKey)
 			continue
 		}
-		hi.nextKey = k[:len(k)-8]
+		hi.nextKey = addrKey
 		hi.nextVal = v
 		return nil
 	}
 	hi.nextKey = nil
 	return nil
 }
+
 func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 	var seek []byte
 	var err error
+
+	// Step-prefix: [^step][addr] -> [txNum][v]
+	stepPrefix := make([]byte, 8)
+	invertedStep := ^hi.step
+	binary.BigEndian.PutUint64(stepPrefix, invertedStep)
+
 	if hi.valsCDup == nil {
 		if hi.valsCDup, err = hi.roTx.CursorDupSort(hi.valsTable); err != nil {
 			return err
 		}
-		seek = hi.from
+		seek = append(stepPrefix, hi.from...)
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
 			hi.nextKey = nil
 			return nil
 		}
-		seek = next
+		seek = append(stepPrefix, next...)
 	}
+
 	k, _, err := hi.valsCDup.Seek(seek)
 	if err != nil {
 		return err
 	}
+
 	for k != nil {
-		if hi.toPrefix != nil && bytes.Compare(k, hi.toPrefix) >= 0 {
+		if len(k) < 8 || !bytes.Equal(k[:8], stepPrefix) {
+			break
+		}
+		addrKey := k[8:]
+		if hi.toPrefix != nil && bytes.Compare(addrKey, hi.toPrefix) >= 0 {
 			break
 		}
 		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
@@ -324,8 +339,7 @@ func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 			}
 			continue
 		}
-
-		hi.nextKey = k
+		hi.nextKey = addrKey
 		hi.nextVal = v[8:]
 		return nil
 	}
@@ -441,7 +455,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			g.Reset(offset)
 			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
+				histKey := historyKeyInDB(txNum, hi.nextKey, hi.hc.h.aggregationStep, nil)
 				if bytes.Equal(histKey, k) {
 					hi.nextVal = v
 					break
@@ -483,14 +497,15 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 }
 
 type HistoryChangesIterDB struct {
-	largeValues     bool
-	roTx            kv.Tx
-	valsC           kv.Cursor
-	valsCDup        kv.CursorDupSort
-	valsTable       string
-	limit, endTxNum int
-	startTxKey      [8]byte
-
+	largeValues      bool
+	roTx             kv.Tx
+	valsC            kv.Cursor
+	valsCDup         kv.CursorDupSort
+	valsTable        string
+	limit, endTxNum  int
+	startTxNumBytes  [8]byte
+	step             uint64
+	aggregationStep  uint64
 	nextKey, nextVal []byte
 	k, v             []byte
 	err              error
@@ -504,13 +519,7 @@ func (hi *HistoryChangesIterDB) Close() {
 		hi.valsCDup.Close()
 	}
 }
-func (hi *HistoryChangesIterDB) advance() (err error) {
-	// not large:
-	//   keys: txNum -> key1+key2
-	//   vals: key1+key2 -> txNum + value (DupSort)
-	// large:
-	//   keys: txNum -> key1+key2
-	//   vals: key1+key2+txNum -> value (not DupSort)
+func (hi *HistoryChangesIterDB) advance() error {
 	if hi.largeValues {
 		return hi.advanceLargeVals()
 	}
@@ -519,40 +528,42 @@ func (hi *HistoryChangesIterDB) advance() (err error) {
 
 func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 	var seek []byte
-	var err error
+	// LargeValues table format: [^step][addr][txNum] -> value
 	if hi.valsC == nil {
+		var err error
 		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
 			return err
 		}
-		firstKey, _, err := hi.valsC.First()
-		if err != nil {
-			return err
-		}
-		if firstKey == nil {
-			hi.nextKey = nil
-			return nil
-		}
-		seek = append(common.Copy(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
+		seek = hexutil.EncodeTs(^hi.step)
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
 			hi.nextKey = nil
 			return nil
 		}
-
-		seek = append(next, hi.startTxKey[:]...)
+		seek = next
 	}
+
+	//startTxNum := binary.BigEndian.Uint64(hi.startTxNumBytes[:])
+
 	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
 		if err != nil {
 			return err
 		}
+
+		seeStep := ^binary.BigEndian.Uint64(k[:8])
+		if seeStep != hi.step {
+			hi.nextKey = nil
+			return nil
+		}
+
 		if hi.endTxNum >= 0 && int(binary.BigEndian.Uint64(k[len(k)-8:])) >= hi.endTxNum {
 			next, ok := kv.NextSubtree(k[:len(k)-8])
 			if !ok {
 				hi.nextKey = nil
 				return nil
 			}
-			seek = append(next, hi.startTxKey[:]...)
+			seek = append(next, hi.startTxNumBytes[:]...)
 			continue
 		}
 		if hi.nextKey != nil && bytes.Equal(k[:len(k)-8], hi.nextKey) && bytes.Equal(v, hi.nextVal) {
@@ -571,15 +582,27 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 				}
 			}
 		}
-		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
+
+		seeStep = ^binary.BigEndian.Uint64(k[:8])
+		if seeStep != hi.step {
+			break
+		}
 		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) /*|| int(binary.BigEndian.Uint64(k[len(k)-8:])) > hi.endTxNum */ {
 			if len(seek) != len(k) {
-				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
+				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxNumBytes[:]...)
 				continue
 			}
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
+
+		//txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+		//if txNum < startTxNum {
+		//	continue
+		//}
+		//if hi.endTxNum >= 0 && txNum >= uint64(hi.endTxNum) {
+		//	continue
+		//}
 		hi.nextKey = k[:len(k)-8]
 		hi.nextVal = v
 		return nil
@@ -589,12 +612,13 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 }
 func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 	var k []byte
+	// SmallValues table format: [^step][addr] -> txNum+value
 	if hi.valsCDup == nil {
 		if hi.valsCDup, err = hi.roTx.CursorDupSort(hi.valsTable); err != nil {
-			return err
+			panic(err)
 		}
-
-		if k, _, err = hi.valsCDup.First(); err != nil {
+		seek := hexutil.EncodeTs(^hi.step)
+		if k, _, err = hi.valsCDup.Seek(seek); err != nil {
 			return err
 		}
 	} else {
@@ -603,7 +627,7 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 		}
 	}
 	for k != nil {
-		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
+		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxNumBytes[:])
 		if err != nil {
 			return err
 		}
@@ -619,6 +643,12 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			}
 			continue
 		}
+
+		seeStep := ^binary.BigEndian.Uint64(k)
+		if seeStep != hi.step { // End
+			break
+		}
+
 		foundTxNumVal := v[:8]
 		if hi.endTxNum < 0 || int(binary.BigEndian.Uint64(foundTxNumVal)) < hi.endTxNum {
 			hi.nextKey = k
@@ -630,6 +660,7 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			return err
 		}
 	}
+	// not found
 	hi.nextKey = nil
 	return nil
 }
@@ -656,6 +687,11 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
-	order.Asc.Assert(hi.k, hi.nextKey)
+
+	// strip `^step` prefix (always 8 bytes)
+	if len(hi.k) >= 8 {
+		hi.k = hi.k[8:]
+	}
+
 	return hi.k, hi.v, nil
 }

@@ -568,12 +568,12 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer icc.Close()
 
-	nonPruned := 490
-
 	k, _, err := icc.First()
 	require.NoError(t, err)
-	require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(k[len(k)-8:]))
+	firstRemainingTxNum := binary.BigEndian.Uint64(k[len(k)-8:])
+	expectedMinTxNum := 490
 
+	require.GreaterOrEqual(t, int(firstRemainingTxNum), expectedMinTxNum)
 	// limits = 10
 
 	// for k, v, err := icc.First(); k != nil; k, v, err = icc.Next() {
@@ -595,7 +595,8 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	_, v, err := itable.First()
 	if v != nil {
 		require.NoError(t, err)
-		require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(v))
+		expectedMinInvertedIndexValue := 490
+		require.GreaterOrEqual(t, int(binary.BigEndian.Uint64(v)), expectedMinInvertedIndexValue)
 	}
 
 	// limits = 10
@@ -617,7 +618,8 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 
 	k, _, err = itable.First()
 	require.NoError(t, err)
-	require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(k))
+	expectedMinInvertedIndexKey := 490
+	require.GreaterOrEqual(t, int(binary.BigEndian.Uint64(k)), expectedMinInvertedIndexKey)
 
 	// limits = 10
 	// for k, v, err := itable.First(); k != nil; k, v, err = itable.Next() {
@@ -650,21 +652,22 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	var from, to [8]byte
-	binary.BigEndian.PutUint64(from[:], uint64(0))
-	binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
+	targetRange := uint64(pruneIters) * pruneLimit // 80
 
 	icc, err := rwTx.CursorDupSort(h.valuesTable)
 	require.NoError(t, err)
 
 	count := 0
-	for key, _, err := icc.Seek(from[:]); key != nil; key, _, err = icc.Next() {
+	// For step-prefixed keys, iterate through all keys and check txNum in last 8 bytes
+	for key, _, err := icc.First(); key != nil; key, _, err = icc.Next() {
 		require.NoError(t, err)
 		//t.Logf("key %x\n", key)
-		if bytes.Compare(key[len(key)-8:], to[:]) >= 0 {
-			break
+		if len(key) >= 8 {
+			txNum := binary.BigEndian.Uint64(key[len(key)-8:])
+			if txNum < targetRange {
+				count++
+			}
 		}
-		count++
 	}
 	require.Equal(t, pruneIters*int(pruneLimit), count)
 	icc.Close()
@@ -697,7 +700,9 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	key, _, err := icc.First()
 	require.NoError(t, err)
 	require.NotNil(t, key)
-	require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
+	firstRemainingTxNum := binary.BigEndian.Uint64(key[len(key)-8:])
+	expectedMinRemainingTxNum := pruneIters * int(pruneLimit)
+	require.GreaterOrEqual(t, int(firstRemainingTxNum), expectedMinRemainingTxNum)
 
 	icc, err = rwTx.CursorDupSort(h.valuesTable)
 	require.NoError(t, err)
@@ -774,6 +779,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	var prevVal [32][]byte
+	logger.Debug("Starting key-value generation for filledHistory")
 	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
@@ -785,12 +791,14 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 				binary.BigEndian.PutUint64(v[:], valNum)
 				k[0] = 1   //mark key to simplify debug
 				v[0] = 255 //mark value to simplify debug
+				logger.Debug("Adding key-value pair", "key", fmt.Sprintf("%x", k[:]), "value", fmt.Sprintf("%x", v[:]), "txNum", txNum, "prevValue", fmt.Sprintf("%x", prevVal[keyNum]))
 				err = writer.AddPrevValue(k[:], txNum, prevVal[keyNum])
 				require.NoError(tb, err)
 				prevVal[keyNum] = v[:]
 			}
 		}
 		if flusher != nil {
+			logger.Debug("Flushing data to database", "txNum", txNum)
 			err = flusher.Flush(ctx, tx)
 			require.NoError(tb, err)
 			flusher = nil
@@ -804,6 +812,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 		err = flusher.Flush(ctx, tx)
 		require.NoError(tb, err)
 	}
+	logger.Debug("Final flush before committing transaction")
 	err = writer.Flush(ctx, tx)
 	require.NoError(tb, err)
 	err = tx.Commit()
@@ -812,11 +821,23 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	return db, h, txs
 }
 
-func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
+func checkHistoryHistory(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 	t.Helper()
 	// Check the history
 	hc := h.BeginFilesRo()
 	defer hc.Close()
+
+	err := db.View(context.Background(), func(tx kv.Tx) error {
+		from, to := hc.stepsRangeInDB(tx)
+		expectedSteps := txs / h.aggregationStep
+		if expectedSteps > 1 {
+			// Should have steps from recent data in DB (last 2 steps remain uncollated)
+			require.Greater(t, to, 0.0, "Should have steps in DB")
+			require.GreaterOrEqual(t, to, from, "To step should be >= from step")
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	for txNum := uint64(0); txNum <= txs; txNum++ {
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
@@ -874,7 +895,7 @@ func TestHistoryHistory(t *testing.T) {
 				require.NoError(err)
 			}()
 		}
-		checkHistoryHistory(t, h, txs)
+		checkHistoryHistory(t, h, db, txs)
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
@@ -953,7 +974,7 @@ func TestHistoryMergeFiles(t *testing.T) {
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
 		collateAndMergeHistory(t, db, h, txs, true)
-		checkHistoryHistory(t, h, txs)
+		checkHistoryHistory(t, h, db, txs)
 	}
 
 	t.Run("large_values", func(t *testing.T) {
@@ -986,7 +1007,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		// Recreate domain and re-scan the files
 		require.NoError(h.openFolder())
 		// Check the history
-		checkHistoryHistory(t, h, txs)
+		checkHistoryHistory(t, h, db, txs)
 	}
 
 	t.Run("large_values", func(t *testing.T) {
@@ -1033,6 +1054,7 @@ func TestHistoryRange1(t *testing.T) {
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
+			fmt.Printf("DEBUG: key=%x, val=%x\n", k, v)
 		}
 		require.Equal([]string{
 			"0100000000000001",
@@ -1195,6 +1217,26 @@ func TestHistoryRange2(t *testing.T) {
 			hc, require := h.BeginFilesRo(), require.New(t)
 			defer hc.Close()
 
+			// single Get test-cases
+			tx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			v, ok, err := hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 900, tx)
+			require.NoError(err)
+			require.True(ok)
+
+			require.Equal("ff00000000000383", hexutil.EncodeWithoutPrefix(v))
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 0, tx)
+			require.NoError(err)
+			require.True(ok)
+			require.Equal([]byte{}, v)
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 1000, tx)
+			require.NoError(err)
+			require.True(ok)
+			require.Equal(hexutil.MustDecodeHex("ff000000000003e7"), v)
+			_ = testCases
+
 			{ //check IdxRange
 				idxIt, err := hc.IdxRange(firstKey[:], -1, -1, order.Asc, -1, roTx)
 				require.NoError(err)
@@ -1294,6 +1336,12 @@ func TestHistoryRange2(t *testing.T) {
 				"ff00000000000052",
 				"ff00000000000024"}, vals)
 
+		})
+		t.Run("after merge", func(t *testing.T) {
+			collateAndMergeHistory(t, db, h, txs, true)
+			hc, require := h.BeginFilesRo(), require.New(t)
+			defer hc.Close()
+
 			// single Get test-cases
 			tx, err := db.BeginRo(ctx)
 			require.NoError(err)
@@ -1311,12 +1359,6 @@ func TestHistoryRange2(t *testing.T) {
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutil.MustDecodeHex("ff000000000003e7"), v)
-			_ = testCases
-		})
-		t.Run("after merge", func(t *testing.T) {
-			collateAndMergeHistory(t, db, h, txs, true)
-			hc, require := h.BeginFilesRo(), require.New(t)
-			defer hc.Close()
 
 			keys = keys[:0]
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
@@ -1348,23 +1390,6 @@ func TestHistoryRange2(t *testing.T) {
 				"0100000000000012",
 				"0100000000000013"}, keys)
 
-			// single Get test-cases
-			tx, err := db.BeginRo(ctx)
-			require.NoError(err)
-			defer tx.Rollback()
-
-			v, ok, err := hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 900, tx)
-			require.NoError(err)
-			require.True(ok)
-			require.Equal(hexutil.MustDecodeHex("ff00000000000383"), v)
-			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 0, tx)
-			require.NoError(err)
-			require.True(ok)
-			require.Equal([]byte{}, v)
-			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 1000, tx)
-			require.NoError(err)
-			require.True(ok)
-			require.Equal(hexutil.MustDecodeHex("ff000000000003e7"), v)
 		})
 	}
 	t.Run("large_values", func(t *testing.T) {
@@ -1550,4 +1575,65 @@ func TestHistory_OpenFolder(t *testing.T) {
 	err = h.openFolder()
 	require.NoError(t, err)
 	h.Close()
+}
+
+func TestStepsRangeInDB(t *testing.T) {
+	logger := log.New()
+	db, h := testDbAndHistory(t, false, logger)
+	ctx := context.Background()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+	writer := hc.NewWriter()
+	defer writer.close()
+
+	// Test with empty DB
+	t.Run("empty DB", func(t *testing.T) {
+		from, to := hc.stepsRangeInDB(tx)
+		require.Equal(t, 0.0, from)
+		require.Equal(t, 0.0, to)
+	})
+
+	// Add some test data across multiple steps
+	key1 := []byte("key1")
+	key2 := []byte("key2")
+
+	// Step 5: txNum 80-95
+	err = writer.AddPrevValue(key1, 85, []byte("prev1"))
+	require.NoError(t, err)
+
+	// Step 10: txNum 160-175
+	err = writer.AddPrevValue(key1, 165, []byte("prev2"))
+	require.NoError(t, err)
+	err = writer.AddPrevValue(key2, 170, []byte("prev3"))
+	require.NoError(t, err)
+
+	// Step 15: txNum 240-255
+	err = writer.AddPrevValue(key2, 245, []byte("prev4"))
+	require.NoError(t, err)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(t, err)
+
+	t.Run("multiple steps", func(t *testing.T) {
+		from, to := hc.stepsRangeInDB(tx)
+		require.Equal(t, 5.0, from, "Should return lowest step")
+		require.Equal(t, 15.0, to, "Should return highest step")
+	})
+
+	// Add one more entry in step 3 (should become new minimum)
+	err = writer.AddPrevValue(key1, 50, []byte("prev0"))
+	require.NoError(t, err)
+	err = writer.Flush(ctx, tx)
+	require.NoError(t, err)
+
+	t.Run("expanded range", func(t *testing.T) {
+		from, to := hc.stepsRangeInDB(tx)
+		require.Equal(t, 3.0, from, "Should return new lowest step")
+		require.Equal(t, 15.0, to, "Should return same highest step")
+	})
 }

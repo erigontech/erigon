@@ -2286,6 +2286,21 @@ func compareIterators(t *testing.T, et, ut stream.KV) {
 		}
 	}
 }
+func compareIteratorsS(t *testing.T, et, ut stream.KV) {
+	t.Helper()
+	for {
+		ek, ev, err1 := et.Next()
+		uk, uv, err2 := ut.Next()
+		require.Equal(t, err1, err2)
+		require.Equal(t, ek, uk)
+		require.Equal(t, ev, uv)
+		if !et.HasNext() {
+			require.False(t, ut.HasNext(), "unwindedIter has more keys than expectedIter got\n")
+			break
+		}
+		require.True(t, ut.HasNext())
+	}
+}
 
 func TestDomain_PruneSimple(t *testing.T) {
 	if testing.Short() {
