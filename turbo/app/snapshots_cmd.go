@@ -267,7 +267,13 @@ var snapshotCommand = cli.Command{
 			Description: "Reset state to resumable initial sync.",
 			Action:      resetCliAction,
 			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
-			Flags: append(slices.Clone(logging.Flags), &utils.DataDirFlag, &utils.ChainFlag),
+			Flags: append(
+				slices.Clone(logging.Flags),
+				&utils.DataDirFlag,
+				&utils.ChainFlag,
+				&pruneFlag,
+				&dryRunFlag,
+			),
 		},
 		{
 			Name:    "rm-state-snapshots",
