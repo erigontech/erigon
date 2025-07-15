@@ -357,11 +357,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				if txTask.IsBlockEnd() { // block changed
 					cumulativeBlobGasUsedInBlock = 0
 				} else {
-					var receipt *types.Receipt
-					if txTask.TxIndex >= 0 {
-						receipt = result.Receipt
-					}
-					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
+					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 						return err
 					}
 				}

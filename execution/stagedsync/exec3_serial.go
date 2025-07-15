@@ -228,20 +228,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			return false, nil
 		}
 
-		var receipt *types.Receipt
-		if !task.IsBlockEnd() {
-			if txTask.TxIndex >= 0 {
-				receipt = blockReceipts[txTask.TxIndex-startTxIndex]
-			}
-			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
-				return false, err
 		var logIndexAfterTx uint32
 		var cumGasUsed uint64
 		if !txTask.IsBlockEnd() {
 			if txTask.TxIndex >= 0 {
 				receipt := blockReceipts[txTask.TxIndex-startTxIndex]
 				if receipt != nil {
-					logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(txTask.Logs))
+					logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(result.Logs))
 					cumGasUsed = receipt.CumulativeGasUsed
 				}
 			}
@@ -274,7 +267,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				}
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-					logIndexAfterTx = uint32(firstIndex) + uint32(len(txTask.Logs))
+					logIndexAfterTx = uint32(firstIndex) + uint32(len(result.Logs))
 					cumGasUsed = lastReceipt.CumulativeGasUsed
 				}
 			}
