@@ -1287,7 +1287,8 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
-func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
+func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64, logger log.Logger) error {
+	logger.Info("WriteReceiptCacheV2", "txNum", txNum, "receipt", receipt)
 	var toWrite []byte
 
 	if receipt != nil {
