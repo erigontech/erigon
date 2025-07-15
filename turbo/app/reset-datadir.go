@@ -56,11 +56,18 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		return fmt.Errorf("getting chain name from chaindata: %w", err)
 	}
 	chain := utils.ChainFlag.Get(cliCtx)
-	if !cliCtx.IsSet(utils.ChainFlag.Name) {
+	if cliCtx.IsSet(utils.ChainFlag.Name) {
+		if configChainName.Ok && configChainName.Value != chain {
+			// Pedantic but interesting.
+			logger.Warn("chain name flag and chain config do not match", "flag", chain, "config", configChainName.Value)
+		}
+		logger.Info("using chain name from flag", "chain", chain)
+	} else {
 		if !configChainName.Ok {
 			return errors.New("chain flag not set and chain name not found in chaindata (reset already occurred or invalid data dir?)")
 		}
 		chain = configChainName.Unwrap()
+		logger.Info("read chain name from config", "chain", chain)
 	}
 
 	dirs := datadir.Open(dataDirPath)
@@ -78,7 +85,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	cfg := snapcfg.KnownCfg(chain)
 	// Should we check cfg.Local? We could be resetting to the preverified.toml...?
 	logger.Info(
-		"Loaded preverified snapshots",
+		"Loaded preverified snapshots hashes",
 		"len", len(cfg.Preverified.Items),
 		"chain", chain,
 	)
