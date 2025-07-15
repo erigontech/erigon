@@ -5,11 +5,11 @@ package types
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var _ = (*logMarshaling)(nil)
@@ -62,7 +62,8 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	}
 	l.Address = *dec.Address
 	if dec.Topics == nil {
-		log.Info("stack is", "stack", dbg.Stack())
+		panic(fmt.Sprintf("missing required field 'topics' for Log: %s %s", dec.TxHash.String(), dbg.Stack()))
+		//log.Info("stack is", "stack", dbg.Stack())
 		return errors.New("missing required field 'topics' for Log")
 	}
 	l.Topics = dec.Topics
