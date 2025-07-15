@@ -143,6 +143,8 @@ func AssembleTracer(
 		// Define a meaningful timeout of a single transaction trace
 		timeout := callTimeout
 		if config.Timeout != nil {
+			log.Warn("[dbg] here11")
+
 			var err error
 			timeout, err = time.ParseDuration(*config.Timeout)
 			if err != nil {
