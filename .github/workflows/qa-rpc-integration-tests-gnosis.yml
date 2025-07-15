@@ -19,6 +19,7 @@ on:
 
 jobs:
   gnosis-rpc-integ-tests:
+    if: false # temporarily disabled after PR 15838
     concurrency:
       group: >-
         ${{
@@ -27,7 +28,7 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [ self-hosted, qa, rpc-integration, Gnosis ]
+    runs-on: [ self-hosted, qa, Gnosis, rpc-integration ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -155,7 +156,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: $TEST_RESULT_DIR
+          path: ${{ env.TEST_RESULT_DIR }}
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'

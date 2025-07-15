@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -88,9 +89,23 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 
 	if len(fuluBlocks) > 0 {
 		// download missing column data for the fulu blocks
-		if err = cfg.peerDas.DownloadMissingColumnsByBlocks(ctx, fuluBlocks); err != nil {
-			return nil, err
+		wg := sync.WaitGroup{}
+		for _, block := range fuluBlocks {
+			wg.Add(1)
+			go func(block *cltypes.SignedBeaconBlock) {
+				defer wg.Done()
+				if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
+					if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, []*cltypes.SignedBeaconBlock{block}); err != nil {
+						log.Warn("[chainTipSync] failed to download columns and recover blobs", "err", err)
+					}
+				} else {
+					if err := cfg.peerDas.DownloadOnlyCustodyColumns(ctx, []*cltypes.SignedBeaconBlock{block}); err != nil {
+						log.Warn("[chainTipSync] failed to download only custody columns", "err", err)
+					}
+				}
+			}(block)
 		}
+		wg.Wait()
 	}
 
 	if len(denebBlocks) > 0 {

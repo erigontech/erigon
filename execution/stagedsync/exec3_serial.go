@@ -235,6 +235,15 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
+		var logIndexAfterTx uint32
+		var cumGasUsed uint64
+		if !txTask.IsBlockEnd() {
+			if txTask.TxIndex >= 0 {
+				receipt := blockReceipts[txTask.TxIndex-startTxIndex]
+				if receipt != nil {
+					logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(txTask.Logs))
+					cumGasUsed = receipt.CumulativeGasUsed
+				}
 			}
 		} else {
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
@@ -253,7 +262,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 						prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
 						result := se.worker.RunTxTaskNoLock(&prevTask)
 						if result.Err != nil {
-							return false, result.Err
+							return false, fmt.Errorf("error while finding last receipt: %w", result.Err)
 						}
 						lastReceipt, err = result.CreateReceipt(nil)
 						if err != nil {
@@ -265,15 +274,15 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				}
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-					receipt = &types.Receipt{
-						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
-						FirstLogIndexWithinBlock: uint32(firstIndex),
-					}
+					logIndexAfterTx = uint32(firstIndex) + uint32(len(txTask.Logs))
+					cumGasUsed = lastReceipt.CumulativeGasUsed
 				}
 			}
 		}
-		if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
-			return false, err
+		if !txTask.HistoryExecution {
+			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
+				return false, err
+			}
 		}
 
 		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
