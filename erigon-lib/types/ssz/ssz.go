@@ -18,6 +18,8 @@ package ssz
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -136,7 +138,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 		return nil, ErrBufferNotRounded
 	}
 	if elementsNum > _max {
-		return nil, ErrTooBigList
+		return nil, errors.Join(ErrTooBigList, fmt.Errorf("expected %d elements, got %d", _max, elementsNum))
 	}
 	objs := make([]T, elementsNum)
 	for i := range objs {
