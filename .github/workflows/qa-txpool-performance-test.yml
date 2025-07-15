@@ -286,24 +286,12 @@ jobs:
           echo "## 📊 Throughput Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if jq -e '.tx_pool_throughput_analysis' "$output_json" > /dev/null 2>&1; then
-            echo "| TX Count | Mean TPS | Max TPS | Missed Events | Duplicated Events | Omission Events |" >> $GITHUB_STEP_SUMMARY
-            echo "|----------|----------|---------|---------------|-------------------|-----------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Max TPS |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|" >> $GITHUB_STEP_SUMMARY
             
             throughput_length=$(jq '.tx_pool_throughput_analysis | length' "$output_json")
             for ((i=0; i<throughput_length; i++)); do
-              tx_count=$(jq -r ".tx_pool_throughput_analysis[$i].tx_count" "$output_json")
-              mean_tps=$(jq -r ".tx_pool_throughput_analysis[$i].mean_tps_throughput" "$output_json")
               max_tps=$(jq -r ".tx_pool_throughput_analysis[$i].throughput_measures | if length > 0 then map(.processed_tps) | max else null end" "$output_json")
-              missed=$(jq -r ".tx_pool_throughput_analysis[$i].missed_p2p_event_count" "$output_json")
-              duplicated=$(jq -r ".tx_pool_throughput_analysis[$i].duplicated_p2p_event_count" "$output_json")
-              omission=$(jq -r ".tx_pool_throughput_analysis[$i].coordinated_omission_events_count" "$output_json")
-              
-              # Format TPS to 2 decimal places, handle null/invalid values
-              if [ "$mean_tps" != "null" ] && [ -n "$mean_tps" ] && [[ "$mean_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                mean_tps_formatted=$(printf "%.2f" "$mean_tps")
-              else
-                mean_tps_formatted="N/A"
-              fi
               
               # Format Max TPS to 2 decimal places, handle null/invalid values
               if [ "$max_tps" != "null" ] && [ -n "$max_tps" ] && [[ "$max_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
@@ -312,7 +300,7 @@ jobs:
                 max_tps_formatted="N/A"
               fi
               
-              echo "| $tx_count | $mean_tps_formatted | $max_tps_formatted | $missed | $duplicated | $omission |" >> $GITHUB_STEP_SUMMARY
+              echo "| $max_tps_formatted |" >> $GITHUB_STEP_SUMMARY
             done
           else
             echo "⚠️ No throughput analysis data available" >> $GITHUB_STEP_SUMMARY
