@@ -17,8 +17,6 @@ linters:
     - gosmopolitan
     - loggercheck
     - nilnesserr
-    - perfsprint
-    - prealloc
     - reassign
     - spancheck
     - unconvert
@@ -46,6 +44,8 @@ linters:
     - sqlclosecheck
     - zerologlint
     - rowserrcheck
+    - perfsprint
+    - prealloc
   settings:
     goconst:
       min-len: 2
