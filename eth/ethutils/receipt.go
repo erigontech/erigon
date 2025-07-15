@@ -68,7 +68,8 @@ func MarshalReceipt(
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
-	log.Info("MarshalReceipt", "txnHash", txnHash, "txIndex", receipt.TransactionIndex)
+	log.Info("MarshalReceipt", "txnHash", txnHash, "txIndex", receipt.TransactionIndex, "blockNumber", receipt.BlockNumber.Uint64())
+	log.Info("receiptssss", "receipt", receipt)
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetTipCap().ToBig())

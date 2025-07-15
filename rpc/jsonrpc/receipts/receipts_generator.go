@@ -262,11 +262,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	var receiptsFromDB types.Receipts
 	receipts := make(types.Receipts, len(block.Transactions()))
 	defer func() {
-		if dbg.Enabled(ctx) {
-			log.Info("[dbg] ReceiptGenerator.GetReceipts",
-				"blockNum", block.NumberU64(),
-				"nil receipts in db", receiptsFromDB == nil)
-		}
+		//if dbg.Enabled(ctx) {
+		log.Info("[dbg] blahblahblah ReceiptGenerator.GetReceipts",
+			"blockNum", block.NumberU64(),
+			"nil receipts in db", receiptsFromDB == nil)
+		//}
 	}()
 
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
