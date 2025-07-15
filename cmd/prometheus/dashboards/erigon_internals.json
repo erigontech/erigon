@@ -33,7 +33,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "12.1.0-91038.patch3-91166"
+      "version": "12.1.0-91295"
     },
     {
       "type": "panel",
@@ -85,7 +85,6 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": null,
   "links": [],
   "panels": [
     {
@@ -356,7 +355,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 400
+            "y": 1535
           },
           "id": 278,
           "options": {
@@ -453,7 +452,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 400
+            "y": 1535
           },
           "id": 276,
           "options": {
@@ -550,7 +549,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 439
+            "y": 1574
           },
           "id": 273,
           "options": {
@@ -647,7 +646,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 439
+            "y": 1574
           },
           "id": 275,
           "options": {
@@ -744,7 +743,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 447
+            "y": 1582
           },
           "id": 274,
           "options": {
@@ -841,7 +840,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 447
+            "y": 1582
           },
           "id": 272,
           "options": {
@@ -1434,7 +1433,7 @@
             "h": 4,
             "w": 12,
             "x": 0,
-            "y": 354
+            "y": 1489
           },
           "id": 222,
           "options": {
@@ -1502,7 +1501,7 @@
             "h": 4,
             "w": 12,
             "x": 0,
-            "y": 435
+            "y": 1570
           },
           "id": 223,
           "options": {
@@ -1842,7 +1841,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 436
+            "y": 1571
           },
           "id": 229,
           "options": {
@@ -1909,7 +1908,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 436
+            "y": 1571
           },
           "id": 215,
           "options": {
@@ -2003,7 +2002,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 444
+            "y": 1579
           },
           "id": 236,
           "options": {
@@ -2081,7 +2080,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 444
+            "y": 1579
           },
           "id": 214,
           "options": {
@@ -2154,7 +2153,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 452
+            "y": 1587
           },
           "id": 235,
           "options": {
@@ -2260,7 +2259,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 452
+            "y": 1587
           },
           "id": 210,
           "options": {
@@ -2329,7 +2328,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 460
+            "y": 1595
           },
           "id": 234,
           "options": {
@@ -2460,7 +2459,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 460
+            "y": 1595
           },
           "id": 211,
           "options": {
@@ -2558,7 +2557,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 468
+            "y": 1603
           },
           "id": 231,
           "options": {
@@ -2646,7 +2645,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 468
+            "y": 1603
           },
           "id": 221,
           "options": {
@@ -2833,7 +2832,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 476
+            "y": 1611
           },
           "id": 216,
           "options": {
@@ -2962,7 +2961,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 476
+            "y": 1611
           },
           "id": 217,
           "options": {
@@ -3060,7 +3059,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 484
+            "y": 1619
           },
           "id": 228,
           "options": {
@@ -3125,7 +3124,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 484
+            "y": 1619
           },
           "id": 213,
           "options": {
@@ -3198,7 +3197,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 492
+            "y": 1627
           },
           "id": 226,
           "options": {
@@ -3304,7 +3303,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 492
+            "y": 1627
           },
           "id": 227,
           "options": {
@@ -3430,7 +3429,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 500
+            "y": 1635
           },
           "id": 224,
           "options": {
@@ -3566,7 +3565,7 @@
             "h": 12,
             "w": 24,
             "x": 0,
-            "y": 509
+            "y": 1644
           },
           "id": 209,
           "options": {
@@ -3714,7 +3713,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -3814,7 +3813,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -3895,7 +3894,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 437
+            "y": 135
           },
           "id": 238,
           "options": {
@@ -3911,7 +3910,7 @@
               "sort": "asc"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -3987,7 +3986,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 437
+            "y": 135
           },
           "id": 239,
           "options": {
@@ -4007,7 +4006,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -4105,7 +4104,7 @@
             "showThresholdMarkers": true,
             "sizing": "auto"
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -4206,7 +4205,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -4308,7 +4307,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -4385,7 +4384,7 @@
             "sizing": "manual",
             "valueMode": "color"
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -4500,7 +4499,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -4658,7 +4657,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -4797,32 +4796,7 @@
               },
               "unit": "s"
             },
-            "overrides": [
-              {
-                "__systemRef": "hideSeriesFrom",
-                "matcher": {
-                  "id": "byNames",
-                  "options": {
-                    "mode": "exclude",
-                    "names": [
-                      "commitment took: dev-bm-e3-ethmainnet-n1"
-                    ],
-                    "prefix": "All except:",
-                    "readOnly": true
-                  }
-                },
-                "properties": [
-                  {
-                    "id": "custom.hideFrom",
-                    "value": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": true
-                    }
-                  }
-                ]
-              }
-            ]
+            "overrides": []
           },
           "gridPos": {
             "h": 10,
@@ -4846,7 +4820,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -4996,7 +4970,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -5134,7 +5108,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -5153,226 +5127,6 @@
             }
           ],
           "title": "Block Execution speed ",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 45
-          },
-          "id": 245,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
-          "targets": [
-            {
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "update_fork_choice{type=\"fork_depth\", instance=~\"$instance\", quantile=\"$quantile\"}",
-              "fullMetaSearch": false,
-              "includeNullMetadata": true,
-              "legendFormat": "fork_depth {{instance}}",
-              "range": true,
-              "refId": "A",
-              "useBackend": false,
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            }
-          ],
-          "title": "Update Fork Choice depth",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "s"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 45
-          },
-          "id": 246,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
-          "targets": [
-            {
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "update_fork_choice{type=\"arrival_delay\", instance=\"$instance\", quantile=\"$quantile\"}",
-              "fullMetaSearch": false,
-              "includeNullMetadata": true,
-              "legendFormat": "arrival_delay $instance",
-              "range": true,
-              "refId": "A",
-              "useBackend": false,
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "update_fork_choice{instance=~\"$instance\", quantile=\"$quantile\", type=\"execution_duration\"}",
-              "fullMetaSearch": false,
-              "hide": false,
-              "includeNullMetadata": true,
-              "instant": false,
-              "legendFormat": "execution_duration {{instance}}",
-              "range": true,
-              "refId": "B",
-              "useBackend": false
-            }
-          ],
-          "title": "Update Fork Choice delays",
           "type": "timeseries"
         },
         {
@@ -5440,7 +5194,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 53
+            "y": 45
           },
           "id": 206,
           "options": {
@@ -5458,7 +5212,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -5544,7 +5298,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 53
+            "y": 45
           },
           "id": 207,
           "options": {
@@ -5562,7 +5316,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -5675,7 +5429,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 53
+            "y": 45
           },
           "id": 194,
           "options": {
@@ -5693,7 +5447,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -5728,6 +5482,328 @@
             }
           ],
           "title": "Exec v3",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 53
+          },
+          "id": 246,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "update_fork_choice{type=\"arrival_delay\", instance=\"$instance\", quantile=\"$quantile\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "arrival_delay $instance",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "update_fork_choice{instance=~\"$instance\", quantile=\"$quantile\", type=\"execution_duration\"}",
+              "fullMetaSearch": false,
+              "hide": false,
+              "includeNullMetadata": true,
+              "instant": false,
+              "legendFormat": "execution_duration {{instance}}",
+              "range": true,
+              "refId": "B",
+              "useBackend": false
+            }
+          ],
+          "title": "Update Fork Choice Delays",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 53
+          },
+          "id": 281,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "update_fork_choice{type=\"prune_duration\", instance=~\"$instance\", quantile=\"$quantile\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "{{type}} {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Update Fork Choice Prune Duration",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 53
+          },
+          "id": 245,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "update_fork_choice{type=\"fork_depth\", instance=~\"$instance\", quantile=\"$quantile\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "fork_depth {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Update Fork Choice Depth",
           "type": "timeseries"
         },
         {
@@ -5829,7 +5905,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -5928,7 +6004,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 70
+            "y": 1404
           },
           "id": 243,
           "options": {
@@ -6047,7 +6123,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 70
+            "y": 1404
           },
           "id": 244,
           "options": {
@@ -6163,7 +6239,7 @@
             "h": 9,
             "w": 8,
             "x": 0,
-            "y": 9
+            "y": 71
           },
           "id": 159,
           "options": {
@@ -6179,7 +6255,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -6273,7 +6349,7 @@
             "h": 9,
             "w": 8,
             "x": 8,
-            "y": 9
+            "y": 71
           },
           "id": 280,
           "options": {
@@ -6289,7 +6365,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "disableTextWrap": false,
@@ -6375,7 +6451,7 @@
             "h": 9,
             "w": 8,
             "x": 16,
-            "y": 9
+            "y": 71
           },
           "id": 167,
           "options": {
@@ -6393,7 +6469,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -6489,7 +6565,7 @@
             "h": 9,
             "w": 8,
             "x": 0,
-            "y": 18
+            "y": 80
           },
           "id": 169,
           "options": {
@@ -6507,7 +6583,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -6615,39 +6691,13 @@
               },
               "unit": "s"
             },
-            "overrides": [
-              {
-                "__systemRef": "hideSeriesFrom",
-                "matcher": {
-                  "id": "byNames",
-                  "options": {
-                    "mode": "exclude",
-                    "names": [
-                      "sync: dev-bm-e3-ethmainnet-n1",
-                      "sync: dev-bm-e3-gnosis-n1"
-                    ],
-                    "prefix": "All except:",
-                    "readOnly": true
-                  }
-                },
-                "properties": [
-                  {
-                    "id": "custom.hideFrom",
-                    "value": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": true
-                    }
-                  }
-                ]
-              }
-            ]
+            "overrides": []
           },
           "gridPos": {
             "h": 9,
             "w": 8,
             "x": 8,
-            "y": 18
+            "y": 80
           },
           "id": 166,
           "options": {
@@ -6665,7 +6715,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -6774,7 +6824,7 @@
                   "type": "linear"
                 },
                 "showPoints": "never",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -6806,7 +6856,7 @@
             "h": 9,
             "w": 8,
             "x": 16,
-            "y": 18
+            "y": 80
           },
           "id": 141,
           "options": {
@@ -6822,7 +6872,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -6906,7 +6956,7 @@
             "h": 9,
             "w": 8,
             "x": 0,
-            "y": 27
+            "y": 89
           },
           "id": 168,
           "options": {
@@ -6924,7 +6974,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -7220,7 +7270,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 10
+            "y": 72
           },
           "id": 106,
           "options": {
@@ -7238,7 +7288,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -7328,7 +7378,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 10
+            "y": 72
           },
           "id": 128,
           "options": {
@@ -7344,7 +7394,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -7440,7 +7490,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 10
+            "y": 72
           },
           "id": 154,
           "options": {
@@ -7458,7 +7508,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -7625,7 +7675,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 18
+            "y": 80
           },
           "id": 86,
           "options": {
@@ -7643,7 +7693,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -7746,7 +7796,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 18
+            "y": 80
           },
           "id": 148,
           "options": {
@@ -7764,7 +7814,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -7915,7 +7965,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 18
+            "y": 80
           },
           "id": 124,
           "options": {
@@ -7931,7 +7981,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -8020,7 +8070,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 26
+            "y": 88
           },
           "id": 153,
           "options": {
@@ -8038,7 +8088,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -8123,7 +8173,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 26
+            "y": 88
           },
           "id": 155,
           "options": {
@@ -8141,7 +8191,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -8271,7 +8321,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 26
+            "y": 88
           },
           "id": 150,
           "options": {
@@ -8289,7 +8339,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -8412,7 +8462,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 34
+            "y": 96
           },
           "id": 85,
           "options": {
@@ -8430,7 +8480,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "datasource": {
@@ -8545,7 +8595,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1417
+            "y": 2552
           },
           "id": 185,
           "options": {
@@ -8670,7 +8720,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1417
+            "y": 2552
           },
           "id": 186,
           "options": {
@@ -8771,7 +8821,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1425
+            "y": 2560
           },
           "id": 187,
           "options": {
@@ -8872,7 +8922,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1425
+            "y": 2560
           },
           "id": 188,
           "options": {
@@ -8981,7 +9031,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 1433
+            "y": 2568
           },
           "id": 189,
           "options": {
@@ -9126,7 +9176,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 1433
+            "y": 2568
           },
           "id": 184,
           "options": {
@@ -9282,7 +9332,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 1418
+            "y": 2553
           },
           "id": 96,
           "options": {
@@ -9405,7 +9455,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 1418
+            "y": 2553
           },
           "id": 77,
           "options": {
@@ -9551,7 +9601,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1419
+            "y": 2554
           },
           "id": 175,
           "options": {
@@ -9712,7 +9762,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1419
+            "y": 2554
           },
           "id": 177,
           "options": {
@@ -9872,7 +9922,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 1427
+            "y": 2562
           },
           "id": 178,
           "options": {
@@ -9975,7 +10025,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 1427
+            "y": 2562
           },
           "id": 180,
           "options": {
@@ -10088,7 +10138,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 1433
+            "y": 2568
           },
           "id": 176,
           "options": {
@@ -10190,7 +10240,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 1433
+            "y": 2568
           },
           "id": 181,
           "options": {
@@ -10317,7 +10367,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1420
+            "y": 2555
           },
           "id": 268,
           "options": {
@@ -10418,7 +10468,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1420
+            "y": 2555
           },
           "id": 267,
           "options": {
@@ -10537,7 +10587,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1428
+            "y": 2563
           },
           "id": 266,
           "options": {
@@ -10639,7 +10689,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1428
+            "y": 2563
           },
           "id": 265,
           "options": {
@@ -10740,7 +10790,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1436
+            "y": 2571
           },
           "id": 264,
           "options": {
@@ -10841,7 +10891,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1436
+            "y": 2571
           },
           "id": 263,
           "options": {
@@ -10960,7 +11010,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1444
+            "y": 2579
           },
           "id": 262,
           "options": {
@@ -11062,7 +11112,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1444
+            "y": 2579
           },
           "id": 261,
           "options": {
@@ -11163,7 +11213,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1452
+            "y": 2587
           },
           "id": 259,
           "options": {
@@ -11264,7 +11314,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1452
+            "y": 2587
           },
           "id": 269,
           "options": {
@@ -11382,7 +11432,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1460
+            "y": 2595
           },
           "id": 255,
           "options": {
@@ -11500,7 +11550,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1460
+            "y": 2595
           },
           "id": 257,
           "options": {
@@ -11602,7 +11652,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1468
+            "y": 2603
           },
           "id": 260,
           "options": {
@@ -11704,7 +11754,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1468
+            "y": 2603
           },
           "id": 258,
           "options": {
@@ -11806,7 +11856,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1476
+            "y": 2611
           },
           "id": 254,
           "options": {
@@ -11907,7 +11957,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1476
+            "y": 2611
           },
           "id": 253,
           "options": {
@@ -12026,7 +12076,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1484
+            "y": 2619
           },
           "id": 252,
           "options": {
@@ -12127,7 +12177,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1484
+            "y": 2619
           },
           "id": 251,
           "options": {
@@ -12245,7 +12295,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1492
+            "y": 2627
           },
           "id": 256,
           "options": {
@@ -12380,7 +12430,7 @@
     ]
   },
   "time": {
-    "from": "now-1h",
+    "from": "now-6h",
     "to": "now"
   },
   "timepicker": {
@@ -12399,6 +12449,7 @@
   "timezone": "",
   "title": "1. Erigon CUSTOM METRICS",
   "uid": "b42a61d7-02b1-416c-8ab4-b9c864356174",
-  "version": 429,
-  "weekStart": ""
+  "version": 443,
+  "weekStart": "",
+  "id": null
 }
