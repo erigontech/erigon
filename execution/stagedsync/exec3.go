@@ -763,7 +763,7 @@ Loop:
 					}
 				}
 
-				if _, err := aggregatorRo.PruneSmallBatches(ctx, pruneTimeout, executor.tx()); err != nil {
+				if _, err := executor.tx().(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
 					return err
 				}
 				pruneDuration = time.Since(timeStart)
