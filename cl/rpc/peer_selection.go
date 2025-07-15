@@ -24,6 +24,10 @@ import (
 )
 
 var (
+	ErrNoGoodPeer = errors.New("no good peer found")
+)
+
+var (
 	peersCandidateRefreshInterval = time.Second * 15
 )
 
@@ -201,17 +205,13 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 	for range len(c.peersQueue) {
 		c.peersIndex = (c.peersIndex + 1) % len(c.peersQueue)
 		peer := c.peersQueue[c.peersIndex]
-		/*if len(peer.mask) == int(c.beaconConfig.NumberOfColumns) {
-			// full mask, no need to filter
-			return req, peer.pid, uint64(len(peer.mask)), nil
-		}*/
 		// matching
 		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](req.Len())
 		req.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, length int) bool {
-			if item.Slot < peer.earliestAvailableSlot {
+			/*if item.Slot < peer.earliestAvailableSlot { // TODO: re-enable this. Now peer is not reliable.
 				log.Debug("skipping peer", "peer", peer.pid, "slot", item.Slot, "earliestAvailableSlot", peer.earliestAvailableSlot)
 				return true
-			}
+			}*/
 			if len(peer.mask) == int(c.beaconConfig.NumberOfColumns) {
 				// full mask, no need to filter
 				newReq.Append(item)
@@ -238,5 +238,5 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 	}
 
 	log.Debug("no good peer found", "peerCount", len(c.peersQueue))
-	return nil, "", 0, errors.New("no good peer found")
+	return nil, "", 0, ErrNoGoodPeer
 }
