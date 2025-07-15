@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -138,6 +139,7 @@ func AssembleTracer(
 	// Assemble the structured logger or the JavaScript tracer
 	switch {
 	case config != nil && config.Tracer != nil:
+		log.Warn("[dbg] here1")
 		// Define a meaningful timeout of a single transaction trace
 		timeout := callTimeout
 		if config.Timeout != nil {
@@ -167,9 +169,11 @@ func AssembleTracer(
 
 		return tracer, false, cancel, nil
 	case config == nil:
+		log.Warn("[dbg] here2")
 		ctx, cancel := context.WithTimeout(ctx, callTimeout)
 		return logger.NewJsonStreamLogger(nil, ctx, stream), true, cancel, nil
 	default:
+		log.Warn("[dbg] here3")
 		ctx, cancel := context.WithTimeout(ctx, callTimeout)
 		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream), true, cancel, nil
 	}
