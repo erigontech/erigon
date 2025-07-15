@@ -271,6 +271,12 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	}()
 
 	for i, txn := range block.Transactions() {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		evm2 := core.CreateEVM(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vm.Config{})
 		evm2.JumpDestCache = evm.JumpDestCache
 		evm = evm2
