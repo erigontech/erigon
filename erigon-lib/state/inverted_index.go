@@ -472,10 +472,17 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	}
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
+	// Create step-prefixed key: ^step + addr
+	step := txNum / w.aggregationStep
+	invertedStep := ^step
+	stepKey := make([]byte, 8+len(indexKey))
+	binary.BigEndian.PutUint64(stepKey[:8], invertedStep)
+	copy(stepKey[8:], indexKey)
+
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
 		return err
 	}
-	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
+	if err := w.index.Collect(stepKey, w.txNumBytes[:]); err != nil {
 		return err
 	}
 	return nil
@@ -622,6 +629,16 @@ func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
 	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
 	// because `hasher` object is interface and need call many methods on it
 	return murmur3.Sum128WithSeed(k, *iit.salt)
+}
+
+// makeStepPrefixedKey creates a step-prefixed key: ^step + addr
+func (iit *InvertedIndexRoTx) makeStepPrefixedKey(addr []byte, txNum uint64) []byte {
+	step := txNum / iit.aggStep
+	invertedStep := ^step
+	stepKey := make([]byte, 8+len(addr))
+	binary.BigEndian.PutUint64(stepKey[:8], invertedStep)
+	copy(stepKey[8:], addr)
+	return stepKey
 }
 
 func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Reader {
@@ -1004,7 +1021,16 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 				return fmt.Errorf("fn error: %w", err)
 			}
 		}
-		if err = idxDelCursor.DeleteExact(key, txnm); err != nil {
+
+		// Create step-prefixed key for deletion from valuesTable
+		txNum := binary.BigEndian.Uint64(txnm)
+		step := txNum / ii.aggregationStep
+		invertedStep := ^step
+		stepKey := make([]byte, 8+len(key))
+		binary.BigEndian.PutUint64(stepKey[:8], invertedStep)
+		copy(stepKey[8:], key)
+
+		if err = idxDelCursor.DeleteExact(stepKey, txnm); err != nil {
 			return err
 		}
 		mxPruneSizeIndex.Inc()
@@ -1012,7 +1038,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 
 		select {
 		case <-logEvery.C:
-			txNum := binary.BigEndian.Uint64(txnm)
 			ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
 				"pruned values", stat.PruneCountValues,
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
@@ -1075,32 +1100,41 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 // collate [stepFrom, stepTo)
 func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (InvertedIndexCollation, error) {
 	stepTo := step + 1
-	txFrom, txTo := step*ii.aggregationStep, stepTo*ii.aggregationStep
 	start := time.Now()
 	defer mxCollateTookIndex.ObserveDuration(start)
 
-	keysCursor, err := roTx.CursorDupSort(ii.keysTable)
+	valuesCursor, err := roTx.CursorDupSort(ii.valuesTable)
 	if err != nil {
-		return InvertedIndexCollation{}, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
+		return InvertedIndexCollation{}, fmt.Errorf("create %s values cursor: %w", ii.filenameBase, err)
 	}
-	defer keysCursor.Close()
+	defer valuesCursor.Close()
 
 	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".collate.ii", ii.iiCfg.dirs.Tmp, etl.SmallSortableBuffers, ii.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
 
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	// Create step-prefixed key range for this step
+	invertedStep := ^step
+	var stepKey [8]byte
+	binary.BigEndian.PutUint64(stepKey[:], invertedStep)
 
-	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
+	for k, v, err := valuesCursor.Seek(stepKey[:]); k != nil; k, v, err = valuesCursor.Next() {
 		if err != nil {
-			return InvertedIndexCollation{}, fmt.Errorf("iterate over %s keys cursor: %w", ii.filenameBase, err)
+			return InvertedIndexCollation{}, fmt.Errorf("iterate over %s values cursor: %w", ii.filenameBase, err)
 		}
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo { // [txFrom; txTo)
-			break
+
+		// Check if key still belongs to our step
+		if len(k) < 8 {
+			continue
 		}
-		if err := collector.Collect(v, k); err != nil {
-			return InvertedIndexCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", ii.filenameBase, k, txNum, k, err)
+		keyStep := binary.BigEndian.Uint64(k[:8])
+		if keyStep != invertedStep {
+			break // We've moved past our step
+		}
+
+		// Extract addr from step+addr key
+		addr := k[8:]
+		if err := collector.Collect(addr, v); err != nil {
+			return InvertedIndexCollation{}, fmt.Errorf("collect %s history key [%x]=>txn [%x]: %w", ii.filenameBase, addr, v, err)
 		}
 		select {
 		case <-ctx.Done():
