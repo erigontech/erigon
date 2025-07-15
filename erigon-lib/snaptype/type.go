@@ -196,6 +196,7 @@ type Type interface {
 	FileInfo(dir string, from uint64, to uint64) FileInfo
 	IdxFileName(from uint64, to uint64, index ...Index) string
 	IdxFileNames(from uint64, to uint64) []string
+	IdxFileMaskNames(from uint64, to uint64) []string
 	Indexes() []Index
 	HasIndexFiles(info FileInfo, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
