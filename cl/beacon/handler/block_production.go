@@ -973,12 +973,15 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	fmt.Println("X1")
 	validation := a.parseBlockPublishingValidation(w, r, apiVersion)
+	fmt.Println("X2")
 	// Decode the block
 	block, err := a.parseRequestBeaconBlock(version, r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	fmt.Println("X3")
 	_ = validation
 
 	if err := a.broadcastBlock(ctx, block.SignedBlock); err != nil {
