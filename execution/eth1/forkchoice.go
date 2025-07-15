@@ -590,7 +590,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		defer e.semaphore.Release(1)
 		pruneStart := time.Now()
 		defer UpdateForkChoicePruneDuration(pruneStart)
-		if err := e.db.UpdateNosync(e.bacgroundCtx, func(tx kv.RwTx) error {
+		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
 			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
 				return err
 			}
