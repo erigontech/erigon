@@ -27,8 +27,8 @@ import (
 	"net"
 	"os"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"

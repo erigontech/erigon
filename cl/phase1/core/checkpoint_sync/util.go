@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	"github.com/erigontech/erigon/cl/phase1/core/state"

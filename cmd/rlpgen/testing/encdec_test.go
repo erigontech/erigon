@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/rlp"
+	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/holiman/uint256"
 )
 

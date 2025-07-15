@@ -34,16 +34,16 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/trie"
-	"github.com/erigontech/erigon-lib/types/accounts"
-	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/rlp"
+	"github.com/erigontech/erigon/erigon-lib/trie"
+	"github.com/erigontech/erigon/erigon-lib/types/accounts"
+	witnesstypes "github.com/erigontech/erigon/erigon-lib/types/witness"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports

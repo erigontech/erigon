@@ -3,8 +3,8 @@ package state
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon/erigon-lib/version"
 )
 
 // aggregate set level snapshot creation config

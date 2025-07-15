@@ -17,7 +17,7 @@
 package rpchelper
 
 import (
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/erigon-lib/metrics"
 )
 
 const (

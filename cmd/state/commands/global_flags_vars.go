@@ -19,9 +19,9 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 
-	"github.com/erigontech/erigon-lib/common/paths"
+	"github.com/erigontech/erigon/erigon-lib/common/paths"
 )
 
 var (

@@ -3,8 +3,8 @@ package multiencseq
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano32"
 	"github.com/stretchr/testify/require"
 )
 

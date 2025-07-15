@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon/erigon-lib/etl"
 	"golang.org/x/sync/errgroup"
 )
 

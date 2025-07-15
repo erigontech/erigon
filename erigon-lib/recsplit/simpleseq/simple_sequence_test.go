@@ -3,8 +3,8 @@ package simpleseq
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/kv/stream"
 	"github.com/stretchr/testify/require"
 )
 

@@ -30,10 +30,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common/debug"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	kv2 "github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 var logger = log.New()

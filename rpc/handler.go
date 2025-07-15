@@ -31,8 +31,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/jsonstream"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )

@@ -14,8 +14,8 @@ import (
 	reflect "reflect"
 	time "time"
 
-	common "github.com/erigontech/erigon-lib/common"
-	types "github.com/erigontech/erigon-lib/types"
+	common "github.com/erigontech/erigon/erigon-lib/common"
+	types "github.com/erigontech/erigon/erigon-lib/types"
 	gomock "go.uber.org/mock/gomock"
 )
 

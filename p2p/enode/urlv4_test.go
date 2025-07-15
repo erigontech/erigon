@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 

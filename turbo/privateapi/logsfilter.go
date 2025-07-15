@@ -21,10 +21,10 @@ import (
 	"io"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 
 	"github.com/erigontech/erigon/turbo/shards"
 )

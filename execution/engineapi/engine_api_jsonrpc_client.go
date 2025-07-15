@@ -23,10 +23,10 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/jwt"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/jwt"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
 )

@@ -19,8 +19,8 @@ package rawdbhelpers
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/config3"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 func IdxStepsCountV3(tx kv.Tx) float64 {

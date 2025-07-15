@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/erigontech/erigon-lib/common/compress"
+	"github.com/erigontech/erigon/erigon-lib/common/compress"
 )
 
 var be = binary.BigEndian

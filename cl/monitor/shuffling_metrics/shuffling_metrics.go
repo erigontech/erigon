@@ -3,7 +3,7 @@ package shuffling_metrics
 import (
 	"time"
 
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/erigon-lib/metrics"
 )
 
 var (

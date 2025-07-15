@@ -5,12 +5,12 @@ import (
 	"math"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	accounts3 "github.com/erigontech/erigon/erigon-lib/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )

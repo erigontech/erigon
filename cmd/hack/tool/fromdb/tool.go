@@ -19,9 +19,9 @@ package fromdb
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 )
 

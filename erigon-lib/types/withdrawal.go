@@ -25,11 +25,11 @@ import (
 	"io"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/erigon-lib/rlp"
+	"github.com/erigontech/erigon/erigon-lib/types/clonable"
 )
 
 type encodingBuf [32]byte

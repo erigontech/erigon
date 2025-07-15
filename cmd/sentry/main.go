@@ -22,9 +22,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/paths"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/common/paths"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/turbo/debug"

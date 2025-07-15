@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	snaptype "github.com/erigontech/erigon-lib/snaptype"
+	snaptype "github.com/erigontech/erigon/erigon-lib/snaptype"
 	gomock "go.uber.org/mock/gomock"
 )
 

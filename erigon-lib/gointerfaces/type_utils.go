@@ -21,7 +21,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	types "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 )
 
 func ConvertH2048ToBloom(h2048 *types.H2048) [256]byte {

@@ -25,7 +25,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"

@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/erigon-lib/common/background"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/stretchr/testify/require"
 )

@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"os"
 
-	_ "github.com/erigontech/erigon-db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/erigon-db/snaptype"      //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/integration/commands"
 )
 

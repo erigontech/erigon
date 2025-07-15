@@ -29,8 +29,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/rpc"
 )

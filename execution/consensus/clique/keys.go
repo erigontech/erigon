@@ -19,7 +19,7 @@ package clique
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash

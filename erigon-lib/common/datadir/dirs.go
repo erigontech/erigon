@@ -25,8 +25,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/gofrs/flock"
 )
 

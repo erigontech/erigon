@@ -26,9 +26,9 @@ import (
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
-	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"

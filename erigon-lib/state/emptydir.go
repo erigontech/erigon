@@ -4,8 +4,8 @@ import (
 	"errors"
 	"path/filepath"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
 )
 
 func CheckSaltFilesExist(dirs datadir.Dirs) (bool, error) {

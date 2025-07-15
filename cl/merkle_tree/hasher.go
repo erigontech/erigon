@@ -19,7 +19,7 @@ package merkle_tree
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/prysmaticlabs/gohashtree"
 )

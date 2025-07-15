@@ -20,7 +20,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-lib/types"
 )
 
 type DecryptionMark struct {

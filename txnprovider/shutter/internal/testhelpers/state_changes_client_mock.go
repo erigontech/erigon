@@ -22,7 +22,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
 )
 
 type StateChangesClientMock struct {

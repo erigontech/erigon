@@ -24,8 +24,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/erigon-lib/types"
 )
 
 const (

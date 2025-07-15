@@ -6,14 +6,14 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
-	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	hexutil2 "github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-lib/types"
 )
 
 func convertDataToStringP(abstractMap map[string]interface{}, field string) *string {

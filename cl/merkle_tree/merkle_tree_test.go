@@ -3,8 +3,8 @@ package merkle_tree_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/stretchr/testify/require"
 )

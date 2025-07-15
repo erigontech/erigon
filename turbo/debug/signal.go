@@ -26,8 +26,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	_debug "github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/log/v3"
+	_debug "github.com/erigontech/erigon/erigon-lib/common/debug"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 func ListenSignals(stack io.Closer, logger log.Logger) {

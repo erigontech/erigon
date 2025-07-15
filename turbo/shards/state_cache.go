@@ -26,10 +26,10 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/metrics"
 
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/erigon-lib/types/accounts"
 )
 
 // LRU state cache consists of two structures - B-Tree and binary heap

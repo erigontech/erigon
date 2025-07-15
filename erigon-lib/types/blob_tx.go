@@ -24,10 +24,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/chain/params"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/rlp"
 )
 
 var ErrNilToFieldTx = errors.New("Tx: field 'To' can not be 'nil'")

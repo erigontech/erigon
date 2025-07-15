@@ -33,7 +33,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/gorilla/websocket"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 const (

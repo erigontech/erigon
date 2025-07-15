@@ -19,8 +19,8 @@ package jsonrpc
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 )
 
 func (api *OtterscanAPIImpl) GetTransactionError(ctx context.Context, hash common.Hash) (hexutil.Bytes, error) {

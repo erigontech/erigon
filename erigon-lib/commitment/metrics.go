@@ -3,8 +3,8 @@ package commitment
 import (
 	"encoding/csv"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 	"os"
 	"sort"
 	"strconv"

@@ -43,19 +43,19 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/erigontech/erigon-db/downloader"
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
-	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/paths"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-db/downloader"
+	"github.com/erigontech/erigon/erigon-db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/erigon-db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/common/paths"
+	proto_downloader "github.com/erigontech/erigon/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -67,7 +67,7 @@ import (
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 
-	_ "github.com/erigontech/erigon-db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/erigon-db/snaptype"      //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 

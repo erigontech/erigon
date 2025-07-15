@@ -44,11 +44,11 @@ import (
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/erigon-lib/version"
 )
 
 type rcloneInfo struct {

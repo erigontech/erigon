@@ -22,8 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/chain/params"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestConfigValueLookup(t *testing.T) {

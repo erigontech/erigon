@@ -27,8 +27,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 )
 
 // Lengths of hashes and addresses in bytes.

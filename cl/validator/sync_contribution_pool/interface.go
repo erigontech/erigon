@@ -17,7 +17,7 @@
 package sync_contribution_pool
 
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )

@@ -25,7 +25,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // Validator represets Volatile state for each Validator

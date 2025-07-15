@@ -20,7 +20,7 @@ package rawdb
 import (
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 var (

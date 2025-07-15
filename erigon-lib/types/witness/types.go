@@ -1,8 +1,8 @@
 package witness
 
 import (
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/types/accounts"
 )
 
 type AccountWithAddress struct {

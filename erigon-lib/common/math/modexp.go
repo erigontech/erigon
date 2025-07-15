@@ -8,7 +8,7 @@ import (
 	"math/big"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // FastExp is semantically equivalent to x.Exp(x,y, m), but is faster for even

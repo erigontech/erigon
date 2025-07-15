@@ -19,9 +19,9 @@ package whitelist
 import (
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/finality/rawdb"
 )
 

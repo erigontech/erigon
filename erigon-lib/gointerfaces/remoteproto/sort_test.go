@@ -20,8 +20,8 @@ import (
 	"slices"
 	"testing"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 	"github.com/stretchr/testify/assert"
 )
 

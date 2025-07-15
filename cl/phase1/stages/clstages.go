@@ -20,8 +20,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/rpc"

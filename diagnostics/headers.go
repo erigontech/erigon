@@ -19,7 +19,7 @@ package diagnostics
 import (
 	"net/http"
 
-	diaglib "github.com/erigontech/erigon-lib/diagnostics"
+	diaglib "github.com/erigontech/erigon/erigon-lib/diagnostics"
 )
 
 func SetupHeadersAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {

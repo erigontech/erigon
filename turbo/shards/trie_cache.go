@@ -24,10 +24,10 @@ import (
 
 	"github.com/google/btree"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv/dbutils"
 
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/erigon-lib/types/accounts"
 )
 
 // An optional addition to the state cache, helping to calculate state root

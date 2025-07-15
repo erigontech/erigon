@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // PendingPool - is different from other pools - it's best is Slice instead of Heap

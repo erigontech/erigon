@@ -80,8 +80,8 @@ github.com/agnivade/levenshtein v1.2.1 h1:EHBY3UOn1gwdy/VbFwgo4cxecRznFk7fKWN1KO
 github.com/agnivade/levenshtein v1.2.1/go.mod h1:QVVI16kDrtSuwcpd0p1+xMC6Z/VfhtCyDIjcwga4/DU=
 github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 h1:byYvvbfSo3+9efR4IeReh77gVs4PnNDR3AMOE9NJ7a0=
 github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0/go.mod h1:q37NoqncT41qKc048STsifIt69LfUJ8SrWWcz/yam5k=
-github.com/alecthomas/assert/v2 v2.8.1 h1:YCxnYR6jjpfnEK5AK5SysALKdUEBPGH4Y7As6tBnDw0=
-github.com/alecthomas/assert/v2 v2.8.1/go.mod h1:Bze95FyfUr7x34QZrjL+XP+0qgp/zg8yS+TtBj1WA3k=
+github.com/alecthomas/assert/v2 v2.1.0 h1:tbredtNcQnoSd3QBhQWI7QZ3XHOVkw1Moklp2ojoH/0=
+github.com/alecthomas/assert/v2 v2.1.0/go.mod h1:b/+1DI2Q6NckYi+3mXyH3wFb8qG37K/DuK80n7WefXA=
 github.com/alecthomas/atomic v0.1.0-alpha2 h1:dqwXmax66gXvHhsOS4pGPZKqYOlTkapELkLb3MNdlH8=
 github.com/alecthomas/atomic v0.1.0-alpha2/go.mod h1:zD6QGEyw49HIq19caJDc2NMXAy8rNi9ROrxtMXATfyI=
 github.com/alecthomas/kong v0.8.1 h1:acZdn3m4lLRobeh3Zi2S2EpnXTd1mOL6U7xVml+vfkY=
@@ -273,6 +273,8 @@ github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXE
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
 github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86 h1:UKcIbFZUGIKzK4aQbkv/dYiOVxZSUuD3zKadhmfwdwU=
 github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86/go.mod h1:JolLjpSff1tCCJKaJx4psrlEdlXuJEC996PL3tTAFks=
+github.com/erigontech/interfaces v0.0.0-20250630094144-bb8edbef4801 h1:+jr2rn1oEm21TKuhedKYFUmNnxDEyBhoZMsB56fEPeg=
+github.com/erigontech/interfaces v0.0.0-20250630094144-bb8edbef4801/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
 github.com/erigontech/mdbx-go v0.39.8 h1:Hp2pjywZexBA3EQQSU9KM1nUpHIppMNHbX8OMGc5tlM=
 github.com/erigontech/mdbx-go v0.39.8/go.mod h1:tHUS492F5YZvccRqatNdpTDQAaN+Vv4HRARYq89KqeY=
 github.com/erigontech/secp256k1 v1.2.0 h1:Q/HCBMdYYT0sh1xPZ9ZYEnU30oNyb/vt715cJhj7n7A=

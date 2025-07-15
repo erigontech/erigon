@@ -28,13 +28,13 @@ import (
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/version"
 )
 
 func TestDomainRoTx_findMergeRange(t *testing.T) {

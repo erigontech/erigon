@@ -24,7 +24,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/cmd/pics/visual"
 )
 

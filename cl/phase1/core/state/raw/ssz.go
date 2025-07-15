@@ -22,8 +22,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"

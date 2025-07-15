@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"

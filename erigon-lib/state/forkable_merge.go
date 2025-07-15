@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/erigon-lib/common/background"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/version"
 )
 
 // type Merger struct {

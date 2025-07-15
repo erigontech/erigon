@@ -23,7 +23,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 
 	"github.com/golang/snappy"
 )

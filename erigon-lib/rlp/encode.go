@@ -28,7 +28,7 @@ import (
 	"math/bits"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/holiman/uint256"
 )
 

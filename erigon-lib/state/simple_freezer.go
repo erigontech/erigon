@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 // default freezer implementation for relational forkables (which have RootRelationI)

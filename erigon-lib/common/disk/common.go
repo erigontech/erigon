@@ -20,7 +20,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 func UpdateDiskStats(ctx context.Context, logger log.Logger) {

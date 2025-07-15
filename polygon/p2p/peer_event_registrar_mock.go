@@ -12,8 +12,8 @@ package p2p
 import (
 	reflect "reflect"
 
-	event "github.com/erigontech/erigon-lib/event"
-	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	event "github.com/erigontech/erigon/erigon-lib/event"
+	sentryproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 	eth "github.com/erigontech/erigon/p2p/protocols/eth"
 	gomock "go.uber.org/mock/gomock"
 )

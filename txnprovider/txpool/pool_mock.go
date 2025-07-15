@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
-	remoteproto "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	kv "github.com/erigontech/erigon-lib/kv"
+	common "github.com/erigontech/erigon/erigon-lib/common"
+	remoteproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	kv "github.com/erigontech/erigon/erigon-lib/kv"
 	txpoolcfg "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 	gomock "go.uber.org/mock/gomock"
 )

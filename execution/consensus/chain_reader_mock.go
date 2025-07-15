@@ -13,10 +13,10 @@ import (
 	big "math/big"
 	reflect "reflect"
 
-	chain "github.com/erigontech/erigon-lib/chain"
-	common "github.com/erigontech/erigon-lib/common"
-	rlp "github.com/erigontech/erigon-lib/rlp"
-	types "github.com/erigontech/erigon-lib/types"
+	chain "github.com/erigontech/erigon/erigon-lib/chain"
+	common "github.com/erigontech/erigon/erigon-lib/common"
+	rlp "github.com/erigontech/erigon/erigon-lib/rlp"
+	types "github.com/erigontech/erigon/erigon-lib/types"
 	gomock "go.uber.org/mock/gomock"
 )
 

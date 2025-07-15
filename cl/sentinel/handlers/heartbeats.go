@@ -21,7 +21,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/network"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"

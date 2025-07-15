@@ -27,11 +27,11 @@ import (
 
 	"google.golang.org/grpc/credentials"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"golang.org/x/sync/semaphore"
 
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	proto_downloader "github.com/erigontech/erigon/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon"
@@ -76,9 +76,9 @@ import (
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/cl/clparams"
 )
 

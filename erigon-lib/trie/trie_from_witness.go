@@ -5,7 +5,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/erigon-lib/rlp"
 )
 
 func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {

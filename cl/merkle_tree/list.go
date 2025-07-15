@@ -21,9 +21,9 @@ import (
 
 	"github.com/prysmaticlabs/gohashtree"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 
 	"github.com/erigontech/erigon/cl/utils"
 )

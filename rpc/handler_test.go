@@ -26,7 +26,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/jsonstream"
+	"github.com/erigontech/erigon/erigon-lib/jsonstream"
 )
 
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
