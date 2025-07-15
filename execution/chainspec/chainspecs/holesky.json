@@ -30,5 +30,5 @@
     }
   },
   "depositContractAddress": "0x4242424242424242424242424242424242424242",
-  "defaultBlockGasLimit" : 60000000
+  "defaultBlockGasLimit": 60000000
 }

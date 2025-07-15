@@ -48,20 +48,20 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 		progress := rtx.Debug().DomainProgress(kv.ReceiptDomain)
 		assert.Greater(progress, uint64(0), "Receipt domain progress should be greater than 0")
 
-		cumGasUsed, _, logIndex, err := rawtemporaldb.ReceiptAsOf(rtx, 3)
+		cumGasUsed, _, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(rtx, 3)
 		require.NoError(err)
 		assert.Equal(0, int(cumGasUsed))
-		assert.Equal(0, int(logIndex))
+		assert.Equal(0, int(logIdxAfterTx))
 
-		cumGasUsed, _, logIndex, err = rawtemporaldb.ReceiptAsOf(rtx, 4)
+		cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(rtx, 4)
 		require.NoError(err)
 		assert.Equal(21_000, int(cumGasUsed))
-		assert.Equal(0, int(logIndex))
+		assert.Equal(0, int(logIdxAfterTx))
 
-		cumGasUsed, _, logIndex, err = rawtemporaldb.ReceiptAsOf(rtx, 5)
+		cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(rtx, 5)
 		require.NoError(err)
 		assert.Equal(0, int(cumGasUsed))
-		assert.Equal(0, int(logIndex))
+		assert.Equal(0, int(logIdxAfterTx))
 
 		return nil
 	})
