@@ -155,15 +155,21 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	var cumGasUsed uint64
 
 	defer func() {
-		if dbg.Enabled(ctx) {
-			log.Info("[dbg] ReceiptGenerator.GetReceipt",
-				"txNum", txNum,
-				"txHash", txnHash.String(),
-				"blockNum", blockNum,
-				"firstLogIndex", firstLogIndex,
-				"logIdxAfterTx", logIdxAfterTx,
-				"nil receipt in db", receiptFromDB == nil)
+		//if dbg.Enabled(ctx) {
+		log.Info("[dbg] ReceiptGenerator.GetReceipt",
+			"txNum", txNum,
+			"txHash", txnHash.String(),
+			"blockNum", blockNum,
+			"logIdxAfterTx", logIdxAfterTx,
+			"nil receipt in db", receiptFromDB == nil,
+			"txNum", txNum)
+
+		log.Info("[dbg] receipt is finally: ", "receipt", receipt)
+		if receipt != nil {
+			log.Info("[dbg] logs is finally: ", "logs", receipt.Logs)
 		}
+
+		//}
 	}()
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
