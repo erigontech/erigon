@@ -846,7 +846,7 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 		// ps =8kb reverse
 		//[WARN] [07-16|15:46:48.545] [dbg] 1 step                             took=22.37325ms st.PruneCountTx=15999 st.PruneCountValues=64415
 		//[WARN] [07-16|15:46:48.547] [dbg] 1K keys                            took=23.938416ms st.PruneCountTx=15999 st.PruneCountValues=64415
-		//dirt 4kb
+		//dirt dirt=1.9 MB
 
 		//Process finished with the exit code 0
 		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(8 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
