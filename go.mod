@@ -12,6 +12,8 @@ require (
 	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 )
 
+require github.com/erigontech/erigon-snapshot v1.3.1-0.20250514130225-f965a3069365 // indirect
+
 replace (
 	github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
@@ -163,7 +165,6 @@ require (
 	github.com/elastic/go-freelru v0.16.0 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250514130225-f965a3069365 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect

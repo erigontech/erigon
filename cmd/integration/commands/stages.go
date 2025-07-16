@@ -1387,3 +1387,12 @@ func readGenesis(chain string) *types.Genesis {
 	_ = genesis.Alloc // nil check
 	return genesis
 }
+
+func readGenesis(chain string) *types.Genesis {
+	genesis := chainspec.GenesisBlockByChainName(chain)
+	if genesis == nil {
+		panic("genesis is nil. probably you passed wrong --chain")
+	}
+	_ = genesis.Alloc // nil check
+	return genesis
+}

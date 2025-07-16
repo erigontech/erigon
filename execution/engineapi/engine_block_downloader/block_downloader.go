@@ -47,7 +47,7 @@ import (
 const (
 	logInterval                 = 30 * time.Second
 	requestLoopCutOff       int = 1
-	forkchoiceTimeoutMillis     = 40 * 60_000 // leaving 40 minutes time
+	forkchoiceTimeoutMillis     = 5000
 )
 
 type RequestBodyFunction func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool)
@@ -136,7 +136,7 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	hashToDownload common.Hash,
 	heightToDownload uint64,
 ) bool {
-	if e.hd.PosStatus() != headerdownload.Idle && e.hd.PosStatus() != headerdownload.Synced {
+	if e.hd.PosStatus() != headerdownload.Idle {
 		e.logger.Info("[EngineBlockDownloader] Postponing PoS download since another one is in progress", "height", heightToDownload, "hash", hashToDownload)
 		return false
 	}
@@ -251,9 +251,6 @@ func saveHeader(db kv.RwTx, header *types.Header, hash common.Hash) error {
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[saveHeader] failed to WriteTd: %w", err)
-	}
-	if blockHeight == 1 {
-		fmt.Printf("SAVING CANONICAL HASH FOR BLOCKHEIGHT = 1\n")
 	}
 	if err = rawdb.WriteCanonicalHash(db, hash, blockHeight); err != nil {
 		return fmt.Errorf("[saveHeader] failed to save canonical hash: %w", err)

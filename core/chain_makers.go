@@ -458,9 +458,6 @@ func GenerateChainWithReader(config *chain.Config, parent *types.Block, blockRea
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
 	txNum := -1
-	setBlockNum := func(blockNum uint64) {
-		domains.SetBlockNum(blockNum)
-	}
 	txNumIncrement := func() {
 		txNum++
 		domains.SetTxNum(uint64(txNum))
@@ -550,7 +547,6 @@ func GenerateChainWithReader(config *chain.Config, parent *types.Block, blockRea
 	}
 
 	for i := 0; i < n; i++ {
-		setBlockNum(uint64(i))
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {
