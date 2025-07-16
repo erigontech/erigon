@@ -61,9 +61,8 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 
 	dirs := datadir.Open(dataDirPath)
 
-	configChainName, err := getChainNameFromChainData(cliCtx, logger, dirs.Chaindata)
+	configChainName, chainNameErr := getChainNameFromChainData(cliCtx, logger, dirs.Chaindata)
 	if err != nil {
-		return fmt.Errorf("getting chain name from chaindata: %w", err)
 	}
 
 	chainName := utils.ChainFlag.Get(cliCtx)
@@ -73,10 +72,11 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 			logger.Warn("chain name flag and chain config do not match", "flag", chainName, "config", configChainName.Value)
 		}
 		logger.Info("using chain name from flag", "chain", chainName)
+	} else if chainNameErr != nil {
+		return fmt.Errorf("getting chain name from chaindata: %w", chainNameErr)
+	} else if !configChainName.Ok {
+		return errors.New("chain flag not set and chain name not found in chaindata (reset already occurred or invalid data dir?)")
 	} else {
-		if !configChainName.Ok {
-			return errors.New("chain flag not set and chain name not found in chaindata (reset already occurred or invalid data dir?)")
-		}
 		chainName = configChainName.Unwrap()
 		logger.Info("read chain name from config", "chain", chainName)
 	}
