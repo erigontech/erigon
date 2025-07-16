@@ -115,6 +115,9 @@ type Progress struct {
 	prevAbortCount        uint64
 	prevInvalidCount      uint64
 	prevReadCount         uint64
+	prevAccountReadCount  uint64
+	prevStorageReadCount  uint64
+	prevCodeReadCount     uint64
 	prevWriteCount        uint64
 	prevCommitTime        time.Time
 	prevCommittedBlockNum uint64
