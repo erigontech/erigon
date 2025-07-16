@@ -35,7 +35,7 @@ jobs:
         uses: erigontech/kurtosis-assertoor-github-action@v1.1.7
         with:
           enclave_name: ${{ env.ENCLAVE_NAME }}
-          ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor-short.io"
+          ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
           kurtosis_extra_args: --verbosity detailed --cli-log-level trace
           persistent_logs: "true"
           clean_docker: "true"
@@ -199,9 +199,9 @@ jobs:
               csv_file="tx_pool_throughput_analysis_${i}.csv"
 
               # Extract the throughput_measures array and convert to CSV format
-              # Each measure contains load_tps, processed_tps, and not_received_p2p_event_count
-              echo "load_tps,processed_tps,not_received_p2p_event_count" > "$csv_file"
-              jq -r ".tx_pool_throughput_analysis[$i].throughput_measures[] | [.load_tps, .processed_tps, .not_received_p2p_event_count] | @csv" "$output_json" >> "$csv_file"
+              # Each measure contains load_tps, processed_tps, not_received_p2p_event_count and coordinated_omission_event_count
+              echo "load_tps,processed_tps,not_received_p2p_event_count,coordinated_omission_event_count" > "$csv_file"
+              jq -r ".tx_pool_throughput_analysis[$i].throughput_measures[] | [.load_tps, .processed_tps, .not_received_p2p_event_count, .coordinated_omission_event_count] | @csv" "$output_json" >> "$csv_file"
 
               # Call the Python script to process the CSV file
               python3 $ERIGON_QA_PATH/test_system/qa-tests/tx-pool/throughput_plot.py \
