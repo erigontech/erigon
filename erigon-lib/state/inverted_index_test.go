@@ -918,7 +918,7 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 	defer ic.Close()
 
 	start := time.Now()
-	st, _ := ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+	ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
 	a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
 	fmt.Printf("[dbg] 1 step dirt=%s\n", datasize.ByteSize(a).HR())
 	log.Warn("[dbg] 1 step", "took", time.Since(start))
