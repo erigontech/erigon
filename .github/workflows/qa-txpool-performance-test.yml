@@ -346,12 +346,12 @@ jobs:
           fi
 
           # Add link to latency plots if they were generated
-          if [ "${{ steps.create_hdr_plots.outputs.processed }}" = "true" ]; then
+          if [ "${{ steps.upload_latency_plots.outputs.artifact-url }}" != "" ]; then
             echo "- [Latency Distribution Plots](${{ steps.upload_latency_plots.outputs.artifact-url }})" >> $GITHUB_STEP_SUMMARY
           fi
 
           # Add link to throughput plots if they were generated
-          if [ "${{ steps.create_throughput_plots.outputs.processed }}" = "true" ]; then
+          if [ "${{ steps.upload_throughput_plots.outputs.artifact-url }}" != "" ]; then
             echo "- [Throughput Analysis Plots](${{ steps.upload_throughput_plots.outputs.artifact-url }})" >> $GITHUB_STEP_SUMMARY
           fi
 
