@@ -947,7 +947,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//		"tx until limit", limit)
 	//}()
 
-	keysCursor, err := rwTx.CursorDupSort(ii.keysTable)
+	keysCursor, err := rwTx.RwCursorDupSort(ii.keysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
@@ -984,7 +984,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		limit--
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
-
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
@@ -992,6 +991,10 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			if err := collector.Collect(v, nil); err != nil {
 				return nil, err
 			}
+		}
+
+		if err = rwTx.Delete(ii.keysTable, k); err != nil {
+			return nil, err
 		}
 
 		if ctx.Err() != nil {
@@ -1028,23 +1031,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
-
-	if stat.MinTxNum != math.MaxUint64 {
-		// Invariant: if `txNum=N` pruned - it's pruned Fully
-		for k, _, err := keysCursor.Seek(txKey[:]); k != nil; k, _, err = keysCursor.NextNoDup() {
-			if err != nil {
-				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
-			}
-			if binary.BigEndian.Uint64(k) > stat.MaxTxNum {
-				break
-			}
-			stat.PruneCountTx++
-
-			if err = rwTx.Delete(ii.keysTable, k); err != nil {
-				return nil, err
-			}
-		}
-	}
 
 	mxPruneSizeIndex.Add(float64(stat.PruneCountValues))
 
