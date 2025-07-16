@@ -124,7 +124,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
 
-	epochData, err := state_accessors.ReadEpochData(kvGetter, roundedSlot)
+	epochData, err := state_accessors.ReadEpochData(kvGetter, roundedSlot, r.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read epoch data: %w", err)
 	}
@@ -204,7 +204,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetSlashings(slashingsVector)
 
 	// Finality
-	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, ok, err := state_accessors.ReadCheckpoints(kvGetter, roundedSlot)
+	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, ok, err := state_accessors.ReadCheckpoints(kvGetter, roundedSlot, r.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read checkpoints: %w", err)
 	}
