@@ -38,12 +38,12 @@ type FinishCfg struct {
 }
 
 func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.ForkValidator) FinishCfg {
-	initialSyncStart := time.Now()
+	initialCycleStart := time.Now()
 	return FinishCfg{
 		db:                db,
 		tmpDir:            tmpDir,
 		forkValidator:     forkValidator,
-		initialCycleStart: &initialSyncStart,
+		initialCycleStart: &initialCycleStart,
 	}
 }
 
