@@ -112,7 +112,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	}
 	reset := reset{removeUnknown: removeUnknown}
 	logger.Info("Resetting snapshots directory", "path", dirs.Snap)
-	err = reset.walkSnapshots(logger, dirs.Snap, cfg.Preverified, removeFunc)
+	err = reset.walkSnapshots(logger, dirs.Snap, cfg.Preverified.Items, removeFunc)
 	if err != nil {
 		err = fmt.Errorf("walking snapshots: %w", err)
 		return
@@ -179,7 +179,7 @@ func (me reset) walkSnapshots(
 	logger log.Logger,
 	// Could almost pass fs.FS here except metainfo.LoadFromFile expects a string filepath.
 	snapDir string,
-	preverified snapcfg.Preverified,
+	preverified snapcfg.PreverifiedItems,
 	// path is the relative path to the walk root. Called for each file that should be removed.
 	// Error is passed back to the walk function.
 	remove func(path string) error,
