@@ -862,6 +862,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//		"pruned values", pruneCount,
 	//		"tx until limit", limit)
 	//}()
+	originalLimit := limit
 
 	keysCursor, err := rwTx.CursorDupSort(ii.keysTable)
 	if err != nil {
@@ -927,7 +928,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		if err = idxDelCursor.DeleteExact(key, txnm); err != nil {
 			return err
 		}
-		mxPruneSizeIndex.Inc()
 		stat.PruneCountValues++
 
 		select {
@@ -941,22 +941,29 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
 
+	limit = originalLimit
+
 	if stat.MinTxNum != math.MaxUint64 {
 		binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
-		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
-		for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
+		for k, _, err := keysCursor.Seek(txKey[:]); k != nil; k, _, err = keysCursor.NextNoDup() {
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 			}
-			if binary.BigEndian.Uint64(txnb) > stat.MaxTxNum {
+
+			txNum := binary.BigEndian.Uint64(k)
+			if txNum >= txTo || limit == 0 {
 				break
 			}
+			limit--
 			stat.PruneCountTx++
-			if err = rwTx.Delete(ii.keysTable, txnb); err != nil {
+
+			if err = rwTx.Delete(ii.keysTable, k); err != nil {
 				return nil, err
 			}
 		}
 	}
+
+	mxPruneSizeIndex.Add(float64(stat.PruneCountValues))
 
 	return stat, err
 }
