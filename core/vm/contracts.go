@@ -25,6 +25,7 @@ import (
 	"errors"
 	evmone "github.com/erigontech/evmone_precompiles"
 	"math/big"
+	"math/bits"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -373,9 +374,7 @@ type bigModExp struct {
 
 var (
 	big1      = big.NewInt(1)
-	big3      = big.NewInt(3)
 	big7      = big.NewInt(7)
-	big20     = big.NewInt(20)
 	big32     = big.NewInt(32)
 	big64     = big.NewInt(64)
 	big96     = big.NewInt(96)
@@ -448,10 +447,40 @@ func modExpMultComplexityEip7883(x *big.Int) *big.Int {
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bigModExp) RequiredGas(input []byte) uint64 {
+
+	var minGas uint64
+	var adjExpFactor uint64
+	var finalDivisor uint64
+	switch {
+	case c.osaka:
+		minGas = 500
+		adjExpFactor = 16
+		finalDivisor = 3
+	case c.eip2565:
+		minGas = 200
+		adjExpFactor = 8
+		finalDivisor = 3
+	default:
+		minGas = 0
+		adjExpFactor = 8
+		finalDivisor = 20
+	}
+
+	header := getData(input, 0, 3*32)
+
+	// If any of the lengths is bigger than uint32, immediately fail.
+	if !allZero(header[0:28]) || !allZero(header[32:32+28]) || !allZero(header[64:64+28]) {
+		// Except for the case where both base and mod are zeros.
+		if allZero(header[0:32]) && allZero(header[64:96]) {
+			return minGas
+		}
+		return math.MaxUint64
+	}
+
 	var (
-		baseLen = new(big.Int).SetBytes(getData(input, 0, 32))
-		expLen  = new(big.Int).SetBytes(getData(input, 32, 32))
-		modLen  = new(big.Int).SetBytes(getData(input, 64, 32))
+		baseLen = binary.BigEndian.Uint32(header[28:32])
+		expLen  = binary.BigEndian.Uint32(header[32+28 : 64])
+		modLen  = binary.BigEndian.Uint32(header[64+28 : 96])
 	)
 	if len(input) > 96 {
 		input = input[96:]
@@ -459,69 +488,52 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 		input = input[:0]
 	}
 	// Retrieve the head 32 bytes of exp for the adjusted exponent length
-	var expHead *big.Int
-	if big.NewInt(int64(len(input))).Cmp(baseLen) <= 0 {
-		expHead = new(big.Int)
-	} else {
-		if expLen.Cmp(big32) > 0 {
-			expHead = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), 32))
-		} else {
-			expHead = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), expLen.Uint64()))
+	expHeadLen := min(expLen, 32)
+	expOffset := baseLen
+	var expHeadExplicitBytes []byte
+	if expOffset < uint32(len(input)) {
+		expHeadExplicitBytes = input[expOffset : expOffset+min(expHeadLen, uint32(len(input))-expOffset)]
+	}
+	firstNonZero := -1
+	for i := 0; i < len(expHeadExplicitBytes); i++ {
+		if expHeadExplicitBytes[i] != 0 {
+			firstNonZero = i
+			break
 		}
 	}
-	// Calculate the adjusted exponent length
-	var msb int
-	if bitlen := expHead.BitLen(); bitlen > 0 {
-		msb = bitlen - 1
+
+	expBitWidth := uint32(0)
+	if firstNonZero >= 0 {
+		expTopByte := expHeadExplicitBytes[firstNonZero]
+		expTopByteBitWidth := 8 - uint32(bits.LeadingZeros8(expTopByte))
+		expBitWidth = 8*(expHeadLen-uint32(firstNonZero)-1) + expTopByteBitWidth
 	}
-	adjExpLen := new(big.Int)
-	if expLen.Cmp(big32) > 0 {
-		adjExpLen.Sub(expLen, big32)
-		if c.osaka { // EIP-7883
-			adjExpLen.Lsh(adjExpLen, 4) // ×16
-		} else {
-			adjExpLen.Lsh(adjExpLen, 3) // ×8
-		}
+
+	expTailLen := expLen - expHeadLen
+	expHeadBits := max(expBitWidth, 1) - 1
+	adjExpLen := max(adjExpFactor*uint64(expTailLen)+uint64(expHeadBits), 1)
+
+	maxLen := max(baseLen, modLen)
+	maxLenBig := new(big.Int).SetUint64(uint64(maxLen))
+
+	var multComplexityBig *big.Int
+	switch {
+	case c.osaka:
+		multComplexityBig = modExpMultComplexityEip7883(maxLenBig)
+	case c.eip2565:
+		multComplexityBig = modExpMultComplexityEip2565(maxLenBig)
+	default:
+		multComplexityBig = modExpMultComplexityEip198(maxLenBig)
 	}
-	adjExpLen.Add(adjExpLen, big.NewInt(int64(msb)))
-	adjExpLen = math.BigMax(adjExpLen, big1)
+	multComplexity := multComplexityBig.Uint64()
 
-	// Calculate the gas cost of the operation
-	gas := new(big.Int).Set(math.BigMax(modLen, baseLen)) // max_length
-	if c.osaka {
-		// EIP-7883: ModExp Gas Cost Increase
-		gas = modExpMultComplexityEip7883(gas /*max_length */)
-
-		gas.Mul(gas, adjExpLen)
-		gas.Div(gas, big3)
-		if gas.BitLen() > 64 {
-			return math.MaxUint64
-		}
-
-		return max(500, gas.Uint64())
-	} else if c.eip2565 {
-		// EIP-2565 has three changes compared to EIP-198:
-
-		// 1. Different multiplication complexity
-		gas = modExpMultComplexityEip2565(gas)
-
-		gas.Mul(gas, adjExpLen)
-		// 2. Different divisor (`GQUADDIVISOR`) (3)
-		gas.Div(gas, big3)
-		if gas.BitLen() > 64 {
-			return math.MaxUint64
-		}
-		// 3. Minimum price of 200 gas
-		return max(200, gas.Uint64())
-	}
-	gas = modExpMultComplexityEip198(gas)
-	gas.Mul(gas, adjExpLen)
-	gas.Div(gas, big20)
-
-	if gas.BitLen() > 64 {
+	gasHi, gasLo := bits.Mul64(multComplexity, adjExpLen)
+	if gasHi != 0 {
 		return math.MaxUint64
 	}
-	return gas.Uint64()
+
+	gas := gasLo / finalDivisor
+	return max(gas, minGas)
 }
 
 var (
