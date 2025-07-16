@@ -58,19 +58,19 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		return fmt.Errorf("getting chain name from chaindata: %w", err)
 	}
 
-	chain := utils.ChainFlag.Get(cliCtx)
+	chainName := utils.ChainFlag.Get(cliCtx)
 	if cliCtx.IsSet(utils.ChainFlag.Name) {
-		if configChainName.Ok && configChainName.Value != chain {
+		if configChainName.Ok && configChainName.Value != chainName {
 			// Pedantic but interesting.
-			logger.Warn("chain name flag and chain config do not match", "flag", chain, "config", configChainName.Value)
+			logger.Warn("chain name flag and chain config do not match", "flag", chainName, "config", configChainName.Value)
 		}
-		logger.Info("using chain name from flag", "chain", chain)
+		logger.Info("using chain name from flag", "chain", chainName)
 	} else {
 		if !configChainName.Ok {
 			return errors.New("chain flag not set and chain name not found in chaindata (reset already occurred or invalid data dir?)")
 		}
-		chain = configChainName.Unwrap()
-		logger.Info("read chain name from config", "chain", chain)
+		chainName = configChainName.Unwrap()
+		logger.Info("read chain name from config", "chain", chainName)
 	}
 
 	unlock, err := dirs.TryFlock()
@@ -84,16 +84,16 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		// can't get it? What about a branch? Can we reset to the embedded snapshot hashes?
 		return fmt.Errorf("loading remote preverified snapshots: %w", err)
 	}
-	cfg, known := snapcfg.KnownCfg(chain)
+	cfg, known := snapcfg.KnownCfg(chainName)
 	if !known {
 		// Wtf does this even mean?
-		return fmt.Errorf("config for chain %v is not known", chain)
+		return fmt.Errorf("config for chain %v is not known", chainName)
 	}
 	// Should we check cfg.Local? We could be resetting to the preverified.toml...?
 	logger.Info(
 		"Loaded preverified snapshots hashes",
 		"len", len(cfg.Preverified.Items),
-		"chain", chain,
+		"chain", chainName,
 	)
 	removeFunc := func(path string) error {
 		return os.Remove(filepath.Join(dirs.Snap, path))
