@@ -913,8 +913,8 @@ func TestInvIndexPruningPerf(t *testing.T) {
 	ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
 	log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 
-	start = time.Now()
-	pruneLimit = ic.aggStep * 10
-	ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
-	log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+	//start = time.Now()
+	//pruneLimit = ic.aggStep * 10
+	//ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
+	//log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 }
