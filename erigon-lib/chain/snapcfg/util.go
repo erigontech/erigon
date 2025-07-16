@@ -53,6 +53,7 @@ var (
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 	Gnosis     = fromToml(snapshothashes.Gnosis)
 	Chiado     = fromToml(snapshothashes.Chiado)
+	Hoodi      = fromToml(snapshothashes.Hoodi)
 )
 
 type PreverifiedItem struct {
@@ -466,6 +467,7 @@ var knownPreverified = map[string]Preverified{
 	networkname.BorMainnet: BorMainnet,
 	networkname.Gnosis:     Gnosis,
 	networkname.Chiado:     Chiado,
+	networkname.Hoodi:      Hoodi,
 }
 
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
@@ -545,6 +547,7 @@ var KnownWebseeds = map[string][]string{
 	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 	networkname.Chiado:     webseedsParse(webseed.Chiado),
 	networkname.Holesky:    webseedsParse(webseed.Holesky),
+	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -579,6 +582,7 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 	Gnosis = fromToml(snapshothashes.Gnosis)
 	Chiado = fromToml(snapshothashes.Chiado)
+	Hoodi = fromToml(snapshothashes.Hoodi)
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
 		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
@@ -588,6 +592,7 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 		networkname.Chiado:     webseedsParse(webseed.Chiado),
 		networkname.Holesky:    webseedsParse(webseed.Holesky),
+		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
 	}
 
 	knownPreverified = map[string]Preverified{
@@ -598,6 +603,7 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 		networkname.BorMainnet: BorMainnet,
 		networkname.Gnosis:     Gnosis,
 		networkname.Chiado:     Chiado,
+		networkname.Hoodi:      Hoodi,
 	}
 	return loaded, nil
 }
@@ -625,6 +631,8 @@ func GetToml(networkName string) []byte {
 		return snapshothashes.Gnosis
 	case networkname.Chiado:
 		return snapshothashes.Chiado
+	case networkname.Hoodi:
+		return snapshothashes.Hoodi
 	default:
 		return nil
 	}
