@@ -199,8 +199,9 @@ jobs:
               csv_file="tx_pool_throughput_analysis_${i}.csv"
 
               # Extract the throughput_measures array and convert to CSV format
-              # Each measure contains load_tps and processed_tps
-              jq -r ".tx_pool_throughput_analysis[$i].throughput_measures[] | [.load_tps, .processed_tps] | @csv" "$output_json" > "$csv_file"
+              # Each measure contains load_tps, processed_tps, and not_received_p2p_event_count
+              echo "load_tps,processed_tps,not_received_p2p_event_count" > "$csv_file"
+              jq -r ".tx_pool_throughput_analysis[$i].throughput_measures[] | [.load_tps, .processed_tps, .not_received_p2p_event_count] | @csv" "$output_json" >> "$csv_file"
 
               # Call the Python script to process the CSV file
               python3 $ERIGON_QA_PATH/test_system/qa-tests/tx-pool/throughput_plot.py \
