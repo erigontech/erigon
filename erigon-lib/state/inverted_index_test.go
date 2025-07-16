@@ -195,7 +195,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		t.Logf("key: %x, txn: %x", key, txn)
 		require.NoError(t, err)
 
-		// require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInSep0, int(binary.BigEndian.Uint64(txn)-1))
+		//require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInSep0, int(binary.BigEndian.Uint64(txn)-1))
 
 		// With step-prefixed keys, verify the transaction number in the value is correct
 		// The pruning with step-prefixed format is more efficient and may prune more aggressively
