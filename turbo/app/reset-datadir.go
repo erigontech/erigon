@@ -15,10 +15,10 @@ import (
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/urfave/cli/v2"
 )
@@ -51,10 +51,13 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	dryRun := dryRunFlag.Get(cliCtx)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 
-	configChainName, err := getChainNameFromChainData(cliCtx, logger)
+	dirs := datadir.Open(dataDirPath)
+
+	configChainName, err := getChainNameFromChainData(cliCtx, logger, dirs.Chaindata)
 	if err != nil {
 		return fmt.Errorf("getting chain name from chaindata: %w", err)
 	}
+
 	chain := utils.ChainFlag.Get(cliCtx)
 	if cliCtx.IsSet(utils.ChainFlag.Name) {
 		if configChainName.Ok && configChainName.Value != chain {
@@ -70,7 +73,6 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		logger.Info("read chain name from config", "chain", chain)
 	}
 
-	dirs := datadir.Open(dataDirPath)
 	unlock, err := dirs.TryFlock()
 	if err != nil {
 		return fmt.Errorf("failed to lock data dir %v: %w", dirs.DataDir, err)
@@ -114,21 +116,17 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	return
 }
 
-func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger) (_ g.Option[string], err error) {
+func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
 	ctx := cliCtx.Context
-	nodeConfig, err := NewNodeConfig(cliCtx, logger)
-	if err != nil {
-		err = fmt.Errorf("getting node config: %w", err)
-		return
-	}
-	// Why does this fail if we set readonly?
-	db, err := node.OpenDatabase(cliCtx.Context, nodeConfig, kv.ChainDB, "", false, logger)
+	var db kv.RoDB
+	db, err = mdbx.New(kv.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)
 	if err != nil {
 		err = fmt.Errorf("opening chaindata database: %w", err)
 		return
 	}
 	defer db.Close()
 	var chainCfg *chain.Config
+	// See tool.ChainConfigFromDB for another example, but that panics on errors.
 	err = db.View(ctx, func(tx kv.Tx) (err error) {
 		genesis, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
