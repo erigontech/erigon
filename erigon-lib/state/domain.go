@@ -365,7 +365,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 					if !fileVer.Less(d.version.DataKV.MinSupported) {
 						d.version.DataKV.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm kv domain snapshots")
+						_, fName := filepath.Split(fPath)
+						panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, d.version.DataKV.MinSupported, d.version.DataKV.Current))
 						//return false
 					}
 				}
@@ -397,8 +398,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 						if !fileVer.Less(d.version.AccessorKVI.MinSupported) {
 							d.version.AccessorKVI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm kvi domain snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, d.version.AccessorKVI.MinSupported, d.version.AccessorKVI.Current))
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
@@ -420,8 +421,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 						if !fileVer.Less(d.version.AccessorBT.MinSupported) {
 							d.version.AccessorBT.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm bt domain snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, d.version.AccessorBT.MinSupported, d.version.AccessorBT.Current))
 						}
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
@@ -443,8 +444,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 						if !fileVer.Less(d.version.AccessorKVEI.MinSupported) {
 							d.version.AccessorKVEI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm kvei domain snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, d.version.AccessorKVEI.MinSupported, d.version.AccessorKVEI.Current))
 						}
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {

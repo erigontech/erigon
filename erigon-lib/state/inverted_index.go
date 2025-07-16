@@ -336,8 +336,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					if !fileVer.Less(ii.version.DataEF.MinSupported) {
 						ii.version.DataEF.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm ef snapshots")
-						//return false
+						_, fName := filepath.Split(fPath)
+						panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, ii.version.DataEF.MinSupported, ii.version.DataEF.Current))
 					}
 				}
 
@@ -369,7 +369,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
 							ii.version.AccessorEFI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm efi snapshots")
+							_, fName := filepath.Split(fPath)
+							panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, ii.version.AccessorEFI.MinSupported, ii.version.AccessorEFI.Current))
 							//return false
 						}
 					}
