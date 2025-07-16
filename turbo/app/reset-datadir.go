@@ -84,7 +84,11 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		// can't get it? What about a branch? Can we reset to the embedded snapshot hashes?
 		return fmt.Errorf("loading remote preverified snapshots: %w", err)
 	}
-	cfg := snapcfg.KnownCfg(chain)
+	cfg, known := snapcfg.KnownCfg(chain)
+	if !known {
+		// Wtf does this even mean?
+		return fmt.Errorf("config for chain %v is not known", chain)
+	}
 	// Should we check cfg.Local? We could be resetting to the preverified.toml...?
 	logger.Info(
 		"Loaded preverified snapshots hashes",
