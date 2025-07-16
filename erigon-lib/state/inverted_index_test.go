@@ -809,15 +809,14 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	ii.Close()
 }
 
-func TestInvIndexPruningPerf(t *testing.T) {
-	t.Skip("for manual benchmarks ")
-	t.Parallel()
+func BenchmarkInvIndexPruningPerf(b *testing.B) {
+	//t.Skip("for manual benchmarks ")
 	testDbAndInvertedIndex2 := func(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
 		tb.Helper()
 		dirs := datadir.New("/Users/alex/data/remove_me_test")
 		keysTable := "Keys"
 		indexTable := "Index"
-		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(8 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(16 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{
 				keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 				indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
@@ -871,40 +870,49 @@ func TestInvIndexPruningPerf(t *testing.T) {
 
 	txCnt := uint64(1_000) * 10_000
 	mod := uint64(1) * 31
-	db, ii := testDbAndInvertedIndex2(t, 16*1_000, log.New())
-	_ = filledInvIndexOfSize2(t, txCnt, mod, db, ii)
+	db, ii := testDbAndInvertedIndex2(b, 16*1_000, log.New())
+	_ = filledInvIndexOfSize2(b, txCnt, mod, db, ii)
 	defer ii.Close()
 
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	require.NoError(b, db.View(context.Background(), func(tx kv.Tx) error {
+		collation, err := ii.collate(context.Background(), 0, tx)
+		require.NoError(b, err)
+		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+		txFrom, txTo := firstTxNumOfStep(0, ii.aggregationStep), firstTxNumOfStep(1, ii.aggregationStep)
+		ii.integrateDirtyFiles(sf, txFrom, txTo)
+
+		// after reCalcVisibleFiles must be able to prune step 0. but not more
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+		return err
+	}))
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	collation, err := ii.collate(context.Background(), 0, tx)
-	require.NoError(t, err)
-	sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
-	txFrom, txTo := firstTxNumOfStep(0, ii.aggregationStep), firstTxNumOfStep(1, ii.aggregationStep)
-	ii.integrateDirtyFiles(sf, txFrom, txTo)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(b, err)
+		ic := ii.BeginFilesRo()
+		ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+		ic.Close()
+		tx.Rollback()
+	}
 
-	// after reCalcVisibleFiles must be able to prune step 0. but not more
-	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-
-	ic := ii.BeginFilesRo()
-	defer ic.Close()
-
-	start := time.Now()
-	st, _ := ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
-	log.Warn("[dbg] 1 step", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
-
-	start = time.Now()
-	pruneLimit := uint64(1_000)
-	ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
-	log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
-
-	start = time.Now()
-	pruneLimit = ic.aggStep * 10
-	ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
-	log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+	//tx, err := db.BeginRw(context.Background())
+	//require.NoError(b, err)r
+	//defer tx.Rollback()
+	//ic := ii.BeginFilesRo()
+	//defer ic.Close()
+	//
+	//start := time.Now()
+	//pruneLimit := uint64(1_000)
+	//ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
+	//log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+	//
+	//start = time.Now()
+	//pruneLimit = ic.aggStep * 10
+	//ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
+	//log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 }
