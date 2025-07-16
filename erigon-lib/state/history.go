@@ -1148,10 +1148,10 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	}
 
 	var txFromBytes [8]byte
-	binary.BigEndian.PutUint64(txFromBytes[:], txFrom)
 
 	var pruned int
 	pruneValue := func(key []byte, minTxNum, maxTxNum uint64) error {
+		binary.BigEndian.PutUint64(txFromBytes[:], minTxNum)
 		if ht.h.historyLargeValues {
 			seek = append(bytes.Clone(key), txFromBytes[:]...)
 			for k, _, err := valsC.Seek(seek); k != nil; k, _, err = valsC.Next() {
