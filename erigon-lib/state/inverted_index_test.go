@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -831,8 +832,24 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 		//[WARN] [07-16|14:31:16.531] [dbg] 10 steps                           took=25.177315458s st.PruneCountTx=0 st.PruneCountValues=64415
 		//BenchmarkInvIndexPruningPerf-16    	       1	25260768708 ns/op	   55360 B/op	     606 allocs/op
 
+		//16kb reverse
+		//[WARN] [07-16|15:41:38.428] [dbg] 1 step                             took=38.976125ms st.PruneCountTx=15999 st.PruneCountValues=64415
+		//[WARN] [07-16|15:41:38.431] [dbg] 1K keys                            took=41.55125ms st.PruneCountTx=15999 st.PruneCountValues=64415
+		//[WARN] [07-16|15:42:02.842] [dbg] 10 steps                           took=24.410764584s st.PruneCountTx=15999 st.PruneCountValues=64415
+		//dirt 3.1mb
+
+		// ps =4kb reverse
+		//[WARN] [07-16|15:46:48.545] [dbg] 1 step                             took=22.37325ms st.PruneCountTx=15999 st.PruneCountValues=64415
+		//[WARN] [07-16|15:46:48.547] [dbg] 1K keys                            took=23.938416ms st.PruneCountTx=15999 st.PruneCountValues=64415
+		//dirt 4kb
+
+		// ps =8kb reverse
+		//[WARN] [07-16|15:46:48.545] [dbg] 1 step                             took=22.37325ms st.PruneCountTx=15999 st.PruneCountValues=64415
+		//[WARN] [07-16|15:46:48.547] [dbg] 1K keys                            took=23.938416ms st.PruneCountTx=15999 st.PruneCountValues=64415
+		//dirt 4kb
+
 		//Process finished with the exit code 0
-		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(16 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(8 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{
 				keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 				indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
@@ -924,14 +941,16 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 
 	start := time.Now()
 	st, _ := ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+	a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
+	fmt.Printf("[dbg] 1 step dirt=%s\n", datasize.ByteSize(a).HR())
 	log.Warn("[dbg] 1 step", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 
 	pruneLimit := uint64(1_000)
 	ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
 	log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 
-	start = time.Now()
-	pruneLimit = ic.aggStep * 10
-	ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
-	log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+	//start = time.Now()
+	//pruneLimit = ic.aggStep * 10
+	//ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
+	//log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 }

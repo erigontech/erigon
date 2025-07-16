@@ -914,7 +914,7 @@ func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, 
 
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, maxTxNum uint64) error) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, minTxNum, maxTxNum uint64) error) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
 		if iit.files.EndTxNum() > 0 {
 			txTo = min(txTo, iit.files.EndTxNum())
@@ -926,7 +926,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txT
 	return iit.prune(ctx, tx, txFrom, txTo, limit, logEvery, fn)
 }
 
-func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, maxTxNum uint64) error) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, minTxNum, maxTxNum uint64) error) (stat *InvertedIndexPruneStat, err error) {
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 
 	mxPruneInProgress.Inc()
@@ -991,7 +991,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 		stat.PruneCountTx++
 
-		for v, err := keysCursor.LastDup(); v != nil; _, v, err = keysCursor.PrevDup() {
+		for v, err := keysCursor.FirstDup(); v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 			}
@@ -1000,10 +1000,9 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			}
 		}
 
-		keysCursor.DeleteCurrentDuplicates()
-		//if err = rwTx.Delete(ii.keysTable, k); err != nil {
-		//	return nil, err
-		//}
+		if err := keysCursor.DeleteCurrentDuplicates(); err != nil {
+			return nil, err
+		}
 
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -1019,7 +1018,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
 	err = collector.Load(nil, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if fn != nil {
-			if err = fn(key, stat.MaxTxNum); err != nil {
+			if err = fn(key, stat.MinTxNum, stat.MaxTxNum); err != nil {
 				return fmt.Errorf("fn error: %w", err)
 			}
 		}

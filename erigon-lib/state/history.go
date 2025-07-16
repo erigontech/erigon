@@ -1151,9 +1151,12 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	binary.BigEndian.PutUint64(txFromBytes[:], txFrom)
 
 	var pruned int
-	pruneValue := func(key []byte, maxTxNum uint64) error {
+	pruneValue := func(key []byte, minTxNum, maxTxNum uint64) error {
+		var minTxNumBytes [8]byte
+		binary.BigEndian.PutUint64(minTxNumBytes[:], minTxNum)
+
 		if ht.h.historyLargeValues {
-			seek = append(bytes.Clone(key), txFromBytes[:]...)
+			seek = append(bytes.Clone(key), minTxNumBytes[:]...)
 			for k, _, err := valsC.Seek(seek); k != nil; k, _, err = valsC.Next() {
 				if err != nil {
 					return fmt.Errorf("iterate over %s values cursor: %w", ht.iit.ii.filenameBase, err)
@@ -1170,7 +1173,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 				}
 			}
 		} else {
-			for v, err := valsCDup.SeekBothRange(key, txFromBytes[:]); v != nil; _, v, err = valsCDup.NextDup() {
+			for v, err := valsCDup.SeekBothRange(key, minTxNumBytes[:]); v != nil; _, v, err = valsCDup.NextDup() {
 				if err != nil {
 					return fmt.Errorf("iterate over %s values cursor: %w", ht.iit.ii.filenameBase, err)
 				}
