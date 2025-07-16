@@ -515,10 +515,12 @@ var (
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
+	// TODO: This can be done without any allocation.
+	header := getData(input, 0, 3*32)
 	var (
-		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
-		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+		baseLen = uint64(binary.BigEndian.Uint32(header[28:32]))
+		expLen  = uint64(binary.BigEndian.Uint32(header[32+28 : 64]))
+		modLen  = uint64(binary.BigEndian.Uint32(header[64+28 : 96]))
 	)
 	if c.osaka {
 		// EIP-7823: Set upper bounds for MODEXP
