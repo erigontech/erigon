@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -193,7 +194,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		key, txn, err := icc.First()
 		t.Logf("key: %x, txn: %x", key, txn)
 		require.NoError(t, err)
-	
+
 		// require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInSep0, int(binary.BigEndian.Uint64(txn)-1))
 
 		// With step-prefixed keys, verify the transaction number in the value is correct
@@ -816,4 +817,104 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = ii.openFolder()
 	require.NoError(t, err)
 	ii.Close()
+}
+
+func TestInvIndexPruningPerf(t *testing.T) {
+	//t.Skip("for manual benchmarks ")
+	t.Parallel()
+	testDbAndInvertedIndex2 := func(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
+		tb.Helper()
+		dirs := datadir.New("/Users/alex/data/remove_me_test")
+		keysTable := "Keys"
+		indexTable := "Index"
+		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(8 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{
+				keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
+				indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
+				kv.TblPruningProgress: kv.TableCfgItem{},
+			}
+		}).MustOpen()
+		tb.Cleanup(db.Close)
+		salt := uint32(1)
+		cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+		cfg.salt.Store(&salt)
+		cfg.Accessors = AccessorHashMap
+		ii, err := NewInvertedIndex(cfg, aggStep, logger)
+		require.NoError(tb, err)
+		ii.DisableFsync()
+		tb.Cleanup(ii.Close)
+		return db, ii
+	}
+	filledInvIndexOfSize2 := func(tb testing.TB, txs, module uint64, db kv.RwDB, ii *InvertedIndex) uint64 {
+		tb.Helper()
+		ctx, require := context.Background(), require.New(tb)
+		tb.Cleanup(db.Close)
+
+		err := db.Update(ctx, func(tx kv.RwTx) error {
+			if cnt, _ := tx.Count(ii.keysTable); cnt > 0 {
+				return nil
+			}
+			ic := ii.BeginFilesRo()
+			defer ic.Close()
+			writer := ic.NewWriter()
+			defer writer.close()
+
+			// keys are encodings of numbers 1..31
+			// each key changes value on every txNum which is multiple of the key
+			var k [32]byte
+			for txNum := uint64(1); txNum <= txs; txNum++ {
+				for keyNum := uint64(1); keyNum <= module; keyNum++ {
+					if txNum%keyNum == 0 {
+						binary.BigEndian.PutUint64(k[:], keyNum)
+						binary.BigEndian.PutUint64(k[:], murmur3.Sum64(k[:]))
+						err := writer.Add(k[:], txNum)
+						require.NoError(err)
+					}
+				}
+			}
+			require.NoError(writer.Flush(ctx, tx))
+			return nil
+		})
+		require.NoError(err)
+		return txs
+	}
+
+	txCnt := uint64(1_000) * 10_000
+	mod := uint64(1) * 31
+	db, ii := testDbAndInvertedIndex2(t, 16*1_000, log.New())
+	_ = filledInvIndexOfSize2(t, txCnt, mod, db, ii)
+	defer ii.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	collation, err := ii.collate(context.Background(), 0, tx)
+	require.NoError(t, err)
+	sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+	txFrom, txTo := firstTxNumOfStep(0, ii.aggregationStep), firstTxNumOfStep(1, ii.aggregationStep)
+	ii.integrateDirtyFiles(sf, txFrom, txTo)
+
+	// after reCalcVisibleFiles must be able to prune step 0. but not more
+	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+
+	ic := ii.BeginFilesRo()
+	defer ic.Close()
+
+	start := time.Now()
+	st, _ := ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+	log.Warn("[dbg] 1 step", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+
+	start = time.Now()
+	pruneLimit := uint64(1_000)
+	ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
+	log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+
+	start = time.Now()
+	pruneLimit = ic.aggStep * 10
+	ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
+	log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 }
