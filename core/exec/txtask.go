@@ -361,7 +361,6 @@ func (t *TxTask) GasPool() *core.GasPool {
 }
 
 func (t *TxTask) ResetGasPool(gasPool *core.GasPool) {
-	fmt.Println(t.BlockNumber(), t.TxIndex, gasPool.Gas())
 	t.gasPool = gasPool
 }
 

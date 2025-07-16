@@ -1069,8 +1069,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		toExecute = append(toExecute, be.execTasks.takeNextPending())
 	}
 
-	gasPool := core.NewGasPool(be.gasPool.Gas(), be.gasPool.BlobGas())
-
 	maxValidated := be.validateTasks.maxComplete()
 	for i := 0; i < len(toExecute); i++ {
 		nextTx := toExecute[i]
@@ -1098,8 +1096,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		}
 
 		be.cntExec++
-
-		execTask.ResetGasPool(gasPool)
 
 		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
 			pe.in.Add(ctx, &taskVersion{
