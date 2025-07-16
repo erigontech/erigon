@@ -370,6 +370,8 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 			continue
 		}
 
+		frozenBlocks := br.blockReader.FrozenBorBlocks()
+
 		if canDeleteTo := CanDeleteTo(currentProgress, frozenBlocks); canDeleteTo > 0 {
 			// PruneBorBlocks - [1, to) old blocks after moving it to snapshots.
 

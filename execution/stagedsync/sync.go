@@ -48,6 +48,7 @@ type Sync struct {
 	logger        log.Logger
 	stagesIdsList []string
 	mode          stages.Mode
+	metricsCache  metricsCache
 }
 
 type Timing struct {
@@ -243,6 +244,7 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 		logger:        logger,
 		stagesIdsList: stagesIdsList,
 		mode:          mode,
+		metricsCache:  newMetricsCache(),
 	}
 }
 
@@ -512,6 +514,7 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialC
 		s.logger.Debug(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
 	}
 	s.timings = append(s.timings, Timing{stage: stage.ID, took: took})
+	s.metricsCache.stageRunDurationSummary(stage.ID).Observe(took.Seconds())
 	return nil
 }
 
@@ -544,6 +547,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap
 		s.logger.Info(fmt.Sprintf("[%s] Unwind done", logPrefix), "in", took)
 	}
 	s.timings = append(s.timings, Timing{isUnwind: true, stage: stage.ID, took: took})
+	s.metricsCache.stageUnwindDurationSummary(stage.ID).Observe(took.Seconds())
 	return nil
 }
 
@@ -575,6 +579,7 @@ func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwT
 		s.logger.Debug(fmt.Sprintf("[%s] Prune done", s.LogPrefix()), "in", took)
 	}
 	s.timings = append(s.timings, Timing{isPrune: true, stage: stage.ID, took: took})
+	s.metricsCache.stagePruneDurationSummary(stage.ID).Observe(took.Seconds())
 	return nil
 }
 
