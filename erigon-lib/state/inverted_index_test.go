@@ -840,7 +840,7 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 		tb.Cleanup(db.Close)
 
 		err := db.Update(ctx, func(tx kv.RwTx) error {
-			if cnt, _ := tx.Count(ii.keysTable); cnt > 0 { // helper for re-usable databases
+			if cnt, _ := tx.Count(ii.keysTable); cnt > 0 { // if db is re-usable
 				return nil
 			}
 			ic := ii.BeginFilesRo()
