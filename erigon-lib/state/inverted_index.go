@@ -1002,7 +1002,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
+	binary.BigEndian.PutUint64(txKey[:], stat.MaxTxNum)
 	err = collector.Load(nil, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if fn != nil {
 			if err = fn(key, stat.MaxTxNum); err != nil {
