@@ -27,7 +27,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -911,24 +910,24 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 		tx.Rollback()
 	}
 
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	ic := ii.BeginFilesRo()
-	defer ic.Close()
-
-	start := time.Now()
-	ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
-	a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
-	fmt.Printf("[dbg] 1 step dirt=%s\n", datasize.ByteSize(a).HR())
-	log.Warn("[dbg] 1 step", "took", time.Since(start))
-
-	pruneLimit := uint64(1_000)
-	ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
-	log.Warn("[dbg] 1K keys", "took", time.Since(start))
-
-	start = time.Now()
-	pruneLimit = ic.aggStep * 10
-	ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
-	log.Warn("[dbg] 10 steps", "took", time.Since(start))
+	//tx, err := db.BeginRw(context.Background())
+	//require.NoError(b, err)
+	//defer tx.Rollback()
+	//ic := ii.BeginFilesRo()
+	//defer ic.Close()
+	//
+	//start := time.Now()
+	//ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+	//a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
+	//fmt.Printf("[dbg] 1 step dirt=%s\n", datasize.ByteSize(a).HR())
+	//log.Warn("[dbg] 1 step", "took", time.Since(start))
+	//
+	//pruneLimit := uint64(1_000)
+	//ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
+	//log.Warn("[dbg] 1K keys", "took", time.Since(start))
+	//
+	//start = time.Now()
+	//pruneLimit = ic.aggStep * 10
+	//ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
+	//log.Warn("[dbg] 10 steps", "took", time.Since(start))
 }
