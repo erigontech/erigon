@@ -947,16 +947,11 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//		"tx until limit", limit)
 	//}()
 
-	keysCursor, err := rwTx.RwCursorDupSort(ii.keysTable)
+	keysCursor, err := rwTx.CursorDupSort(ii.keysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursor.Close()
-	valsTblDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
-	if err != nil {
-		return nil, err
-	}
-	defer valsTblDelCursor.Close()
 
 	collector := etl.NewCollector(ii.filenameBase+".prune.ii", ii.dirs.Tmp, etl.NewOldestEntryBuffer(16*datasize.MB), ii.logger)
 	defer collector.Close()
@@ -993,14 +988,20 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			}
 		}
 
-		//if err = rwTx.Delete(ii.keysTable, k); err != nil {
-		//	return nil, err
-		//}
+		if err = rwTx.Delete(ii.keysTable, k); err != nil {
+			return nil, err
+		}
 
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 	}
+
+	valsTblDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
+	if err != nil {
+		return nil, err
+	}
+	defer valsTblDelCursor.Close()
 
 	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
 	err = collector.Load(nil, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
