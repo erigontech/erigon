@@ -901,12 +901,15 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 	}
 
 	//tx, err := db.BeginRw(context.Background())
-	//require.NoError(b, err)r
+	//require.NoError(b, err)
 	//defer tx.Rollback()
 	//ic := ii.BeginFilesRo()
 	//defer ic.Close()
 	//
 	//start := time.Now()
+	//st, _ := ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+	//log.Warn("[dbg] 1 step", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+	//
 	//pruneLimit := uint64(1_000)
 	//ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
 	//log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
