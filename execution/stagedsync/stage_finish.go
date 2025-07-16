@@ -31,24 +31,24 @@ import (
 )
 
 type FinishCfg struct {
-	db               kv.RwDB
-	tmpDir           string
-	forkValidator    *engine_helpers.ForkValidator
-	initialSyncStart *time.Time
+	db                kv.RwDB
+	tmpDir            string
+	forkValidator     *engine_helpers.ForkValidator
+	initialCycleStart *time.Time
 }
 
 func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.ForkValidator) FinishCfg {
 	initialSyncStart := time.Now()
 	return FinishCfg{
-		db:               db,
-		tmpDir:           tmpDir,
-		forkValidator:    forkValidator,
-		initialSyncStart: &initialSyncStart,
+		db:                db,
+		tmpDir:            tmpDir,
+		forkValidator:     forkValidator,
+		initialCycleStart: &initialSyncStart,
 	}
 }
 
 func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
-	defer updateInitialSyncDuration(s, cfg)
+	defer updateInitialCycleDuration(s, cfg)
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -95,12 +95,12 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	return nil
 }
 
-func updateInitialSyncDuration(s *StageState, cfg FinishCfg) {
+func updateInitialCycleDuration(s *StageState, cfg FinishCfg) {
 	if s.CurrentSyncCycle.IsInitialCycle {
-		initialSyncDurationSecs.Set(time.Since(*cfg.initialSyncStart).Seconds())
+		initialCycleDurationSecs.Set(time.Since(*cfg.initialCycleStart).Seconds())
 	} else {
-		*cfg.initialSyncStart = time.Now()
-		initialSyncDurationSecs.Set(0)
+		*cfg.initialCycleStart = time.Now()
+		initialCycleDurationSecs.Set(0)
 	}
 }
 
