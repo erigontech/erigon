@@ -129,7 +129,8 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 	if chainConfig != nil {
 		chainName = chainConfig.ChainName
 	}
-	blocksPerFile := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, from)
+	snapCfg, _ := snapcfg.KnownCfg(chainName)
+	blocksPerFile := snapcfg.MergeLimitFromCfg(snapCfg, snapType, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = min(next, to)
@@ -375,13 +376,8 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 			deletedBorBlocks, err := func() (deleted int, err error) {
 				defer mxPruneTookBor.ObserveDuration(time.Now())
 
-				pruneTx := tx
-				if br.config.PolygonSync {
-					pruneTx = nil
-				}
-
 				return bordb.PruneHeimdall(context.Background(),
-					br.heimdallStore, br.bridgeStore, pruneTx, canDeleteTo, 1)
+					br.heimdallStore, br.bridgeStore, nil, canDeleteTo, 1)
 			}()
 			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit, "deleted", deleted, "err", err)
 			if err != nil {
