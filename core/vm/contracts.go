@@ -373,45 +373,8 @@ type bigModExp struct {
 }
 
 var (
-	big1      = big.NewInt(1)
-	big7      = big.NewInt(7)
-	big32     = big.NewInt(32)
-	big64     = big.NewInt(64)
-	big96     = big.NewInt(96)
-	big480    = big.NewInt(480)
-	big1024   = big.NewInt(1024)
-	big3072   = big.NewInt(3072)
-	big199680 = big.NewInt(199680)
+	big1 = big.NewInt(1)
 )
-
-// modExpMultComplexityEip198 implements modExp multiplication complexity formula, as defined in EIP-198
-//
-// def mult_complexity(x):
-//
-//	if x <= 64: return x ** 2
-//	elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
-//	else: return x ** 2 // 16 + 480 * x - 199680
-//
-// where is x is max(base_length, modulus_length)
-func modExpMultComplexityEip198(x *big.Int) *big.Int {
-	switch {
-	case x.Cmp(big64) <= 0:
-		x.Mul(x, x) // x ** 2
-	case x.Cmp(big1024) <= 0:
-		// (x ** 2 // 4 ) + ( 96 * x - 3072)
-		x = new(big.Int).Add(
-			new(big.Int).Rsh(new(big.Int).Mul(x, x), 2),
-			new(big.Int).Sub(new(big.Int).Mul(big96, x), big3072),
-		)
-	default:
-		// (x ** 2 // 16) + (480 * x - 199680)
-		x = new(big.Int).Add(
-			new(big.Int).Rsh(new(big.Int).Mul(x, x), 4),
-			new(big.Int).Sub(new(big.Int).Mul(big480, x), big199680),
-		)
-	}
-	return x
-}
 
 // modExpMultComplexityEip2565 implements modExp multiplication complexity formula, as defined in EIP-2565
 //
@@ -421,10 +384,9 @@ func modExpMultComplexityEip198(x *big.Int) *big.Int {
 //	return words**2
 //
 // where is x is max(base_length, modulus_length)
-func modExpMultComplexityEip2565(x *big.Int) *big.Int {
-	x.Add(x, big7)
-	x.Rsh(x, 3) // ÷8
-	return x.Mul(x, x)
+func modExpMultComplexityEip2565(x uint32) uint64 {
+	numWords := (uint64(x) + 7) / 8
+	return numWords * numWords
 }
 
 // modExpMultComplexityEip7883 implements modExp multiplication complexity formula, as defined in EIP-7883
@@ -437,12 +399,35 @@ func modExpMultComplexityEip2565(x *big.Int) *big.Int {
 // return multiplication_complexity
 //
 // where is x is max(base_length, modulus_length)
-func modExpMultComplexityEip7883(x *big.Int) *big.Int {
-	if x.Cmp(big32) > 0 {
-		x = modExpMultComplexityEip2565(x)
-		return x.Lsh(x, 1) // ×2
+func modExpMultComplexityEip7883(x uint32) uint64 {
+	if x > 32 {
+		return modExpMultComplexityEip2565(x) * 2
 	}
-	return x.SetUint64(16)
+	return 16
+}
+
+// modExpMultComplexityEip198 implements modExp multiplication complexity formula, as defined in EIP-198
+//
+// def mult_complexity(x):
+//
+//	if x <= 64: return x ** 2
+//	elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
+//	else: return x ** 2 // 16 + 480 * x - 199680
+//
+// where is x is max(base_length, modulus_length)
+func modExpMultComplexityEip198(x uint32) uint64 {
+	xx := uint64(x) * uint64(x)
+	switch {
+	case x <= 64:
+		return xx
+	case x <= 1024:
+		// (x ** 2 // 4 ) + ( 96 * x - 3072)
+		return xx/4 + 96*uint64(x) - 3072
+	default:
+		// (x ** 2 // 16) + (480 * x - 199680)
+		// max value: 0x100001df'dffcf220
+		return xx/16 + 480*uint64(x) - 199680
+	}
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -514,18 +499,16 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	adjExpLen := max(adjExpFactor*uint64(expTailLen)+uint64(expHeadBits), 1)
 
 	maxLen := max(baseLen, modLen)
-	maxLenBig := new(big.Int).SetUint64(uint64(maxLen))
 
-	var multComplexityBig *big.Int
+	var multComplexity uint64
 	switch {
 	case c.osaka:
-		multComplexityBig = modExpMultComplexityEip7883(maxLenBig)
+		multComplexity = modExpMultComplexityEip7883(maxLen)
 	case c.eip2565:
-		multComplexityBig = modExpMultComplexityEip2565(maxLenBig)
+		multComplexity = modExpMultComplexityEip2565(maxLen)
 	default:
-		multComplexityBig = modExpMultComplexityEip198(maxLenBig)
+		multComplexity = modExpMultComplexityEip198(maxLen)
 	}
-	multComplexity := multComplexityBig.Uint64()
 
 	gasHi, gasLo := bits.Mul64(multComplexity, adjExpLen)
 	if gasHi != 0 {
