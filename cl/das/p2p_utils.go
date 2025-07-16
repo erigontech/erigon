@@ -84,7 +84,7 @@ func ComputeCells(blobs *cltypes.Blob) ([]cltypes.Cell, error) {
 		return nil, err
 	}
 	ret := make([]cltypes.Cell, len(cells))
-	for i, cell := range cells {
+	for i, cell := range &cells {
 		ret[i] = cltypes.Cell(cell)
 	}
 	return ret, nil
