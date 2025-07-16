@@ -24,11 +24,18 @@ import (
 )
 
 var (
-	pruneFlag = cli.BoolFlag{
-		Name:     "prune",
+	removeUnknownFlag = cli.BoolFlag{
+		Name:     "remove-unknown",
 		Usage:    "Remove files not described in snapshot set.",
 		Value:    false,
-		Aliases:  []string{"p"},
+		Aliases:  []string{"u"},
+		Category: "Reset",
+	}
+	chaindataFlag = cli.BoolFlag{
+		Name:     "chaindata",
+		Usage:    "Remove chaindata too.",
+		Value:    false,
+		Aliases:  []string{"c"},
 		Category: "Reset",
 	}
 	dryRunFlag = cli.BoolFlag{
@@ -47,8 +54,9 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		err = fmt.Errorf("setting up logging: %w", err)
 		return
 	}
-	prune := pruneFlag.Get(cliCtx)
+	removeUnknown := removeUnknownFlag.Get(cliCtx)
 	dryRun := dryRunFlag.Get(cliCtx)
+	removeChainData := chaindataFlag.Get(cliCtx)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 
 	dirs := datadir.Open(dataDirPath)
@@ -101,21 +109,23 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	if dryRun {
 		removeFunc = dryRunRemove
 	}
-	reset := reset{prune: prune}
-	logger.Info("Walking snapshots directory", "path", dirs.Snap)
+	reset := reset{removeUnknown: removeUnknown}
+	logger.Info("Resetting snapshots directory", "path", dirs.Snap)
 	err = reset.walkSnapshots(logger, dirs.Snap, cfg.Preverified, removeFunc)
 	if err != nil {
 		err = fmt.Errorf("walking snapshots: %w", err)
 		return
 	}
 	// Remove chaindata last, so that the config is available if there's an error.
-	logger.Warn("Removing chaindata dir", "path", dirs.Chaindata)
-	if !dryRun {
-		err = os.RemoveAll(dirs.Chaindata)
-	}
-	if err != nil {
-		err = fmt.Errorf("removing chaindata dir: %w", err)
-		return
+	if removeChainData {
+		logger.Warn("Removing chaindata dir", "path", dirs.Chaindata)
+		if !dryRun {
+			err = os.RemoveAll(dirs.Chaindata)
+		}
+		if err != nil {
+			err = fmt.Errorf("removing chaindata dir: %w", err)
+			return
+		}
 	}
 	return
 }
@@ -161,7 +171,7 @@ func dryRunRemove(path string) error {
 }
 
 type reset struct {
-	prune bool
+	removeUnknown bool
 }
 
 func (me reset) walkSnapshots(
@@ -189,7 +199,7 @@ func (me reset) walkSnapshots(
 			item, ok := preverified.Get(itemName)
 			if !ok {
 				logger.Debug("file not in preverified list", "path", path)
-				if me.prune {
+				if me.removeUnknown {
 					return remove(path)
 				} else {
 					return nil

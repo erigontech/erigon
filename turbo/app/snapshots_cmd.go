@@ -283,8 +283,9 @@ var snapshotCommand = cli.Command{
 				slices.Clone(logging.Flags),
 				&utils.DataDirFlag,
 				&utils.ChainFlag,
-				&pruneFlag,
 				&dryRunFlag,
+				&removeUnknownFlag,
+				&chaindataFlag,
 			),
 		},
 		{
