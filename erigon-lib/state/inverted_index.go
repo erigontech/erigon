@@ -947,7 +947,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//		"tx until limit", limit)
 	//}()
 
-	keysCursor, err := rwTx.CursorDupSort(ii.keysTable)
+	keysCursor, err := rwTx.RwCursorDupSort(ii.keysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
@@ -959,27 +959,41 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	collector.SortAndFlushInBackground(true)
 
 	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	binary.BigEndian.PutUint64(txKey[:], txTo)
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.NextNoDup() {
+	k, _, err := keysCursor.Seek(txKey[:])
+	if err != nil {
+		return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
+	}
+	if k == nil {
+		k, _, err = keysCursor.Last()
+		if err != nil {
+			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
+		}
+	}
+	for ; k != nil; k, _, err = keysCursor.PrevNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 		}
 
 		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo || limit == 0 {
+		fmt.Printf("prune see: txNum=%d, %d-%d\n", txNum, txFrom, txTo)
+		if txNum >= txTo {
+			continue
+		}
+		if txNum < txFrom || limit == 0 {
 			break
 		}
-		if asserts && txNum < txFrom {
-			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
-		}
-
 		limit--
+
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
-		for ; v != nil; _, v, err = keysCursor.NextDup() {
+		stat.PruneCountTx++
+
+		kCopy := bytes.Clone(k)
+		for v, err := keysCursor.FirstDup(); v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 			}
@@ -988,7 +1002,10 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			}
 		}
 
-		if err = rwTx.Delete(ii.keysTable, k); err != nil {
+		//fmt.Printf("del = %x, %x\n", k, kCopy)
+		//keysCursor.DeleteCurrentDuplicates()
+		fmt.Printf("prune keys: kCopy=%x\n", kCopy)
+		if err = rwTx.Delete(ii.keysTable, kCopy); err != nil {
 			return nil, err
 		}
 
@@ -1006,6 +1023,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
 	err = collector.Load(nil, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if fn != nil {
+			fmt.Printf("prune valS: key=%x\n", key)
 			if err = fn(key, stat.MaxTxNum); err != nil {
 				return fmt.Errorf("fn error: %w", err)
 			}
@@ -1034,7 +1052,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}, etl.TransformArgs{Quit: ctx.Done()})
 
 	mxPruneSizeIndex.Add(float64(stat.PruneCountValues))
-
 	return stat, err
 }
 

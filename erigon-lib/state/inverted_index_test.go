@@ -816,7 +816,23 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 		dirs := datadir.New("/Users/alex/data/remove_me_test")
 		keysTable := "Keys"
 		indexTable := "Index"
-		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(4 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		//[WARN] [07-16|14:29:10.869] [dbg] 1 step                             took=23.542333ms st.PruneCountTx=0 st.PruneCountValues=64415
+		//[WARN] [07-16|14:29:10.871] [dbg] 1K keys                            took=25.390125ms st.PruneCountTx=0 st.PruneCountValues=64415
+		//[WARN] [07-16|14:29:26.804] [dbg] 10 steps                           took=15.932846834s st.PruneCountTx=0 st.PruneCountValues=64415
+		//BenchmarkInvIndexPruningPerf-16    	       1	15982058584 ns/op	   55776 B/op	     612 allocs/op
+
+		//[WARN] [07-16|14:29:34.994] [dbg] 1 step                             took=23.633667ms st.PruneCountTx=0 st.PruneCountValues=64415
+		//[WARN] [07-16|14:29:34.996] [dbg] 1K keys                            took=25.338625ms st.PruneCountTx=0 st.PruneCountValues=64415
+		//[WARN] [07-16|14:29:49.752] [dbg] 10 steps                           took=14.755738958s st.PruneCountTx=0 st.PruneCountValues=64415
+		//BenchmarkInvIndexPruningPerf-16    	       1	14819144250 ns/op	   55776 B/op	     612 allocs/op
+
+		//[WARN] [07-16|14:30:51.351] [dbg] 1 step                             took=40.702833ms st.PruneCountTx=0 st.PruneCountValues=64415
+		//[WARN] [07-16|14:30:51.353] [dbg] 1K keys                            took=43.415375ms st.PruneCountTx=0 st.PruneCountValues=64415
+		//[WARN] [07-16|14:31:16.531] [dbg] 10 steps                           took=25.177315458s st.PruneCountTx=0 st.PruneCountValues=64415
+		//BenchmarkInvIndexPruningPerf-16    	       1	25260768708 ns/op	   55360 B/op	     606 allocs/op
+
+		//Process finished with the exit code 0
+		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(16 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{
 				keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 				indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
@@ -900,22 +916,22 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 		tx.Rollback()
 	}
 
-	//tx, err := db.BeginRw(context.Background())
-	//require.NoError(b, err)
-	//defer tx.Rollback()
-	//ic := ii.BeginFilesRo()
-	//defer ic.Close()
-	//
-	//start := time.Now()
-	//st, _ := ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
-	//log.Warn("[dbg] 1 step", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
-	//
-	//pruneLimit := uint64(1_000)
-	//ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
-	//log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
-	//
-	//start = time.Now()
-	//pruneLimit = ic.aggStep * 10
-	//ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
-	//log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(b, err)
+	defer tx.Rollback()
+	ic := ii.BeginFilesRo()
+	defer ic.Close()
+
+	start := time.Now()
+	st, _ := ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+	log.Warn("[dbg] 1 step", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+
+	pruneLimit := uint64(1_000)
+	ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
+	log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+
+	start = time.Now()
+	pruneLimit = ic.aggStep * 10
+	ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
+	log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 }
