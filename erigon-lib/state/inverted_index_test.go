@@ -816,7 +816,7 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 		dirs := datadir.New("/Users/alex/data/remove_me_test")
 		keysTable := "Keys"
 		indexTable := "Index"
-		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(8 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(4 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{
 				keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 				indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
