@@ -260,7 +260,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 
 	// Disable HTTP2. See above.
-	//g.MakeMap(&requestHandler.Transport.TLSNextProto)
+	g.MakeMap(&requestHandler.Transport.TLSNextProto)
 
 	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
 	cfg.ClientConfig.WebTransport = &requestHandler
