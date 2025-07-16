@@ -4,9 +4,9 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 
 	ethereum "github.com/erigontech/erigon"
 )

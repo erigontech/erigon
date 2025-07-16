@@ -56,7 +56,15 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		signer.blob = true
 		signer.setCode = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
+	case config.IsBhilai(blockNumber):
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.blob = false
+		signer.setCode = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsCancun(blockTime):
 		// All transaction types are still supported
 		signer.protected = true
@@ -64,22 +72,22 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		signer.dynamicFee = true
 		signer.blob = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsLondon(blockNumber):
 		signer.protected = true
 		signer.accessList = true
 		signer.dynamicFee = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsBerlin(blockNumber):
 		signer.protected = true
 		signer.accessList = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsSpuriousDragon(blockNumber):
 		signer.protected = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsHomestead(blockNumber):
 	default:
 		// Only allow malleable transactions in Frontier
@@ -110,7 +118,7 @@ func LatestSigner(config *chain.Config) *Signer {
 		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
-	signer.chainIDMul.Mul(chainId, u256.Num2)
+	signer.chainIDMul.Lsh(chainId, 1) // ×2
 	if config.ChainID != nil {
 		if config.CancunTime != nil {
 			signer.blob = true
@@ -125,6 +133,9 @@ func LatestSigner(config *chain.Config) *Signer {
 			signer.protected = true
 		}
 		if config.PragueTime != nil {
+			signer.setCode = true
+		}
+		if config.Bor != nil && config.Bor.GetBhilaiBlock() != nil {
 			signer.setCode = true
 		}
 	}
@@ -149,7 +160,7 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
-	signer.chainIDMul.Mul(chainId, u256.Num2)
+	signer.chainIDMul.Lsh(chainId, 1) // ×2
 	signer.protected = true
 	signer.accessList = true
 	signer.dynamicFee = true
@@ -340,6 +351,8 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(&t.V, u256.Num27)
 		R, S = &t.R, &t.S
+	case *AccountAbstractionTransaction:
+		return txn.Sender(Signer{})
 	default:
 		return common.Address{}, ErrTxTypeNotSupported
 	}
@@ -442,5 +455,5 @@ func DeriveChainId(v *uint256.Int) *uint256.Int {
 		return new(uint256.Int).SetUint64((v - 35) / 2)
 	}
 	r := new(uint256.Int).Sub(v, u256.Num35)
-	return r.Div(r, u256.Num2)
+	return r.Rsh(r, 1) // ÷2
 }

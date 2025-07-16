@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -33,15 +34,16 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/aura"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/execution/stages/mock"
 )
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,
 // does not change the state root.
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
-	genesis := core.GnosisGenesisBlock()
+	genesis := chainspec.GnosisGenesisBlock()
 	genesisBlock, _, err := core.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 
@@ -56,7 +58,7 @@ func TestEmptyBlock(t *testing.T) {
 
 	time := uint64(1539016985)
 	header := core.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
-	header.UncleHash = types.EmptyUncleHash
+	header.UncleHash = empty.UncleHash
 	header.TxHash = trie.EmptyRoot
 	header.ReceiptHash = trie.EmptyRoot
 	header.Coinbase = common.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")
@@ -82,7 +84,7 @@ func TestEmptyBlock(t *testing.T) {
 
 func TestAuRaSkipGasLimit(t *testing.T) {
 	require := require.New(t)
-	genesis := core.GnosisGenesisBlock()
+	genesis := chainspec.GnosisGenesisBlock()
 	genesis.Config.TerminalTotalDifficultyPassed = false
 	genesis.Config.Aura.BlockGasLimitContractTransitions = map[uint64]common.Address{0: common.HexToAddress("0x4000000000000000000000000000000000000001")}
 

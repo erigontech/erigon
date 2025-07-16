@@ -4,8 +4,8 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 )
 
 // HeadL1Origin returns the latest L2 block's corresponding L1 origin.

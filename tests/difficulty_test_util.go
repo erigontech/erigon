@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -59,7 +60,7 @@ func (test *DifficultyTest) Run(config *chain.Config) error {
 	}
 
 	if test.ParentUncles == 0 {
-		parent.UncleHash = types.EmptyUncleHash
+		parent.UncleHash = empty.UncleHash
 	} else {
 		parent.UncleHash = common.HexToHash("ab") // some dummy != EmptyUncleHash
 	}

@@ -72,13 +72,10 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 		}
 	}
 	// Check that no extra elements are in the access list
-	index := s.accessList.addresses[address]
-	if index >= 0 {
-		stateSlots := s.accessList.slots[index]
-		for s := range stateSlots {
-			if _, slotPresent := slotMap[s]; !slotPresent {
-				t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
-			}
+	stateSlots := s.accessList.addresses[address]
+	for s := range stateSlots {
+		if _, slotPresent := slotMap[s]; !slotPresent {
+			t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
 		}
 	}
 }
@@ -95,12 +92,10 @@ func TestAccessList(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	state := New(NewReaderV3(domains))
+	state := New(NewReaderV3(domains.AsGetter(tx)))
 
 	state.accessList = newAccessList()
 
@@ -113,9 +108,6 @@ func TestAccessList(t *testing.T) {
 	verifyAddrs(t, state, "aa", "bb")
 	verifySlots(t, state, "bb", "01", "02")
 	if got, exp := len(state.accessList.addresses), 2; got != exp {
-		t.Fatalf("expected empty, got %d", got)
-	}
-	if got, exp := len(state.accessList.slots), 1; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
 
@@ -201,7 +193,31 @@ func TestAccessList(t *testing.T) {
 	if got, exp := len(state.accessList.addresses), 0; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
-	if got, exp := len(state.accessList.slots), 0; got != exp {
-		t.Fatalf("expected empty, got %d", got)
-	}
+
+	require.Len(t, state.accessList.codeAccesses, 0)
+	require.Len(t, state.journal.entries, 0)
+	changed := state.AddCodeAddressToAccessList(addr("0x0001"))
+	require.True(t, changed)
+	require.Len(t, state.accessList.codeAccesses, 1)
+	require.Len(t, state.journal.entries, 1)
+	require.Contains(t, state.accessList.codeAccesses, addr("0x0001"))
+	changed = state.AddCodeAddressToAccessList(addr("0x0002"))
+	require.True(t, changed)
+	require.Len(t, state.accessList.codeAccesses, 2)
+	require.Len(t, state.journal.entries, 2)
+	require.Contains(t, state.accessList.codeAccesses, addr("0x0001"))
+	require.Contains(t, state.accessList.codeAccesses, addr("0x0002"))
+	changed = state.AddCodeAddressToAccessList(addr("0x0001"))
+	require.False(t, changed)
+	require.Len(t, state.accessList.codeAccesses, 2)
+	require.Len(t, state.journal.entries, 2)
+	require.Contains(t, state.accessList.codeAccesses, addr("0x0001"))
+	require.Contains(t, state.accessList.codeAccesses, addr("0x0002"))
+	state.journal.revert(state, 1)
+	require.Len(t, state.accessList.codeAccesses, 1)
+	require.Len(t, state.journal.entries, 1)
+	require.Contains(t, state.accessList.codeAccesses, addr("0x0001"))
+	state.journal.revert(state, 0)
+	require.Len(t, state.accessList.codeAccesses, 0)
+	require.Len(t, state.journal.entries, 0)
 }

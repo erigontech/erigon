@@ -58,5 +58,5 @@ func TestBlockCollectorAccumulateAndFlush(t *testing.T) {
 		}
 	}
 	require.NoError(t, bc.Flush(context.Background()))
-	require.Equal(t, len(blocksLeft), 0)
+	require.Empty(t, blocksLeft)
 }

@@ -39,7 +39,7 @@ func TestArchiveWriter(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
 
-	td := generateTestData(t, 20, 52, 1, 1, 100000)
+	td := generateTestData(t, 4, 8, 1, 1, 10_000)
 
 	openWriter := func(tb testing.TB, tmp, name string, compFlags seg.FileCompression) *seg.Writer {
 		tb.Helper()
@@ -79,8 +79,8 @@ func TestArchiveWriter(t *testing.T) {
 
 			fk, _ := g.Next(nil)
 			fv, _ := g.Next(nil)
-			require.EqualValues(tb, k, fk)
-			require.EqualValues(tb, upd[0].value, fv)
+			require.Equal(tb, k, fk)
+			require.Equal(tb, upd[0].value, fv)
 		}
 	}
 

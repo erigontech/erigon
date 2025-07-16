@@ -21,15 +21,15 @@ import (
 	"math"
 	"testing"
 
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 func TestDecryptionKeysValidators(t *testing.T) {

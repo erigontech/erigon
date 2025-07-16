@@ -53,7 +53,7 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	curK := make([]byte, 0, 128)
 	if err := sc.WalkAccounts([]byte{}, func(addrHash common.Hash, account *accounts.Account) (bool, error) {
 		curK = append(curK[:0], addrHash.Bytes()...)
-		assert.True(t, bytes.Compare(lastK, curK) < 0)
+		assert.Negative(t, bytes.Compare(lastK, curK))
 		lastK = append(lastK[:0], curK...)
 		return true, nil
 	}); err != nil {
@@ -69,7 +69,7 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	lastK = lastK[:0]
 	if err := sc.WalkStorage(common.BytesToHash(sha3.NewLegacyKeccak256().Sum(a1.Bytes())), 1, nil, func(locHash common.Hash, val []byte) error {
 		curK = append(curK[:0], locHash.Bytes()...)
-		assert.True(t, bytes.Compare(lastK, curK) < 0)
+		assert.Negative(t, bytes.Compare(lastK, curK))
 		lastK = append(lastK[:0], curK...)
 		return nil
 	}); err != nil {
@@ -256,7 +256,7 @@ func TestReplaceAccountReadsWithWrites(t *testing.T) {
 	if sc.readQueuesLen() != 4 {
 		t.Fatalf("Read queue is expected to have 4 elements, got: %d", sc.readQueuesLen())
 	}
-	// Do 4 more delets
+	// Do 4 more deletes
 	for i := 5; i <= 8; i++ {
 		var addr common.Address
 		addr[0] = byte(i)

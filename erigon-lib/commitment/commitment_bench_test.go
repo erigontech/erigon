@@ -111,7 +111,7 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 
 		keyI := 0
 		replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-			require.EqualValues(b, oldKeys[keyI][:4], key[:4])
+			require.Equal(b, oldKeys[keyI][:4], key[:4])
 			defer func() { keyI++ }()
 			return oldKeys[keyI], nil
 		})

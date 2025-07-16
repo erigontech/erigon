@@ -57,7 +57,7 @@ func NewManualProofRetainer(t *testing.T, acc *accounts.Account, rl *RetainList,
 			storageHexKeys = append(storageHexKeys, rl.AddKey(key))
 			require.Equal(t, accHexKey, storageHexKeys[0][:64], "all storage keys must be for the same account")
 		default:
-			require.Fail(t, "unexpected key length %d", len(key))
+			require.Fail(t, "unexpected key length", len(key))
 		}
 	}
 	return &DefaultProofRetainer{
@@ -123,7 +123,7 @@ func TestProofRetainerConstruction(t *testing.T) {
 		pe := pr.ProofElement(key)
 		require.Nil(t, pe)
 	}
-	require.Equal(t, len(validKeys), len(pr.proofs))
+	require.Len(t, pr.proofs, len(validKeys))
 
 	accProof, err := pr.ProofResult()
 	require.NoError(t, err)

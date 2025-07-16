@@ -132,7 +132,7 @@ type StructLogger struct {
 	err     error
 	env     *tracing.VMContext
 
-	usedGas uint64
+	gasUsed uint64
 }
 
 // NewStructLogger returns a new logger
@@ -176,7 +176,7 @@ func (l *StructLogger) OnTxEnd(receipt *types.Receipt, err error) {
 		}
 		return
 	}
-	l.usedGas = receipt.GasUsed
+	l.gasUsed = receipt.GasUsed
 }
 
 // OnOpcode also tracks SLOAD/SSTORE ops to track storage change.
@@ -221,7 +221,7 @@ func (l *StructLogger) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope 
 				address = common.Hash(stack[stackLen-1].Bytes32())
 				value   uint256.Int
 			)
-			l.env.IntraBlockState.GetState(contractAddr, &address, &value)
+			l.env.IntraBlockState.GetState(contractAddr, address, &value)
 			l.storage[contractAddr][address] = value.Bytes32()
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.

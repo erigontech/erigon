@@ -32,9 +32,9 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestTxPoolContent(t *testing.T) {
@@ -62,14 +62,14 @@ func TestTxPoolContent(t *testing.T) {
 	reply, err := txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 	require.NoError(err)
 	for _, res := range reply.Imported {
-		require.Equal(res, txpool.ImportResult_SUCCESS, fmt.Sprintf("%s", reply.Errors))
+		require.Equal(txpool.ImportResult_SUCCESS, res, fmt.Sprintf("%s", reply.Errors))
 	}
 
 	content, err := api.Content(ctx)
 	require.NoError(err)
 
 	sender := m.Address.String()
-	require.Equal(1, len(content["pending"][sender]))
+	require.Len(content["pending"][sender], 1)
 	require.Equal(expectValue, content["pending"][sender]["0"].Value.ToInt().Uint64())
 
 	status, err := api.Status(ctx)

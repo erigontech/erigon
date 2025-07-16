@@ -22,11 +22,9 @@ package vm_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"strconv"
 	"testing"
-	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -41,12 +39,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -104,7 +101,10 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	dirs, logger := datadir.New(t.TempDir()), log.New()
+	salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	agg, err := state3.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -136,22 +136,22 @@ func TestEIP2200(t *testing.T) {
 			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
 			defer tx.Rollback()
 
-			r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 			s := state.New(r)
 
 			address := common.BytesToAddress([]byte("contract"))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
-			s.SetState(address, &common.Hash{}, *uint256.NewInt(uint64(tt.original)))
+			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), w)
+			_ = s.CommitBlock(chain.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 					return nil
 				},
 			}
-			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, params.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
+			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
 			_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
 			if !errors.Is(err, tt.failure) {
@@ -185,28 +185,19 @@ var createGasTests = []struct {
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	for i, tt := range createGasTests {
 		address := common.BytesToAddress([]byte("contract"))
 
-		tx, err := db.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
-
-		var stateReader state.StateReader
-		var stateWriter state.StateWriter
-		txc := wrap.NewTxContainer(tx, nil)
-
-		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
-		fmt.Printf("init tx %x\n", eface[1])
-
-		domains, err := state3.NewSharedDomains(txc.Tx.(kv.TemporalTx), log.New())
+		domains, err := state3.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
-		txc.Doms = domains
 
-		//stateReader = rpchelper.NewLatestStateReader(domains)
-		stateReader = rpchelper.NewLatestDomainStateReader(domains)
-		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
+		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
+		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
@@ -234,7 +225,7 @@ func TestCreateGas(t *testing.T) {
 		if gasUsed := startGas - gas; gasUsed != tt.gasUsed {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
-		tx.Rollback()
 		domains.Close()
 	}
+	tx.Rollback()
 }

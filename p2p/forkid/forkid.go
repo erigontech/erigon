@@ -30,10 +30,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/chain"
 )
 
 var (
@@ -68,7 +67,7 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHe
 			hash = checksumUpdate(hash, fork)
 			continue
 		}
-		return ID{Hash: checksumToBytes(hash), Next: fork}
+		return ID{Hash: ChecksumToBytes(hash), Next: fork}
 	}
 	var next uint64
 	for _, fork := range timeForks {
@@ -80,7 +79,7 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHe
 		next = fork
 		break
 	}
-	return ID{Hash: checksumToBytes(hash), Next: next}
+	return ID{Hash: ChecksumToBytes(hash), Next: next}
 }
 
 func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) [4]byte {
@@ -89,7 +88,7 @@ func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash,
 		return id.Hash
 	} else {
 		hash := binary.BigEndian.Uint32(id.Hash[:])
-		return checksumToBytes(checksumUpdate(hash, id.Next))
+		return ChecksumToBytes(checksumUpdate(hash, id.Next))
 	}
 }
 
@@ -119,10 +118,10 @@ func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight,
 	// Calculate the all the valid fork hash and fork next combos
 	sums := make([][4]byte, len(forks)+1) // 0th is the genesis
 	hash := crc32.ChecksumIEEE(genesis[:])
-	sums[0] = checksumToBytes(hash)
+	sums[0] = ChecksumToBytes(hash)
 	for i, fork := range forks {
 		hash = checksumUpdate(hash, fork)
-		sums[i+1] = checksumToBytes(hash)
+		sums[i+1] = ChecksumToBytes(hash)
 	}
 	// Add two sentries to simplify the fork checks and don't require special
 	// casing the last one.
@@ -203,8 +202,8 @@ func checksumUpdate(hash uint32, fork uint64) uint32 {
 	return crc32.Update(hash, crc32.IEEETable, blob[:])
 }
 
-// checksumToBytes converts a uint32 checksum into a [4]byte array.
-func checksumToBytes(hash uint32) [4]byte {
+// ChecksumToBytes converts a uint32 checksum into a [4]byte array.
+func ChecksumToBytes(hash uint32) [4]byte {
 	var blob [4]byte
 	binary.BigEndian.PutUint32(blob[:], hash)
 	return blob
@@ -253,6 +252,9 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 		}
 		if config.Bor.GetNapoliBlock() != nil {
 			heightForks = append(heightForks, config.Bor.GetNapoliBlock().Uint64())
+		}
+		if config.Bor.GetBhilaiBlock() != nil {
+			heightForks = append(heightForks, config.Bor.GetBhilaiBlock().Uint64())
 		}
 	}
 

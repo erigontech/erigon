@@ -3,6 +3,7 @@ run:
   build-tags:
     - nosqlite
     - noboltdb
+    - nosilkworm
 linters:
   enable:
     - asasalint
@@ -24,15 +25,13 @@ linters:
     - prealloc
     - predeclared
     - reassign
-    - rowserrcheck
     - spancheck
-    - sqlclosecheck
     - thelper
     - unconvert
     - wastedassign
-    - zerologlint
+    - govet
   disable:
-    - testifylint #TODO: enable me
+    - testifylint
     - staticcheck #TODO: enable me
     - perfsprint #TODO: enable me
     - recvcheck  #TODO: enable me
@@ -45,6 +44,9 @@ linters:
     - protogetter
     - unparam
     - wrapcheck
+    - rowserrcheck
+    - sqlclosecheck
+    - zerologlint
   settings:
     goconst:
       min-len: 2
@@ -53,6 +55,8 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
+        - unnecessaryDefer
+        - appendAssign
         - rangeValCopy
         - exitAfterDefer
         - elseif
@@ -62,7 +66,6 @@ linters:
         - captLocal
         - commentFormatting
         - ifElseChain
-        - appendAssign
         - preferFprint
         - sloppyReassign
         - sprintfQuotedString
@@ -73,7 +76,6 @@ linters:
         - returnAfterHttpError
         - weakCond
         - builtinShadowDecl
-        - unnecessaryDefer
         - uncheckedInlineErr
         - preferStringWriter
       enabled-tags:
@@ -93,6 +95,8 @@ linters:
       excludes:
         - G115
     govet:
+      enable:
+        - nilness
       disable:
         - deepequalerrors
         - shadow
@@ -142,14 +146,12 @@ linters:
           - gocritic
           - gosec
         path: metrics/sample\.go
-      - linters:
-          - gocritic
-          - gosec
-        path: p2p/simulations
     paths:
       - third_party$
       - builtin$
       - examples$
+      - testdata$
+      - execution-spec-tests$
 formatters:
   enable:
     - gofmt
@@ -162,3 +164,5 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - testdata$
+      - execution-spec-tests$

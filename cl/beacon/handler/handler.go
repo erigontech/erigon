@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -78,6 +79,7 @@ type ApiHandler struct {
 	caplinSnapshots      *freezeblocks.CaplinSnapshots
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
+	peerdas das.PeerDas
 	version string // Node's version
 
 	// pools
@@ -312,7 +314,7 @@ func (a *ApiHandler) init() {
 					})
 					r.Get("/blinded_blocks/{slot}", http.NotFound) // deprecated
 					r.Get("/attestation_data", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAttestationData))
-					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAggregateAttestation))
+					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAggregateAttestation)) // deprecated
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
 					r.Post("/beacon_committee_subscriptions", a.PostEthV1ValidatorBeaconCommitteeSubscription)
 					r.Post("/sync_committee_subscriptions", a.PostEthV1ValidatorSyncCommitteeSubscriptions)

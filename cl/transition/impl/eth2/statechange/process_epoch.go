@@ -101,5 +101,12 @@ func ProcessEpoch(s abstract.BeaconState) error {
 			return err
 		}
 	}
+
+	if s.Version() >= clparams.FuluVersion {
+		if err := ProcessProposerLookahead(s); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

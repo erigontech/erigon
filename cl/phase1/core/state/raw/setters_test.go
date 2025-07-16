@@ -30,7 +30,7 @@ import (
 func TestBeaconState_SetVersion(t *testing.T) {
 	state := GetTestState()
 	state.SetVersion(clparams.Phase0Version)
-	assert.Equal(t, state.Version(), clparams.Phase0Version)
+	assert.Equal(t, clparams.Phase0Version, state.Version())
 }
 
 func TestBeaconState_SetSlot(t *testing.T) {
@@ -86,7 +86,7 @@ func TestBeaconState_SetWithdrawableEpochForValidatorAtIndex_InvalidIndex(t *tes
 	index := 10000000000000
 	epoch := uint64(5)
 	err := state.SetWithdrawableEpochForValidatorAtIndex(index, epoch)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestBeaconState_SetEffectiveBalanceForValidatorAtIndex(t *testing.T) {
@@ -174,7 +174,7 @@ func TestBeaconState_SetValidatorSlashed_InvalidIndex(t *testing.T) {
 	index := 10
 	slashed := true
 	err := state.SetValidatorSlashed(index, slashed)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestBeaconState_SetValidatorMinCurrentInclusionDelayAttestation(t *testing.T) {

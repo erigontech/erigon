@@ -17,11 +17,11 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/taiko"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,7 +45,7 @@ var (
 
 func init() {
 
-	config = params.TestChainConfig
+	config = chain.TestChainConfig
 	config.GrayGlacierBlock = nil
 	config.ArrowGlacierBlock = nil
 	config.Ethash = nil
@@ -61,7 +61,7 @@ func init() {
 	// )
 
 	genesis = &types.Genesis{
-		Config: params.TaikoChainConfig,
+		Config: chainspec.TaikoChainConfig,
 		Alloc: types.GenesisAlloc{
 			testAddr:     {Balance: testBalance, Storage: map[common.Hash]common.Hash{testSlot: testValue}},
 			testContract: {Nonce: 1, Code: []byte{0x13, 0x37}, Balance: common.Big0},
@@ -182,7 +182,7 @@ func TestVerifyHeader(t *testing.T) {
 		ParentHash:      chain.TopBlock.Hash(),
 		Number:          new(big.Int).SetInt64(int64(len(chain.Blocks) + 1)),
 		Time:            uint64(time.Now().Unix()),
-		GasLimit:        params2.MaxGasLimit + 1,
+		GasLimit:        params2.MaxBlockGasLimit + 1,
 		BaseFee:         big.NewInt(params2.InitialBaseFee),
 		WithdrawalsHash: &types.EmptyRootHash,
 		UncleHash:       types.EmptyUncleHash,
@@ -193,7 +193,7 @@ func TestVerifyHeader(t *testing.T) {
 		ParentHash: chain.TopBlock.Hash(),
 		Number:     new(big.Int).SetInt64(int64(len(chain.Blocks) + 1)),
 		Time:       uint64(time.Now().Unix()),
-		GasLimit:   params2.MaxGasLimit,
+		GasLimit:   params2.MaxBlockGasLimit,
 		BaseFee:    big.NewInt(params2.InitialBaseFee),
 		UncleHash:  types.EmptyUncleHash,
 	}, false)
@@ -203,7 +203,7 @@ func TestVerifyHeader(t *testing.T) {
 		ParentHash:      chain.TopBlock.Hash(),
 		Number:          new(big.Int).SetInt64(int64(len(chain.Blocks) + 1)),
 		Time:            uint64(time.Now().Unix()),
-		GasLimit:        params2.MaxGasLimit,
+		GasLimit:        params2.MaxBlockGasLimit,
 		BaseFee:         big.NewInt(params2.InitialBaseFee),
 		WithdrawalsHash: &types.EmptyRootHash,
 	}, false)

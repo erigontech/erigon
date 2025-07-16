@@ -30,14 +30,15 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -278,11 +279,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
-	var stream *jsoniter.Stream
+	var stream jsonstream.Stream
 	if !s.disableStreaming {
-		stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+		stream = jsonstream.New(w)
 	}
-	s.serveSingleRequest(ctx, codec, stream)
+
+	errorMsg := s.serveSingleRequest(ctx, codec, stream)
+	if errorMsg != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		codec.WriteJSON(ctx, errorMsg)
+	}
 }
 
 // validateRequest returns a non-zero response code and error message if the
@@ -301,10 +307,8 @@ func validateRequest(r *http.Request) (int, error) {
 	}
 	// Check content-type
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("content-type")); err == nil {
-		for _, accepted := range acceptedContentTypes {
-			if accepted == mt {
-				return 0, nil
-			}
+		if slices.Contains(acceptedContentTypes, mt) {
+			return 0, nil
 		}
 	}
 	// Invalid content-type

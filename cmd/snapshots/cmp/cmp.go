@@ -32,19 +32,18 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-db/downloader"
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/snapshots/flags"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -338,7 +337,7 @@ type BodyEntry struct {
 func splitEntries(files []fs.DirEntry, version snaptype.Version, firstBlock, lastBlock uint64) (hents []fs.DirEntry, bents []*BodyEntry) {
 	for _, ent := range files {
 		if info, err := ent.Info(); err == nil {
-			if snapInfo, ok := info.Sys().(downloader.SnapInfo); ok && snapInfo.Version() > 0 {
+			if snapInfo, ok := info.Sys().(downloader.SnapInfo); ok && !snapInfo.Version().IsZero() {
 				if version == snapInfo.Version() &&
 					(firstBlock == 0 || snapInfo.From() >= firstBlock) &&
 					(lastBlock == 0 || snapInfo.From() < lastBlock) {
@@ -395,7 +394,7 @@ type comparitor struct {
 }
 
 func (c comparitor) chainConfig() *chain.Config {
-	return params.ChainConfigByChainName(c.chain)
+	return chainspec.ChainConfigByChainName(c.chain)
 }
 
 func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2ents []fs.DirEntry, workers int, logger log.Logger) (time.Duration, time.Duration, time.Duration, error) {

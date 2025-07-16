@@ -22,6 +22,7 @@ import (
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
@@ -166,23 +167,6 @@ func (u *BitList) addMsb() int {
 	return byteLen
 }
 
-func (u *BitList) SetOnBit(bitIndex int) {
-	if bitIndex >= u.c {
-		return
-	}
-	// remove the last on bit if necessary
-	u.removeMsb()
-	// expand the bitlist if necessary
-	for len(u.u)*8 <= bitIndex {
-		u.u = append(u.u, 0)
-	}
-	// set the bit
-	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
-	// set last bit
-	byteLen := u.addMsb()
-	u.l = byteLen
-}
-
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.
 func (u *BitList) Length() int {
 	return u.l
@@ -269,24 +253,17 @@ func (u *BitList) UnmarshalJSON(input []byte) error {
 }
 
 func (u *BitList) Merge(other *BitList) (*BitList, error) {
-	if u.c != other.c {
-		return nil, errors.New("bitlist union: different capacity")
+	if u.Bits() != other.Bits() {
+		log.Warn("bitlist union: different length", "u", u.Bits(), "other", other.Bits())
+		return nil, errors.New("bitlist union: different length")
 	}
 	// copy by the longer one
 	var ret, unionFrom *BitList
-	if u.Bits() < other.Bits() {
-		ret = other.Copy()
-		unionFrom = u
-	} else {
-		ret = u.Copy()
-		unionFrom = other
-	}
-	// union
-	unionFrom.removeMsb()
-	for i := 0; i < unionFrom.l; i++ {
+	ret = other.Copy()
+	unionFrom = u
+	for i := 0; i < len(unionFrom.u); i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
-	unionFrom.addMsb()
 	return ret, nil
 }
 

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -168,7 +169,7 @@ func getUncles(chain consensus.ChainReader, header *types.Header) (mapset.Set[co
 		}
 		ancestors[parent] = ancestorHeader
 		// If the ancestor doesn't have any uncles, we don't have to iterate them
-		if ancestorHeader.UncleHash != types.EmptyUncleHash {
+		if ancestorHeader.UncleHash != empty.UncleHash {
 			// Need to add those uncles to the blacklist too
 			ancestor := chain.GetBlock(parent, number)
 			if ancestor == nil {
@@ -220,8 +221,8 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		return errOlderBlockTime
 	}
 	// Verify that the gas limit is <= 2^63-1
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	if header.GasLimit > params.MaxBlockGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxBlockGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
@@ -354,7 +355,7 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 		// (2 if len(parent_uncles) else 1) - (block_timestamp - parent_timestamp) // 9
 		x.Sub(bigTime, bigParentTime)
 		x.Div(x, big9)
-		if parentUncleHash == types.EmptyUncleHash {
+		if parentUncleHash == empty.UncleHash {
 			x.Sub(big1, x)
 		} else {
 			x.Sub(big2, x)
@@ -568,10 +569,10 @@ func (ethash *Ethash) Initialize(config *chain.Config, chain consensus.ChainHead
 func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
-) (types.Transactions, types.Receipts, types.FlatRequests, error) {
+) (types.FlatRequests, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
-	return txs, r, nil, nil
+	return nil, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
@@ -579,15 +580,15 @@ func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state
 func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
+) (*types.Block, types.FlatRequests, error) {
 
 	// Finalize block
-	outTxs, outR, _, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall, false, logger)
+	_, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall, false, logger)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	// Header seems complete, assemble into a block and return
-	return types.NewBlock(header, outTxs, uncles, outR, withdrawals), outTxs, outR, nil, nil
+	return types.NewBlock(header, txs, uncles, r, withdrawals), nil, nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
@@ -658,10 +659,10 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 		r.Add(uncleNum, u256.Num8)
 		r.Sub(r, headerNum)
 		r.Mul(r, blockReward)
-		r.Div(r, u256.Num8)
+		r.Rsh(r, 3) // ÷8
 		uncleRewards = append(uncleRewards, *r)
 
-		r.Div(blockReward, u256.Num32)
+		r.Rsh(blockReward, 5) // ÷32
 		reward.Add(reward, r)
 	}
 	return *reward, uncleRewards
@@ -672,8 +673,8 @@ func accumulateRewards(config *chain.Config, state *state.IntraBlockState, heade
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	for i, uncle := range uncles {
 		if i < len(uncleRewards) {
-			state.AddBalance(uncle.Coinbase, &uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
+			state.AddBalance(uncle.Coinbase, uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
 		}
 	}
-	state.AddBalance(header.Coinbase, &minerReward, tracing.BalanceIncreaseRewardMineBlock)
+	state.AddBalance(header.Coinbase, minerReward, tracing.BalanceIncreaseRewardMineBlock)
 }

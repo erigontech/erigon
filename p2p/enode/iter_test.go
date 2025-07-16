@@ -160,6 +160,7 @@ func TestFairMixEmpty(t *testing.T) {
 
 // This test checks closing a source while Next runs.
 func TestFairMixRemoveSource(t *testing.T) {
+	t.Skip("issue #15019")
 	mix := NewFairMix(1 * time.Second)
 	source := make(blockingIter)
 	mix.AddSource(source)

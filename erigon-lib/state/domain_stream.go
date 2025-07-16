@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
-	"fmt"
+	"math"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -168,7 +168,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 
 	for i, item := range dc.files {
 		// todo release btcursor when iter over/make it truly stateless
-		btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), hi.from)
+		btCursor, err := dc.statelessBtree(i).Seek(dc.reusableReader(i), hi.from)
 		if err != nil {
 			return err
 		}
@@ -303,12 +303,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
-	ramIter btree2.MapIter[string, dataWithPrevStep],
-	it func(k []byte, v []byte, step uint64) (cont bool, err error),
-	txNum, stepSize uint64,
-	roTx kv.Tx,
-) error {
+func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, dataWithPrevStep], it func(k []byte, v []byte, step uint64) (cont bool, err error), stepSize uint64, roTx kv.Tx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
 	//     DB endTxNum    = first txNum of step in db
@@ -329,7 +324,7 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 		v = ramIter.Value().data
 
 		if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: ramIter, endTxNum: txNum, reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: ramIter, endTxNum: math.MaxUint64, reverse: true})
 		}
 	}
 
@@ -344,16 +339,16 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
 		step := ^binary.BigEndian.Uint64(v[:8])
 		val := v[8:]
-		endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-		if haveRamUpdates && endTxNum >= txNum {
-			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", txNum, endTxNum)
-		}
+		//endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+		//if haveRamUpdates && endTxNum >= txNum {
+		//	return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", txNum, endTxNum)
+		//}
 
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), step: step, cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), step: step, cDup: valsCursor, endTxNum: math.MaxUint64, reverse: true})
 	}
 
 	for i, item := range dt.files {
-		cursor, err := item.src.bindex.Seek(dt.statelessGetter(i), prefix)
+		cursor, err := item.src.bindex.Seek(dt.reusableReader(i), prefix)
 		if err != nil {
 			return err
 		}
@@ -387,7 +382,7 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 					}
 				}
 			case FILE_CURSOR:
-				indexList := dt.d.AccessorList
+				indexList := dt.d.Accessors
 				if indexList.Has(AccessorBTree) {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
@@ -423,10 +418,6 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 					ci1.key = common.Copy(k)
 					step := ^binary.BigEndian.Uint64(v[:8])
 					endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-					if haveRamUpdates && endTxNum >= txNum {
-						ci1.cDup.Close()
-						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", txNum, endTxNum)
-					}
 					ci1.endTxNum = endTxNum
 					ci1.val = common.Copy(v[8:])
 					ci1.step = step

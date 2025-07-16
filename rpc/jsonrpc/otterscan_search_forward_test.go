@@ -173,8 +173,8 @@ func TestSearchTransactionsAfter(t *testing.T) {
 		require.NoError(err)
 		require.False(results.FirstPage)
 		require.False(results.LastPage)
-		require.Equal(2, len(results.Txs))
-		require.Equal(2, len(results.Receipts))
+		require.Len(results.Txs, 2)
+		require.Len(results.Receipts, 2)
 	})
 	t.Run("big page size", func(t *testing.T) {
 		require := require.New(t)
@@ -182,8 +182,8 @@ func TestSearchTransactionsAfter(t *testing.T) {
 		require.NoError(err)
 		require.True(results.FirstPage)
 		require.False(results.LastPage)
-		require.Equal(3, len(results.Txs))
-		require.Equal(3, len(results.Receipts))
+		require.Len(results.Txs, 3)
+		require.Len(results.Receipts, 3)
 	})
 	t.Run("filter last block", func(t *testing.T) {
 		require := require.New(t)
@@ -192,8 +192,8 @@ func TestSearchTransactionsAfter(t *testing.T) {
 		require.NoError(err)
 		require.True(results.FirstPage)
 		require.False(results.LastPage)
-		require.Equal(2, len(results.Txs))
-		require.Equal(2, len(results.Receipts))
+		require.Len(results.Txs, 2)
+		require.Len(results.Receipts, 2)
 
 		require.Equal(5, int(results.Txs[0].BlockNumber.ToInt().Uint64()))
 		require.Equal(0, int(results.Txs[0].Nonce))

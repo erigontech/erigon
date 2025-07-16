@@ -32,8 +32,10 @@ import (
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/p2p/enode"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -87,7 +89,9 @@ func createSentinel(
 	indiciesDB kv.RwDB,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
-	logger log.Logger) (*sentinel.Sentinel, error) {
+	dataColumnStorage blob_storage.DataColumnStorage,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
+	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		context.Background(),
 		cfg,
@@ -97,12 +101,15 @@ func createSentinel(
 		indiciesDB,
 		logger,
 		forkChoiceReader,
+		dataColumnStorage,
+		peerDasStateReader,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := sent.Start(); err != nil {
-		return nil, err
+	localNode, err := sent.Start()
+	if err != nil {
+		return nil, nil, err
 	}
 	gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
@@ -139,6 +146,17 @@ func createSentinel(
 			int(cfg.BeaconConfig.SyncCommitteeSubnetCount),
 		)...)
 
+	for subnet := range cfg.BeaconConfig.DataColumnSidecarSubnetCount {
+		topic := sentinel.GossipTopic{
+			Name:     gossip.TopicNameDataColumnSidecar(subnet),
+			CodecStr: sentinel.SSZSnappyCodec,
+		}
+		// just subscribe but do not listen to the messages. This topic will be dynamically controlled in peerdas.
+		if _, err := sent.SubscribeGossip(topic, time.Unix(0, 0)); err != nil {
+			logger.Error("[Sentinel] failed to subscribe to data column sidecar", "err", err)
+		}
+	}
+
 	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
@@ -162,7 +180,7 @@ func createSentinel(
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 	}
-	return sent, nil
+	return sent, localNode, nil
 }
 
 func StartSentinelService(
@@ -173,19 +191,23 @@ func StartSentinelService(
 	srvCfg *ServerConfig,
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
-	logger log.Logger) (sentinelrpc.SentinelClient, error) {
+	dataColumnStorage blob_storage.DataColumnStorage,
+	PeerDasStateReader peerdasstate.PeerDasStateReader,
+	logger log.Logger) (sentinelrpc.SentinelClient, *enode.LocalNode, error) {
 	ctx := context.Background()
-	sent, err := createSentinel(
+	sent, localNode, err := createSentinel(
 		cfg,
 		blockReader,
 		blobStorage,
 		indiciesDB,
 		forkChoiceReader,
 		ethClock,
+		dataColumnStorage,
+		PeerDasStateReader,
 		logger,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
@@ -195,7 +217,7 @@ func StartSentinelService(
 	server := NewSentinelServer(ctx, sent, logger)
 	go StartServe(server, srvCfg, srvCfg.Creds)
 
-	return direct.NewSentinelClientDirect(server), nil
+	return direct.NewSentinelClientDirect(server), localNode, nil
 }
 
 func StartServe(

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -20,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/holiman/uint256"
@@ -159,8 +159,8 @@ func (t *Taiko) verifyHeader(header, parent *types.Header, unixNow int64) error 
 	}
 
 	// Verify that the gas limit is <= 2^63-1
-	if header.GasLimit > params2.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params2.MaxGasLimit)
+	if header.GasLimit > params2.MaxBlockGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params2.MaxBlockGasLimit)
 	}
 
 	// Verify that the gasUsed is <= gasLimit
@@ -232,7 +232,7 @@ func (t *Taiko) Prepare(chain consensus.ChainHeaderReader, header *types.Header,
 func (t *Taiko) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
-) (types.Transactions, types.Receipts, types.FlatRequests, error) {
+) (types.FlatRequests, error) {
 	// no block rewards in l2
 	header.UncleHash = types.CalcUncleHash(nil)
 	header.Difficulty = common.Big0
@@ -240,11 +240,11 @@ func (t *Taiko) Finalize(config *chain.Config, header *types.Header, state *stat
 	for _, w := range withdrawals {
 		state.AddBalance(
 			w.Address,
-			uint256.MustFromBig(new(big.Int).SetUint64(w.Amount)),
+			*uint256.MustFromBig(new(big.Int).SetUint64(w.Amount)),
 			tracing.BalanceIncreaseWithdrawal,
 		)
 	}
-	return txs, r, nil, nil
+	return nil, nil
 }
 
 // FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
@@ -254,7 +254,7 @@ func (t *Taiko) Finalize(config *chain.Config, header *types.Header, state *stat
 // consensus rules that happen at finalization (e.g. block rewards).
 func (t *Taiko) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
+) (*types.Block, types.FlatRequests, error) {
 	if withdrawals == nil {
 		withdrawals = make([]*types.Withdrawal, 0)
 	}
@@ -263,17 +263,17 @@ func (t *Taiko) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Hea
 	if len(txs) != 0 { // Transactions list might be empty when building empty payload.
 		isAnchor, err := t.ValidateAnchorTx(txs[0], header)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, err
 		}
 		if !isAnchor {
-			return nil, nil, nil, nil, ErrAnchorTxNotFound
+			return nil, nil, ErrAnchorTxNotFound
 		}
 	}
 
 	// Finalize block
 	t.Finalize(chainConfig, header, state, txs, uncles, receipts, withdrawals, chain, syscall /* sikReceiptsEval */, false, logger)
 	// header.Root = state.IntermediateRoot(true)
-	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), txs, receipts, nil, nil
+	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), nil, nil
 }
 
 // Seal generates a new sealing request for the given input block and pushes
@@ -384,6 +384,10 @@ func (t *Taiko) ValidateAnchorTx(tx types.Transaction, header *types.Header) (bo
 
 // APIs returns the RPC APIs this consensus engine provides.
 func (t *Taiko) APIs(chain consensus.ChainHeaderReader) []rpc.API {
+	return nil
+}
+
+func (t *Taiko) TxDependencies(header *types.Header) [][]int {
 	return nil
 }
 

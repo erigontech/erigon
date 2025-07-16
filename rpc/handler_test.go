@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	jsoniter "github.com/json-iterator/go"
 	"reflect"
 	"testing"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/jsonstream"
 )
 
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
@@ -45,9 +47,13 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			params:   []byte("[3]"),
 			expected: `{"jsonrpc":"2.0","id":1,"result":{}}`,
 		},
-		"err_with_valid_json": {
+		"err_with_valid_json_empty_array": {
 			params:   []byte("[4]"),
 			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":[]},"error":{"code":-32000,"message":"id 4"}}`,
+		},
+		"err_with_valid_json_empty_object": {
+			params:   []byte("[5]"),
+			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":{}},"error":{"code":-32000,"message":"id 4"}}`,
 		},
 	}
 
@@ -62,7 +68,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				Result:  nil,
 			}
 
-			dummyFunc := func(id int, stream *jsoniter.Stream) error {
+			dummyFunc := func(id int, stream jsonstream.Stream) error {
 				if id == 1 {
 					stream.WriteNil()
 					return errors.New("id 1")
@@ -78,6 +84,13 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 					stream.WriteObjectStart()
 					stream.WriteObjectField("structLogs")
 					stream.WriteEmptyArray()
+					stream.WriteObjectEnd()
+					return errors.New("id 4")
+				}
+				if id == 5 {
+					stream.WriteObjectStart()
+					stream.WriteObjectField("structLogs")
+					stream.WriteEmptyObject()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
@@ -101,7 +114,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+			stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 
 			h := handler{}
 			h.runMethod(context.Background(), &msg, cb, args, stream)

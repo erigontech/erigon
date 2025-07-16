@@ -28,8 +28,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/trie"
@@ -46,26 +45,31 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
+	var blockNrOrHash rpc.BlockNumberOrHash
+	if requestedBlock != nil {
+		blockNrOrHash = *requestedBlock
+	} else {
+		blockNrOrHash = latestNumOrHash
+	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -76,23 +80,18 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	header, _, err := headerByNumberOrHash(ctx, tx, blockNrOrHash, api)
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil
+	if header == nil {
+		return nil, errors.New("header not found")
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
-	header := block.HeaderNoCopy()
 	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {
 		return nil, err
@@ -111,26 +110,26 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 }
 
 // headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
-func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
-	_, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, bool, error) {
+	_, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	block := api.tryBlockFromLru(hash)
 	if block != nil {
-		return block.Header(), nil
+		return block.Header(), false, nil
 	}
 
 	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// header can be nil
-	return header, nil
+	return header, isLatest, nil
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
@@ -158,35 +157,30 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	engine := api.engine()
 
-	blockNum, blockHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, dbtx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	header, isLatest, err := headerByNumberOrHash(ctx, dbtx, *blockNrOrHash, api)
 	if err != nil {
 		return 0, err
 	}
 
-	block := api.tryBlockFromLru(blockHash)
-
-	// try and get the block from the lru cache first then try DB before failing
-	if block == nil {
-		block, err = api.blockWithSenders(ctx, dbtx, blockHash, blockNum)
+	// try to check if it is a pending block
+	if header == nil {
+		b := api.filters.LastPendingBlock()
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, dbtx, api._blockReader, api.filters)
 		if err != nil {
 			return 0, err
 		}
-	}
-
-	// try to check if it is a pending block
-	if block == nil {
-		b := api.filters.LastPendingBlock()
 		if b != nil && blockNum == b.NumberU64() {
-			block = b
+			header = b.HeaderNoCopy()
 		}
 	}
 
-	if block == nil {
-		return 0, errors.New(fmt.Sprintf("could not find the block %s in cache or db", blockNrOrHash.String()))
+	if header == nil {
+		return 0, errors.New(fmt.Sprintf("could not find the header %s in cache or db", blockNrOrHash.String()))
 	}
-	header := block.HeaderNoCopy()
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, api._txNumReader, blockNum, isLatest, 0, api.stateCache, chainConfig.ChainName)
+	blockNum := *(header.Number)
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -279,7 +273,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// Assuming a contract can freely run all the instructions, we have
 	// the true amount of gas it wants to consume to execute fully.
 	// We want to ensure that the gas used doesn't fall below this
-	trueGas := result.UsedGas // Must not fall below this
+	trueGas := result.GasUsed // Must not fall below this
 	lo = max(trueGas+result.EvmRefund-1, params.TxGas-1)
 
 	i := 0
@@ -297,7 +291,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil && !errors.Is(err, core.ErrIntrinsicGas) {
 			return 0, err
 		}
-		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() || result.UsedGas < trueGas {
+		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() || result.GasUsed < trueGas {
 			lo = mid
 		} else {
 			hi = mid
@@ -309,7 +303,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	roTx, err := api.db.BeginRo(ctx)
+	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +323,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -356,18 +350,18 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 	}
 	if blockNrOrHash.BlockNumber.Uint64() < latestBlock {
 		// Get first txnum of blockNumber+1 to ensure that correct state root will be restored as of blockNumber has been executed
-		lastTxnInBlock, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)).Min(tx, blockNrOrHash.BlockNumber.Uint64()+1)
+		lastTxnInBlock, err := api._txNumReader.Min(tx, blockNrOrHash.BlockNumber.Uint64()+1)
 		if err != nil {
 			return nil, err
 		}
-		commitmentStartingTxNum := tx.HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if lastTxnInBlock < commitmentStartingTxNum {
 			return nil, state.PrunedError
 		}
 
 		sdCtx.SetLimitReadAsOfTxNum(lastTxnInBlock, false)
 		//domains.SetTrace(true)
-		if _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
+		if err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
 		}
 		domains.SetTrace(false)
@@ -377,7 +371,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, _, err := sdCtx.Witness(ctx, header.Root[:], "eth_getProof")
+	proofTrie, _, err := sdCtx.Witness(ctx, nil, header.Root[:], "eth_getProof")
 	if err != nil {
 		return nil, err
 	}
@@ -418,20 +412,20 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 	proof.StorageHash = acc.Root
 
 	// if storage is not empty touch keys and build trie
-	if proof.StorageHash.Cmp(common.BytesToHash(commitment.EmptyRootHash)) != 0 && len(storageKeys) != 0 {
+	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) != 0 && len(storageKeys) != 0 {
 		// touch storage keys
 		for _, storageKey := range storageKeys {
 			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil)
 		}
 
 		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-		proofTrie, _, err = sdCtx.Witness(ctx, header.Root[:], "eth_getProof")
+		proofTrie, _, err = sdCtx.Witness(ctx, nil, header.Root[:], "eth_getProof")
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
+	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +435,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 		proof.StorageProof[i].Key = uint256.NewInt(0).SetBytes(keyHash[:]).Hex()
 
 		// if we have simple non contract account just set values directly without requesting any key proof
-		if proof.StorageHash.Cmp(common.BytesToHash(commitment.EmptyRootHash)) == 0 {
+		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
 			proof.StorageProof[i].Proof = nil
 			proof.StorageProof[i].Value = new(hexutil.Big)
 			continue
@@ -458,14 +452,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		res, err := reader.ReadAccountStorage(address, acc.Incarnation, &keyHash)
+		res, _, err := reader.ReadAccountStorage(address, keyHash)
 		if err != nil {
-			res = []byte{}
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
-		n := new(big.Int)
-		n.SetBytes(res)
-		proof.StorageProof[i].Value = (*hexutil.Big)(n)
+		proof.StorageProof[i].Value = (*hexutil.Big)(res.ToBig())
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
@@ -621,11 +612,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 	sdCtx := domains.GetCommitmentContext()
-	patricieTrie := sdCtx.Trie()
-	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
-	if !ok {
-		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
-	}
 
 	// execute block #blockNr ephemerally. This will use TrieStateWriter to record touches of accounts and storage keys.
 	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
@@ -637,21 +623,17 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
 	codeReads := store.Tds.BuildCodeTouches()
 
-	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
-	// so this is just to satisfy the current hex patricia trie api.
-	updates := commitment.NewUpdates(commitment.ModeDirect, api.dirs.Tmp, commitment.KeyToHexNibbleHash)
+	// marking keys we want to get witness for
 	for _, key := range touchedPlainKeys {
-		updates.TouchPlainKey(string(key), nil, updates.TouchAccount)
+		sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
 	}
 
-	hph.SetTrace(false) // disable tracing to avoid mixing with trace from witness computation
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
-	witnessTrie, witnessRootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
+	witnessTrie, witnessRootHash, err := sdCtx.Witness(ctx, codeReads, prevHeader.Root[:], "computeWitness")
 	if err != nil {
 		return nil, err
 	}
 
-	//
 	if !bytes.Equal(witnessRootHash, prevHeader.Root[:]) {
 		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRootHash, prevHeader.Root[:])
 	}
@@ -741,18 +723,13 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	engine := api.engine()
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, bNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	header, latest, err := headerByNumberOrHash(ctx, tx, *blockNrOrHash, api)
 	if err != nil {
 		return nil, err
-	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil
 	}
 	var stateReader state.StateReader
+
+	blockNumber := header.Number.Uint64()
 
 	if latest {
 		cacheView, err := api.stateCache.View(ctx, tx)
@@ -761,13 +738,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, api._txNumReader, blockNumber+1, 0, chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api._txNumReader)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	header := block.Header()
 	// If the gas amount is not set, extract this as it will depend on access
 	// lists and we'll need to reestimate every time
 	nogas := args.Gas == nil
@@ -791,6 +767,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 				a, err := stateReader.ReadAccountData(*args.From)
 				if err != nil {
 					return nil, err
+				}
+				if a == nil {
+					return nil, errors.New("Account: " + args.From.Hex() + " not found")
 				}
 				nonce = a.Nonce + 1
 			}
@@ -859,7 +838,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if res.Err != nil {
 				errString = res.Err.Error()
 			}
-			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}
+			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.GasUsed)}
 			if optimizeGas != nil && *optimizeGas {
 				optimizeWarmAddrInAccessList(accessList, *args.From)
 				optimizeWarmAddrInAccessList(accessList, to)

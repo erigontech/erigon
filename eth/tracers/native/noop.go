@@ -80,7 +80,7 @@ func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 
 func (*noopTracer) OnTxEnd(receipt *types.Receipt, err error) {}
 
-func (*noopTracer) OnBalanceChange(a common.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+func (*noopTracer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 }
 
 func (*noopTracer) OnNonceChange(a common.Address, prev, new uint64) {}
@@ -88,7 +88,7 @@ func (*noopTracer) OnNonceChange(a common.Address, prev, new uint64) {}
 func (*noopTracer) OnCodeChange(a common.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
 }
 
-func (*noopTracer) OnStorageChange(a common.Address, k *common.Hash, prev, new uint256.Int) {}
+func (*noopTracer) OnStorageChange(a common.Address, k common.Hash, prev, new uint256.Int) {}
 
 func (*noopTracer) OnLog(log *types.Log) {}
 

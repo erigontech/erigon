@@ -184,8 +184,14 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
-func (db *DB) Debug() kv.TemporalDebugDB                 { return kv.TemporalDebugDB(db) }
-func (db *DB) DomainTables(domain ...kv.Domain) []string { panic("not implemented") }
+func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
+func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
+func (db *DB) ReloadSalt() error                                   { panic("not implemented") }
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
+func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
+func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
+func (db *DB) EnableReadAhead() kv.TemporalDebugDB                 { panic("not implemented") }
+func (db *DB) DisableReadAhead()                                   { panic("not implemented") }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
@@ -231,10 +237,29 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) AggTx() any                 { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx  { panic("not implemented") }
-func (tx *tx) FreezeInfo() kv.FreezeInfo  { panic("not implemented") }
-func (db *DB) OnFreeze(f kv.OnFreezeFunc) { panic("not implemented") }
+func (tx *tx) AggTx() any                           { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx            { return kv.TemporalDebugTx(tx) }
+func (tx *tx) FreezeInfo() kv.FreezeInfo            { panic("not implemented") }
+func (tx *tx) CanUnwindToBlockNum() (uint64, error) { panic("not implemented") }
+func (tx *tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	panic("not implemented")
+}
+func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
+func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
+func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
+	panic("not implemented")
+}
+func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	panic("not implemented")
+}
+func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 { panic("not implemented") }
+func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	panic("not implemented")
+}
+func (tx *tx) StepSize() uint64                                     { panic("not implemented") }
+func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
+
+func (db *DB) OnFilesChange(f kv.OnFilesChange) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
 func (tx *tx) CollectMetrics() {}
@@ -263,6 +288,11 @@ func (tx *tx) Rollback() {
 		c.Close()
 	}
 }
+
+func (tx *tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+	return f(tx)
+}
+
 func (tx *tx) DBSize() (uint64, error) { panic("not implemented") }
 
 func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {
@@ -372,8 +402,16 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 	return c, nil
 }
 
-func (tx *tx) ListBuckets() ([]string, error) {
-	return nil, errors.New("function ListBuckets is not implemented for remoteTx")
+func (tx *tx) ListTables() ([]string, error) {
+	return nil, errors.New("function ListTables is not implemented for remoteTx")
+}
+
+func (tx *tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	panic("not implemented")
+}
+
+func (tx *tx) AggForkablesTx(id kv.ForkableId) any {
+	panic("not implemented")
 }
 
 // func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }
@@ -640,8 +678,11 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.las
 // Temporal Methods
 
 func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
-	// TODO: not yet implemented, return 0 for now
-	return 0
+	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remote.HistoryStartFromReq{Domain: uint32(name)})
+	if err != nil {
+		return 0
+	}
+	return reply.StartFrom
 }
 
 func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -660,9 +701,13 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err er
 	return reply.V, 0, nil
 }
 
-func (tx *tx) HasPrefix(domain kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
-	//TODO implement me
-	panic("implement me")
+func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	req := &remote.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
+	reply, err := tx.db.remoteKV.HasPrefix(tx.ctx, req)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return reply.FirstKey, reply.FirstVal, reply.HasPrefix, nil
 }
 
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
@@ -693,7 +738,7 @@ func (tx *tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 
 func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
 	return stream.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
-		req := &remote.IndexRangeReq{TxId: tx.id, Table: string(name), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken}
+		req := &remote.IndexRangeReq{TxId: tx.id, Table: name.String(), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken}
 		reply, err := tx.db.remoteKV.IndexRange(tx.ctx, req)
 		if err != nil {
 			return nil, "", err

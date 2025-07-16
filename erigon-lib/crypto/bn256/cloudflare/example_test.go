@@ -14,7 +14,7 @@ import (
 func TestExamplePair(t *testing.T) {
 	// This implements the tripartite Diffie-Hellman algorithm from "A One
 	// Round Protocol for Tripartite Diffie-Hellman", A. Joux.
-	// http://www.springerlink.com/content/cddc57yyva0hburb/fulltext.pdf
+	// https://link.springer.com/chapter/10.1007/10722028_23
 
 	// Each of three parties, a, b and c, generate a private value.
 	a, _ := rand.Int(rand.Reader, Order)

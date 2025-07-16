@@ -153,7 +153,8 @@ func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
+	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
+	defer done()
 	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
@@ -166,7 +167,8 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
+	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
+	defer done()
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
 		return nil, err
@@ -182,7 +184,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
-	s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
+	s, done := rlp.NewStreamFromPool(bytes.NewReader(data[1:]), uint64(len(data)-1))
+	defer done()
 	var t Transaction
 	switch data[0] {
 	case AccessListTxType:
@@ -422,6 +425,9 @@ func (m *Message) Nonce() uint64                   { return m.nonce }
 func (m *Message) Data() []byte                    { return m.data }
 func (m *Message) AccessList() AccessList          { return m.accessList }
 func (m *Message) Authorizations() []Authorization { return m.authorizations }
+func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
+	m.blobHashes = blobHashes
+}
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations
 }
@@ -450,7 +456,7 @@ func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	m.gasLimit = gas
 }
 
-func (m *Message) BlobGas() uint64 { return params.BlobGasPerBlob * uint64(len(m.blobHashes)) }
+func (m *Message) BlobGas() uint64 { return params.GasPerBlob * uint64(len(m.blobHashes)) }
 
 func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 	return &m.maxFeePerBlobGas

@@ -118,7 +118,7 @@ func TestTruncateCanonicalChain(t *testing.T) {
 
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, block.Block.Slot)
 	require.NoError(t, err)
-	require.Equal(t, canonicalRoot, common.Hash{})
+	require.Equal(t, common.Hash{}, canonicalRoot)
 }
 
 func TestReadBeaconBlockHeader(t *testing.T) {

@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -40,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var (
@@ -79,10 +77,11 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal".
-				Full: Keep only blocks and latest state,
-				Archive: Keep the entire indexed database, aka. no pruning,
-				Minimal: Keep only latest state`,
+		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
+				full: Keep only necessary blocks and latest state,
+				blocks: Keep all blocks but not the state history,
+				archive: Keep the entire state history and all blocks,
+				minimal: Keep only latest state`,
 		Value: "full",
 	}
 	PruneDistanceFlag = cli.Uint64Flag{
@@ -93,7 +92,6 @@ var (
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
 	}
-
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
 		Name:  "tls",
@@ -185,7 +183,7 @@ var (
 	}
 	HTTPIdleTimeoutFlag = cli.DurationFlag{
 		Name:  "http.timeouts.idle",
-		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used.",
+		Usage: "Maximum amount of time to wait for the next request when keep-alive connections are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used.",
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
 	}
 
@@ -201,7 +199,7 @@ var (
 	}
 	AuthRpcIdleTimeoutFlag = cli.DurationFlag{
 		Name:  "authrpc.timeouts.idle",
-		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
+		Usage: "Maximum amount of time to wait for the next request when keep-alive connections are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
 	}
 
@@ -248,12 +246,6 @@ var (
 		Usage: "Maximum number of topics per subscription to filter logs by.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
 	}
-
-	TxPoolCommitEvery = cli.DurationFlag{
-		Name:  "txpool.commit.every",
-		Usage: "How often transactions should be committed to the storage",
-		Value: txpoolcfg.DefaultConfig.CommitEvery,
-	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
@@ -262,37 +254,27 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
 	}
 	_ = chainId
-	// Sanitize prune flag
-	if ctx.String(PruneModeFlag.Name) != "archive" && (ctx.IsSet(PruneBlocksDistanceFlag.Name) || ctx.IsSet(PruneDistanceFlag.Name)) {
-		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
-	}
-	distance := ctx.Uint64(PruneDistanceFlag.Name)
+
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
+	distance := ctx.Uint64(PruneDistanceFlag.Name)
 
-	if !ctx.IsSet(PruneBlocksDistanceFlag.Name) {
-		blockDistance = math.MaxUint64
+	// check if the prune.mode flag is not set to archive
+	persistenceReceiptsV2 := ctx.String(PruneModeFlag.Name) != prune.ArchiveMode.String()
+
+	// overwrite receipts persistence if the flag is set
+	if ctx.IsSet(utils.PersistReceiptsV2Flag.Name) {
+		persistenceReceiptsV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
 	}
-	if !ctx.IsSet(PruneDistanceFlag.Name) {
-		distance = math.MaxUint64
+
+	if persistenceReceiptsV2 {
+		cfg.PersistReceiptsCacheV2 = true
 	}
-	mode, err := prune.FromCli(distance, blockDistance)
+
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	// Full mode prunes all but the latest state
-	if ctx.String(PruneModeFlag.Name) == "full" {
-		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	}
-	// Minimal mode prunes all but the latest state including blocks
-	if ctx.String(PruneModeFlag.Name) == "minimal" {
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	}
 
-	if err != nil {
-		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
 	cfg.Prune = mode
 	if ctx.String(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
@@ -359,12 +341,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		}
 	}
 
-	disableIPV6 := ctx.Bool(utils.DisableIPV6.Name)
-	disableIPV4 := ctx.Bool(utils.DisableIPV4.Name)
-	downloadRate := ctx.String(utils.TorrentDownloadRateFlag.Name)
-	uploadRate := ctx.String(utils.TorrentUploadRateFlag.Name)
-
-	logger.Info("[Downloader] Running with", "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate, "upload.rate", uploadRate)
 	if ctx.Bool(utils.DisableIPV6.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv6 = true
 	}
@@ -391,23 +367,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		distance = *pruneDistance
 	}
 
-	mode, err := prune.FromCli(distance, blockDistance)
+	mode, err := prune.FromCli(*pruneMode, distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	switch *pruneMode {
-	case "archive":
-	case "full":
-		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	case "minimal":
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	default:
-		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
-	}
-	mode.Blocks = prune.Distance(blockDistance)
-	mode.History = prune.Distance(distance)
 
 	cfg.Prune = mode
 
@@ -417,6 +380,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
+
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
 		sizeVal := datasize.ByteSize(0)
 		size := &sizeVal
@@ -488,16 +452,15 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
 			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
 		},
-		EvmCallTimeout:                    ctx.Duration(EvmCallTimeoutFlag.Name),
-		OverlayGetLogsTimeout:             ctx.Duration(OverlayGetLogsFlag.Name),
-		OverlayReplayBlockTimeout:         ctx.Duration(OverlayReplayBlockFlag.Name),
-		WebsocketPort:                     ctx.Int(utils.WSPortFlag.Name),
-		WebsocketEnabled:                  ctx.IsSet(utils.WSEnabledFlag.Name),
-		WebsocketSubscribeLogsChannelSize: ctx.Int(utils.WSSubscribeLogsChannelSize.Name),
-		RpcBatchConcurrency:               ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
-		RpcStreamingDisable:               ctx.Bool(utils.RpcStreamingDisableFlag.Name),
-		DBReadConcurrency:                 ctx.Int(utils.DBReadConcurrencyFlag.Name),
-		RpcAllowListFilePath:              ctx.String(utils.RpcAccessListFlag.Name),
+		EvmCallTimeout:            ctx.Duration(EvmCallTimeoutFlag.Name),
+		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),
+		OverlayReplayBlockTimeout: ctx.Duration(OverlayReplayBlockFlag.Name),
+		WebsocketPort:             ctx.Int(utils.WSPortFlag.Name),
+		WebsocketEnabled:          ctx.IsSet(utils.WSEnabledFlag.Name),
+		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
+		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
 			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
 			RpcSubscriptionFiltersMaxHeaders:   ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
@@ -521,19 +484,31 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
 	}
 
-	if c.Enabled {
-		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis)
+	if ctx.IsSet(utils.WSSubscribeLogsChannelSize.Name) {
+		c.WebsocketSubscribeLogsChannelSize = ctx.Int(utils.WSSubscribeLogsChannelSize.Name)
+	} else {
+		c.WebsocketSubscribeLogsChannelSize = 8192
 	}
 
-	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
-		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)
+	if c.Enabled {
+		if ctx.IsSet(utils.HttpCompressionFlag.Name) {
+			c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)
+		} else {
+			c.HttpCompression = true
+		}
+		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis, "http.compression", c.HttpCompression)
 	} else {
-		c.HttpCompression = true
+		c.HttpCompression = false
 	}
-	if ctx.IsSet(utils.WsCompressionFlag.Name) {
-		c.WebsocketCompression = ctx.Bool(utils.WsCompressionFlag.Name)
+
+	if c.WebsocketEnabled {
+		if ctx.IsSet(utils.WsCompressionFlag.Name) {
+			c.WebsocketCompression = ctx.Bool(utils.WsCompressionFlag.Name)
+		} else {
+			c.WebsocketCompression = true
+		}
 	} else {
-		c.WebsocketCompression = true
+		c.WebsocketCompression = false
 	}
 
 	err := c.StateCache.CacheSize.UnmarshalText([]byte(ctx.String(utils.StateCacheFlag.Name)))

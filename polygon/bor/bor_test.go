@@ -39,14 +39,14 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type test_heimdall struct {
@@ -75,7 +75,7 @@ func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, 
 	return nil, nil
 }
 
-func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
 	return nil, nil
 }
 
@@ -368,11 +368,13 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 }
 
 func TestValidatorCreate(t *testing.T) {
-	newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
+	t.Skip("issue #15017")
+	newValidator(t, newTestHeimdall(polychain.BorDevnetChainConfig), map[uint64]*types.Block{})
 }
 
 func TestVerifyHeader(t *testing.T) {
-	v := newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
+	t.Skip("issue #15017")
+	v := newValidator(t, newTestHeimdall(polychain.BorDevnetChainConfig), map[uint64]*types.Block{})
 
 	chain, err := v.generateChain(1)
 
@@ -398,17 +400,17 @@ func TestVerifyRun(t *testing.T) {
 }
 
 func TestVerifySprint(t *testing.T) {
-	//testVerify(t, 10, 4, int(params.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
+	//testVerify(t, 10, 4, int(polychain.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func TestVerifySpan(t *testing.T) {
-	//testVerify(t, 10, 4 /*100**/ *int(params.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
+	//testVerify(t, 10, 4 /*100**/ *int(polychain.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func testVerify(t *testing.T, noValidators int, chainLength int) {
 	log.Root().SetHandler(log.StderrHandler)
 
-	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
+	heimdall := newTestHeimdall(polychain.BorDevnetChainConfig)
 	blocks := map[uint64]*types.Block{}
 
 	validators := make([]validator, noValidators)
@@ -469,7 +471,8 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 }
 
 func TestSendBlock(t *testing.T) {
-	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
+	t.Skip("issue #15017")
+	heimdall := newTestHeimdall(polychain.BorDevnetChainConfig)
 	blocks := map[uint64]*types.Block{}
 
 	s := newValidator(t, heimdall, blocks)

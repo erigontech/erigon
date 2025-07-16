@@ -3,6 +3,7 @@ run:
   build-tags:
     - nosqlite
     - noboltdb
+    - nosilkworm
 linters:
   enable:
     - asasalint
@@ -19,14 +20,12 @@ linters:
     - perfsprint
     - prealloc
     - reassign
-    - rowserrcheck
     - spancheck
-    - sqlclosecheck
     - unconvert
     - wastedassign
-    - zerologlint
+    - govet
   disable:
-    - testifylint #TODO: enable me
+    - testifylint
     - staticcheck #TODO: enable me
     - errchkjson #TODO: enable me
     - makezero #TODO: enable me
@@ -44,6 +43,9 @@ linters:
     - recvcheck
     - unparam
     - wrapcheck
+    - sqlclosecheck
+    - zerologlint
+    - rowserrcheck
   settings:
     goconst:
       min-len: 2
@@ -52,8 +54,9 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - regexpMust
+        - unnecessaryDefer
         - appendAssign
+        - regexpMust
         - rangeValCopy
         - exitAfterDefer
         - elseif
@@ -72,7 +75,6 @@ linters:
         - returnAfterHttpError
         - weakCond
         - builtinShadowDecl
-        - unnecessaryDefer
         - uncheckedInlineErr
         - preferStringWriter
         - commentedOutCode
@@ -138,15 +140,13 @@ linters:
       - linters:
           - gocritic
           - gosec
-        path: p2p/simulations
-      - linters:
-          - gocritic
-          - gosec
         path: p2p/dnsdisc
     paths:
       - third_party$
       - builtin$
       - examples$
+      - testdata$
+      - execution-spec-tests$
 formatters:
   enable:
     - gofmt
@@ -159,3 +159,5 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - testdata$
+      - execution-spec-tests$

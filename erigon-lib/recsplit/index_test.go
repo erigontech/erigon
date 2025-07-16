@@ -46,6 +46,7 @@ func TestReWriteIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rs.Close()
 	for i := 0; i < 100; i++ {
 		if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
 			t.Fatal(err)

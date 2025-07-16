@@ -25,13 +25,13 @@ import (
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func TestMsgID(t *testing.T) {
-	n := clparams.NetworkConfigs[networkid.MainnetChainID]
+	n := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	s := &Sentinel{
 		ctx: context.TODO(),
 		cfg: &SentinelConfig{

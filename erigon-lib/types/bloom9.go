@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 )
 
 type bytesBacked interface {
@@ -120,7 +119,7 @@ func CreateBloom(receipts Receipts) Bloom {
 	var bin Bloom
 	for _, receipt := range receipts {
 		for _, log := range receipt.Logs {
-			bin.add(log.Address.Bytes(), buf)
+			bin.add(log.Address[:], buf)
 			for _, b := range log.Topics {
 				bin.add(b[:], buf)
 			}
@@ -134,7 +133,7 @@ func LogsBloom(logs []*Log) Bloom {
 	buf := make([]byte, 6)
 	var bin Bloom
 	for _, log := range logs {
-		bin.add(log.Address.Bytes(), buf)
+		bin.add(log.Address[:], buf)
 		for _, b := range log.Topics {
 			bin.add(b[:], buf)
 		}
@@ -154,7 +153,7 @@ func bloomValues(data []byte, hashbuf []byte) (uint, byte, uint, byte, uint, byt
 	sha := crypto.NewKeccakState()
 	sha.Write(data)   //nolint:errcheck
 	sha.Read(hashbuf) //nolint:errcheck
-	cryptopool.ReturnToPoolKeccak256(sha)
+	crypto.ReturnToPool(sha)
 	// The actual bits to flip
 	v1 := byte(1 << (hashbuf[1] & 0x7))
 	v2 := byte(1 << (hashbuf[3] & 0x7))
