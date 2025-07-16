@@ -412,7 +412,6 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 
 func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	t.Helper()
-	fmt.Printf("txs: %d\n", txs)
 	require := require.New(t)
 	ctx := context.Background()
 	var err error
