@@ -23,7 +23,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
-	evmone "github.com/erigontech/evmone_precompiles"
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -549,28 +548,14 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		}
 	}
 
-	// Handle a special case when the mod length is zero
-	if modLen == 0 {
-		return []byte{}, nil
-	}
-
-	// For inputs within reasonable limits, use faster evmone's implementation.
-	if baseLen <= 1024 && modLen <= 1024 {
-		// FIXME: evmone has some issues with padding input, avoid it for now.
-		fullSize := int(3*32 + baseLen + expLen + modLen)
-		if len(input) < fullSize {
-			input = common.RightPadBytes(input, fullSize)
-		}
-
-		output := make([]byte, modLen)
-		evmone.ModExp(output, input)
-		return output, nil
-	}
-
 	if len(input) > 96 {
 		input = input[96:]
 	} else {
 		input = input[:0]
+	}
+	// Handle a special case when both the base and mod length is zero
+	if baseLen == 0 && modLen == 0 {
+		return []byte{}, nil
 	}
 	// Retrieve the operands and execute the exponentiation
 	var (
