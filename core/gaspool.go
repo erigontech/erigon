@@ -37,37 +37,46 @@ func NewGasPool(gas, blobGas uint64) *GasPool {
 }
 
 func (gp *GasPool) Reset(amount, blobGas uint64) {
-	gp.mu.Lock()
-	defer gp.mu.Unlock()
-	gp.gas = amount
-	gp.blobGas = blobGas
+	if gp != nil {
+		gp.mu.Lock()
+		defer gp.mu.Unlock()
+		gp.gas = amount
+		gp.blobGas = blobGas
+	}
 }
 
 // AddGas makes gas available for execution.
 func (gp *GasPool) AddGas(amount uint64) *GasPool {
-	gp.mu.Lock()
-	defer gp.mu.Unlock()
-	if gp.gas > math.MaxUint64-amount {
-		panic("gas pool pushed above uint64")
+	if gp != nil {
+		gp.mu.Lock()
+		defer gp.mu.Unlock()
+		if gp.gas > math.MaxUint64-amount {
+			panic("gas pool pushed above uint64")
+		}
+		gp.gas += amount
 	}
-	gp.gas += amount
 	return gp
 }
 
 // SubGas deducts the given amount from the pool if enough gas is
 // available and returns an error otherwise.
 func (gp *GasPool) SubGas(amount uint64) error {
-	gp.mu.Lock()
-	defer gp.mu.Unlock()
-	if gp.gas < amount {
-		return ErrGasLimitReached
+	if gp != nil {
+		gp.mu.Lock()
+		defer gp.mu.Unlock()
+		if gp.gas < amount {
+			return ErrGasLimitReached
+		}
+		gp.gas -= amount
 	}
-	gp.gas -= amount
 	return nil
 }
 
 // Gas returns the amount of gas remaining in the pool.
 func (gp *GasPool) Gas() uint64 {
+	if gp == nil {
+		return 0
+	}
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
 	return gp.gas
@@ -75,35 +84,45 @@ func (gp *GasPool) Gas() uint64 {
 
 // AddBlobGas makes blob gas available for execution.
 func (gp *GasPool) AddBlobGas(amount uint64) *GasPool {
-	gp.mu.Lock()
-	defer gp.mu.Unlock()
-	if gp.blobGas > math.MaxUint64-amount {
-		panic("blob gas pool pushed above uint64")
+	if gp != nil {
+		gp.mu.Lock()
+		defer gp.mu.Unlock()
+		if gp.blobGas > math.MaxUint64-amount {
+			panic("blob gas pool pushed above uint64")
+		}
+		gp.blobGas += amount
 	}
-	gp.blobGas += amount
 	return gp
 }
 
 // SubBlobGas deducts the given amount from the pool if enough blob gas is available and returns an
 // error otherwise.
 func (gp *GasPool) SubBlobGas(amount uint64) error {
-	gp.mu.Lock()
-	defer gp.mu.Unlock()
-	if gp.blobGas < amount {
-		return ErrBlobGasLimitReached
+	if gp != nil {
+		gp.mu.Lock()
+		defer gp.mu.Unlock()
+		if gp.blobGas < amount {
+			return ErrBlobGasLimitReached
+		}
+		gp.blobGas -= amount
 	}
-	gp.blobGas -= amount
 	return nil
 }
 
 // BlobGas returns the amount of blob gas remaining in the pool.
 func (gp *GasPool) BlobGas() uint64 {
+	if gp == nil {
+		return 0
+	}
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
 	return gp.blobGas
 }
 
 func (gp *GasPool) String() string {
+	if gp == nil {
+		return "gas: %0, blob_gas: 0"
+	}
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
 	return fmt.Sprintf("gas: %d, blob_gas: %d", gp.gas, gp.blobGas)
