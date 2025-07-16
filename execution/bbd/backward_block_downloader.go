@@ -241,7 +241,8 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 	currentHead := config.chainLengthCurrentHead
 	if currentHead != nil && *currentHead > headerNum && *currentHead-headerNum >= config.chainLengthLimit {
 		return nil, fmt.Errorf(
-			"chain length limit breach: num=%d, hash=%s, currentHead=%d, limit=%d",
+			"%w: num=%d, hash=%s, currentHead=%d, limit=%d",
+			ErrChainLengthExceedsLimit,
 			headerNum,
 			hash,
 			*config.chainLengthCurrentHead,
