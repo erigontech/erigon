@@ -993,16 +993,16 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			}
 		}
 
-		if err = rwTx.Delete(ii.keysTable, k); err != nil {
-			return nil, err
-		}
+		//if err = rwTx.Delete(ii.keysTable, k); err != nil {
+		//	return nil, err
+		//}
 
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 	}
 
-	binary.BigEndian.PutUint64(txKey[:], stat.MaxTxNum)
+	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
 	err = collector.Load(nil, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if fn != nil {
 			if err = fn(key, stat.MaxTxNum); err != nil {
