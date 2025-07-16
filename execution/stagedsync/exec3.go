@@ -64,14 +64,18 @@ var (
 	mxExecMgas         = metrics.NewGauge(`exec_mgas`)
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
 
-	mxExecReadCount            = metrics.NewGauge("exec_read_count")
+	mxExecBlockReadDuration    = metrics.NewGauge("exec_block_dur")
+	mxExecTaskReadDuration     = metrics.NewGauge("exec_task_dur")
 	mxExecReadDuration         = metrics.NewGauge("exec_read_dur")
-	mxExecAccountReadCount     = metrics.NewGauge("exec_account_read_count")
 	mxExecAccountReadDuration  = metrics.NewGauge("exec_account_read_dur")
-	mxExecStorageReadCount     = metrics.NewGauge("exec_storage_read_count")
 	mxExecStoreageReadDuration = metrics.NewGauge("exec_storage_read_dur")
-	mxExecCodeReadCount        = metrics.NewGauge("exec_code_read_count")
 	mxExecCodeReadDuration     = metrics.NewGauge("exec_code_read_dur")
+
+	mxExecReadRate        = metrics.NewGauge("exec_read_rate")
+	mxExecWriteRate       = metrics.NewGauge("exec_write_rate")
+	mxExecAccountReadRate = metrics.NewGauge("exec_account_read_rate")
+	mxExecStorageReadRate = metrics.NewGauge("exec_storage_read_rate")
+	mxExecCodeReadRate    = metrics.NewGauge("exec_code_read_rate")
 )
 
 const (
@@ -97,36 +101,36 @@ func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMe
 }
 
 type Progress struct {
-	initialTime           time.Time
-	initialTxNum          uint64
-	initialBlockNum       uint64
-	prevExecTime          time.Time
-	prevExecutedBlockNum  uint64
-	prevExecutedTxNum     uint64
-	prevExecutedGas       int64
-	prevExecCount         uint64
-	prevActivations       int64
-	prevTaskDuration      time.Duration
-	prevTaskReadDuration  time.Duration
-	prevAccountReadDur    time.Duration
-	prevStorageReadDur    time.Duration
-	prevCodeReadDur       time.Duration
-	prevTaskReadCount     int64
-	prevTaskGas           int64
-	prevBlockCount        int64
-	prevBlockDuration     time.Duration
-	prevAbortCount        uint64
-	prevInvalidCount      uint64
-	prevReadCount         uint64
-	prevAccountReadCount  uint64
-	prevStorageReadCount  uint64
-	prevCodeReadCount     uint64
-	prevWriteCount        uint64
-	prevCommitTime        time.Time
-	prevCommittedBlockNum uint64
-	prevCommittedTxNum    uint64
-	prevCommittedGas      int64
-	commitThreshold       uint64
+	initialTime             time.Time
+	initialTxNum            uint64
+	initialBlockNum         uint64
+	prevExecTime            time.Time
+	prevExecutedBlockNum    uint64
+	prevExecutedTxNum       uint64
+	prevExecutedGas         int64
+	prevExecCount           uint64
+	prevActivations         int64
+	prevTaskDuration        time.Duration
+	prevTaskReadDuration    time.Duration
+	prevAccountReadDuration time.Duration
+	prevStorageReadDuration time.Duration
+	prevCodeReadDuration    time.Duration
+	prevTaskReadCount       int64
+	prevTaskGas             int64
+	prevBlockCount          int64
+	prevBlockDuration       time.Duration
+	prevAbortCount          uint64
+	prevInvalidCount        uint64
+	prevReadCount           uint64
+	prevAccountReadCount    uint64
+	prevStorageReadCount    uint64
+	prevCodeReadCount       uint64
+	prevWriteCount          uint64
+	prevCommitTime          time.Time
+	prevCommittedBlockNum   uint64
+	prevCommittedTxNum      uint64
+	prevCommittedGas        int64
+	commitThreshold         uint64
 
 	logPrefix string
 	logger    log.Logger
@@ -151,29 +155,26 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 	taskGas := te.taskExecMetrics.GasUsed.Total.Load()
 	taskDur := time.Duration(te.taskExecMetrics.Duration.Load())
-	readDur := time.Duration(te.taskExecMetrics.ReadDuration.Load())
-	readCount := te.taskExecMetrics.ReadCount.Load()
+	taskReadDur := time.Duration(te.taskExecMetrics.ReadDuration.Load())
+	accountReadDur := time.Duration(te.taskExecMetrics.AccountReadDuration.Load())
+	storageReadDur := time.Duration(te.taskExecMetrics.StorageReadDuration.Load())
+	codeReadDur := time.Duration(te.taskExecMetrics.CodeReadDuration.Load())
 	activations := te.taskExecMetrics.Active.Total.Load()
-
-	mxExecReadCount.SetUint64(uint64(te.taskExecMetrics.ReadCount.Load()))
-	mxExecReadDuration.SetUint64(uint64(te.taskExecMetrics.ReadDuration.Load()))
-	mxExecAccountReadCount.SetUint64(uint64(te.taskExecMetrics.AccountReadCount.Load()))
-	mxExecAccountReadDuration.SetUint64(uint64(te.taskExecMetrics.AccountReadDuration.Load()))
-	mxExecStorageReadCount.SetUint64(uint64(te.taskExecMetrics.StorageReadCount.Load()))
-	mxExecStoreageReadDuration.SetUint64(uint64(te.taskExecMetrics.StorageReadDuration.Load()))
-	mxExecCodeReadCount.SetUint64(uint64(te.taskExecMetrics.CodeReadCount.Load()))
-	mxExecCodeReadDuration.SetUint64(uint64(te.taskExecMetrics.CodeReadDuration.Load()))
 
 	curTaskGas := taskGas - p.prevTaskGas
 	curTaskDur := taskDur - p.prevTaskDuration
-	curReadDur := readDur - p.prevTaskReadDuration
-	curStorageReadCount := readCount - p.prevTaskReadCount
+	curTaskReadDur := taskReadDur - p.prevTaskReadDuration
+	curAccountReadDur := accountReadDur - p.prevAccountReadDuration
+	curStorageReadDur := storageReadDur - p.prevStorageReadDuration
+	curCodeReadDur := codeReadDur - p.prevCodeReadDuration
 	curActivations := activations - int64(p.prevActivations)
 
 	p.prevTaskGas = taskGas
 	p.prevTaskDuration = taskDur
-	p.prevTaskReadDuration = readDur
-	p.prevTaskReadCount = readCount
+	p.prevTaskReadDuration = curTaskReadDur
+	p.prevAccountReadDuration = curAccountReadDur
+	p.prevStorageReadDuration = curStorageReadDur
+	p.prevCodeReadDuration = curCodeReadDur
 	p.prevActivations = activations
 
 	var readRatio float64
@@ -183,7 +184,12 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 	if curActivations > 0 {
 		avgTaskDur = curTaskDur / time.Duration(curActivations)
-		avgReadDur = curReadDur / time.Duration(curActivations)
+		avgReadDur = curTaskReadDur / time.Duration(curActivations)
+
+		mxExecReadDuration.SetUint64(uint64(avgReadDur))
+		mxExecAccountReadDuration.SetUint64(uint64(curAccountReadDur / time.Duration(curActivations)))
+		mxExecStoreageReadDuration.SetUint64(uint64(curStorageReadDur / time.Duration(curActivations)))
+		mxExecCodeReadDuration.SetUint64(uint64(curCodeReadDur / time.Duration(curActivations)))
 
 		if avgTaskDur > 0 {
 			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
@@ -202,6 +208,12 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		invalidCount := uint64(te.invalidCount.Load())
 		readCount := uint64(te.readCount.Load())
 		writeCount := uint64(te.writeCount.Load())
+
+		// not sure why this happens but sometime we read more from disk than from memory
+		storageReadCount := uint64(te.taskExecMetrics.ReadCount.Load())
+		if storageReadCount > readCount {
+			readCount = storageReadCount
+		}
 
 		execDiff := execCount - p.prevExecCount
 
@@ -229,11 +241,14 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 		curReadCount := int64(readCount - p.prevReadCount)
 
-		var cacheRatio float64
+		curReadRate := uint64(float64(curReadCount) / interval.Seconds())
+		curWriteRate := uint64(float64(writeCount-p.prevWriteCount) / interval.Seconds())
 
-		if curReadCount > 0 {
-			cacheRatio = 100.0 * float64(curReadCount-curStorageReadCount) / float64(curReadCount)
-		}
+		mxExecReadRate.SetUint64(curReadRate)
+		mxExecWriteRate.SetUint64(curWriteRate)
+		mxExecAccountReadRate.SetUint64(uint64(float64(te.taskExecMetrics.AccountReadCount.Load()) / interval.Seconds()))
+		mxExecStorageReadRate.SetUint64(uint64(float64(te.taskExecMetrics.StorageReadCount.Load()) / interval.Seconds()))
+		mxExecCodeReadRate.SetUint64(uint64(float64(te.taskExecMetrics.CodeReadCount.Load()) / interval.Seconds()))
 
 		execVals = []interface{}{
 			"exec", common.PrettyCounter(execDiff),
@@ -246,12 +261,9 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"tsrdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
 			"rd", common.PrettyCounter(curReadCount),
-			"srd", common.PrettyCounter(curStorageReadCount),
-			"cache%", fmt.Sprintf("%.2f", cacheRatio),
 			"wrt", common.PrettyCounter(curReadCount),
-			"rd/s", common.PrettyCounter(uint64(float64(curReadCount) / interval.Seconds())),
-			"srd/s", common.PrettyCounter(uint64(float64(curStorageReadCount) / interval.Seconds())),
-			"wrt/s", common.PrettyCounter(uint64(float64(writeCount-p.prevWriteCount) / interval.Seconds())),
+			"rd/s", common.PrettyCounter(curReadRate),
+			"wrt/s", common.PrettyCounter(curWriteRate),
 		}
 
 		mxExecRepeats.AddInt(int(repeats))
@@ -263,13 +275,17 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		p.prevReadCount = readCount
 		p.prevWriteCount = writeCount
 	case *serialExecutor:
+		readCount := uint64(te.taskExecMetrics.ReadCount.Load())
+		curReadCount := readCount - p.prevReadCount
+		p.prevReadCount = readCount
+
 		execVals = []interface{}{
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
-			"srd", common.PrettyCounter(curStorageReadCount),
-			"srd/s", common.PrettyCounter(uint64(float64(curStorageReadCount) / interval.Seconds())),
+			"rd", common.PrettyCounter(curReadCount),
+			"rd/s", common.PrettyCounter(uint64(float64(curReadCount) / interval.Seconds())),
 		}
 	}
 
