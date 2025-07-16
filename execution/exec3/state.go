@@ -65,7 +65,10 @@ func NewWorkerMetrics() *WorkerMetrics {
 		Active:              activeCount{Ema: metrics.NewEmaWithBeta[int64](0, 1, 0.2)},
 		GasUsed:             activeCount{Ema: metrics.NewEma[int64](0, 0.3)},
 		Duration:            activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
+		ReadDuration:        activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
+		AccountReadDuration: activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 		StorageReadDuration: activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
+		CodeReadDuration:    activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 		WriteDuration:       activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 	}
 }
@@ -256,14 +259,24 @@ func (rw *Worker) resetTx(chainTx kv.Tx) {
 }
 
 func (rw *Worker) Run() (err error) {
-	defer func() { // convert panic to err - because it's background workers
+	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("exec3.Worker panic: %s, %s", rec, dbg.Stack())
+			rw.logger.Warn("Worger failed", "err", err)
 		}
 	}()
 
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
-		result := rw.RunTxTask(txTask)
+		result := func() (result *exec.TxResult) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					result = &exec.TxResult{
+						Err: fmt.Errorf("exec3 task panic: %s, %s", rec, dbg.Stack()),
+					}
+				}
+			}()
+			return rw.RunTxTask(txTask)
+		}()
 		if err := rw.results.Add(rw.ctx, result); err != nil {
 			return err
 		}
