@@ -390,7 +390,16 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	return deleted, nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinishRetire func() error) {
+func (br *BlockRetire) RetireBlocksInBackground(
+	ctx context.Context,
+	minBlockNum,
+	maxBlockNum uint64,
+	lvl log.Lvl,
+	seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
+	onDeleteSnapshots func(l []string) error,
+	onFinishRetire func() error,
+	onDone func(),
+) {
 	if maxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
@@ -400,6 +409,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 	}
 
 	go func() {
+		defer onDone()
 		defer br.working.Store(false)
 
 		if br.snBuildAllowed != nil {

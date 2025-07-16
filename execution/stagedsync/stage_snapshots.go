@@ -479,6 +479,10 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				cfg.notifier.Events.OnNewSnapshot()
 			}
 			return err
+		}, func() {
+			if cfg.notifier != nil {
+				cfg.notifier.Events.OnRetirementDone()
+			}
 		})
 
 		//	cfg.agg.BuildFilesInBackground()

@@ -119,6 +119,7 @@ type MockSentry struct {
 	ReceiveWg            sync.WaitGroup
 	Address              common.Address
 	Eth1ExecutionService *eth1.EthereumExecutionModule
+	RetirementDone       chan struct{}
 
 	Notifications *shards.Notifications
 
@@ -318,6 +319,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		HistoryV3:      true,
 		cfg:            cfg,
 	}
+	mock.RetirementDone, _ = mock.Notifications.Events.AddRetirementDoneSubscription()
 
 	if tb != nil {
 		tb.Cleanup(mock.Close)
@@ -786,6 +788,10 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	initialCycle, firstCycle := MockInsertAsInitialCycle, false
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
 
+	// Wait for the background snapshot retirement launched by stages2.StageLoopIteration to finish during test clean-up
+	ms.tb.Cleanup(func() {
+		<-ms.RetirementDone
+	})
 	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.NewTxContainer(nil, nil), ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
 	}
