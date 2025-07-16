@@ -190,7 +190,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			if !ok {
 				continue
 			}
-			if blockPrune < res.To {
+			if blockPrune <= res.To {
 				continue
 			}
 			blackList[name] = struct{}{}
