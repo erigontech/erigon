@@ -436,19 +436,23 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	var minGas uint64
 	var adjExpFactor uint64
 	var finalDivisor uint64
+	var calcMultComplexity func(uint32) uint64
 	switch {
 	case c.osaka:
 		minGas = 500
 		adjExpFactor = 16
 		finalDivisor = 3
+		calcMultComplexity = modExpMultComplexityEip7883
 	case c.eip2565:
 		minGas = 200
 		adjExpFactor = 8
 		finalDivisor = 3
+		calcMultComplexity = modExpMultComplexityEip2565
 	default:
 		minGas = 0
 		adjExpFactor = 8
 		finalDivisor = 20
+		calcMultComplexity = modExpMultComplexityEip198
 	}
 
 	header := getData(input, 0, 3*32)
@@ -479,42 +483,27 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	if expOffset < uint32(len(input)) {
 		expHeadExplicitBytes = input[expOffset : expOffset+min(expHeadLen, uint32(len(input))-expOffset)]
 	}
-	firstNonZero := -1
+	// Compute the exp bit width
+	expBitWidth := uint32(0)
 	for i := 0; i < len(expHeadExplicitBytes); i++ {
-		if expHeadExplicitBytes[i] != 0 {
-			firstNonZero = i
+		expByte := expHeadExplicitBytes[i]
+		if expByte != 0 {
+			expTopByteBitWidth := 8 - uint32(bits.LeadingZeros8(expByte))
+			expBitWidth = 8*(expHeadLen-uint32(i)-1) + expTopByteBitWidth
 			break
 		}
 	}
-
-	expBitWidth := uint32(0)
-	if firstNonZero >= 0 {
-		expTopByte := expHeadExplicitBytes[firstNonZero]
-		expTopByteBitWidth := 8 - uint32(bits.LeadingZeros8(expTopByte))
-		expBitWidth = 8*(expHeadLen-uint32(firstNonZero)-1) + expTopByteBitWidth
-	}
-
+	// Compute the adjusted exp length
 	expTailLen := expLen - expHeadLen
 	expHeadBits := max(expBitWidth, 1) - 1
 	adjExpLen := max(adjExpFactor*uint64(expTailLen)+uint64(expHeadBits), 1)
 
 	maxLen := max(baseLen, modLen)
-
-	var multComplexity uint64
-	switch {
-	case c.osaka:
-		multComplexity = modExpMultComplexityEip7883(maxLen)
-	case c.eip2565:
-		multComplexity = modExpMultComplexityEip2565(maxLen)
-	default:
-		multComplexity = modExpMultComplexityEip198(maxLen)
-	}
-
+	multComplexity := calcMultComplexity(maxLen)
 	gasHi, gasLo := bits.Mul64(multComplexity, adjExpLen)
 	if gasHi != 0 {
 		return math.MaxUint64
 	}
-
 	gas := gasLo / finalDivisor
 	return max(gas, minGas)
 }
