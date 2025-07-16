@@ -357,10 +357,9 @@ func TestHistoryAfterPrune(t *testing.T) {
 			cur, err = tx.Cursor(table)
 			require.NoError(err)
 			defer cur.Close()
-			var k []byte
-			k, _, err = cur.First()
+			k, v, err := cur.First()
 			require.NoError(err)
-			require.Nilf(k, "table=%s", table)
+			require.Nilf(k, "table=%s, k=%s, v=%s", table, k, v)
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {
@@ -526,21 +525,23 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 
 	hc := h.BeginFilesRo()
 	defer hc.Close()
+	//{
+	//	itable, err := rwTx.CursorDupSort(hc.iit.ii.valuesTable)
+	//	require.NoError(t, err)
+	//	defer itable.Close()
+	//	limits := 10
+	//	for k, v, err := itable.First(); k != nil; k, v, err = itable.Next() {
+	//		if err != nil {
+	//			t.Fatalf("err: %v", err)
+	//		}
+	//		limits--
+	//		if limits == 0 {
+	//			break
+	//		}
+	//		fmt.Printf("k=%x [%d] v=%x\n", k, binary.BigEndian.Uint64(k), v)
+	//	}
+	//}
 
-	itable, err := rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
-	require.NoError(t, err)
-	defer itable.Close()
-	limits := 10
-	for k, v, err := itable.First(); k != nil; k, v, err = itable.Next() {
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		limits--
-		if limits == 0 {
-			break
-		}
-		fmt.Printf("k=%x [%d] v=%x\n", k, binary.BigEndian.Uint64(k), v)
-	}
 	canHist, txTo := hc.canPruneUntil(rwTx, math.MaxUint64)
 	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
 
@@ -586,7 +587,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	// }
 
 	// fmt.Printf("start index table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
+	itable, err := rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
 	require.NoError(t, err)
 	defer itable.Close()
 
@@ -678,8 +679,8 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	// this one should prune value of tx=0 due to given range [0,1) (we have first value at tx=0) even it is forced
 	stat, err = hc.Prune(context.Background(), rwTx, 0, 1, pruneLimit, true, logEvery)
 	require.NoError(t, err)
-	require.EqualValues(t, 1, stat.PruneCountValues)
-	require.EqualValues(t, 1, stat.PruneCountTx)
+	require.EqualValues(t, 1, int(stat.PruneCountValues))
+	require.EqualValues(t, 1, int(stat.PruneCountTx))
 
 	// this should prune exactly pruneLimit*pruneIter transactions
 	for i := 0; i < pruneIters; i++ {
