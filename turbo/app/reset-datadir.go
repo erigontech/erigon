@@ -104,6 +104,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		"chain", chainName,
 	)
 	removeFunc := func(path string) error {
+		logger.Info("Removing snapshot file", "path", path)
 		return os.Remove(filepath.Join(dirs.Snap, path))
 	}
 	if dryRun {
