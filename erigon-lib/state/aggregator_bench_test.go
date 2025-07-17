@@ -285,7 +285,7 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 	for cpu in $(seq 0 20); do
 		cpus=$((1 << $cpu))  # Same as 2^cpu
 		echo -n "($cpus, "
-		echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkAggregator_BeginFilesRo_Throughput$ github.com/erigontech/erigon-lib/state  \
+		echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkAggregator_BeginFilesRo_Throughput$ github.com/erigontech/erigon/erigon-lib/state  \
 		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkAggregator_BeginFilesRo_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
 		echo -n "), "
 	done
@@ -320,7 +320,7 @@ func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 	for cpu in $(seq 0 20); do
 	    cpus=$((1 << $cpu))  # Same as 2^cpu
 	    echo -n "($cpus, "
-	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput$ github.com/erigontech/erigon-lib/state  \
+	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput$ github.com/erigontech/erigon/erigon-lib/state  \
 		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkDb_BeginFiles_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
 	    echo -n "), "
 	done
@@ -364,7 +364,7 @@ func BenchmarkDb_BeginFiles_Throughput_IO(b *testing.B) {
 	for cpu in $(seq 0 20); do
 	    cpus=$((1 << $cpu))  # Same as 2^cpu
 	    echo -n "($cpus, "
-	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput_IO$ github.com/erigontech/erigon-lib/state  \
+	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput_IO$ github.com/erigontech/erigon/erigon-lib/state  \
 		-bench.parallel=$cpus | grep 'BenchmarkDb_BeginFiles_Throughput_IO' | cut -f3 | xargs|cut -d' ' -f1)
 	    echo -n "), "
 	done
