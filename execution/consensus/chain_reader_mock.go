@@ -311,17 +311,17 @@ func (c *MockChainReaderFrozenBlocksCall) DoAndReturn(f func() uint64) *MockChai
 }
 
 // FrozenBorBlocks mocks base method.
-func (m *MockChainReader) FrozenBorBlocks() uint64 {
+func (m *MockChainReader) FrozenBorBlocks(align bool) uint64 {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FrozenBorBlocks")
+	ret := m.ctrl.Call(m, "FrozenBorBlocks", align)
 	ret0, _ := ret[0].(uint64)
 	return ret0
 }
 
 // FrozenBorBlocks indicates an expected call of FrozenBorBlocks.
-func (mr *MockChainReaderMockRecorder) FrozenBorBlocks() *MockChainReaderFrozenBorBlocksCall {
+func (mr *MockChainReaderMockRecorder) FrozenBorBlocks(align any) *MockChainReaderFrozenBorBlocksCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FrozenBorBlocks", reflect.TypeOf((*MockChainReader)(nil).FrozenBorBlocks))
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FrozenBorBlocks", reflect.TypeOf((*MockChainReader)(nil).FrozenBorBlocks), align)
 	return &MockChainReaderFrozenBorBlocksCall{Call: call}
 }
 
@@ -337,13 +337,13 @@ func (c *MockChainReaderFrozenBorBlocksCall) Return(arg0 uint64) *MockChainReade
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockChainReaderFrozenBorBlocksCall) Do(f func() uint64) *MockChainReaderFrozenBorBlocksCall {
+func (c *MockChainReaderFrozenBorBlocksCall) Do(f func(bool) uint64) *MockChainReaderFrozenBorBlocksCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockChainReaderFrozenBorBlocksCall) DoAndReturn(f func() uint64) *MockChainReaderFrozenBorBlocksCall {
+func (c *MockChainReaderFrozenBorBlocksCall) DoAndReturn(f func(bool) uint64) *MockChainReaderFrozenBorBlocksCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
