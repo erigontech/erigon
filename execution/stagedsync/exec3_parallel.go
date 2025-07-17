@@ -145,8 +145,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		return nil, fmt.Errorf("unexpected task type: %T", result.Task)
 	}
 
+	blockNum := task.Version().BlockNum
 	txIndex := task.Version().TxIndex
-
 	txIncarnation := task.Version().Incarnation
 	// we want to force a re-read of the conbiase & burnt contract address
 	// if thay where referenced by the tx
@@ -166,12 +166,10 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		return nil, nil
 	}
 
-	blockNum := txTask.BlockNumber()
-
 	var tracePrefix string
-	if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
-		tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
-	}
+	//if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
+	tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
+	//}
 
 	if task.IsBlockEnd() || txIndex < 0 {
 		//if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
@@ -183,7 +181,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		// they are taken into account by subsequent transactions
 		vm.FlushVersionedWrites(ibs.VersionedWrites(true), true, tracePrefix)
 		vm.SetTrace(false)
-		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
+		ibs.SetTrace(true)
+		ibs.FinalizeTx(txTask.Config.Rules(blockNum, txTask.BlockTime()), stateWriter)
 		return nil, nil
 	}
 
@@ -197,15 +196,14 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				execResult := result.ExecutionResult
-				// to generate logs we want the initial balance
-				coinbase, err := stateReader.ReadAccountData(result.Coinbase)
+				coinbase, err := stateReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
 				if err != nil {
 					return nil, err
 				}
 
 				if traceTx(blockNum, txIndex) {
-					fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, task.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
+					fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txIncarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
 				}
 
 				execResult.CoinbaseInitBalance = coinbase.Balance
@@ -239,7 +237,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	vm.SetTrace(false)
 
 	if txTask.Config.IsByzantium(blockNum) {
-		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
+		ibs.FinalizeTx(txTask.Config.Rules(blockNum, txTask.BlockTime()), stateWriter)
 	}
 
 	receipt, err := result.CreateReceipt(prevReceipt)
