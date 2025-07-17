@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -636,9 +637,8 @@ func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
 	return murmur3.Sum128WithSeed(k, *iit.salt)
 }
 
-// makeStepPrefixedKey creates a step-prefixed key: ^step + addr
+// makeStepPrefixedKey  ^step + addr
 func (iit *InvertedIndexRoTx) makeStepPrefixedKey(addr []byte, txNum uint64) []byte {
-	// Create step-prefixed key: ^step + addr
 	if 8+len(addr) > cap(iit.stepPrefixedKeyBuf) {
 		iit.stepPrefixedKeyBuf = make([]byte, 8+len(addr))
 	}
@@ -1159,27 +1159,16 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".collate.ii", ii.iiCfg.dirs.Tmp, etl.SmallSortableBuffers, ii.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
 
-	// Create step-prefixed key range for this step
-	invertedStep := ^step
-	var stepKey [8]byte
-	binary.BigEndian.PutUint64(stepKey[:], invertedStep)
-
-	for k, v, err := valuesCursor.Seek(stepKey[:]); k != nil; k, v, err = valuesCursor.Next() {
+	for k, v, err := valuesCursor.Seek(hexutil.EncodeTs(^step)); k != nil; k, v, err = valuesCursor.Next() {
 		if err != nil {
 			return InvertedIndexCollation{}, fmt.Errorf("iterate over %s values cursor: %w", ii.filenameBase, err)
 		}
-
-		// Check if key still belongs to our step
-		if len(k) < 8 {
-			continue
-		}
-		keyStep := binary.BigEndian.Uint64(k[:8])
-		if keyStep != invertedStep {
-			break // We've moved past our step
+		keyStep := ^binary.BigEndian.Uint64(k[:8])
+		if keyStep != step {
+			break
 		}
 
-		// Extract addr from step+addr key
-		addr := k[8:]
+		addr := k[8:] // format: ^step+addr
 		if err := collector.Collect(addr, v); err != nil {
 			return InvertedIndexCollation{}, fmt.Errorf("collect %s history key [%x]=>txn [%x]: %w", ii.filenameBase, addr, v, err)
 		}
