@@ -490,32 +490,6 @@ func (s *Sync) PrintTimings() []interface{} {
 	return logCtx
 }
 
-func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
-	if tx == nil {
-		return nil
-	}
-	bucketSizes := make([]interface{}, 0, 2*(len(buckets)+2))
-	for _, bucket := range buckets {
-		sz, err1 := tx.BucketSize(bucket)
-		if err1 != nil {
-			return bucketSizes
-		}
-		bucketSizes = append(bucketSizes, bucket, common.ByteCount(sz))
-	}
-
-	sz, err1 := tx.BucketSize("freelist")
-	if err1 != nil {
-		return bucketSizes
-	}
-	bucketSizes = append(bucketSizes, "FreeList", common.ByteCount(sz))
-	amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
-	if db != nil {
-		bucketSizes = append(bucketSizes, "ReclaimableSpace", common.ByteCount(amountOfFreePagesInDb*db.PageSize().Bytes()))
-	}
-
-	return bucketSizes
-}
-
 func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool, badBlockUnwind bool) (err error) {
 	start := time.Now()
 	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))

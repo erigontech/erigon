@@ -473,7 +473,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	for i, chain := range []string{networkname.Mainnet, networkname.Amoy} {
 		step := steps[i]
 		dir := filepath.Join(baseDir, chain)
-		chainSnapshotCfg := snapcfg.KnownCfg(chain)
+		chainSnapshotCfg, _ := snapcfg.KnownCfg(chain)
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 		cfg := ethconfig.BlocksFreezing{ChainName: chain}
 		createFile := func(from, to uint64, name snaptype.Type) {

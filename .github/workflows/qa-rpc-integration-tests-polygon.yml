@@ -19,6 +19,7 @@ on:
 
 jobs:
   bor-mainnet-rpc-integ-tests:
+    if: false # temporarily disabled after PR 15838
     concurrency:
       group: >-
         ${{

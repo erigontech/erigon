@@ -179,7 +179,6 @@ func producingNodeArgs(dataDir string, nodeNumber int) []string {
 	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
 	natArg, _ := parameterFromArgument("--nat", "none")
 	accountSlotsArg, _ := parameterFromArgument("--txpool.accountslots", "16")
-	withHeimdallMilestonesArg, _ := parameterFromArgument("--bor.milestone", "false")
 
 	return []string{
 		buildDirArg,
@@ -198,7 +197,6 @@ func producingNodeArgs(dataDir string, nodeNumber int) []string {
 		p2pProtocol,
 		downloaderArg,
 		accountSlotsArg,
-		withHeimdallMilestonesArg,
 	}
 }
 
@@ -219,7 +217,6 @@ func nonProducingNodeArgs(dataDir string, nodeNumber int, enode string) []string
 	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
 	natArg, _ := parameterFromArgument("--nat", "none")
 	ws := wsArg
-	withHeimdallMilestonesArg, _ := parameterFromArgument("--bor.milestone", "false")
 
 	return []string{
 		buildDirArg,
@@ -238,6 +235,5 @@ func nonProducingNodeArgs(dataDir string, nodeNumber int, enode string) []string
 		torrentPort,
 		p2pProtocol,
 		downloaderArg,
-		withHeimdallMilestonesArg,
 	}
 }

@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	account_services "github.com/erigontech/erigon/cmd/devnet/services/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 )
@@ -96,7 +95,6 @@ func NewBorDevnetWithHeimdall(
 	checkpointOwner *accounts.Account,
 	producerCount int,
 	gasLimit uint64,
-	withMilestones bool,
 	logger log.Logger,
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
@@ -134,7 +132,6 @@ func NewBorDevnetWithHeimdall(
 		BaseRPCHost:        baseRpcHost,
 		BaseRPCPort:        baseRpcPort,
 		BorStateSyncDelay:  5 * time.Second,
-		BorWithMilestones:  &withMilestones,
 		Services:           append(services, account_services.NewFaucet(networkname.BorDevnet, faucetSource)),
 		Genesis: &types.Genesis{
 			Alloc: types.GenesisAlloc{
@@ -205,7 +202,6 @@ func NewBorDevnetWithRemoteHeimdall(
 ) devnet.Devnet {
 	heimdallURL := ""
 	checkpointOwner := accounts.NewAccount("checkpoint-owner")
-	withMilestones := utils.WithHeimdallMilestones.Value
 	return NewBorDevnetWithHeimdall(
 		dataDir,
 		baseRpcHost,
@@ -215,7 +211,6 @@ func NewBorDevnetWithRemoteHeimdall(
 		checkpointOwner,
 		producerCount,
 		gasLimit,
-		withMilestones,
 		logger,
 		consoleLogLevel,
 		dirLogLevel)
@@ -260,7 +255,5 @@ func NewBorDevnetWithLocalHeimdall(
 		checkpointOwner,
 		producerCount,
 		gasLimit,
-		// milestones are not supported yet on the local heimdall
-		false,
 		logger, consoleLogLevel, dirLogLevel)
 }
