@@ -333,7 +333,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	d.MainLoopInBackground(false)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
-		for _, it := range snapcfg.KnownCfg(chain).Preverified.Items {
+		snapCfg, _ := snapcfg.KnownCfg(chain)
+		for _, it := range snapCfg.Preverified.Items {
 			downloadItems = append(downloadItems, &proto_downloader.AddItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),

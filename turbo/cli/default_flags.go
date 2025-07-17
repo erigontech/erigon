@@ -176,9 +176,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithoutHeimdallFlag,
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
-	&utils.WithHeimdallMilestones,
-	&utils.WithHeimdallWaypoints,
-	&utils.PolygonSyncFlag,
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
@@ -256,4 +253,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
+	&utils.ElBlockDownloaderV2,
 }

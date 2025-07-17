@@ -241,12 +241,6 @@ type Config struct {
 	HeimdallURL string
 	// No heimdall service
 	WithoutHeimdall bool
-	// Heimdall services active
-	WithHeimdallMilestones bool
-	// Heimdall waypoint recording active
-	WithHeimdallWaypointRecording bool
-	// Use polygon checkpoint sync in preference to POW downloader
-	PolygonSync bool
 
 	// Ethstats service
 	Ethstats string
@@ -275,6 +269,8 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	ElBlockDownloaderV2 bool
 }
 
 type Sync struct {

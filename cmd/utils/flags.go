@@ -798,26 +798,6 @@ var (
 		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
 	}
 
-	// TODO - this is a depricated flag - should be removed
-	WithHeimdallMilestones = cli.BoolFlag{
-		Name:  "bor.milestone",
-		Usage: "Enabling bor milestone processing",
-		Value: true,
-	}
-
-	// TODO - this is a depricated flag - should be removed
-	WithHeimdallWaypoints = cli.BoolFlag{
-		Name:  "bor.waypoints",
-		Usage: "Enabling bor waypont recording",
-		Value: false,
-	}
-
-	PolygonSyncFlag = cli.BoolFlag{
-		Name:  "polygon.sync",
-		Usage: "Enabling syncing using the new polygon sync component",
-		Value: true,
-	}
-
 	AAFlag = cli.BoolFlag{
 		Name:  "aa",
 		Usage: "Enable AA transactions",
@@ -1157,6 +1137,11 @@ var (
 	ShadowForkFlag = cli.BoolFlag{
 		Name:  "shadowfork",
 		Usage: "Enables shadowfork mode",
+	}
+	ElBlockDownloaderV2 = cli.BoolFlag{
+		Name:  "el.block.downloader.v2",
+		Usage: "Enables the EL engine v2 block downloader",
+		Value: false,
 	}
 )
 
@@ -1728,16 +1713,8 @@ func setClique(ctx *cli.Context, cfg *chainspec.ConsensusSnapshotConfig, datadir
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
-	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
-	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
-	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 
-	if cfg.PolygonSync {
-		cfg.WithHeimdallMilestones = false
-		cfg.WithHeimdallWaypointRecording = true
-	}
-
-	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync)
+	heimdall.RecordWayPoints(true)
 
 	chainConfig := chainspec.ChainConfigByChainName(ctx.String(ChainFlag.Name))
 	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
@@ -2010,6 +1987,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setCaplin(ctx, cfg)
 
 	cfg.AllowAA = ctx.Bool(AAFlag.Name)
+	cfg.ElBlockDownloaderV2 = ctx.Bool(ElBlockDownloaderV2.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {

@@ -1483,15 +1483,9 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	var bridgeStore bridge.Store
 	var heimdallStore heimdall.Store
 	if chainConfig.Bor != nil {
-		const PolygonSync = true
-		if PolygonSync {
-			borSnaps.DownloadComplete() // mark as ready
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
-		} else {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(chainDB), borSnaps, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(chainDB), borSnaps)
-		}
+		borSnaps.DownloadComplete() // mark as ready
+		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
+		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
 	}
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, heimdallStore, bridgeStore)
@@ -1916,7 +1910,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	blocksInSnapshots := blockReader.FrozenBlocks()
 
 	if chainConfig.Bor != nil {
-		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks())
+		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
 
 	from2, to2, ok := freezeblocks.CanRetire(to, blocksInSnapshots, coresnaptype.Enums.Headers, nil)
