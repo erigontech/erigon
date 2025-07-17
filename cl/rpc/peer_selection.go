@@ -206,10 +206,10 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 		// matching
 		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](req.Len())
 		req.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, length int) bool {
-			/*if item.Slot < peer.earliestAvailableSlot { // TODO: re-enable this. Now peer is not reliable.
-				log.Debug("skipping peer", "peer", peer.pid, "slot", item.Slot, "earliestAvailableSlot", peer.earliestAvailableSlot)
+			if item.Slot < peer.earliestAvailableSlot { // TODO: re-enable this. Now peer is not reliable.
+				//log.Debug("skipping peer", "peer", peer.pid, "slot", item.Slot, "earliestAvailableSlot", peer.earliestAvailableSlot)
 				return true
-			}*/
+			}
 			if len(peer.mask) == int(c.beaconConfig.NumberOfColumns) {
 				// full mask, no need to filter
 				newReq.Append(item)
