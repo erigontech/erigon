@@ -154,7 +154,6 @@ type MultiClient struct {
 	// disableBlockDownload is meant to be used temporarily for astrid until work to
 	// decouple sentry multi client from header and body downloading logic is done
 	disableBlockDownload bool
-	shadowFork           bool
 
 	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
@@ -175,7 +174,6 @@ func NewMultiClient(
 	logPeerInfo bool,
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
-	shadowFork bool,
 	logger log.Logger,
 ) (*MultiClient, error) {
 	// header downloader
@@ -227,11 +225,6 @@ func NewMultiClient(
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
 		ethApiWrapper:                     receipts.NewGenerator(blockReader, engine),
-		shadowFork:                        shadowFork,
-	}
-
-	if cs.shadowFork {
-		cs.logger.Info("[sentry] shadow fork mode enabled in multi client")
 	}
 
 	return cs, nil

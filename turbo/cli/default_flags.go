@@ -90,7 +90,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
 	&utils.AlwaysGenerateChangesetsFlag,
-	&utils.ShadowForkFlag,
 
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,

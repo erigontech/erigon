@@ -423,7 +423,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		false,
 		maxBlockBroadcastPeers,
 		false, /* disableBlockDownload */
-		false, /* shadowFork */
 		logger,
 	)
 	if err != nil {

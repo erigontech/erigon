@@ -1134,10 +1134,6 @@ var (
 		Name:  "experimental.always-generate-changesets",
 		Usage: "Enables blazing fast eth_getProof for executed block",
 	}
-	ShadowForkFlag = cli.BoolFlag{
-		Name:  "shadowfork",
-		Usage: "Enables shadowfork mode",
-	}
 	ElBlockDownloaderV2 = cli.BoolFlag{
 		Name:  "el.block.downloader.v2",
 		Usage: "Enables the EL engine v2 block downloader",
@@ -1954,7 +1950,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.NetworkID = chainspec.NetworkIDByChainName(chain)
 	}
 
-	cfg.ShadowFork = ctx.Bool(ShadowForkFlag.Name)
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.ProduceE2 = !ctx.Bool(SnapStopFlag.Name)
