@@ -148,6 +148,14 @@ var CaplinIndexes = struct {
 
 func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	dir := info.Dir()
+	segment, err := seg.NewDecompressor(info.Path)
+
+	if err != nil {
+		return false
+	}
+
+	defer segment.Close()
+
 	fNameMask := IdxFileMaskName(info.From, info.To, i.Name)
 	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, fNameMask))
 	if err != nil {
@@ -168,14 +176,6 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 			//return false
 		}
 	}
-
-	segment, err := seg.NewDecompressor(info.Path)
-
-	if err != nil {
-		return false
-	}
-
-	defer segment.Close()
 
 	idx, err := recsplit.OpenIndex(fPath)
 
@@ -523,7 +523,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 		p.Total.Store(uint64(d.Count()))
 	}
 	cfg.KeyCount = d.Count()
-	cfg.IndexFile = filepath.Join(info.Dir(), strings.ReplaceAll(info.name, ".seg", ".idx"))
+	cfg.IndexFile = info.Type.IdxFileName(info.From, info.To, info.Type.Indexes()...)
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err

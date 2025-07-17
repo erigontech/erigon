@@ -24,6 +24,7 @@ var (
 	V1_0_standart Versions = Versions{V1_0, V1_0}
 	V1_1_standart Versions = Versions{V1_1, V1_0}
 	V2_0_standart Versions = Versions{V2_0, V1_0}
+	V2_0_nosup             = Versions{V2_0, V2_0}
 )
 
 func (v Version) Less(rhd Version) bool {
