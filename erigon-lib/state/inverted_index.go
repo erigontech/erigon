@@ -451,9 +451,10 @@ type InvertedIndexBufferedWriter struct {
 
 	indexTable, indexKeysTable string
 
-	aggregationStep uint64
-	txNumBytes      [8]byte
-	name            kv.InvertedIdx
+	aggregationStep    uint64
+	txNumBytes         [8]byte
+	stepPrefixedKeyBuf []byte
+	name               kv.InvertedIdx
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -474,16 +475,17 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
 	// Create step-prefixed key: ^step + addr
-	step := txNum / w.aggregationStep
-	invertedStep := ^step
-	stepKey := make([]byte, 8+len(indexKey))
-	binary.BigEndian.PutUint64(stepKey[:8], invertedStep)
-	copy(stepKey[8:], indexKey)
+	if 8+len(indexKey) > cap(w.stepPrefixedKeyBuf) {
+		w.stepPrefixedKeyBuf = make([]byte, 8+len(indexKey))
+	}
+	invStep := ^(txNum / w.aggregationStep)
+	binary.BigEndian.PutUint64(w.stepPrefixedKeyBuf[:8], invStep)
+	copy(w.stepPrefixedKeyBuf[8:], indexKey)
 
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
 		return err
 	}
-	if err := w.index.Collect(stepKey, w.txNumBytes[:]); err != nil {
+	if err := w.index.Collect(w.stepPrefixedKeyBuf, w.txNumBytes[:]); err != nil {
 		return err
 	}
 	return nil
@@ -623,6 +625,8 @@ type InvertedIndexRoTx struct {
 	// ef *multiencseq.SequenceBuilder // re-usable
 	salt    *uint32
 	aggStep uint64
+
+	stepPrefixedKeyBuf []byte
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -634,12 +638,14 @@ func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
 
 // makeStepPrefixedKey creates a step-prefixed key: ^step + addr
 func (iit *InvertedIndexRoTx) makeStepPrefixedKey(addr []byte, txNum uint64) []byte {
-	step := txNum / iit.aggStep
-	invertedStep := ^step
-	stepKey := make([]byte, 8+len(addr))
-	binary.BigEndian.PutUint64(stepKey[:8], invertedStep)
-	copy(stepKey[8:], addr)
-	return stepKey
+	// Create step-prefixed key: ^step + addr
+	if 8+len(addr) > cap(iit.stepPrefixedKeyBuf) {
+		iit.stepPrefixedKeyBuf = make([]byte, 8+len(addr))
+	}
+	invStep := ^(txNum / iit.aggStep)
+	binary.BigEndian.PutUint64(iit.stepPrefixedKeyBuf[:8], invStep)
+	copy(iit.stepPrefixedKeyBuf[8:], addr)
+	return iit.stepPrefixedKeyBuf
 }
 
 func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Reader {
