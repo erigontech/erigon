@@ -208,7 +208,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			started := time.Now()
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				if hashedKey[0] != thisNib {
-					return fmt.Errorf("hashedKey[0] %x != nibble %x", hashedKey[0], nib)
+					return fmt.Errorf("hashedKey[0] %x != nibble %x", hashedKey[0], thisNib)
 				}
 				processed.Add(1)
 				cnt++
