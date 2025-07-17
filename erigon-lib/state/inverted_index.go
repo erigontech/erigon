@@ -1071,43 +1071,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
 
-	//// tbl format: `[^step][addr] -> txNum`
-	//for k, _, err := valuesCursor.Last(); k != nil; k, _, err = valuesCursor.PrevNoDup() {
-	//	if err != nil {
-	//		return stat, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
-	//	}
-	//	step := ^binary.BigEndian.Uint64(k)
-	//	if step < txFrom/ii.aggregationStep {
-	//		break
-	//	}
-	//
-	//	if limit == 0 {
-	//		break
-	//	}
-	//	limit--
-	//	stat.PruneCountValues++
-	//
-	//	if err = valuesCursor.DeleteCurrentDuplicates(); err != nil {
-	//		return nil, err
-	//	}
-	//
-	//	select {
-	//	case <-logEvery.C:
-	//		ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
-	//			"pruned values", stat.PruneCountValues)
-	//	default:
-	//	}
-	//}
-	//
-	//err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	//	if fn != nil {
-	//		if err = fn(key, txnm); err != nil {
-	//			return fmt.Errorf("fn error: %w", err)
-	//		}
-	//	}
-	//	return nil
-	//}, etl.TransformArgs{Quit: ctx.Done()})
-
 	mxPruneSizeIndex.Add(float64(stat.PruneCountValues))
 
 	return stat, nil
