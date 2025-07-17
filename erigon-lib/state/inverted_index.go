@@ -337,7 +337,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						ii.version.DataEF.Current = fileVer
 					} else {
 						_, fName := filepath.Split(fPath)
-						panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, ii.version.DataEF.MinSupported, ii.version.DataEF.Current))
+						versionTooLowPanic(fName, ii.version.DataEF)
 					}
 				}
 
@@ -370,8 +370,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 							ii.version.AccessorEFI.Current = fileVer
 						} else {
 							_, fName := filepath.Split(fPath)
-							panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, ii.version.AccessorEFI.MinSupported, ii.version.AccessorEFI.Current))
-							//return false
+							versionTooLowPanic(fName, ii.version.AccessorEFI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {

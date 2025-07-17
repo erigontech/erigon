@@ -366,8 +366,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 						d.version.DataKV.Current = fileVer
 					} else {
 						_, fName := filepath.Split(fPath)
-						panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, d.version.DataKV.MinSupported, d.version.DataKV.Current))
-						//return false
+						versionTooLowPanic(fName, d.version.DataKV)
 					}
 				}
 
@@ -399,7 +398,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 							d.version.AccessorKVI.Current = fileVer
 						} else {
 							_, fName := filepath.Split(fPath)
-							panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, d.version.AccessorKVI.MinSupported, d.version.AccessorKVI.Current))
+							versionTooLowPanic(fName, d.version.AccessorKVI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
@@ -422,7 +421,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 							d.version.AccessorBT.Current = fileVer
 						} else {
 							_, fName := filepath.Split(fPath)
-							panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, d.version.AccessorBT.MinSupported, d.version.AccessorBT.Current))
+							versionTooLowPanic(fName, d.version.AccessorBT)
 						}
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
@@ -445,7 +444,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 							d.version.AccessorKVEI.Current = fileVer
 						} else {
 							_, fName := filepath.Split(fPath)
-							panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, d.version.AccessorKVEI.MinSupported, d.version.AccessorKVEI.Current))
+							versionTooLowPanic(fName, d.version.AccessorKVEI)
 						}
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
@@ -2125,3 +2124,7 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 
 func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
+
+func versionTooLowPanic(filename string, version version.Versions) {
+	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon seg reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
+}

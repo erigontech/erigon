@@ -228,7 +228,7 @@ func (h *History) openDirtyFiles() error {
 						h.version.DataV.Current = fileVer
 					} else {
 						_, fName := filepath.Split(fPath)
-						panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, h.version.DataV.MinSupported, h.version.DataV.Current))
+						versionTooLowPanic(fName, h.version.DataV)
 					}
 				}
 
@@ -273,7 +273,7 @@ func (h *History) openDirtyFiles() error {
 							h.version.AccessorVI.Current = fileVer
 						} else {
 							_, fName := filepath.Split(fPath)
-							panic(fmt.Sprintf("Version is too low, try to run snapshot reset. file=%s, min_supported=%s, current=%s", fName, h.version.AccessorVI.MinSupported, h.version.AccessorVI.Current))
+							versionTooLowPanic(fName, h.version.AccessorVI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
