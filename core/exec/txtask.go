@@ -95,7 +95,7 @@ type AAValidationResult struct {
 // TxResult is the ouput of the task execute process
 type TxResult struct {
 	Task
-	ExecutionResult   *evmtypes.ExecutionResult
+	ExecutionResult   evmtypes.ExecutionResult
 	ValidationResults []AAValidationResult
 	Err               error
 	Coinbase          common.Address
@@ -470,13 +470,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
 		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
-		result.ExecutionResult = &evmtypes.ExecutionResult{}
 	case txTask.IsBlockEnd():
 		if txTask.BlockNumber() == 0 {
 			break
 		}
 
-		result.ExecutionResult = &evmtypes.ExecutionResult{}
 		result.TraceTos = map[common.Address]struct{}{}
 		result.TraceTos[txTask.Header.Coinbase] = struct{}{}
 		for _, uncle := range txTask.Uncles {
@@ -501,33 +499,36 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		result.Coinbase = evm.Context.Coinbase
 
 		// MA applytx
-		result.ExecutionResult, result.Err = func() (*evmtypes.ExecutionResult, error) {
+		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {
 			message, err := txTask.TxMessage()
 
 			if err != nil {
-				return nil, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+				return evmtypes.ExecutionResult{}, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 			}
 
 			// Apply the transaction to the current state (included in the env).
+			var applyRes *evmtypes.ExecutionResult
+			var applyErr error
+			
 			if !calcFees {
-				applyRes, applyErr := core.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool(), true, false, engine)
-
-				if applyErr != nil {
-					if _, ok := applyErr.(core.ErrExecAbortError); !ok {
-						return nil, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
-					}
-
-					return nil, applyErr
-				}
-
-				if applyRes == nil {
-					return nil, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
-				}
-
-				return applyRes, err
+				applyRes, applyErr = core.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool(), true, false, engine)
+			} else {
+				applyRes, applyErr = core.ApplyMessage(evm, message, txTask.GasPool(), true, false, engine)
 			}
 
-			return core.ApplyMessage(evm, message, txTask.GasPool(), true, false, engine)
+			if applyErr != nil {
+				if _, ok := applyErr.(core.ErrExecAbortError); !ok {
+					return evmtypes.ExecutionResult{}, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
+				}
+
+				return evmtypes.ExecutionResult{}, applyErr
+			}
+
+			if applyRes == nil {
+				return evmtypes.ExecutionResult{}, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
+			}
+
+			return *applyRes, err
 		}()
 
 		if result.Err == nil {

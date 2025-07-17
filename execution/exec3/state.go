@@ -131,9 +131,10 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 	lock := &sync.RWMutex{}
 
 	w := &Worker{
-		lock:    lock,
-		chainDb: chainDb,
-		in:      in,
+		lock:     lock,
+		notifier: sync.NewCond(lock),
+		chainDb:  chainDb,
+		in:       in,
 
 		logger: logger,
 		ctx:    ctx,
@@ -310,7 +311,7 @@ func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
 				rw.metrics.CodeReadDuration.Add(rw.ibs.CodeReadDuration())
 				rw.metrics.CodeReadCount.Add(rw.ibs.CodeReadCount())
 			}
-			if result != nil && result.ExecutionResult != nil {
+			if result != nil {
 				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.GasUsed))
 			}
 			rw.metrics.Active.Add(-1)

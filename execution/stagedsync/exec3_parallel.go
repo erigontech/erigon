@@ -182,7 +182,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
-				execResult := *result.ExecutionResult
+				execResult := result.ExecutionResult
 				// to generate logs we want the initial balance
 				coinbase, err := stateReader.ReadAccountData(result.Coinbase)
 

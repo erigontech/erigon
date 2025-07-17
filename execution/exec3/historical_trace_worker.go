@@ -232,7 +232,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 			if err != nil {
 				return err
 			} else {
-				result.ExecutionResult = applyRes
+				result.ExecutionResult = *applyRes
 				// Update the state with pending changes
 				ibs.SoftFinalise()
 
