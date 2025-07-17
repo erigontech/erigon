@@ -165,45 +165,13 @@ func (f *FetcherBase) FetchBlocksBackwardsByHash(
 	if amount == 0 || amount > eth.MaxHeadersServe {
 		return FetcherResponse[[]*types.Block]{}, fmt.Errorf("%w: amount=%d", ErrInvalidFetchBlocksAmount, amount)
 	}
-	request := &eth.GetBlockHeadersPacket{
-		Origin: eth.HashOrNumber{
-			Hash: hash,
-		},
-		Amount:  amount,
-		Reverse: true,
-	}
 
-	config := f.config.CopyWithOptions(opts...)
-	headersResponse, err := f.fetchHeadersWithRetry(ctx, request, peerId, config)
+	headersResponse, err := f.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
 	if err != nil {
 		return FetcherResponse[[]*types.Block]{}, err
 	}
 
 	headers := headersResponse.Data
-	if len(headers) == 0 {
-		return FetcherResponse[[]*types.Block]{}, &ErrMissingHeaderHash{requested: hash}
-	}
-
-	startHeader := headers[0]
-	if startHeader.Hash() != hash {
-		err := &ErrUnexpectedHeaderHash{requested: hash, received: startHeader.Hash()}
-		return FetcherResponse[[]*types.Block]{}, err
-	}
-
-	offset := amount - 1 // safe, we check that amount > 0 at function start
-	startNum := startHeader.Number.Uint64()
-	if startNum > offset {
-		startNum = startNum - offset
-	} else {
-		startNum = 0
-	}
-
-	slices.Reverse(headers)
-
-	if err := f.validateHeadersResponse(headers, startNum, amount); err != nil {
-		return FetcherResponse[[]*types.Block]{}, err
-	}
-
 	bodiesResponse, err := f.FetchBodies(ctx, headers, peerId, opts...)
 	if err != nil {
 		return FetcherResponse[[]*types.Block]{}, err
@@ -221,6 +189,58 @@ func (f *FetcherBase) FetchBlocksBackwardsByHash(
 	}
 
 	return response, nil
+}
+
+func (f *FetcherBase) FetchHeadersBackwards(
+	ctx context.Context,
+	hash common.Hash,
+	amount uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Header], error) {
+	if amount == 0 || amount > eth.MaxHeadersServe {
+		return FetcherResponse[[]*types.Header]{}, fmt.Errorf("%w: amount=%d", ErrInvalidFetchHeadersAmount, amount)
+	}
+
+	config := f.config.CopyWithOptions(opts...)
+	request := &eth.GetBlockHeadersPacket{
+		Origin: eth.HashOrNumber{
+			Hash: hash,
+		},
+		Amount:  amount,
+		Reverse: true,
+	}
+
+	headersResponse, err := f.fetchHeadersWithRetry(ctx, request, peerId, config)
+	if err != nil {
+		return FetcherResponse[[]*types.Header]{}, err
+	}
+
+	if len(headersResponse.Data) == 0 {
+		return FetcherResponse[[]*types.Header]{}, &ErrMissingHeaderHash{requested: hash}
+	}
+
+	startHeader := headersResponse.Data[0]
+	if startHeader.Hash() != hash {
+		err := &ErrUnexpectedHeaderHash{requested: hash, received: startHeader.Hash()}
+		return FetcherResponse[[]*types.Header]{}, err
+	}
+
+	offset := amount - 1 // safe, we check that amount > 0 at function start
+	startNum := startHeader.Number.Uint64()
+	if startNum > offset {
+		startNum = startNum - offset
+	} else {
+		startNum = 0
+	}
+
+	slices.Reverse(headersResponse.Data)
+
+	if err := f.validateHeadersResponse(headersResponse.Data, startNum, amount); err != nil {
+		return FetcherResponse[[]*types.Header]{}, err
+	}
+
+	return headersResponse, nil
 }
 
 func (f *FetcherBase) fetchHeadersWithRetry(
@@ -468,5 +488,5 @@ func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMes
 }
 
 func filter(requestPeerId, responsePeerId *PeerId, requestId, responseId uint64) bool {
-	return !requestPeerId.Equal(responsePeerId) && requestId != responseId
+	return !requestPeerId.Equal(responsePeerId) || requestId != responseId
 }
