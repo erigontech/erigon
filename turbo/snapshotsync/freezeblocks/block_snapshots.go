@@ -370,7 +370,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 			continue
 		}
 
-		frozenBlocks := br.blockReader.FrozenBorBlocks()
+		frozenBlocks := br.blockReader.FrozenBorBlocks(true)
 
 		if canDeleteTo := CanDeleteTo(currentProgress, frozenBlocks); canDeleteTo > 0 {
 			// PruneBorBlocks - [1, to) old blocks after moving it to snapshots.
@@ -463,7 +463,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 		}
 
 		if includeBor {
-			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(), requestedMinBlockNum)
+			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(false), requestedMinBlockNum)
 			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
