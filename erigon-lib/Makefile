@@ -1,17 +1,15 @@
 GOBINREL = build/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
 
-BUILD_TAGS =
-
 CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
 ifeq ($(CGO_CXXFLAGS),)
 	CGO_CXXFLAGS += -g
 	CGO_CXXFLAGS += -O2
 endif
 
-GOBUILD = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go build -trimpath -tags $(BUILD_TAGS)
-GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath -tags $(BUILD_TAGS)
-GOTEST_NOFUZZ = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath --tags=$(BUILD_TAGS),nofuzz
+GOBUILD = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go build -trimpath
+GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath
+GOTEST_NOFUZZ = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath --tags=nofuzz
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
