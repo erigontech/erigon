@@ -828,6 +828,7 @@ func ExecV3(ctx context.Context,
 						HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 						Trace:            traceTx(blockNum, txIndex),
 						Hooks:            hooks,
+						Logger:           logger,
 					}
 
 					if txTask.TxNum > 0 && txTask.TxNum <= outputTxNum.Load() {
@@ -1051,11 +1052,11 @@ func ExecV3(ctx context.Context,
 							b, err = blockReader.BlockByHash(ctx, applyTx, applyResult.BlockHash)
 
 							if err != nil {
-								return fmt.Errorf("can't retrieve block %n: for post validation: %w", applyResult.BlockNum, err)
+								return fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err)
 							}
 
 							if b.NumberU64() != applyResult.BlockNum {
-								return fmt.Errorf("block numbers don't match expected: %n: got: %n for hash %x", applyResult.BlockNum, b.NumberU64(), applyResult.BlockHash)
+								return fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, b.NumberU64(), applyResult.BlockHash)
 							}
 
 							if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,

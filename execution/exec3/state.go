@@ -271,7 +271,8 @@ func (rw *Worker) Run() (err error) {
 			defer func() {
 				if rec := recover(); rec != nil {
 					result = &exec.TxResult{
-						Err: fmt.Errorf("exec3 task panic: %s, %s", rec, dbg.Stack()),
+						Task: txTask,
+						Err:  fmt.Errorf("exec3 task panic: %s, %s", rec, dbg.Stack()),
 					}
 				}
 			}()

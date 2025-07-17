@@ -1452,10 +1452,6 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tx) (
 	for rwsIt.HasNext() && (blockResult == nil || !blockResult.complete) {
 		txResult := rwsIt.PopNext()
 
-		if txResult.Err != nil {
-			return nil, txResult.Err
-		}
-
 		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
 			chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
 			if chaosErr != nil {
