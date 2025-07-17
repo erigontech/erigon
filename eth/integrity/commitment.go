@@ -53,7 +53,7 @@ func CommitmentFilesSanity(ctx context.Context, db kv.TemporalRwDB, blockReader 
 				}
 				defer tx.Rollback()
 
-				aggTx := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
+				aggTx := state.AggTx(tx)
 				info.Do(func() {
 					log.Info("Checking commitment files", "domain", kv.CommitmentDomain, "txn", aggTx.TxNumsInFiles(kv.CommitmentDomain))
 				})
