@@ -23,7 +23,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
@@ -1467,7 +1467,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		return nil, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
 	}
 
-	return txHandler.WithTx(tx).EventsByBlock(ctx, hash, blockHeight)
+	return txHandler.WithTx(tx).EventsByBlock(ctx, blockHeight)
 }
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
