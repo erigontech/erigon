@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -372,7 +373,15 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 
 func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*execution.ReadyResponse, error) {
 
-	if err := <-e.blockReader.Ready(ctx); err != nil {
+	// setup a timeout for the context to avoid waiting indefinitely
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	if err := <-e.blockReader.Ready(ctxWithTimeout); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			e.logger.Trace("ethereumExecutionModule.Ready: context deadline exceeded")
+			return &execution.ReadyResponse{Ready: false}, nil
+		}
 		return &execution.ReadyResponse{Ready: false}, err
 	}
 

@@ -486,10 +486,12 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	pruneLimit := 10
+	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneLimit = 10_000
+		pruneTimeout = time.Hour
 	}
-	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
@@ -717,7 +719,8 @@ func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
 	}
 
 	if checkKnownSizes {
-		for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName).Preverified.Items {
+		snapCfg, _ := snapcfg.KnownCfg(u.cfg.chainConfig.ChainName)
+		for _, it := range snapCfg.Preverified.Items {
 			info, _, _ := snaptype.ParseFileName("", it.Name)
 
 			if fi.From == info.From {
