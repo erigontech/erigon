@@ -7,7 +7,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/params"
 	cli2 "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -31,15 +30,6 @@ func MakeApp_zkEvm(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli
 			}
 			log.Error(fmt.Sprintf("Command '%s' not found. Available commands: %s", context.Args().First(), goodNames))
 			cli.ShowAppHelpAndExit(context, 1)
-		}
-
-		// handle case: config flag
-		configFilePath := context.String(utils.ConfigFlag.Name)
-		if configFilePath != "" {
-			if err := cli2.SetFlagsFromConfigFile(context, configFilePath); err != nil {
-				log.Error("failed setting config flags from yaml/toml file", "err", err)
-				return err
-			}
 		}
 
 		if _, _, _, err := debug.Setup(context, true); err != nil {

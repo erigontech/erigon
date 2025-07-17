@@ -222,20 +222,21 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 
 	// compute blob fee for eip-4844 data blobs if any
+	// Blob txs are not supported for L2
 	blobGasVal := new(uint256.Int)
-	if st.evm.ChainRules().IsCancun {
-		blobGasPrice := st.evm.Context.BlobBaseFee
-		if blobGasPrice == nil {
-			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
-		}
-		blobGasVal, overflow = blobGasVal.MulOverflow(blobGasPrice, new(uint256.Int).SetUint64(st.msg.BlobGas()))
-		if overflow {
-			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, blobGasVal)
-		}
-		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
-			return err
-		}
-	}
+	// if st.evm.ChainRules().IsCancun {
+	// 	blobGasPrice := st.evm.Context.BlobBaseFee
+	// 	if blobGasPrice == nil {
+	// 		return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
+	// 	}
+	// 	blobGasVal, overflow = blobGasVal.MulOverflow(blobGasPrice, new(uint256.Int).SetUint64(st.msg.BlobGas()))
+	// 	if overflow {
+	// 		return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, blobGasVal)
+	// 	}
+	// 	if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	if !gasBailout {
 		balanceCheck := gasVal
@@ -249,26 +250,30 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			if overflow {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 			}
-			if st.evm.ChainRules().IsCancun {
-				maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))
-				if overflow {
-					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
-				}
-				balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, maxBlobFee)
-				if overflow {
-					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
-				}
-			}
+			// if st.evm.ChainRules().IsCancun {
+			// 	maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))
+			// 	if overflow {
+			// 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+			// 	}
+			// 	balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, maxBlobFee)
+			// 	if overflow {
+			// 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+			// 	}
+			// }
 		}
 		balance := st.state.GetBalance(st.msg.From())
 		if have, want := balance, balanceCheck; have.Cmp(want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
 		st.state.SubBalance(st.msg.From(), gasVal)
-		st.state.SubBalance(st.msg.From(), blobGasVal)
+		// st.state.SubBalance(st.msg.From(), blobGasVal) // Blob txs are not supported for L2
 	}
 
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
+		if !gasBailout {
+			// refund the gas
+			st.state.AddBalance(st.msg.From(), gasVal)
+		}
 		return err
 	}
 	st.gasRemaining += st.msg.Gas()
@@ -329,17 +334,23 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
-		blobGasPrice := st.evm.Context.BlobBaseFee
-		if blobGasPrice == nil {
-			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
-		}
-		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
-		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
-			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
-				ErrMaxFeePerBlobGas, st.msg.From().Hex(), st.msg.MaxFeePerBlobGas(), blobGasPrice)
-		}
+
+	// Blob txs are not supported for L2
+	if st.msg.BlobHashes() != nil {
+		return fmt.Errorf("%w: address %v, blob txs are not supported for L2", ErrTxTypeNotSupported, st.msg.From().Hex())
 	}
+
+	// if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
+	// 	blobGasPrice := st.evm.Context.BlobBaseFee
+	// 	if blobGasPrice == nil {
+	// 		return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
+	// 	}
+	// 	maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
+	// 	if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
+	// 		return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
+	// 			ErrMaxFeePerBlobGas, st.msg.From().Hex(), st.msg.MaxFeePerBlobGas(), blobGasPrice)
+	// 	}
+	// }
 
 	return st.buyGas(gasBailout)
 }
@@ -462,8 +473,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		}
 	}
 
+	isPragueNormalcy := rules.IsPrague && rules.IsNormalcy
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, floorGas7623, err := IntrinsicGas(st.data, accessTuples, contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, uint64(len(auths)))
+	gas, floorGas7623, err := IntrinsicGas(st.data, accessTuples, contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, isPragueNormalcy, uint64(len(auths)))
 	if err != nil {
 		return nil, err
 	}
@@ -499,7 +511,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, vmerr = st.evm.Deploy(sender, st.data, st.gasRemaining, st.value, gas)
+		ret, _, st.gasRemaining, vmerr = st.evm.Deploy(sender, st.data, st.gasRemaining, st.value, bailout, gas)
 	} else {
 		// Increment the nonce for the next transaction
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout, gas)
@@ -513,12 +525,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		gasUsed := st.gasUsed()
 		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
 		gasUsed = gasUsed - refund
-		if rules.IsPrague {
+		if isPragueNormalcy {
 			gasUsed = max(floorGas7623, gasUsed)
 		}
 		st.gasRemaining = st.initialGas - gasUsed
 		st.refundGas()
-	} else if rules.IsPrague {
+	} else if isPragueNormalcy {
 		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
 

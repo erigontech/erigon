@@ -1,0 +1,49 @@
+name: Unwinds tests type-1 PMT
+on:
+  pull_request:
+    branches:
+      - project/pp2
+  workflow_dispatch:
+
+jobs:
+  unwind-tests-type-1:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout cdk-erigon
+        uses: actions/checkout@v4
+        with:
+          path: cdk-erigon
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install -y build-essential lsof
+
+      - name: Build
+        run: |
+          cd ./cdk-erigon
+          make -j$(nproc) cdk-erigon
+
+      - name: Prepare configs
+        run: |
+          cd ./cdk-erigon
+          cp ./zk/tests/unwinds/config-shared/dynamic-integration-allocs.json ./
+          cp ./zk/tests/unwinds/config-shared/dynamic-integration-conf.json ./
+          cp ./zk/tests/unwinds/config-type1-normalcy-pmt-pectra/dynamic-integration8.yaml ./
+          cp ./zk/tests/unwinds/config-type1-normalcy-pmt-pectra/dynamic-integration-chainspec.json ./
+
+      - name: Run tests
+        run: |
+          cd ./cdk-erigon
+          chmod +x ./zk/tests/unwinds/unwind.sh
+          dsDir=dynamic-integration8-normalcy-pmt-prague
+          dsFile=dynamic-integration8-normalcy-pmt-prague.tar.gz
+          firstStop=678
+          secondStop=1000
+          unwindToBatch=18
+          smtV2Only=false
+          ./zk/tests/unwinds/unwind.sh $dsDir $dsFile $firstStop $secondStop $unwindToBatch $smtV2Only

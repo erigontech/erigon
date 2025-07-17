@@ -20,7 +20,7 @@ zkevm.l1-first-block: 6411787
 # zkevm.data-stream-port: 6900
 # zkevm.data-stream-host: "127.0.0.1"
 zkevm.executor-strict: false
-zkevm.sequencer-block-seal-time: "5s"
+zkevm.sequencer-block-seal-time: "100ms"
 zkevm.sequencer-batch-seal-time: "15m"
 zkevm.allow-pre-eip155-transactions: true
 

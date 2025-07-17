@@ -140,7 +140,7 @@ var PrecompiledContractsPrague = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
 	libcommon.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
 	libcommon.BytesToAddress([]byte{0x09}): &blake2F{},
-	libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
+	// libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{}, // Disabled for L2 as we don't support blob
 	libcommon.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
 	libcommon.BytesToAddress([]byte{0x0c}): &bls12381G1MultiExp{},
 	libcommon.BytesToAddress([]byte{0x0d}): &bls12381G2Add{},

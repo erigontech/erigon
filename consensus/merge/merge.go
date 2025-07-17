@@ -167,13 +167,14 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		for _, rec := range receipts {
 			allLogs = append(allLogs, rec.Logs...)
 		}
-		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
-		}
-		if depositReqs != nil {
-			rs = append(rs, *depositReqs)
-		}
+		// [ cdk ] removed as we have no beacon chain
+		//depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
+		//if err != nil {
+		//	return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+		//}
+		//if depositReqs != nil {
+		//	rs = append(rs, *depositReqs)
+		//}
 		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
 		if withdrawalReq != nil {
 			rs = append(rs, *withdrawalReq)
@@ -335,9 +336,11 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger)
 	}
 	if chain.Config().IsCancun(header.Time) {
-		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr libcommon.Address, data []byte) ([]byte, error) {
-			return syscall(addr, data, state, header, false /* constCall */)
-		})
+		if !chain.Config().IsNormalcy(header.Time) {
+			misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr libcommon.Address, data []byte) ([]byte, error) {
+				return syscall(addr, data, state, header, false /* constCall */)
+			})
+		}
 	}
 	if chain.Config().IsPrague(header.Time) {
 		misc.StoreBlockHashesEip2935(header, state, config, chain)

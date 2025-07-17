@@ -50,3 +50,12 @@ func enable3529_zkevm(jt *JumpTable) {
 	jt[SSTORE].dynamicGas = gasSStoreEIP3529
 	jt[SELFDESTRUCT].dynamicGas = gasSelfdestructEIP3529_zkevm
 }
+
+func enable7516_zkevm(jt *JumpTable) {
+	jt[BLOBBASEFEE] = &operation{
+		execute:     opBlobBaseFee_zkevm,
+		constantGas: GasQuickStep,
+		numPop:      0,
+		numPush:     1,
+	}
+}

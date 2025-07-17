@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/zk/hermez_db"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -14,7 +15,6 @@ import (
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/zk/hermez_db"
 	"github.com/erigontech/erigon/zk/utils"
 )
 
@@ -68,20 +68,14 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	api.SenderLocks.AddLock(sender)
 	defer api.SenderLocks.ReleaseLock(sender)
 
-	if txn.Type() != types.LegacyTxType {
-		latestBlock, err := api.blockByNumber(ctx, rpc.LatestBlockNumber, tx)
+	// When we are not in normalcy, we need to check if the transaction is a legacy transaction
+	if !cc.IsNormalcy(header.NumberU64()) && txn.Type() != types.LegacyTxType {
+		return common.Hash{}, errors.New("only legacy transactions are supported")
+	}
 
-		if err != nil {
-			return common.Hash{}, err
-		}
-
-		if !cc.IsLondon(latestBlock.NumberU64()) {
-			return common.Hash{}, errors.New("only legacy transactions are supported")
-		}
-
-		if txn.Type() == types.BlobTxType {
-			return common.Hash{}, errors.New("blob transactions are not supported")
-		}
+	// We do not support blob transactions on L2
+	if txn.Type() == types.BlobTxType {
+		return common.Hash{}, errors.New("blob transactions are not supported")
 	}
 
 	// check if the price is too low if we are set to reject low gas price transactions
@@ -96,16 +90,16 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
-	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
+	if err = checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
 		return common.Hash{}, err
 	}
+
 	if !api.AllowPreEIP155Transactions && !txn.Protected() && !api.AllowUnprotectedTxs {
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
 	if txn.Protected() {
 		txnChainId := txn.GetChainID()
-		chainId := cc.ChainID
 		if chainId.Cmp(txnChainId.ToBig()) != 0 {
 			return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
 		}
@@ -119,6 +113,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	if err != nil {
 		return common.Hash{}, err
 	}
+
 	if badTxHashCounter >= api.BadTxAllowance {
 		return common.Hash{}, errors.New("transaction uses too many counters to fit into a batch")
 	}

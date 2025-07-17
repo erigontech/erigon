@@ -41,6 +41,7 @@ func main() {
 	}
 
 	app := erigonapp.MakeApp_zkEvm("cdk-erigon", runErigon, erigoncli.DefaultFlags)
+
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -169,11 +170,12 @@ func setFlagInContext(ctx *cli.Context, key, value string) error {
 }
 
 func handleFlagError(key, value string, err error) error {
-	if deprecatedFlag, found := erigoncli.DeprecatedFlags[key]; found {
-		if deprecatedFlag == "" {
-			return fmt.Errorf("failed setting %s flag: it is deprecated, remove it", key)
+	if replacementFlag, found := erigoncli.DeprecatedFlags[key]; found {
+		if replacementFlag == "" {
+			log.Warn("🚨 failed setting flag: deprecated flag provided, remove it", "key", key, "value", value)
+			return nil
 		}
-		return fmt.Errorf("failed setting %s flag: it is deprecated, use %s instead", key, deprecatedFlag)
+		return fmt.Errorf("failed setting %s flag: it is deprecated, use %s instead", key, replacementFlag)
 	}
 
 	errUnknownFlag := fmt.Errorf("no such flag -%s", key)

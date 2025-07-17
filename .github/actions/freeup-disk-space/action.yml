@@ -1,0 +1,17 @@
+name: "Free Up Disk Space"
+description: "Frees extra disk space by removing unnecessary files and directories."
+runs:
+  using: "composite"
+  steps:
+    - name: Free up disk space
+      shell: bash
+      run: |
+        echo "Disk usage before cleanup:"
+        df -h
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        docker system prune -af
+        echo "Disk usage after cleanup:"
+        df -h

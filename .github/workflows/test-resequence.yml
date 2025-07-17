@@ -4,10 +4,12 @@ on:
     branches:
       - zkevm
       - stable/**
+      - project/**
   pull_request:
     branches:
       - zkevm
       - stable/**
+      - project/**
     types:
       - opened
       - reopened
@@ -30,12 +32,6 @@ jobs:
       - name: Test resequence
         working-directory: ./cdk-erigon
         run: .github/scripts/test_resequence.sh
-          
-      - name: Upload logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: evm-rpc-tests-logs-${{ github.run_id }}
-          path: ./cdk-erigon/logs/evm-rpc-tests.log
 
       - name: Prepare logs
         working-directory: ./kurtosis-cdk

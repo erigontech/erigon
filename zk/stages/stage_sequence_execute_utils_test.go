@@ -6,6 +6,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	dsTypes "github.com/erigontech/erigon/zk/datastream/types"
 	zktx "github.com/erigontech/erigon/zk/tx"
 	zktypes "github.com/erigontech/erigon/zk/types"
@@ -201,7 +202,7 @@ func Test_PrepareForkId_DuringRecovery(t *testing.T) {
 				}()
 			}
 
-			forkId, err := prepareForkId(test.lastBatch, 1, forkDbMock)
+			forkId, err := prepareForkId(test.lastBatch, 1, forkDbMock, SequenceBlockCfg{zk: &ethconfig.Zk{Commitment: ethconfig.CommitmentSMT}})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

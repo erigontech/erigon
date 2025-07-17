@@ -6,14 +6,14 @@ get_latest_l2_batch() {
 
     local latest_batch
     latest_batch=$(cast rpc zkevm_batchNumberByBlockNumber "$latest_block" --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-sequencer-001 rpc)" | sed 's/^"//;s/"$//')
-    
+
     if [[ -z "$latest_batch" ]]; then
         echo "Error: Failed to get latest batch number" >&2
         return 1
     fi
-    
+
     latest_batch_dec=$((latest_batch))
-    
+
     echo "$latest_batch_dec"
 }
 
@@ -48,7 +48,11 @@ wait_for_l1_batch() {
         if [ "$batch_type" = "virtual" ]; then
 
             current_batch=$(cast logs --rpc-url "$(kurtosis port print cdk-v1 el-1-geth-lighthouse rpc)" --address 0x1Fe038B54aeBf558638CA51C91bC8cCa06609e91 --from-block 0 --json | jq -r '.[] | select(.topics[0] == "0x3e54d0825ed78523037d00a81759237eb436ce774bd546993ee67a1b67b6e766") | .topics[1]' | tail -n 1 | sed 's/^0x//')
-            current_batch=$((16#$current_batch))
+            if [[ -z "$current_batch" ]]; then
+                echo "Error: Failed to get current virtual batch number" >&2
+            else
+                current_batch=$((16#$current_batch))
+            fi
         elif [ "$batch_type" = "verified" ]; then
             current_batch=$(cast rpc zkevm_verifiedBatchNumber --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" | sed 's/^"//;s/"$//')
         else
@@ -112,7 +116,7 @@ set -e
 stop_cdk_erigon_sequencer
 
 echo "Copying and modifying config"
-kurtosis service exec cdk-v1  cdk-erigon-sequencer-001 'cp \-r /etc/cdk-erigon/ /tmp/ && sed -i '\''s/zkevm\.executor-strict: true/zkevm.executor-strict: false/;s/zkevm\.executor-urls: zkevm-stateless-executor-001:50071/zkevm.executor-urls: ","/;$a zkevm.disable-virtual-counters: true'\'' /tmp/cdk-erigon/config.yaml'
+kurtosis service exec cdk-v1  cdk-erigon-sequencer-001 'cp \-r /etc/cdk-erigon/ /tmp/ && sed -i '\''s/zkevm\.executor-strict: true/zkevm.executor-strict: false/;s/zkevm\.executor-urls: zkevm-stateless-executor-001:50071/zkevm.executor-urls: ","/;'\'' /tmp/cdk-erigon/config.yaml'
 
 echo "Starting cdk-erigon with modified config"
 kurtosis service exec cdk-v1 cdk-erigon-sequencer-001 "nohup cdk-erigon --pprof=true --pprof.addr 0.0.0.0 --config /tmp/cdk-erigon/config.yaml --datadir /home/erigon/data/dynamic-kurtosis-sequencer > /proc/1/fd/1 2>&1 &"
@@ -123,7 +127,8 @@ sleep 30
 num_requests=2000
 
 echo "Running loadtest using polycli"
-/usr/local/bin/polycli loadtest --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" --private-key "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625" --verbosity 600 --requests $num_requests --rate-limit 500  --mode uniswapv3 --legacy
+polycli_bin=$(which polycli)
+$polycli_bin loadtest --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" --private-key "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625" --verbosity 700 --requests $num_requests --rate-limit 500  --mode uniswapv3 --legacy
 
 echo "Waiting for batch virtualization"
 if ! wait_for_l1_batch 600 "virtual"; then

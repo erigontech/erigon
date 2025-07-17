@@ -1,0 +1,20 @@
+name: Pre-Pectra type1 test
+on:
+  pull_request:
+    branches:
+      - project/pp2
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+jobs:
+  pectra-type1:
+    uses: ./.github/workflows/reusable_type1.yml
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      PRIVATE_KEY: "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625"
+    with:
+      enable-pectra: false

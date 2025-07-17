@@ -18,10 +18,10 @@ import (
 	"github.com/erigontech/erigon/zk/datastream/server"
 	"github.com/erigontech/erigon/zk/l1infotree"
 	"github.com/erigontech/erigon/zk/legacy_executor_verifier"
+	"github.com/erigontech/erigon/zk/sequencer"
 	zkStages "github.com/erigontech/erigon/zk/stages"
 	"github.com/erigontech/erigon/zk/syncer"
 	"github.com/erigontech/erigon/zk/txpool"
-	"github.com/erigontech/erigon/zk/sequencer"
 )
 
 // NewDefaultZkStages creates stages for zk syncer (RPC mode)
@@ -119,14 +119,14 @@ func NewSequencerZkStages(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 
-	interhashesCfg := zkStages.StageZkInterHashesCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg, cfg.Zk)
+	hashStateCfg := stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg)
+	zkIntersCfg := zkStages.StageZkInterHashesCfg(db, !cfg.DebugDisableStateRootCheck, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg, cfg.Zk)
 
 	return zkStages.SequencerZkStages(ctx,
 		zkStages.StageL1SyncerCfg(db, l1Syncer, cfg.Zk),
 		zkStages.StageL1SequencerSyncCfg(db, cfg.Zk, sequencerStageSyncer),
 		zkStages.StageL1InfoTreeCfg(db, cfg.Zk, infoTreeUpdater),
 		zkStages.StageSequencerL1BlockSyncCfg(db, cfg.Zk, l1BlockSyncer),
-		zkStages.StageDataStreamCatchupCfg(dataStreamServer, db, cfg.Genesis.Config.ChainID.Uint64()),
 		zkStages.StageSequenceBlocksCfg(
 			db,
 			cfg.Prune,
@@ -147,21 +147,23 @@ func NewSequencerZkStages(ctx context.Context,
 			dataStreamServer,
 			cfg.Zk,
 			&cfg.Miner,
+			hashStateCfg,
+			zkIntersCfg,
 			txPool,
 			txPoolDb,
 			verifier,
 			uint16(cfg.YieldSize),
 			infoTreeUpdater,
 			hook,
-			interhashesCfg,
 			txYielder,
 		),
-		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg),
-		zkStages.StageZkInterHashesCfg(db, !cfg.DebugDisableStateRootCheck, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg, cfg.Zk),
+		zkIntersCfg,
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
 		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, &cfg.Genesis.Config.DepositContract),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, cfg.Sync, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
-		runInTestMode)
+		hashStateCfg,
+		runInTestMode,
+	)
 }

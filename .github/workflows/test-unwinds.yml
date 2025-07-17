@@ -5,6 +5,7 @@ on:
       - zkevm
       - zkevm-2.60
       - stable/**
+      - project/**
   workflow_dispatch:
 
 jobs:
@@ -23,30 +24,29 @@ jobs:
 
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
-        run: sudo apt update && sudo apt install -y build-essential
+        run: sudo apt update && sudo apt install -y build-essential lsof
 
       - name: Build
         run: |
           cd ./cdk-erigon
-          make cdk-erigon
+          make -j$(nproc) cdk-erigon
 
       - name: Prepare configs
         run: |
           cd ./cdk-erigon
+          cp ./zk/tests/unwinds/config-shared/dynamic-integration-allocs.json ./
+          cp ./zk/tests/unwinds/config-shared/dynamic-integration-conf.json ./
           cp ./zk/tests/unwinds/config/dynamic-integration8.yaml ./
-          cp ./zk/tests/unwinds/config/dynamic-integration-allocs.json ./
           cp ./zk/tests/unwinds/config/dynamic-integration-chainspec.json ./
-          cp ./zk/tests/unwinds/config/dynamic-integration-conf.json ./
-
-      - name: Prepare data stream
-        run: |
-          cd ./cdk-erigon/zk/tests/unwinds/datastream
-          tar -xzf ./datastream-net8-upto-11318-101.zip ./
 
       - name: Run tests
         run: |
           cd ./cdk-erigon
           chmod +x ./zk/tests/unwinds/unwind.sh
-          ./zk/tests/unwinds/unwind.sh
-
-  
+          dsDir=hermez-dynamic-integration8-datastream
+          dsFile=datastream-net8-upto-11318-101.zip
+          firstStop=11203
+          secondStop=11315
+          unwindToBatch=70
+          smtV2Only=true
+          ./zk/tests/unwinds/unwind.sh $dsDir $dsFile $firstStop $secondStop $unwindToBatch $smtV2Only

@@ -1,0 +1,79 @@
+name: Reusable Type1 test
+on:
+  workflow_call:
+    inputs:
+      enable-pectra:
+        description: "Enable Pectra for this workflow"
+        type: boolean
+        required: false
+        default: true
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
+      PRIVATE_KEY:
+        required: true
+
+jobs:
+  reusable-type1:
+    strategy:
+      matrix:
+        da-mode: [ "rollup" ]
+    runs-on: ubuntu-latest
+
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      PRIVATE_KEY:        ${{ secrets.PRIVATE_KEY }}
+
+    steps:
+      - name: Checkout cdk-erigon
+        uses: actions/checkout@v4
+
+      - name: Setup kurtosis type-1
+        uses: ./.github/actions/setup-kurtosis-type1
+        with:
+          enable-pectra: ${{ inputs.enable-pectra }}
+
+      - name: Get RPC URL from Kurtosis
+        id: get_rpc
+        run: |
+          echo "rpc_url=$(kurtosis port print cdk-v1 cdk-erigon-sequencer-001 rpc)" >> $GITHUB_OUTPUT
+
+      - name: Test pectra type1
+        working-directory:  ${{ github.workspace }}
+        if: ${{ inputs.enable-pectra }}
+        run: |
+          ./zk/tests/pectra/pectra.sh "${{ steps.get_rpc.outputs.rpc_url }}" $PRIVATE_KEY
+
+      - name: Test dencun type1
+        working-directory:  ${{ github.workspace }}
+        run: |
+          ./zk/tests/dencun/dencun.sh "${{ steps.get_rpc.outputs.rpc_url }}" $PRIVATE_KEY
+
+      - name: Test shanghai type1
+        working-directory:  ${{ github.workspace }}
+        run: |
+          ./zk/tests/shanghai/shanghai.sh "${{ steps.get_rpc.outputs.rpc_url }}" $PRIVATE_KEY
+
+      - name: Test london type1
+        working-directory:  ${{ github.workspace }}
+        run: |
+          ./zk/tests/london/london.sh "${{ steps.get_rpc.outputs.rpc_url }}" $PRIVATE_KEY
+
+      - name: Prepare logs
+        working-directory: ./kurtosis-cdk
+        if: failure()
+        run: |
+          mkdir -p ci_logs
+          cd ci_logs
+          kurtosis service logs cdk-v1 cdk-erigon-rpc-001 --all > cdk-erigon-rpc-001.log
+          kurtosis service logs cdk-v1 cdk-erigon-sequencer-001 --all > cdk-erigon-sequencer-001.log
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs_${{ github.run_id }}
+          path: ./kurtosis-cdk/ci_logs

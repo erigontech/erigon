@@ -1,0 +1,176 @@
+name: Configurable E2E Execution
+run-name: Run Kurtosis CDK E2E test by @${{ github.actor }}
+
+on:
+  workflow_call:
+    inputs:
+      kurtosis-cdk-repo:
+        description: "The kurtosis-cdk repo that will be used"
+        required: false
+        type: string
+        default: "0xPolygon/kurtosis-cdk"
+
+      kurtosis-cdk-ref:
+        description: "The tag, branch, or commit of the kurtosis-cdk package that will be used"
+        required: true
+        type: string
+
+      agglayer-e2e-ref:
+        description: "The tag, branch, or commit of the agglayer/e2e repo that will used for running tests"
+        required: true
+        type: string
+
+      kurtosis-cdk-args:
+        description: "Input arguments for the Kurtosis CDK package."
+        required: true
+        type: string
+
+      kurtosis-cdk-enclave-name:
+        description: "The name to be used for the kurtosis enclave"
+        required: true
+        type: string
+
+      docker-image-override:
+        description: "The docker image in kurtosis that will replaced with a local tag (e.g. agglayer_image)"
+        required: false
+        type: string
+        default: ""
+
+      docker-tag:
+        description: "A local docker tag to be used as the image for a particular service in kurtosis (e.g. agglayer:local)"
+        required: false
+        type: string
+        default: "local"
+
+      docker-artifact-name:
+        description: "A name of a docker image to download (e.g. docker-image)"
+        required: false
+        type: string
+        default: "aggkit"
+
+      test-name:
+        description: "Name of test"
+        required: true
+        type: string
+
+jobs:
+  test-single-e2e:
+    name: Single chain E2E test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout cdk-erigon
+        uses: actions/checkout@v4
+        with:
+          path: cdk-erigon
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract cdk_erigon_node_image from JSON
+        id: extract-image
+        run: |
+          echo "value=$(echo '${{ inputs.kurtosis-cdk-args }}' | jq -r '.args.cdk_erigon_node_image')" >> "$GITHUB_OUTPUT"
+
+      - name: Build & load cdk-erigon docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: cdk-erigon
+          tags: ${{ steps.extract-image.outputs.value }}
+          load: true
+
+      - name: Checkout agglayer-e2e
+        uses: actions/checkout@v4
+        with:
+          repository: agglayer/e2e
+          ref: ${{ inputs.agglayer-e2e-ref }}
+          path: agglayer-e2e
+
+      - name: Checkout kurtosis-cdk
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.kurtosis-cdk-repo }}
+          ref: ${{ inputs.kurtosis-cdk-ref }}
+          path: kurtosis-cdk
+
+      - name: Download artifact
+        if: inputs.docker-artifact-name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.docker-artifact-name }}
+          path: "/tmp"
+
+      - name: Load image
+        run: |
+          if [[ -e /tmp/${{ inputs.docker-artifact-name }}.tar ]]; then
+              docker load --input /tmp/${{ inputs.docker-artifact-name }}.tar
+              docker images
+          fi
+
+      - name: Install foundry
+        uses: foundry-rs/foundry-toolchain@v1.3.1
+
+      - name: Install bats
+        uses: bats-core/bats-action@3.0.0
+
+      - name: Install kurtosis cli and jq
+        run: |
+          echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
+          sudo apt update
+          sudo apt install -y kurtosis-cli jq
+          kurtosis analytics disable
+
+      - name: Write args input to a file
+        run: |
+          docker_image_override='${{ inputs.docker-image-override}}'
+          if [[ $docker_image_override == "" ]]; then
+              echo '${{ inputs.kurtosis-cdk-args }}' | tee /tmp/kurtosis-args.json
+              exit
+          fi
+          echo '${{ inputs.kurtosis-cdk-args }}'
+          echo '${{ inputs.kurtosis-cdk-args }}' | jq --arg img '${{ inputs.docker-image-override }}' --arg tag '${{ inputs.docker-tag }}' '.args[$img] = $tag' | tee /tmp/kurtosis-args.json
+
+      - name: Startup the kurtosis-cdk package
+        run: |
+          pushd kurtosis-cdk || exit 1
+          kurtosis run --enclave '${{ inputs.kurtosis-cdk-enclave-name }}' --args-file /tmp/kurtosis-args.json .
+          popd
+
+      - name: Run e2e tests
+        run: |
+          pushd agglayer-e2e || exit 1
+          set -a
+          source ./tests/.env
+          set +a
+          export BATS_LIB_PATH="$PWD/core/helpers/lib"
+          export PROJECT_ROOT="$PWD"
+          export ENCLAVE="${{ inputs.kurtosis-cdk-enclave-name }}"
+          if [[ $ENCLAVE == "op" ]]; then
+            bats ./tests/aggkit/bridge-e2e.bats ./tests/aggkit/e2e-pp.bats ./tests/aggkit/bridge-sovereign-chain-e2e.bats
+          else
+            bats ./tests/aggkit/bridge-e2e.bats ./tests/aggkit/e2e-pp.bats # TODO add custom-gas tests when they are fixed
+          fi
+          popd
+
+      - name: Dump enclave logs
+        if: ${{ failure() }}
+        run: kurtosis dump ./dump
+
+      - name: Generate archive name
+        if: ${{ failure() }}
+        run: |
+          archive_name="dump_run_with_args_${{inputs.test-name}}_${{ github.run_id }}"
+          echo "ARCHIVE_NAME=${archive_name}" >> "$GITHUB_ENV"
+          echo "Generated archive name: ${archive_name}"
+
+      - name: Upload logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.test-name }}
+          path: ./dump
+
+      - name: Clean up kurtosis-cdk enclave
+        if: ${{ always() }}
+        run: |
+          kurtosis enclave stop '${{ inputs.kurtosis-cdk-enclave-name }}'
+          kurtosis clean

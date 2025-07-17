@@ -143,7 +143,7 @@ Loop:
 						return funcErr
 					}
 					if fork == 0 {
-						log.Error("received CreateNewRollupTopic for unknown rollup type", "rollupType", rollupType)
+						log.Warn("received CreateNewRollupTopic for unknown rollup type", "rollupType", rollupType)
 					}
 					if funcErr = hermezDb.WriteNewForkHistory(fork, 0); funcErr != nil {
 						return funcErr

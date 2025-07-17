@@ -195,7 +195,7 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 		return nil, err
 	}
 
-	zkConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: txCounters.ExecutionCounters()}
+	zkConfig := vm.NewZkConfig(vm.Config{NoBaseFee: true}, txCounters.ExecutionCounters())
 	evm := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkConfig)
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
@@ -409,7 +409,9 @@ func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumR
 		return nil, err
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false, nil)
+	unlimitedCounters := chainConfig.IsNormalcy(latestBlockNum) || api.config.Zk.ShouldCountersBeUnlimited(api.config.Zk.IsL1Recovery())
+
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, unlimitedCounters, nil)
 
 	var (
 		block                                   *types.Block
@@ -499,7 +501,7 @@ func (api *ZkEvmAPIImpl) execTransaction(
 	if msg, err = tx.AsMessage(*signer, header.BaseFee, rules); err != nil {
 		return 0, err
 	}
-	zkConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: txCounters.ExecutionCounters()}
+	zkConfig := vm.NewZkConfig(vm.Config{NoBaseFee: true}, txCounters.ExecutionCounters())
 	evm := vm.NewZkEVM(blockCtx, core.NewEVMTxContext(msg), ibs, chainConfig, zkConfig)
 	gp := new(core.GasPool).AddGas(msg.Gas())
 	ibs.Init(tx.Hash(), header.Hash(), 0)
@@ -531,17 +533,36 @@ type batchCountersResponse struct {
 	BlockFrom      uint64           `json:"blockFrom"`
 	BlockTo        uint64           `json:"blockTo"`
 	CountersUsed   combinecCounters `json:"countersUsed"`
-	CoutnersLimits combinecCounters `json:"countersLimits"`
+	CountersLimits combinecCounters `json:"countersLimits"`
 }
 
 func populateBatchCounters(collected *vm.Counters, smtDepth int, batchNum, blockFrom, blockTo, totalGasUsed uint64) (jsonRes json.RawMessage, err error) {
-
-	res := batchCountersResponse{
-		SmtDepth:    smtDepth,
-		BatchNumber: batchNum,
-		BlockFrom:   blockFrom,
-		BlockTo:     blockTo,
-		CountersUsed: combinecCounters{
+	var countersUsed combinecCounters
+	var countersLimits combinecCounters
+	if len(*collected) == 0 {
+		countersLimits = combinecCounters{
+			KeccakHashes:     0,
+			Poseidonhashes:   0,
+			PoseidonPaddings: 0,
+			MemAligns:        0,
+			Arithmetics:      0,
+			Binaries:         0,
+			Steps:            0,
+			SHA256hashes:     0,
+		}
+		countersUsed = combinecCounters{
+			Gas:              0,
+			KeccakHashes:     0,
+			Poseidonhashes:   0,
+			PoseidonPaddings: 0,
+			MemAligns:        0,
+			Arithmetics:      0,
+			Binaries:         0,
+			Steps:            0,
+			SHA256hashes:     0,
+		}
+	} else {
+		countersUsed = combinecCounters{
 			Gas:              totalGasUsed,
 			KeccakHashes:     collected.GetKeccakHashes().Used(),
 			Poseidonhashes:   collected.GetPoseidonHashes().Used(),
@@ -551,8 +572,8 @@ func populateBatchCounters(collected *vm.Counters, smtDepth int, batchNum, block
 			Binaries:         collected.GetBinaries().Used(),
 			Steps:            collected.GetSteps().Used(),
 			SHA256hashes:     collected.GetSHA256Hashes().Used(),
-		},
-		CoutnersLimits: combinecCounters{
+		}
+		countersLimits = combinecCounters{
 			KeccakHashes:     collected.GetKeccakHashes().Limit(),
 			Poseidonhashes:   collected.GetPoseidonHashes().Limit(),
 			PoseidonPaddings: collected.GetPoseidonPaddings().Limit(),
@@ -561,7 +582,16 @@ func populateBatchCounters(collected *vm.Counters, smtDepth int, batchNum, block
 			Binaries:         collected.GetBinaries().Limit(),
 			Steps:            collected.GetSteps().Limit(),
 			SHA256hashes:     collected.GetSHA256Hashes().Limit(),
-		},
+		}
+	}
+
+	res := batchCountersResponse{
+		SmtDepth:       smtDepth,
+		BatchNumber:    batchNum,
+		BlockFrom:      blockFrom,
+		BlockTo:        blockTo,
+		CountersUsed:   countersUsed,
+		CountersLimits: countersLimits,
 	}
 
 	return json.Marshal(res)

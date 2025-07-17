@@ -32,12 +32,13 @@ import (
 	"github.com/erigontech/erigon/zk/hermez_db"
 	"github.com/erigontech/erigon/zk/l1infotree"
 	verifier "github.com/erigontech/erigon/zk/legacy_executor_verifier"
+	"github.com/erigontech/erigon/zk/sequencer"
 	zktx "github.com/erigontech/erigon/zk/tx"
 	"github.com/erigontech/erigon/zk/txpool"
 	zktypes "github.com/erigontech/erigon/zk/types"
 	"github.com/erigontech/erigon/zk/utils"
 	"github.com/hashicorp/golang-lru/v2/expirable"
-	"github.com/erigontech/erigon/zk/sequencer"
+
 	db2 "github.com/erigontech/erigon/smt/pkg/db"
 	"github.com/erigontech/erigon/smt/pkg/smt"
 )
@@ -83,6 +84,8 @@ type SequenceBlockCfg struct {
 	dataStreamServer server.DataStreamServer
 	zk               *ethconfig.Zk
 	miningConfig     *params.MiningConfig
+	hashStateCfg     stagedsync.HashStateCfg
+	intersCfg        ZkInterHashesCfg
 
 	txPool   *txpool.TxPool
 	txPoolDb kv.RwDB
@@ -95,8 +98,7 @@ type SequenceBlockCfg struct {
 	decodedTxCache *expirable.LRU[common.Hash, *types.Transaction]
 	doneHook       DoneHook
 
-	interHashesCfg ZkInterHashesCfg
-	txYielder      TxYielder
+	txYielder TxYielder
 }
 
 func StageSequenceBlocksCfg(
@@ -106,7 +108,7 @@ func StageSequenceBlocksCfg(
 	changeSetHook stagedsync.ChangeSetHook,
 	chainConfig *chain.Config,
 	engine consensus.Engine,
-	vmConfig *vm.ZkConfig,
+	zkVmConfig *vm.ZkConfig,
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	badBlockHalt bool,
@@ -120,6 +122,8 @@ func StageSequenceBlocksCfg(
 	dataStreamServer server.DataStreamServer,
 	zk *ethconfig.Zk,
 	miningConfig *params.MiningConfig,
+	hashStateCfg stagedsync.HashStateCfg,
+	intersCfg ZkInterHashesCfg,
 
 	txPool *txpool.TxPool,
 	txPoolDb kv.RwDB,
@@ -127,7 +131,6 @@ func StageSequenceBlocksCfg(
 	yieldSize uint16,
 	infoTreeUpdater *l1infotree.Updater,
 	doneHook DoneHook,
-	interHashesCfg ZkInterHashesCfg,
 	txYielder *sequencer.PoolTransactionYielder,
 ) SequenceBlockCfg {
 
@@ -140,7 +143,7 @@ func StageSequenceBlocksCfg(
 		changeSetHook:    changeSetHook,
 		chainConfig:      chainConfig,
 		engine:           engine,
-		zkVmConfig:       vmConfig,
+		zkVmConfig:       zkVmConfig,
 		dirs:             dirs,
 		accumulator:      accumulator,
 		stateStream:      stateStream,
@@ -153,6 +156,8 @@ func StageSequenceBlocksCfg(
 		dataStreamServer: dataStreamServer,
 		zk:               zk,
 		miningConfig:     miningConfig,
+		hashStateCfg:     hashStateCfg,
+		intersCfg:        intersCfg,
 		txPool:           txPool,
 		txPoolDb:         txPoolDb,
 		legacyVerifier:   legacyVerifier,
@@ -160,7 +165,6 @@ func StageSequenceBlocksCfg(
 		infoTreeUpdater:  infoTreeUpdater,
 		decodedTxCache:   decodedTxCache,
 		doneHook:         doneHook,
-		interHashesCfg:   interHashesCfg,
 		txYielder:        txYielder,
 	}
 }
@@ -226,11 +230,21 @@ type ForkDb interface {
 	WriteForkId(batch, forkId uint64) error
 }
 
-func prepareForkId(lastBatch, executionAt uint64, hermezDb ForkDb) (latest uint64, err error) {
+func prepareForkId(lastBatch, executionAt uint64, hermezDb ForkDb, cfg SequenceBlockCfg) (latest uint64, err error) {
 	// get all history and find the fork appropriate for the batch we're processing now
 	allForks, allBatches, err := hermezDb.GetAllForkHistory()
 	if err != nil {
 		return 0, err
+	}
+
+	if cfg.zk.Commitment.IsType1() {
+		if len(allForks) == 1 && allForks[0] == 0 {
+			// we are in normalcy on a network that has never had an FEP rollup type
+			// assigned to it, so there is no fork history to use here.  So we default
+			// to the highest available fork id (13) to ensure we're using the latest
+			// methods for decoding things like the injected batch (read from disk in normalcy).
+			return 13, nil
+		}
 	}
 
 	nextBatch := lastBatch + 1
@@ -619,6 +633,11 @@ func checkSmtMigration(ctx context.Context, cfg SequenceBlockCfg, roTx kv.Tx, s 
 		return nil
 	}
 
+	// we only care to migrate the SMT if the commitment type is SMT
+	if cfg.zk.Commitment != ethconfig.CommitmentSMT {
+		return nil
+	}
+
 	smtCursor, err := roTx.Cursor(kv.TableSmtIntermediateHashes)
 	if err != nil {
 		return err
@@ -649,7 +668,7 @@ func sequencerRegenIntermediateHashes(ctx context.Context, s *stagedsync.StageSt
 	eridb := db2.NewEriDb(tx)
 	smt := smt.NewSMT(eridb, false)
 	to := s.BlockNumber
-	if _, err := regenerateIntermediateHashes(ctx, s.LogPrefix(), cfg.interHashesCfg, tx, eridb, smt, to); err != nil {
+	if _, err := regenerateIntermediateHashes(ctx, s.LogPrefix(), cfg.intersCfg, tx, eridb, smt, to); err != nil {
 		return err
 	}
 	return tx.Commit()

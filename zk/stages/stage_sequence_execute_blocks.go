@@ -9,6 +9,7 @@ import (
 
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -20,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/zk/hermez_db"
 	zktypes "github.com/erigontech/erigon/zk/types"
 	"github.com/erigontech/secp256k1"
-	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func handleStateForNewBlockStarting(
@@ -38,10 +38,15 @@ func handleStateForNewBlockStarting(
 
 	ibs.PreExecuteStateSet(chainConfig, blockNumber, timestamp, stateRoot)
 
+	if chainConfig.DebugDisableZkevmStateChanges {
+		// we don't want to write anything to the GER contract when debugging emulating ethereum
+		return nil
+	}
+
 	// handle writing to the ger manager contract but only if the index is above 0
 	// block 1 is a special case as it's the injected batch, so we always need to check the GER/L1 block hash
 	// as these will be force-fed from the event from L1
-	if l1info != nil && l1info.Index > 0 || blockNumber == 1 {
+	if l1info != nil && (l1info.Index > 0 || blockNumber == 1) {
 		// store it so we can retrieve for the data stream
 		if err := hermezDb.WriteBlockGlobalExitRoot(blockNumber, l1info.GER); err != nil {
 			return err
@@ -188,19 +193,33 @@ func finaliseBlock(
 
 	quit := batchContext.ctx.Done()
 	batchContext.sdb.eridb.OpenBatch(quit)
+
 	// this is actually the interhashes stage
 	now := time.Now()
-	newRoot, err := zkIncrementIntermediateHashes_v2_Forwards(batchContext.ctx, batchContext.cfg.dirs.Tmp, batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
+	var newRoot common.Hash
+	commitment := "smt"
+	if batchContext.cfg.zk.UsingPMT() {
+		commitment = "pmt"
+		logger := log.New()
+		if err = stagedsync.HashStateFromTo(batchContext.s.LogPrefix(), batchContext.sdb.tx, batchContext.cfg.hashStateCfg, newHeader.Number.Uint64()-1, newHeader.Number.Uint64(), batchContext.ctx, logger); err != nil {
+			return nil, err
+		}
+
+		newRoot, err = stagedsync.IncrementIntermediateHashes(batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, thisBlockNumber, trieConfigSequencer(batchContext.cfg.intersCfg), common.Hash{}, quit, logger)
+	} else {
+		newRoot, err = zkIncrementIntermediateHashes(batchContext.ctx, batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, batchContext.sdb.eridb, batchContext.sdb.smt, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
+	}
 	if err != nil {
 		batchContext.sdb.eridb.RollbackBatch()
 		return nil, err
 	}
 
+	elapsed := time.Since(now)
+	log.Info(fmt.Sprintf("[%s] IncrementIntermediateHashes finished newRoot: %s", batchContext.s.LogPrefix(), newRoot.String()), "took", elapsed, "commitment", commitment)
+
 	if err = batchContext.sdb.eridb.CommitBatch(); err != nil {
 		return nil, err
 	}
-	elapsed := time.Since(now)
-	log.Info(fmt.Sprintf("[%s]: zkIncrementIntermediateHashes_v2_Forwards took %s", batchContext.s.LogPrefix(), elapsed))
 
 	finalHeader := finalBlock.HeaderNoCopy()
 	finalHeader.Root = newRoot

@@ -23,15 +23,14 @@ func SequencerZkStages(
 	l1SequencerSyncCfg L1SequencerSyncCfg,
 	l1InfoTreeCfg L1InfoTreeCfg,
 	sequencerL1BlockSyncCfg SequencerL1BlockSyncCfg,
-	dataStreamCatchupCfg DataStreamCatchupCfg,
 	exec SequenceBlockCfg,
-	hashState stages.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
 	history stages.HistoryCfg,
 	logIndex stages.LogIndexCfg,
 	callTraces stages.CallTracesCfg,
 	txLookup stages.TxLookupCfg,
 	finish stages.FinishCfg,
+	hashStateCfg stages.HashStateCfg,
 	test bool,
 ) []*stages.Stage {
 	return []*stages.Stage{
@@ -116,6 +115,9 @@ func SequencerZkStages(
 				return SpawnSequencerInterhashesStage(s, u, txc.Tx, ctx, zkInterHashesCfg, true)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
+				if zkInterHashesCfg.zk.UsingPMT() {
+					return stages.UnwindIntermediateHashesStage(u, s, txc.Tx, trieConfigSequencer(zkInterHashesCfg), ctx, logger)
+				}
 				return UnwindSequencerInterhashsStage(u, s, txc.Tx, ctx, zkInterHashesCfg)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
@@ -127,13 +129,17 @@ func SequencerZkStages(
 			Description: "Hash the key in the state",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return stages.SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
+				// this is only used in normalcy and the forward is used in execution stage before inters.
+				if !zkInterHashesCfg.zk.UsingPMT() {
+					return stages.SpawnHashStateStage(s, txc.Tx, hashStateCfg, ctx, logger)
+				}
+				return nil
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return stages.UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger, false)
+				return stages.UnwindHashStateStage(u, s, txc.Tx, hashStateCfg, ctx, logger, false)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
-				return stages.PruneHashStateStage(p, tx, hashState, ctx)
+				return stages.PruneHashStateStage(p, tx, hashStateCfg, ctx)
 			},
 		},
 		{
@@ -220,6 +226,32 @@ func SequencerZkStages(
 			},
 		},
 	}
+}
+
+func trieConfigSequencer(zkInterHashesCfg ZkInterHashesCfg) stages.TrieCfg {
+	return stages.StageTrieCfg(
+		zkInterHashesCfg.db,
+		false, // we can't check the root on sequencer because hash stage is done mid-execution.
+		zkInterHashesCfg.saveNewHashesToDB,
+		zkInterHashesCfg.badBlockHalt,
+		zkInterHashesCfg.tmpDir,
+		zkInterHashesCfg.blockReader,
+		zkInterHashesCfg.hd,
+		zkInterHashesCfg.historyV3,
+		zkInterHashesCfg.agg)
+}
+
+func trieConfigRPC(zkInterHashesCfg ZkInterHashesCfg) stages.TrieCfg {
+	return stages.StageTrieCfg(
+		zkInterHashesCfg.db,
+		zkInterHashesCfg.checkRoot,
+		zkInterHashesCfg.saveNewHashesToDB,
+		zkInterHashesCfg.badBlockHalt,
+		zkInterHashesCfg.tmpDir,
+		zkInterHashesCfg.blockReader,
+		zkInterHashesCfg.hd,
+		zkInterHashesCfg.historyV3,
+		zkInterHashesCfg.agg)
 }
 
 func DefaultZkStages(
@@ -345,10 +377,19 @@ func DefaultZkStages(
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				if zkInterHashesCfg.zk.UsingPMT() {
+					_, err := stages.SpawnIntermediateHashesStage(s, u, txc.Tx, trieConfigRPC(zkInterHashesCfg), ctx, logger)
+					return err
+				}
+
 				_, err := SpawnZkIntermediateHashesStage(s, u, txc.Tx, zkInterHashesCfg, ctx)
 				return err
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
+				if zkInterHashesCfg.zk.UsingPMT() {
+					return stages.UnwindIntermediateHashesStage(u, s, txc.Tx, trieConfigRPC(zkInterHashesCfg), ctx, logger)
+				}
+
 				return UnwindZkIntermediateHashesStage(u, s, txc.Tx, zkInterHashesCfg, ctx, false)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {

@@ -53,7 +53,7 @@ type Zk struct {
 	SequencerDecodedTxCacheTTL             time.Duration
 	SequencerResequenceInfoTreeOffset      *L1InfoTreeOffset
 	ExecutorUrls                           []string
-	ExecutorStrictMode                     bool
+	ExecutorStrictMode                     bool `yaml:"zkevm.executor-strict"`
 	ExecutorRequestTimeout                 time.Duration
 	ExecutorEnabled                        bool
 	DatastreamNewBlockTimeout              time.Duration
@@ -62,6 +62,7 @@ type Zk struct {
 	ExecutorMaxConcurrentRequests          int
 	Limbo                                  bool
 	AllowFreeTransactions                  bool
+	FreeInjectedBatch                      bool
 	AllowPreEIP155Transactions             bool
 	EffectiveGasPriceForEthTransfer        uint8
 	EffectiveGasPriceForErc20Transfer      uint8
@@ -128,13 +129,14 @@ type Zk struct {
 	L2InfoTreeUpdatesBatchSize     uint64
 	L2InfoTreeUpdatesEnabled       bool
 
-	Hardfork   Hardfork
-	Commitment Commitment
-	InjectGers bool
+	Hardfork        Hardfork
+	Commitment      Commitment `yaml:"zkevm.initial-commitment"`
+	InjectGers      bool
+	HonourChainspec bool `yaml:"zkevm.honour-chainspec"`
 
-	SkipSmt                        bool
-	OnlySmtV2                      bool
-	SequencerBlockGasLimit         uint64
+	SkipSmt                bool
+	OnlySmtV2              bool
+	SequencerBlockGasLimit uint64
 }
 
 type Hardfork string
@@ -171,11 +173,13 @@ func (c Commitment) IsValid() bool {
 	return false
 }
 
-func (c Commitment) ValidCommitments() []Commitment {
+func ValidCommitments() []Commitment {
 	return []Commitment{CommitmentPMT, CommitmentSMT}
 }
 
-var DefaultZkConfig = &Zk{}
+func (c Commitment) IsType1() bool {
+	return c == CommitmentPMT
+}
 
 func (c *Zk) ShouldCountersBeUnlimited(l1Recovery bool) bool {
 	return l1Recovery || (c.DisableVirtualCounters && !c.ExecutorStrictMode && !c.HasExecutors())
@@ -204,14 +208,6 @@ func (c *Zk) UsingSMT() bool {
 
 func (c *Zk) UsingPMT() bool {
 	return c.Commitment == CommitmentPMT
-}
-
-func (c *Zk) UsingHermezHardfork() bool {
-	return c.Hardfork == HardforkTypeHermez
-}
-
-func (c *Zk) UsingEthereumHardfork() bool {
-	return c.Hardfork == HardforkTypeEthereum
 }
 
 type L1InfoTreeOffset struct {

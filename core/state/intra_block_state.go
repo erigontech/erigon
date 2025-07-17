@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/types"
@@ -96,6 +97,8 @@ type IntraBlockState struct {
 	trace             bool
 	balanceInc        map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 	disableBalanceInc bool                                   // Disable balance increase tracking and eagerly read accounts
+
+	isType1 bool
 }
 
 // Create a new state from a given trie
@@ -404,13 +407,17 @@ func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) {
 func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) {
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
-		if len(code) == 0 {
-			stateObject.setCode(libcommon.BytesToHash(emptyCodeHash), code)
-			return
-		}
+		if sdb.isType1 {
+			stateObject.SetCode(crypto.Keccak256Hash(code), code)
+		} else {
+			if len(code) == 0 {
+				stateObject.setCode(libcommon.BytesToHash(emptyCodeHash), code)
+				return
+			}
 
-		hashedBytecode := utils.HashContractBytecodeBigInt(hex.EncodeToString(code))
-		stateObject.SetCode(libcommon.BigToHash(hashedBytecode), code)
+			hashedBytecode := utils.HashContractBytecodeBigInt(hex.EncodeToString(code))
+			stateObject.SetCode(libcommon.BigToHash(hashedBytecode), code)
+		}
 	}
 }
 
@@ -894,6 +901,9 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 			}
 		}
 	}
+
+	sdb.isType1 = rules.IsType1
+
 	// Reset transient storage at the beginning of transaction execution
 	sdb.transientStorage = newTransientStorage()
 }
@@ -933,4 +943,8 @@ func (sdb *IntraBlockState) AddressInAccessList(addr libcommon.Address) bool {
 
 func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
 	return sdb.accessList.Contains(addr, slot)
+}
+
+func (sdb *IntraBlockState) SetType1(isType1 bool) {
+	sdb.isType1 = isType1
 }

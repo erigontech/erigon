@@ -128,7 +128,7 @@ func sequencingBatchStep(
 		return err
 	}
 
-	forkId, err := prepareForkId(lastBatch, executionAt, sdb.hermezDb)
+	forkId, err := prepareForkId(lastBatch, executionAt, sdb.hermezDb, cfg)
 	if err != nil {
 		return err
 	}
@@ -149,19 +149,28 @@ func sequencingBatchStep(
 	runLoopBlocks := true
 	batchContext := newBatchContext(ctx, &cfg, &historyCfg, s, sdb)
 	batchState := newBatchState(forkId, batchNumberForStateInitialization, executionAt+1, cfg.zk.UseExecutors(), cfg.zk.IsL1Recovery(), cfg.txPool, resequenceBatchJob)
-	blockDataSizeChecker := NewBlockDataChecker(cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()))
+	shouldCountersBeInfinite := cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()) || cfg.chainConfig.IsNormalcy(executionAt)
+	blockDataSizeChecker := NewBlockDataChecker(shouldCountersBeInfinite)
 	streamWriter := newSequencerBatchStreamWriter(batchContext, batchState)
 
 	// injected batch
 	if executionAt == 0 {
-		if err := processInjectedInitialBatch(batchContext, batchState); err != nil {
+		if cfg.chainConfig.DebugDisableZkevmStateChanges {
+			// sealed empty block batch
+			if err = processEmptyInitialBatch(batchContext, batchState); err != nil {
+				return err
+			}
+		} else {
+			if err = processInjectedInitialBatch(batchContext, batchState); err != nil {
+				return err
+			}
+		}
+
+		if err = cfg.dataStreamServer.WriteWholeBatchToStream(logPrefix, sdb.tx, sdb.hermezDb.HermezDbReader, lastBatch, injectedBatchBatchNumber); err != nil {
 			return err
 		}
 
-		if err := cfg.dataStreamServer.WriteWholeBatchToStream(logPrefix, sdb.tx, sdb.hermezDb.HermezDbReader, lastBatch, injectedBatchBatchNumber); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(sdb.tx, stages.DataStream, 1); err != nil {
+		if err = stages.SaveStageProgress(sdb.tx, stages.DataStream, 1); err != nil {
 			return err
 		}
 
@@ -207,7 +216,7 @@ func sequencingBatchStep(
 		return err
 	}
 
-	batchCounters := prepareBatchCounters(batchContext, batchState)
+	batchCounters := prepareBatchCounters(batchContext, batchState, shouldCountersBeInfinite)
 
 	if batchState.isL1Recovery() {
 		if cfg.zk.L1SyncStopBatch > 0 && batchState.batchNumber > cfg.zk.L1SyncStopBatch {
@@ -283,7 +292,7 @@ func sequencingBatchStep(
 		logTicker.Reset(10 * time.Second)
 		blockTimer := time.NewTimer(cfg.zk.SequencerBlockSealTime)
 		emptyBlockTimer := time.NewTimer(cfg.zk.SequencerEmptyBlockSealTime)
-		ethBlockGasPool := new(core.GasPool).AddGas(transactionGasLimit) // used only in normalcy mode per block
+		ethBlockGasPool := new(core.GasPool).AddGas(transactionGasLimit)
 
 		if batchState.isLimboRecovery() {
 			transactions, err := getLimboTransaction(ctx, cfg, batchState.limboRecoveryData.limboTxHash, executionAt)
@@ -598,7 +607,7 @@ func sequencingBatchStep(
 						*/
 
 						// now check if this transaction on it's own would overflow counters for the batch
-						tempCounters := prepareBatchCounters(batchContext, batchState)
+						tempCounters := prepareBatchCounters(batchContext, batchState, shouldCountersBeInfinite)
 						singleTxOverflow, err := tempCounters.SingleTransactionOverflowCheck(txCounters)
 						if err != nil {
 							return err

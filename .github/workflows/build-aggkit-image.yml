@@ -1,0 +1,52 @@
+name: Build Aggkit Image # Copied from agglayer/aggkit/.github/workflows/build-aggkit-image.yml
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        required: true
+        type: string
+      docker-image-name:
+        required: true
+        type: string
+      repository:
+        type: string
+        required: false
+        default: agglayer/aggkit
+      ref:
+        type: string
+        required: false
+        default: ""
+
+concurrency:
+  group: build-aggkit-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-aggkit-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          # if inputs.ref is non-empty, use it, otherwise use the ref that triggered *this* run
+          ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+
+      - name: Build Aggkit Docker Image
+        run: make build-docker
+
+      - name: Save Aggkit Image to Archive
+        run: docker save --output /tmp/${{ inputs.docker-image-name }}.tar ${{ inputs.docker-image-name }}
+
+      - name: Upload Aggkit Archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.docker-image-name }}
+          path: /tmp/${{ inputs.docker-image-name }}.tar

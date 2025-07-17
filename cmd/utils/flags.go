@@ -725,6 +725,11 @@ var (
 		Usage: "Allow the sequencer to proceed transactions with 0 gas price",
 		Value: false,
 	}
+	FreeInjectedBatch = cli.BoolFlag{
+		Name:  "zkevm.free-injected-batch",
+		Usage: "Process the injected batch for free - default true",
+		Value: true,
+	}
 	RejectLowGasPriceTransactions = cli.BoolFlag{
 		Name:  "zkevm.reject-low-gas-price-transactions",
 		Usage: "Reject the sequencer to proceed transactions with low gas price",
@@ -935,13 +940,8 @@ var (
 		Usage: "Exclude zkevm flags from startup logging on zkevm flags.",
 		Value: cli.NewStringSlice("zkevm.l1-rpc-url"),
 	}
-	Hardfork = cli.StringFlag{
-		Name:  "zkevm.hardfork",
-		Usage: "Values { hermez | ethereum }. Default, hermez.",
-		Value: "hermez",
-	}
 	Commitment = cli.StringFlag{
-		Name:  "zkevm.commitment",
+		Name:  "zkevm.initial-commitment",
 		Usage: "Values { smt | pmt }. Default, smt.",
 		Value: "smt",
 	}
@@ -949,6 +949,11 @@ var (
 		Name:  "zkevm.inject-gers",
 		Usage: "Inject L1 information into the scalable contract and ger manager. Default true.",
 		Value: true,
+	}
+	HonourChainspec = cli.BoolFlag{
+		Name:  "zkevm.honour-chainspec",
+		Usage: "Honour the actual chainspec values. This means that no chainspec values will get changed based on normalcy mode. Default false.",
+		Value: false,
 	}
 	SkipSmt = cli.BoolFlag{
 		Name:  "zkevm.skip-smt",
@@ -2505,6 +2510,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		genesis.Timestamp = dConf.Timestamp
 		genesis.GasLimit = dConf.GasLimit
 		genesis.Difficulty = big.NewInt(dConf.Difficulty)
+		genesis.HonourChainspec = ctx.Bool(HonourChainspec.Name)
+		commitment := ethconfig.Commitment(ctx.String(Commitment.Name))
+		if !commitment.IsValid() {
+			panic(fmt.Sprintf("Invalid commitment: %s. Must be one of: %s", ctx.String(Commitment.Name), ethconfig.ValidCommitments()))
+		}
+		genesis.Type1 = commitment.IsType1()
 
 		cfg.Genesis = genesis
 

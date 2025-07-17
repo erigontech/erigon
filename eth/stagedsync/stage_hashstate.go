@@ -65,29 +65,8 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 		return err
 	}
 
-	logPrefix := s.LogPrefix()
-	if s.BlockNumber == to {
-		// we already did hash check for this block
-		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
-		log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
-		return nil
-	}
-	if s.BlockNumber > to { // Erigon will self-heal (download missed blocks) eventually
-		log.Warn(fmt.Sprintf("[%s] promotion backwards from %d to %d", s.LogPrefix(), s.BlockNumber, to))
-		return nil
-	}
-
-	if to > s.BlockNumber+16 {
-		logger.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
-	}
-	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, ctx, logger); err != nil {
-			return err
-		}
-	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx, logger); err != nil {
-			return err
-		}
+	if err = HashStateFromTo(s.LogPrefix(), tx, cfg, s.BlockNumber, to, ctx, logger); err != nil {
+		return err
 	}
 
 	if err = s.Update(tx, to); err != nil {
@@ -152,6 +131,38 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	if err := prom.Unwind(logPrefix, s, u, true /* storage */, false /* codes */, quiet); err != nil {
 		return err
 	}
+	return nil
+}
+
+// HashStateFromTo hashes the state for the PMT. Used in the zk sequencer node.
+// It is like SpawnHashStateStage, but it does not get the fromBlock from the executionAt because this happens mid-execution on zk sequencer.
+func HashStateFromTo(logPrefix string, tx kv.RwTx, cfg HashStateCfg, from, to uint64, ctx context.Context, logger log.Logger) error {
+	if from == to {
+		// we already did hash check for this block
+		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
+		log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
+		return nil
+	}
+
+	if from > to { // Erigon will self-heal (download missed blocks) eventually
+		log.Warn(fmt.Sprintf("[%s] promotion backwards from %d to %d", logPrefix, from, to))
+		return nil
+	}
+
+	if to > from+16 {
+		logger.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", from, "to", to)
+	}
+
+	if from == 0 { // Initial hashing of the state is performed at the previous stage
+		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, ctx, logger); err != nil {
+			return err
+		}
+	} else {
+		if err := promoteHashedStateIncrementally(logPrefix, from, to, tx, cfg, ctx, logger); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

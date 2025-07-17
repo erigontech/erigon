@@ -75,6 +75,10 @@ func SpawnStageWitness(
 		log.Info(fmt.Sprintf("[%s] skipping -- sequencer", logPrefix))
 		return nil
 	}
+	if cfg.zkCfg.UsingPMT() {
+		log.Info(fmt.Sprintf("[%s] skipping -- using PMT", logPrefix))
+		return nil
+	}
 	defer log.Info(fmt.Sprintf("[%s] Finished witness cache stage", logPrefix))
 
 	freshTx := false

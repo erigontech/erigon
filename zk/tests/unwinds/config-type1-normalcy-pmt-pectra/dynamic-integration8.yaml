@@ -1,0 +1,39 @@
+datadir: "./datadir"
+chain: "dynamic-integration"
+http: true
+private.api.addr: "localhost:9090"
+zkevm.l2-chain-id: 779
+zkevm.l2-sequencer-rpc-url: "http://34.175.214.161:18123"
+zkevm.l2-datastreamer-url: "0.0.0.0:6900"
+zkevm.l1-chain-id: 11155111
+zkevm.l1-rpc-url: "http://localhost:8545" # not used for the test
+
+zkevm.l1-contract-address-retrieve: false
+zkevm.l1-contract-address-check: false
+zkevm.address-sequencer: "0x153724F17B1eb206e31CAbA82f6b45E865879D94"
+zkevm.address-zkevm: "0xA24686d989DCd70fBb4D8311694820d74872f061"
+zkevm.address-rollup: "0xeE6F5B532b67ee594B372f7a3eBD276A45Ea6777"
+zkevm.address-ger-manager: "0x33ff0546a9ce00D9b2B43Fe52Eab336D919eAD36"
+
+zkevm.l1-matic-contract-address: "0xdC66C280f5E8bBbd2F2d92FaD1489863c8F55915"
+zkevm.l1-first-block: 6411787
+zkevm.executor-strict: false
+zkevm.sequencer-block-seal-time: "150ms"
+zkevm.sequencer-batch-seal-time: "1s"
+zkevm.allow-pre-eip155-transactions: true
+
+externalcl: true
+http.api: ["eth", "debug", "net", "trace", "web3", "erigon", "txpool", "zkevm"]
+http.addr: "0.0.0.0"
+http.port: 8123
+http.vhosts: "*"
+http.corsdomain: "*"
+
+ws: true
+rpc.batch.limit: 500
+zkevm.default-gas-price: 1000000000
+
+zkevm.l1-cache-enabled: false
+
+zkevm.honour-chainspec: true
+zkevm.initial-commitment: pmt

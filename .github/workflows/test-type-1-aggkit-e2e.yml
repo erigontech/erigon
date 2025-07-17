@@ -1,0 +1,108 @@
+# This workflow runs the Bats E2E tests for aggkit.
+# Copied from agglayer/aggkit/.github/workflows/test-e2e.yml
+name: Bats E2E Tests Type 1 aggkit bridge
+
+on:
+  pull_request:
+    branches:
+      - project/pp2
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-aggkit-image:
+    uses: ./.github/workflows/build-aggkit-image.yml # Replace with aggkit's version if PR to pass repository and ref is merged
+    with:
+      go-version: 1.24.x
+      docker-image-name: aggkit
+      repository: agglayer/aggkit
+      ref:        2364b97d3186c5bd3b8ea618863219c58c0e49bb
+    secrets: inherit
+
+  read-aggkit-args:
+    name: Read aggkit args
+    runs-on: ubuntu-latest
+    outputs:
+      # single l2 network (fork 12, pessimistic)
+      kurtosis-cdk-args-single-fork12-pessimistic: ${{ steps.read-args.outputs.fork12_pessimistic_args }}
+    steps:
+      - name: Checkout aggkit
+        uses: actions/checkout@v4
+        with:
+          repository: agglayer/aggkit
+          ref: 2364b97d3186c5bd3b8ea618863219c58c0e49bb # feat/new-bridge-service
+
+      - name: Read kurtosis-cdk-args from file
+        id: read-args
+        run: |
+          # single l2 network (fork 12, pessimistic)
+          CONTENT=$(jq -c '
+          .args.cdk_erigon_node_image        = "cdk-erigon-type1:local"   |
+          .args.gas_token_enabled            = false                      |
+          .args.enable_aggkit_claim_sponsor  = true                       |
+          .args.zkevm_honour_chainspec       = true                       |
+          .args.zkevm_initial_commitment     = "pmt"                      |
+          .deployment_stages.deploy_l2_contracts = false
+          ' ./.github/test_e2e_single_chain_fork12_pessimistic_args.json)
+          echo "fork12_pessimistic_args=${CONTENT}" >> $GITHUB_OUTPUT
+
+  test-single-l2-network-fork12-pessimistic:
+    name: Single L2 chain tests (pessimistic)
+    needs:
+      - build-aggkit-image
+      - read-aggkit-args
+    uses: ./.github/workflows/aggkit-e2e-single-chain.yml # Replace with aggkit's version if PR to pass kurtosis-cdk-repo and ref is merged
+    secrets: inherit
+    with:
+      kurtosis-cdk-repo: "gateway-fm/kurtosis-cdk"
+      kurtosis-cdk-ref: feat/add-type1-flags-to-config-template
+      agglayer-e2e-ref: 9769842d0b8bf1fa7fa1135b686d2c7ba08eb73f
+      kurtosis-cdk-enclave-name: aggkit
+      kurtosis-cdk-args: ${{ needs.read-aggkit-args.outputs.kurtosis-cdk-args-single-fork12-pessimistic }}
+      test-name: "test-single-l2-network-fork12-pessimistic"
+
+  check-single-l2-network-fork12-pessimistic-tests-result:
+    name: Check results for single l2 network (pessimistic)
+    needs:
+      - test-single-l2-network-fork12-pessimistic
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+        if: ${{ contains(fromJSON('["failure", "cancelled"]'), needs.test-single-l2-network-fork12-pessimistic.result) }}
+
+  build-tools:
+    name: Build aggsender find imported bridge tool
+    needs:
+      - build-aggkit-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout aggkit
+        uses: actions/checkout@v4
+        with:
+          repository: agglayer/aggkit
+          ref: 2364b97d3186c5bd3b8ea618863219c58c0e49bb # feat/new-bridge-service
+          # token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+
+      - name: Build Aggsender Find Imported Bridge
+        run: make build-tools
+
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: aggsender_find_imported_bridge
+          path: ./target/aggsender_find_imported_bridge

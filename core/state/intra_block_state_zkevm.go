@@ -69,6 +69,11 @@ func (sdb *IntraBlockState) PostExecuteStateSet(chainConfig *chain.Config, block
 }
 
 func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, stateRoot *libcommon.Hash) {
+	if chainConfig.DebugDisableZkevmStateChanges {
+		// in debug we return early here, no out of EVM state changes
+		return
+	}
+
 	if !sdb.Exist(ADDRESS_SCALABLE_L2) {
 		// create account if not exists
 		sdb.CreateAccount(ADDRESS_SCALABLE_L2, true)
@@ -99,6 +104,11 @@ func (sdb *IntraBlockState) SyncerPreExecuteStateSet(
 	gerUpdates *[]dstypes.GerUpdate,
 	reUsedL1InfoTreeIndex bool,
 ) {
+	if chainConfig.DebugDisableZkevmStateChanges {
+		// in debug we return early here, no out of EVM state changes
+		return
+	}
+
 	if !sdb.Exist(ADDRESS_SCALABLE_L2) {
 		// create account if not exists
 		sdb.CreateAccount(ADDRESS_SCALABLE_L2, true)

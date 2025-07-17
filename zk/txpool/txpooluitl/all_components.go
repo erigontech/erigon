@@ -157,7 +157,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, ethCfg *ethconfig.
 		}
 	}
 
-	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime, chainConfig.BlobSchedule, chainConfig.LondonBlock, ethCfg, aclDB, priorityList)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime, chainConfig.BlobSchedule, chainConfig.LondonBlock, chainConfig.NormalcyBlock, ethCfg, aclDB, priorityList)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

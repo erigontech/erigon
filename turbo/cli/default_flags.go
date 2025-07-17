@@ -241,6 +241,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.ExecutorMaxConcurrentRequests,
 	&utils.Limbo,
 	&utils.AllowFreeTransactions,
+	&utils.FreeInjectedBatch,
 	&utils.AllowPreEIP155Transactions,
 	&utils.EffectiveGasPriceForEthTransfer,
 	&utils.EffectiveGasPriceForErc20Transfer,
@@ -336,8 +337,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.BadTxPurge,
 	&utils.ZkevmLogExcludeFlags,
 
-	&utils.Hardfork,
 	&utils.Commitment,
+	&utils.HonourChainspec,
 	&utils.InjectGers,
 	&utils.SkipSmt,
 	&utils.OnlySmtV2,

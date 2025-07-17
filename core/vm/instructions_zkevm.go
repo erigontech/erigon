@@ -82,6 +82,12 @@ func opDifficulty_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	return nil, nil
 }
 
+func opBlobBaseFee_zkevm(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
+	// We don't support blob base fee in the ZK-EVM, so we return 1 as minimum per EIP.
+	callContext.Stack.Push(uint256.NewInt(1))
+	return nil, nil
+}
+
 func opStaticCall_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	stack := scope.Stack

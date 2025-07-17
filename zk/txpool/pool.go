@@ -320,6 +320,8 @@ type TxPool struct {
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
+	normalcyBlock           *big.Int
+	isPostNormalcy          atomic.Bool
 	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	// log          log.Logger
@@ -357,7 +359,7 @@ type FeeCalculator interface {
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
 	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime, pragueTime *big.Int, blobSchedule *chain.BlobSchedule,
-	londonBlock *big.Int, ethCfg *ethconfig.Config, aclDB kv.RwDB, priorityList *PriorityList) (*TxPool, error) {
+	londonBlock *big.Int, normalcyBlock *big.Int, ethCfg *ethconfig.Config, aclDB kv.RwDB, priorityList *PriorityList) (*TxPool, error) {
 	var err error
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -428,12 +430,26 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		policyValidator:         policyValidator,
 		metrics:                 &Metrics{},
 		londonBlock:             londonBlock,
+		shanghaiTime:            blockTimeOrNil(shanghaiTime),
+		agraBlock:               blockTimeOrNil(agraBlock),
+		cancunTime:              blockTimeOrNil(cancunTime),
+		pragueTime:              blockTimeOrNil(pragueTime),
+		normalcyBlock:           normalcyBlock,
+		auths:                   map[common.Address]*metaTx{},
 		priorityList:            priorityList,
 	}
 
 	res.updatePendingPoolPrioritySenders()
 
 	return res, nil
+}
+
+func blockTimeOrNil(block *big.Int) *uint64 {
+	if block == nil {
+		return nil
+	}
+	blockTime := block.Uint64()
+	return &blockTime
 }
 
 func (p *TxPool) Start(ctx context.Context, db kv.RwDB) error {
@@ -1069,7 +1085,23 @@ func (p *TxPool) isCancun() bool {
 }
 
 func (p *TxPool) isPrague() bool {
-	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
+	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime) && p.isNormalcy()
+}
+
+func (p *TxPool) isNormalcy() bool {
+	set := p.isPostNormalcy.Load()
+	if set {
+		return true
+	}
+	if p.normalcyBlock == nil {
+		return false
+	}
+	lsbBig := big.NewInt(0).SetUint64(p.lastSeenBlock.Load())
+	if p.normalcyBlock.Cmp(lsbBig) <= 0 {
+		p.isPostNormalcy.Swap(true)
+		return true
+	}
+	return false
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {

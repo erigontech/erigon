@@ -52,7 +52,7 @@ func TestNonceFromAddress(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	ethCfg := &ethconfig.Defaults
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, ethCfg, aclsDB, nil)
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, ethCfg, aclsDB, nil)
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -285,7 +285,7 @@ func TestPriorityYieldBest(t *testing.T) {
 	priorityList, err := UnmarshalDynamicPriorityList("test-priority-list.json")
 	require.NoError(t, err)
 	assert.NotNil(t, priorityList)
-	pool, err := New(ch, coreDB, txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), uint256.Int(*u256.N1), nil, nil, nil, nil, nil, nil, &ethconfig.Defaults, aclDB, priorityList)
+	pool, err := New(ch, coreDB, txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), uint256.Int(*u256.N1), nil, nil, nil, nil, nil, nil, nil, &ethconfig.Defaults, aclDB, priorityList)
 	assert.NoError(t, err)
 	require.True(t, pool != nil)
 

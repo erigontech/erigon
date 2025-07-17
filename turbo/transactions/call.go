@@ -263,7 +263,7 @@ func NewReusableCaller(
 		counterCollector = txCounters.ExecutionCounters()
 	}
 
-	zkVmConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: counterCollector}
+	zkVmConfig := vm.NewZkConfig(vm.Config{NoBaseFee: true}, counterCollector)
 	evm := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkVmConfig)
 
 	return &ReusableCaller{

@@ -23,10 +23,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"os"
 	"slices"
 	"sync"
+
+	"github.com/erigontech/erigon/turbo/trie"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/config3"
@@ -196,6 +199,15 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime, o
 	}
 	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
+	}
+
+	// set unwanted forks block to max number, so they are not activated
+	if newCfg.NormalcyBlock != nil && genesis != nil && !genesis.HonourChainspec {
+		maxInt := new(big.Int).SetUint64(math.MaxUint64)
+		newCfg.LondonBlock = maxInt
+		newCfg.ShanghaiTime = maxInt
+		newCfg.CancunTime = maxInt
+		newCfg.PragueTime = maxInt
 	}
 
 	return newCfg, storedBlock, nil
@@ -606,6 +618,11 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
 
+		if g.Config != nil {
+			g.Config.Type1 = g.Type1
+		}
+		statedb.SetType1(g.Type1)
+
 		hasConstructorAllocation := false
 		for _, account := range g.Alloc {
 			if len(account.Constructor) > 0 {
@@ -648,16 +665,24 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 
-			ro, err = processAccount(sparseTree, ro, &account, addr)
-			if err != nil {
-				return
+			if !g.Type1 {
+				ro, err = processAccount(sparseTree, ro, &account, addr)
+				if err != nil {
+					return
+				}
 			}
 		}
 		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 			return
 		}
 
-		root = libcommon.BigToHash(ro)
+		if g.Type1 {
+			if root, err = trie.CalcRoot("genesis", tx); err != nil {
+				return
+			}
+		} else {
+			root = libcommon.BigToHash(ro)
+		}
 	}()
 	wg.Wait()
 	if err != nil {

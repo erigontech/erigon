@@ -223,6 +223,10 @@ func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Cou
 		return Counters{}, nil
 	}
 
+	if bcc.unlimitedCounters {
+		return Counters{}, nil
+	}
+
 	// if we have external coutners use them, otherwise create new
 	// this is used when sequencer starts mid batch and we need the already comulated counters
 	combined := bcc.NewCounters()

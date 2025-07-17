@@ -51,7 +51,7 @@ type operation struct {
 }
 
 var (
-	frontierInstructionSet         = newFrontierInstructionSet()
+	frontierInstructionSet         = newFrontierInstructionSetZk()
 	homesteadInstructionSet        = newHomesteadInstructionSet()
 	tangerineWhistleInstructionSet = newTangerineWhistleInstructionSet()
 	spuriousDragonInstructionSet   = newSpuriousDragonInstructionSet()
@@ -61,9 +61,9 @@ var (
 	berlinInstructionSet           = newBerlinInstructionSet()
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
-	napoliInstructionSet           = newNapoliInstructionSet()
-	cancunInstructionSet           = newCancunInstructionSet()
-	pragueInstructionSet           = newPragueInstructionSet()
+	napoliInstructionSet           = newNapoliInstructionSetZk()
+	cancunInstructionSet           = newCancunInstructionSetZk()
+	pragueInstructionSet           = newPragueInstructionSetZk()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -263,7 +263,7 @@ func newTangerineWhistleInstructionSet() JumpTable {
 // newHomesteadInstructionSet returns the frontier and homestead
 // instructions that can be executed during the homestead phase.
 func newHomesteadInstructionSet() JumpTable {
-	instructionSet := newFrontierInstructionSet()
+	instructionSet := newFrontierInstructionSetZk()
 	instructionSet[DELEGATECALL] = &operation{
 		execute:     opDelegateCall,
 		dynamicGas:  gasDelegateCall,

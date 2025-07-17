@@ -2,11 +2,10 @@ package stages
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
-
-	"errors"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -187,4 +186,43 @@ func loadInjectedBatchDataFromFile(fileName string) (*injectedBatchImportResult,
 	log.Debug(fmt.Sprintf("Initializing with first batch data...\n%s", string(rawBytes)))
 
 	return &injectedBatchImportResult{injectedBatch: &injectedBatch}, nil
+}
+
+func processEmptyInitialBatch(batchContext *BatchContext, batchState *BatchState) error {
+	if err := utils.RecoverySetBlockConfigForks(injectedBatchBlockNumber, batchState.forkId, batchContext.cfg.chainConfig, batchContext.s.LogPrefix()); err != nil {
+		return err
+	}
+
+	header, parentBlock, err := prepareHeader(batchContext.sdb.tx, 0, math.MaxUint64, math.MaxUint64, batchState.forkId, batchContext.cfg.zk.AddressSequencer, batchContext.cfg.chainConfig, batchContext.cfg.miningConfig)
+	if err != nil {
+		return err
+	}
+
+	timestamp := header.Time
+
+	ibs := state.New(batchContext.sdb.stateReader)
+
+	parentRoot := parentBlock.Root()
+	if err = handleStateForNewBlockStarting(batchContext, ibs, injectedBatchBlockNumber, injectedBatchBatchNumber, timestamp, &parentRoot, nil, true); err != nil {
+		return err
+	}
+
+	effectiveGas := uint8(zktypes.EFFECTIVE_GAS_PRICE_MAX_VAL.Uint64())
+
+	batchState.blockState.builtBlockElements = BuiltBlockElements{
+		transactions:     types.Transactions{},
+		receipts:         types.Receipts{},
+		executionResults: []*evmtypes.ExecutionResult{},
+		effectiveGases:   []uint8{effectiveGas},
+	}
+
+	shouldCountersBeInfinite := batchContext.cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()) || batchContext.cfg.chainConfig.IsNormalcy(header.Number.Uint64())
+
+	batchCounters := vm.NewBatchCounterCollector(batchContext.sdb.smt.GetDepth(), uint16(batchState.forkId), batchContext.cfg.zk.VirtualCountersSmtReduction, shouldCountersBeInfinite, nil)
+
+	if _, err = doFinishBlockAndUpdateState(batchContext, ibs, header, parentBlock, batchState, common.Hash{}, common.Hash{}, 0, 0, batchCounters); err != nil {
+		return err
+	}
+
+	return nil
 }

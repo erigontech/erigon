@@ -250,7 +250,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	header := block.HeaderNoCopy()
 
-	useCounters := !api.DisableVirtualCounters
+	useCounters := true
+	if api.DisableVirtualCounters || chainConfig.IsNormalcy(header.Number.Uint64()) {
+		useCounters = false
+	}
 	caller, err := transactions.NewReusableCaller(engine, stateReader, overrides, header, args, api.GasCap, latestNumOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout, api.VirtualCountersSmtReduction, useCounters)
 	if err != nil {
 		return 0, err
@@ -503,6 +506,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 				a, err := stateReader.ReadAccountData(*args.From)
 				if err != nil {
 					return nil, err
+				}
+				if a == nil {
+					return nil, fmt.Errorf("account %s not found", args.From)
 				}
 				nonce = a.Nonce + 1
 			}
