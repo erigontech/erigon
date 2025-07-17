@@ -348,7 +348,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 }
 
 func getPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
-	snapProgress := min(blockReader.FrozenBorBlocks(), blockReader.FrozenBlocks())
+	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
 	if blockReader.BorSnapshots() == nil {
 		snapProgress = blockReader.FrozenBlocks()
 	}

@@ -111,8 +111,10 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	return td
 }
 
-func (cr ChainReader) FrozenBlocks() uint64    { return cr.BlockReader.FrozenBlocks() }
-func (cr ChainReader) FrozenBorBlocks() uint64 { return cr.BlockReader.FrozenBorBlocks() }
+func (cr ChainReader) FrozenBlocks() uint64 { return cr.BlockReader.FrozenBlocks() }
+func (cr ChainReader) FrozenBorBlocks(align bool) uint64 {
+	return cr.BlockReader.FrozenBorBlocks(align)
+}
 
 func (cr ChainReader) BorStartEventId(_ libcommon.Hash, _ uint64) uint64 {
 	panic("bor events by block not implemented")
