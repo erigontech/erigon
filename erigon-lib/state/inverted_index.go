@@ -1400,8 +1400,7 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 		}
 	}
 
-	if !asc {
-		// Reverse the iterators array for descending order
+	if !asc { // Reverse the iterators array for descending order
 		for i, j := 0, len(iterators)-1; i < j; i, j = i+1, j-1 {
 			iterators[i], iterators[j] = iterators[j], iterators[i]
 		}
@@ -1421,12 +1420,10 @@ func (iit *InvertedIndexRoTx) recentIterateRangeForStep(key []byte, step uint64,
 }
 
 // isStepInVisibleFiles checks if a step is already covered by visible files
-// Optimized: files are sorted, so check from the last file first
 func (iit *InvertedIndexRoTx) isStepInVisibleFiles(step uint64) bool {
 	if len(iit.files) == 0 {
 		return false
 	}
-
 	return step < iit.firstStepNotInFiles()
 }
 
