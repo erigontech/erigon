@@ -176,7 +176,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	if task.IsBlockEnd() || txIndex < 0 {
 		//if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
 		vm.SetTrace(true)
-		fmt.Println(tracePrefix+" end", ibs.VersionedWrites(true))
+		fmt.Println(tracePrefix+" end", ibs.VersionedWrites(false))
 		//}
 
 		// we need to flush the finalized writes to the version map so
