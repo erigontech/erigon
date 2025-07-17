@@ -173,7 +173,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	if task.IsBlockEnd() || txIndex < 0 {
 		//if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
-		fmt.Sprintf("%x,%x\n", result.Coinbase, result.ExecutionResult.BurntContractAddress)
+		fmt.Sprintf("%s %x,%x\n", tracePrefix, result.Coinbase, result.ExecutionResult.BurntContractAddress)
 		vm.SetTrace(true)
 		fmt.Println(tracePrefix+" end", ibs.VersionedWrites(false))
 		//}
