@@ -1417,8 +1417,6 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 		return []stream.U64{}, nil
 	}
 
-	lastVisibleStepInFiles := iit.files.EndTxNum() / iit.aggStep
-
 	var fromStep, toStep uint64
 	if startTxNum >= 0 {
 		fromStep = uint64(startTxNum) / iit.aggStep
@@ -1436,23 +1434,17 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 		fromStep, toStep = toStep, fromStep
 	}
 
-	// Only iterate through steps that are not in visible files
-	if fromStep < lastVisibleStepInFiles {
-		fromStep = lastVisibleStepInFiles
-	}
+	fromStep = min(fromStep, iit.firstStepNotInFiles())
 
 	var iterators []stream.U64
 
-	// Create iterators for each step
 	for step := fromStep; step <= toStep; step++ {
-		if !iit.isStepInVisibleFiles(step) {
-			stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
-			if err != nil {
-				return nil, err
-			}
-			if stepIt != nil {
-				iterators = append(iterators, stepIt)
-			}
+		stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
+		if err != nil {
+			return nil, err
+		}
+		if stepIt != nil {
+			iterators = append(iterators, stepIt)
 		}
 	}
 
@@ -1483,8 +1475,10 @@ func (iit *InvertedIndexRoTx) isStepInVisibleFiles(step uint64) bool {
 		return false
 	}
 
-	return step < (iit.files.EndTxNum() / iit.aggStep)
+	return step < iit.firstStepNotInFiles()
 }
+
+func (iit *InvertedIndexRoTx) firstStepNotInFiles() uint64 { return iit.files.EndTxNum() / iit.aggStep }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	fst, _ := kv.FirstKey(tx, iit.ii.keysTable)
