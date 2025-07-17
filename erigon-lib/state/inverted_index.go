@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -928,7 +929,7 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	is.PruneCountValues += other.PruneCountValues
 }
 
-func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
+func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, minTxNum, maxTxNum uint64) error) error {
 	_, err := iit.prune(ctx, rwTx, txFrom, txTo, limit, logEvery, fn)
 	if err != nil {
 		return err
@@ -938,7 +939,7 @@ func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, 
 
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, minTxNum, maxTxNum uint64) error) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
 		if iit.files.EndTxNum() > 0 {
 			txTo = min(txTo, iit.files.EndTxNum())
@@ -950,7 +951,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txT
 	return iit.prune(ctx, tx, txFrom, txTo, limit, logEvery, fn)
 }
 
-func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, minTxNum, maxTxNum uint64) error) (stat *InvertedIndexPruneStat, err error) {
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 
 	mxPruneInProgress.Inc()
@@ -960,6 +961,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64
 	}
+	originalLimit := limit
 
 	ii := iit.ii
 	//defer func() {
@@ -971,18 +973,13 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//		"tx until limit", limit)
 	//}()
 
-	keysCursor, err := rwTx.CursorDupSort(ii.keysTable)
+	keysCursor, err := rwTx.RwCursorDupSort(ii.keysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursor.Close()
-	idxDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
-	if err != nil {
-		return nil, err
-	}
-	defer idxDelCursor.Close()
 
-	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".prune.ii", ii.dirs.Tmp, etl.SmallSortableBuffers, ii.logger)
+	collector := etl.NewCollector(ii.filenameBase+".prune.ii", ii.dirs.Tmp, etl.NewOldestEntryBuffer(16*datasize.MB), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlTrace)
 	collector.SortAndFlushInBackground(true)
@@ -994,28 +991,34 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.NextNoDup() {
 		if err != nil {
-			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
+			return stat, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 		}
 
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo || limit == 0 {
 			break
 		}
+		limit--
+
 		if asserts && txNum < txFrom {
 			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
 		}
 
-		limit--
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
+		stat.PruneCountTx++
 
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 			}
-			if err := collector.Collect(v, k); err != nil {
+			if err := collector.Collect(v, nil); err != nil {
 				return nil, err
 			}
+		}
+
+		if err = rwTx.Delete(ii.keysTable, k); err != nil {
+			return nil, err
 		}
 
 		if ctx.Err() != nil {
@@ -1023,55 +1026,85 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	limit = originalLimit
+	valsTblDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
+	if err != nil {
+		return nil, err
+	}
+	defer valsTblDelCursor.Close()
+
+	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
+	err = collector.Load(nil, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if fn != nil {
-			if err = fn(key, txnm); err != nil {
+			if err = fn(key, stat.MinTxNum, stat.MaxTxNum); err != nil {
 				return fmt.Errorf("fn error: %w", err)
 			}
 		}
 
-		// Create step-prefixed key for deletion from valuesTable
-		txNum := binary.BigEndian.Uint64(txnm)
-		step := txNum / ii.aggregationStep
-		invertedStep := ^step
-		stepKey := make([]byte, 8+len(key))
-		binary.BigEndian.PutUint64(stepKey[:8], invertedStep)
-		copy(stepKey[8:], key)
-
-		if err = idxDelCursor.DeleteExact(stepKey, txnm); err != nil {
-			return err
+		stepKey := iit.makeStepPrefixedKey(key, stat.MinTxNum)
+		for v, err := valsTblDelCursor.SeekBothRange(stepKey, txKey[:]); v != nil; _, v, err = valsTblDelCursor.NextDup() {
+			if err != nil {
+				return fmt.Errorf("iterate over %s values cursor: %w", ii.filenameBase, err)
+			}
+			txNum := binary.BigEndian.Uint64(v)
+			if txNum > stat.MaxTxNum {
+				break
+			}
+			if err := valsTblDelCursor.DeleteCurrent(); err != nil {
+				return err
+			}
+			stat.PruneCountValues++
 		}
-		mxPruneSizeIndex.Inc()
-		stat.PruneCountValues++
 
 		select {
 		case <-logEvery.C:
 			ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
-				"pruned values", stat.PruneCountValues,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
+				"pruned values", stat.PruneCountValues)
 		default:
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
 
-	if stat.MinTxNum != math.MaxUint64 {
-		binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
-		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
-		for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
-			if err != nil {
-				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
-			}
-			if binary.BigEndian.Uint64(txnb) > stat.MaxTxNum {
-				break
-			}
-			stat.PruneCountTx++
-			if err = rwTx.Delete(ii.keysTable, txnb); err != nil {
-				return nil, err
-			}
-		}
-	}
+	//// tbl format: `[^step][addr] -> txNum`
+	//for k, _, err := valuesCursor.Last(); k != nil; k, _, err = valuesCursor.PrevNoDup() {
+	//	if err != nil {
+	//		return stat, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
+	//	}
+	//	step := ^binary.BigEndian.Uint64(k)
+	//	if step < txFrom/ii.aggregationStep {
+	//		break
+	//	}
+	//
+	//	if limit == 0 {
+	//		break
+	//	}
+	//	limit--
+	//	stat.PruneCountValues++
+	//
+	//	if err = valuesCursor.DeleteCurrentDuplicates(); err != nil {
+	//		return nil, err
+	//	}
+	//
+	//	select {
+	//	case <-logEvery.C:
+	//		ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
+	//			"pruned values", stat.PruneCountValues)
+	//	default:
+	//	}
+	//}
+	//
+	//err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	//	if fn != nil {
+	//		if err = fn(key, txnm); err != nil {
+	//			return fmt.Errorf("fn error: %w", err)
+	//		}
+	//	}
+	//	return nil
+	//}, etl.TransformArgs{Quit: ctx.Done()})
 
-	return stat, err
+	mxPruneSizeIndex.Add(float64(stat.PruneCountValues))
+
+	return stat, nil
 }
 
 func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator1 {
@@ -1397,6 +1430,10 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 
 	if asc {
 		for step := fromStep; step <= toStep; step++ {
+			// Skip steps that are already in visible files
+			if iit.isStepInVisibleFiles(step) {
+				continue
+			}
 			stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
 			if err != nil {
 				return nil, err
@@ -1414,6 +1451,14 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 			minStep = toStep
 		}
 		for step := maxStep; step >= minStep; step-- {
+			// Skip steps that are already in visible files
+			if iit.isStepInVisibleFiles(step) {
+				// Prevent underflow when step is 0
+				if step == 0 {
+					break
+				}
+				continue
+			}
 			stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
 			if err != nil {
 				return nil, err
@@ -1439,6 +1484,15 @@ func (iit *InvertedIndexRoTx) recentIterateRangeForStep(key []byte, step uint64,
 	copy(stepKey[8:], key)
 
 	return iit.recentIterateRange(stepKey, startTxNum, endTxNum, asc, limit, roTx)
+}
+
+// isStepInVisibleFiles checks if a step is already covered by visible files
+// Optimized: files are sorted, so check from the last file first
+func (iit *InvertedIndexRoTx) isStepInVisibleFiles(step uint64) bool {
+	if len(iit.files) == 0 {
+		return false
+	}
+	return step < (iit.files.EndTxNum() / iit.aggStep)
 }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
