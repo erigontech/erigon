@@ -166,15 +166,26 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		return nil, nil
 	}
 
+	blockNum := txTask.BlockNumber()
+
+	var tracePrefix string
+	if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
+		tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
+	}
+
 	if task.IsBlockEnd() || txIndex < 0 {
-		if txIndex < 0 {
-			fmt.Println("finalize", task.Version())
+		if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
+			vm.SetTrace(true)
+			fmt.Println(tracePrefix, ibs.VersionedWrites(true))
 		}
+
+		// we need to flush the finalized writes to the version map so
+		// they are taken into account by subsequent transactions
+		vm.FlushVersionedWrites(ibs.VersionedWrites(true), true, tracePrefix)
+		vm.SetTrace(false)
 		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
 		return nil, nil
 	}
-
-	blockNum := txTask.BlockNumber()
 
 	if task.shouldDelayFeeCalc {
 		if txTask.Config.IsLondon(blockNum) {
@@ -217,9 +228,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		}
 	}
 
-	var tracePrefix string
 	if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
-		tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
 		vm.SetTrace(true)
 		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
 	}

@@ -181,19 +181,21 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	var avgTaskGasPerSec int64
 	var avgTaskDur time.Duration
 	var avgReadDur time.Duration
+	var avgAccountReadDur time.Duration
+	var avgStorageReadDur time.Duration
+	var avgCodeReadDur time.Duration
 
 	if curActivations > 0 {
 		avgTaskDur = curTaskDur / time.Duration(curActivations)
 		avgReadDur = curTaskReadDur / time.Duration(curActivations)
+		avgAccountReadDur = curAccountReadDur / time.Duration(curActivations)
+		avgStorageReadDur = curStorageReadDur / time.Duration(curActivations)
+		avgCodeReadDur = curCodeReadDur / time.Duration(curActivations)
 
 		mxExecReadDuration.SetUint64(uint64(avgReadDur))
-		mxExecAccountReadDuration.SetUint64(uint64(curAccountReadDur / time.Duration(curActivations)))
-		mxExecStoreageReadDuration.SetUint64(uint64(curStorageReadDur / time.Duration(curActivations)))
-		mxExecCodeReadDuration.SetUint64(uint64(curCodeReadDur / time.Duration(curActivations)))
-
-		fmt.Println("acc", (curAccountReadDur / time.Duration(curActivations)).Microseconds(),
-			"st", (curStorageReadDur / time.Duration(curActivations)).Microseconds(),
-			"cd", (curCodeReadDur / time.Duration(curActivations)).Microseconds())
+		mxExecAccountReadDuration.SetUint64(uint64(avgAccountReadDur))
+		mxExecStoreageReadDuration.SetUint64(uint64(avgStorageReadDur))
+		mxExecCodeReadDuration.SetUint64(uint64(avgCodeReadDur))
 
 		if avgTaskDur > 0 {
 			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
@@ -260,9 +262,9 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
-			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
+			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
-			"tsrdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"tsrdur", fmt.Sprintf("%d(a=%d,s=%d,c=%d)µs(%.2f%%)", avgReadDur.Microseconds(), avgAccountReadDur.Microseconds(),avgStorageReadDur.Microseconds(),avgCodeReadDur.Microseconds(), readRatio),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
 			"rd", common.PrettyCounter(curReadCount),
 			"wrt", common.PrettyCounter(curReadCount),
