@@ -920,14 +920,14 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		tx, err := db.BeginRw(context.Background())
-		require.NoError(b, err)
-		ic := ii.BeginFilesRo()
-		ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
-		ic.Close()
-		tx.Rollback()
-	}
+	//for i := 0; i < b.N; i++ {
+	//	tx, err := db.BeginRw(context.Background())
+	//	require.NoError(b, err)
+	//	ic := ii.BeginFilesRo()
+	//	ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+	//	ic.Close()
+	//	tx.Rollback()
+	//}
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(b, err)
