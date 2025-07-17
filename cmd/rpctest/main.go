@@ -61,6 +61,7 @@ func main() {
 		errorFile        string
 		visitAllPages    bool
 		additionalParams string
+		failFast         bool
 	)
 	withErigonUrl := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")
@@ -89,6 +90,9 @@ func main() {
 	}
 	withAdditionalParams := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&additionalParams, "additionalParams", "", "Additional params for the request")
+	}
+	withFailFast := func(cmd *cobra.Command) {
+		cmd.Flags().BoolVar(&failFast, "failFast", false, "Fail fast")
 	}
 	with := func(cmd *cobra.Command, opts ...func(*cobra.Command)) {
 		for i := range opts {
@@ -281,13 +285,13 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.EthGetLogsInvariants(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo)
+			err := rpctest.EthGetLogsInvariants(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, latest, failFast)
 			if err != nil {
 				logger.Error(err.Error())
 			}
 		},
 	}
-	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest, withFailFast)
 
 	var benchOverlayGetLogsCmd = &cobra.Command{
 		Use:   "benchOverlayGetLogs",

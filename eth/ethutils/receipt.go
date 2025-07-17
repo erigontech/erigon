@@ -79,7 +79,7 @@ func MarshalReceipt(
 	// Assign receipt status.
 	fields["status"] = hexutil.Uint64(receipt.Status)
 	if receipt.Logs == nil {
-		fields["logs"] = [][]*types.Log{}
+		fields["logs"] = []*types.Log{}
 	}
 
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
