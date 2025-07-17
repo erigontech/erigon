@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 	"github.com/spf13/afero"
+	"golang.org/x/sync/semaphore"
 )
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
@@ -41,7 +42,7 @@ type PeerDas interface {
 
 const (
 	numOfBlobRecoveryWorkers   = 8
-	maxNumberOfCellsPerRequest = 256 // 512*2KB = 1MB
+	maxNumberOfCellsPerRequest = 128 // 512*2KB = 1MB
 )
 
 type peerdas struct {
@@ -437,12 +438,17 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	}
 
 	// split the request into multiple requests to avoid overwhelming the peer
+	semaphore := semaphore.NewWeighted(12)
 	wg := sync.WaitGroup{}
 	requests := req.splitRequest(maxNumberOfCellsPerRequest)
 	for _, req := range requests {
+		semaphore.Acquire(ctx, 1)
 		wg.Add(1)
 		go func(req *downloadRequest) {
-			defer wg.Done()
+			defer func() {
+				semaphore.Release(1)
+				wg.Done()
+			}()
 			if err := d.runDownload(ctx, req, true); err != nil {
 				log.Warn("failed to download columns", "err", err)
 			}
