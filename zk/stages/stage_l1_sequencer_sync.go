@@ -112,14 +112,23 @@ Loop:
 					if funcErr = HandleInitialSequenceBatches(cfg.syncer, hermezDb, l, header); funcErr != nil {
 						return funcErr
 					}
-				case contracts.AddNewRollupTypeTopic:
-					fallthrough
-				case contracts.AddNewRollupTypeTopicBanana:
+				case contracts.AddNewRollupTypeTopic, contracts.AddNewRollupTypeTopicBanana:
 					rollupType := l.Topics[1].Big().Uint64()
 					forkIdBytes := l.Data[64:96] // 3rd positioned item in the log data
 					forkId := new(big.Int).SetBytes(forkIdBytes).Uint64()
-					if funcErr = hermezDb.WriteRollupType(rollupType, forkId); funcErr != nil {
-						return funcErr
+
+					// now that we support fep -> pp migrations we only want to accept and handle fork changes that are related to
+					// StateTransition type rollup ids anything else we can write as a PP rollup type and ignore fork changes for these events
+					verifierType := l.Data[96:128] // 4th positioned item in the log data
+					verifierBig := new(big.Int).SetBytes(verifierType)
+					if verifierBig.Uint64() == 0 {
+						if funcErr = hermezDb.WriteRollupType(rollupType, forkId); funcErr != nil {
+							return funcErr
+						}
+					} else {
+						if err := hermezDb.WritePPRollupType(rollupType); err != nil {
+							return err
+						}
 					}
 				case contracts.CreateNewRollupTopic:
 					rollupId := l.Topics[1].Big().Uint64()
@@ -152,6 +161,15 @@ Loop:
 						return funcErr
 					}
 					if fork == 0 {
+						// this might be a PP rollup type that we need to effecitvely ignore as it won't affect the fork history
+						isPP, err := hermezDb.IsPPRollupType(newRollup)
+						if err != nil {
+							return err
+						}
+						if isPP {
+							log.Info("received UpdateRollupTopic for PP rollup type, ignoring", "rollupType", newRollup)
+							continue
+						}
 						funcErr = fmt.Errorf("received UpdateRollupTopic for unknown rollup type: %v", newRollup)
 						return funcErr
 					}

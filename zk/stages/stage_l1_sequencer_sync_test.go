@@ -94,7 +94,7 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 	const (
 		forkIdBytesStartPosition = 64
 		forkIdBytesEndPosition   = 96
-		rollupDataSize           = 100
+		rollupDataSize           = 128
 
 		injectedBatchLogTransactionStartByte = 128
 		injectedBatchLastGerStartByte        = 32

@@ -557,6 +557,8 @@ const (
 
 	// Hermez SMT v2
 	TableSmtIntermediateHashes = "HermezSmtIntermediateHashes"
+
+	PP_ROLLUP_TYPES = "pp_rollup_types" // rollup type id -> true
 )
 
 // Keys
@@ -802,6 +804,7 @@ var ChaindataTables = []string{
 	WITNESS_CACHE,
 	BAD_TX_HASHES,
 	CONFIRMED_L1_INFO_TREE_UPDATE,
+	PP_ROLLUP_TYPES,
 }
 
 const (
