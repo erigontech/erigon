@@ -172,8 +172,11 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	//}
 
 	if task.IsBlockEnd() || txIndex < 0 {
+
 		//if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
-		fmt.Printf("%s %x,%x\n", tracePrefix, result.Coinbase, result.ExecutionResult.BurntContractAddress)
+		for _, vw := range result.TxOut {
+			fmt.Println(tracePrefix, "WRT", vw.String())
+		}
 		vm.SetTrace(true)
 		fmt.Println(tracePrefix+" end", ibs.VersionedWrites(false))
 		//}
