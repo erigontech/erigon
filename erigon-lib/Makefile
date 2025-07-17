@@ -1,17 +1,15 @@
 GOBINREL = build/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
 
-BUILD_TAGS = nosqlite,noboltdb,disable_libutp
-
 CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
 ifeq ($(CGO_CXXFLAGS),)
 	CGO_CXXFLAGS += -g
 	CGO_CXXFLAGS += -O2
 endif
 
-GOBUILD = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go build -trimpath -tags $(BUILD_TAGS)
-GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath -tags $(BUILD_TAGS)
-GOTEST_NOFUZZ = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath --tags=$(BUILD_TAGS),nofuzz
+GOBUILD = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go build -trimpath
+GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath
+GOTEST_NOFUZZ = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath --tags=nofuzz
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -60,6 +58,7 @@ protoc-clean:
 	rm -f "$(GOBIN)/protoc"*
 	rm -rf "$(PROTOC_INCLUDE)"
 
+	# Use go mod replaces until this is made Go workspace aware. Pass GOWORK in the env to disable for this. Don't do it by default so behaviour is not unexpected.
 grpc: protoc-clean protoc-all
 	go mod vendor
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \

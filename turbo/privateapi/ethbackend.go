@@ -38,8 +38,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
@@ -300,10 +300,16 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	if err != nil {
 		return nil, err
 	}
+
+	if block == nil {
+		return &remote.BlockReply{}, nil
+	}
+
 	blockRlp, err := rlp.EncodeToBytes(block)
 	if err != nil {
 		return nil, err
 	}
+
 	sendersBytes := make([]byte, 20*len(senders))
 	for i, sender := range senders {
 		copy(sendersBytes[i*20:], sender[:])

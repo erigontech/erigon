@@ -17,10 +17,12 @@
 package heimdall
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
 )
@@ -145,7 +147,52 @@ type CheckpointResponseV1 struct {
 }
 
 type CheckpointResponseV2 struct {
-	Checkpoint Checkpoint `json:"checkpoint"`
+	Checkpoint struct {
+		Proposer   common.Address `json:"proposer"`
+		StartBlock string         `json:"start_block"`
+		EndBlock   string         `json:"end_block"`
+		RootHash   string         `json:"root_hash"`
+		ChainID    string         `json:"bor_chain_id"`
+		Timestamp  string         `json:"timestamp"`
+	} `json:"checkpoint"`
+}
+
+func (v *CheckpointResponseV2) ToCheckpoint(id int64) (*Checkpoint, error) {
+	r := Checkpoint{
+		Id: CheckpointId(id),
+		Fields: WaypointFields{
+			Proposer: v.Checkpoint.Proposer,
+			ChainID:  v.Checkpoint.ChainID,
+		},
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(v.Checkpoint.RootHash)
+	if err != nil {
+		return nil, err
+	}
+
+	startBlock, err := strconv.Atoi(v.Checkpoint.StartBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	endBlock, err := strconv.Atoi(v.Checkpoint.EndBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Fields.RootHash = common.BytesToHash(decoded)
+	r.Fields.StartBlock = big.NewInt(int64(startBlock))
+	r.Fields.EndBlock = big.NewInt(int64(endBlock))
+
+	timestamp, err := strconv.Atoi(v.Checkpoint.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Fields.Timestamp = uint64(timestamp)
+
+	return &r, nil
 }
 
 type CheckpointCount struct {
@@ -161,9 +208,71 @@ type CheckpointCountResponseV2 struct {
 	AckCount string `json:"ack_count"`
 }
 
-type CheckpointListResponse struct {
+type CheckpointListResponseV1 struct {
 	Height string      `json:"height"`
 	Result checkpoints `json:"result"`
+}
+
+type CheckpointListResponseV2 struct {
+	CheckpointList []struct {
+		ID         string         `json:"id"`
+		Proposer   common.Address `json:"proposer"`
+		StartBlock string         `json:"start_block"`
+		EndBlock   string         `json:"end_block"`
+		RootHash   string         `json:"root_hash"`
+		ChainID    string         `json:"bor_chain_id"`
+		Timestamp  string         `json:"timestamp"`
+	} `json:"checkpoint_list"`
+}
+
+func (v *CheckpointListResponseV2) ToList() ([]*Checkpoint, error) {
+	checkpoints := make([]*Checkpoint, 0, len(v.CheckpointList))
+
+	for i := range v.CheckpointList {
+		r := Checkpoint{
+			Fields: WaypointFields{
+				Proposer: v.CheckpointList[i].Proposer,
+				ChainID:  v.CheckpointList[i].ChainID,
+			},
+		}
+
+		id, err := strconv.Atoi(v.CheckpointList[i].ID)
+		if err != nil {
+			return nil, err
+		}
+
+		decoded, err := base64.StdEncoding.DecodeString(v.CheckpointList[i].RootHash)
+		if err != nil {
+			return nil, err
+		}
+
+		startBlock, err := strconv.Atoi(v.CheckpointList[i].StartBlock)
+		if err != nil {
+			return nil, err
+		}
+
+		endBlock, err := strconv.Atoi(v.CheckpointList[i].EndBlock)
+		if err != nil {
+			return nil, err
+		}
+
+		r.Id = CheckpointId(id)
+		r.Fields.RootHash = common.BytesToHash(decoded)
+		r.Fields.RootHash = common.BytesToHash(decoded)
+		r.Fields.StartBlock = big.NewInt(int64(startBlock))
+		r.Fields.EndBlock = big.NewInt(int64(endBlock))
+
+		timestamp, err := strconv.Atoi(v.CheckpointList[i].Timestamp)
+		if err != nil {
+			return nil, err
+		}
+
+		r.Fields.Timestamp = uint64(timestamp)
+
+		checkpoints = append(checkpoints, &r)
+	}
+
+	return checkpoints, nil
 }
 
 var ErrCheckpointNotFound = errors.New("checkpoint not found")

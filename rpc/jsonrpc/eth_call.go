@@ -45,9 +45,9 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -57,13 +57,19 @@ import (
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
+	var blockNrOrHash rpc.BlockNumberOrHash
+	if requestedBlock != nil {
+		blockNrOrHash = *requestedBlock
+	} else {
+		blockNrOrHash = latestNumOrHash
+	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -761,6 +767,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 				a, err := stateReader.ReadAccountData(*args.From)
 				if err != nil {
 					return nil, err
+				}
+				if a == nil {
+					return nil, errors.New("Account: " + args.From.Hex() + " not found")
 				}
 				nonce = a.Nonce + 1
 			}

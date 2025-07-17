@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,7 +21,7 @@ func TestOpenFolder(t *testing.T) {
 	// open folder
 	// check dirtyFile presence
 
-	dirs, db, log := setup(t)
+	dirs, db, log := setupDb(t)
 	headerId, header := setupHeader(t, db, log, dirs)
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 
@@ -138,7 +137,7 @@ func TestOpenFolder(t *testing.T) {
 func TestRecalcVisibleFilesAligned(t *testing.T) {
 	// different configurations of forkables - aligned and not aligned
 
-	dirs, db, log := setup(t)
+	dirs, db, log := setupDb(t)
 	headerId, header := setupHeader(t, db, log, dirs)
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 
@@ -195,7 +194,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 }
 
 func TestRecalcVisibleFilesUnaligned(t *testing.T) {
-	dirs, db, log := setup(t)
+	dirs, db, log := setupDb(t)
 	headerId, header := setupHeader(t, db, log, dirs)
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 	bodies.unaligned = true
@@ -278,7 +277,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	// dirty files/visible files should be closed
-	dirs, db, log := setup(t)
+	dirs, db, log := setupDb(t)
 	headerId, header := setupHeader(t, db, log, dirs)
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 	bodies.unaligned = true
@@ -339,7 +338,7 @@ func TestMergedFileGet(t *testing.T) {
 	// merged file -- addWord (compressed)
 	// this reflects in the GetFiles() as well...ensure that is the case, and correct logic is applied
 	// we go with this simple logic..this is not something user should bother with.
-	dirs, db, log := setup(t)
+	dirs, db, log := setupDb(t)
 	headerId, header := setupHeader(t, db, log, dirs)
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 
@@ -408,7 +407,7 @@ func TestMergedFileGet(t *testing.T) {
 			}
 		}
 
-		snapCfg := ee.Registry.SnapshotConfig(headerId)
+		snapCfg := Registry.SnapshotConfig(headerId)
 		var nDirtyFiles, nVisibleFiles int
 		if mergeDisabled {
 			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
@@ -442,7 +441,7 @@ func TestMergedFileGet(t *testing.T) {
 	checkBuildFilesFn(false)
 }
 
-func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
+func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
@@ -495,21 +494,21 @@ func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	return bodyId, ma
 }
 
-func registerEntity(dirs datadir.Dirs, name string) ee.ForkableId {
+func registerEntity(dirs datadir.Dirs, name string) ForkableId {
 	stepSize := uint64(10)
-	return registerEntityWithSnapshotConfig(dirs, name, ee.NewSnapshotConfig(&ee.SnapshotCreationConfig{
+	return registerEntityWithSnapshotConfig(dirs, name, NewSnapshotConfig(&SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{80, 160},
 		MinimumSize:    10,
 		SafetyMargin:   5,
-	}, ee.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
+	}, NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
 }
 
-func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ee.SnapshotConfig) ee.ForkableId {
-	return ee.RegisterForkable(name, dirs, nil, ee.WithSnapshotConfig(cfg))
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *SnapshotConfig) ForkableId {
+	return RegisterForkable(name, dirs, nil, WithSnapshotConfig(cfg))
 }
 
-func calculateNumberOfFiles(amount uint64, snapConfig *ee.SnapshotConfig) (nfiles uint64) {
+func calculateNumberOfFiles(amount uint64, snapConfig *SnapshotConfig) (nfiles uint64) {
 	amount -= snapConfig.SafetyMargin
 	for i := len(snapConfig.MergeStages) - 1; i >= 0; i-- {
 		mergeStageSize := snapConfig.MergeStages[i]

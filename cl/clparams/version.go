@@ -44,6 +44,8 @@ func (v StateVersion) String() string {
 		return "deneb"
 	case ElectraVersion:
 		return "electra"
+	case FuluVersion:
+		return "fulu"
 	default:
 		panic("unsupported fork version")
 	}
@@ -84,6 +86,8 @@ func StringToClVersion(s string) (StateVersion, error) {
 		return DenebVersion, nil
 	case "electra":
 		return ElectraVersion, nil
+	case "fulu":
+		return FuluVersion, nil
 	default:
 		return 0, fmt.Errorf("unsupported fork version %s", s)
 	}

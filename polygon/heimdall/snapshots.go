@@ -170,6 +170,8 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 }
 
 func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+	defer eventSegment.Src().MadvNormal().DisableReadAhead()
+
 	g := eventSegment.Src().MakeGetter()
 
 	word := make([]byte, 0, 4096)
@@ -238,16 +240,10 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 		prevEventId = eventId
 		prevBlock = block
 
-		var logChan <-chan time.Time
-
-		if logEvery != nil {
-			logChan = logEvery.C
-		}
-
 		select {
 		case <-ctx.Done():
 			return prevEventId, ctx.Err()
-		case <-logChan:
+		case <-logEvery.C:
 			log.Info("[integrity] NoGapsInBorEvents", "blockNum", fmt.Sprintf("%dK/%dK", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum])/1000, maxBlockNum/1000))
 		default:
 		}

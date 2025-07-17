@@ -45,9 +45,9 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/testutil"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // A BlockTest checks handling of entire blocks.
