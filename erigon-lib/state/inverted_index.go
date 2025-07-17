@@ -1032,7 +1032,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	limit = originalLimit
 	valsTblDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
 	if err != nil {
 		return nil, err
@@ -1389,7 +1388,6 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 	fromStep = min(fromStep, iit.firstStepNotInFiles())
 
 	var iterators []stream.U64
-
 	for step := fromStep; step <= toStep; step++ {
 		stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
 		if err != nil {
@@ -1411,14 +1409,6 @@ func (iit *InvertedIndexRoTx) recentIterateRangeForStep(key []byte, step uint64,
 	copy(stepKey[8:], key)
 
 	return iit.recentIterateRange(stepKey, startTxNum, endTxNum, asc, limit, roTx)
-}
-
-// isStepInVisibleFiles checks if a step is already covered by visible files
-func (iit *InvertedIndexRoTx) isStepInVisibleFiles(step uint64) bool {
-	if len(iit.files) == 0 {
-		return false
-	}
-	return step < iit.firstStepNotInFiles()
 }
 
 func (iit *InvertedIndexRoTx) firstStepNotInFiles() uint64 { return iit.files.EndTxNum() / iit.aggStep }

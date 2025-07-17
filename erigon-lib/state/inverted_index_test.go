@@ -213,7 +213,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		require.Greater(t, remainingCount, 0, "valuesTable should not be empty after pruning")
 
 		// Check last entry details
-		key, txn, err := icc.Last()
+		key, _, err := icc.Last()
 		require.NoError(t, err)
 		icc.Close()
 		step := ^binary.BigEndian.Uint64(key)
