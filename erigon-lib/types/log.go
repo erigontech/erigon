@@ -286,7 +286,7 @@ func decodeTopics2(s *rlp.Stream) (list []common.Hash, err error) {
 		return nil, err
 	}
 	if l == 0 {
-		return nil, s.ListEnd()
+		return []common.Hash{}, s.ListEnd()
 	}
 	listLen := int(l / (1 + 32))  // rlpLenPrefix+32bytes
 	preAlloc := min(128, listLen) // attacker may craft rlp prefix - which will trigger hube pre-alloc. so, add hard-limit
