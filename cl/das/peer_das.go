@@ -84,9 +84,19 @@ func NewPeerDas(
 		ethClock:      ethClock,
 		queue:         NewFileBasedQueue(afero.NewBasePathFs(afero.NewOsFs(), blobRecoveryRequestDir)),
 	}
-	p.resubscribeGossip()
-	for range numOfBlobRecoveryWorkers {
-		go p.blobsRecoverWorker(ctx)
+	if beaconConfig.FuluForkEpoch != math.MaxUint64 {
+		go func() {
+			fuluSlot := beaconConfig.FuluForkEpoch * beaconConfig.SlotsPerEpoch
+			fuluClockTime := ethClock.GetSlotTime(fuluSlot)
+			if fuluClockTime.Before(time.Now()) {
+				// wait until the fulu clock time
+				<-time.After(time.Until(fuluClockTime))
+			}
+			p.resubscribeGossip()
+			for range numOfBlobRecoveryWorkers {
+				go p.blobsRecoverWorker(ctx)
+			}
+		}()
 	}
 	return p
 }
@@ -143,6 +153,10 @@ func (d *peerdas) isMyColumnDataAvailable(blockRoot common.Hash) (bool, error) {
 }
 
 func (d *peerdas) resubscribeGossip() {
+	if d.ethClock.GetCurrentEpoch() < d.beaconConfig.FuluForkEpoch {
+		return
+	}
+
 	if d.IsArchivedMode() {
 		// subscribe to all subnets
 		for subnet := range d.beaconConfig.DataColumnSidecarSubnetCount {
