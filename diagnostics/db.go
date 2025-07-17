@@ -25,10 +25,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/paths"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon/erigon-lib/common/paths"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
 )
 
 func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {

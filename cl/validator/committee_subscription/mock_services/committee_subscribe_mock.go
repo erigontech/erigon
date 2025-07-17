@@ -13,9 +13,10 @@ import (
 	context "context"
 	reflect "reflect"
 
+	gomock "go.uber.org/mock/gomock"
+
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	solid "github.com/erigontech/erigon/cl/cltypes/solid"
-	gomock "go.uber.org/mock/gomock"
 )
 
 // MockCommitteeSubscribe is a mock of CommitteeSubscribe interface.

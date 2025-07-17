@@ -19,7 +19,7 @@ package kvcfg
 import (
 	"errors"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 type ConfigKey []byte

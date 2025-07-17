@@ -33,7 +33,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
 )
 
 // DirectoryString is custom type which is registered in the flags library which cli uses for

@@ -24,7 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 )
 
 func Benchmark_HexPatriciaHashed_Process(b *testing.B) {

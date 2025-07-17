@@ -24,8 +24,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/config3"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 var (

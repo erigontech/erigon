@@ -31,7 +31,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 

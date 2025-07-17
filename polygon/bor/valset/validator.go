@@ -18,14 +18,14 @@ package valset
 
 import (
 	"bytes"
-	// "encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"sort"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	// "encoding/json"
 )
 
 // Validator represets Volatile state for each Validator

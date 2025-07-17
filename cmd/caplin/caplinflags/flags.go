@@ -17,8 +17,9 @@
 package caplinflags
 
 import (
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
 var CliFlags = []cli.Flag{

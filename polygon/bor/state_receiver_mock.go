@@ -12,9 +12,10 @@ package bor
 import (
 	reflect "reflect"
 
-	rlp "github.com/erigontech/erigon-lib/rlp"
-	consensus "github.com/erigontech/erigon/execution/consensus"
 	gomock "go.uber.org/mock/gomock"
+
+	rlp "github.com/erigontech/erigon/erigon-lib/rlp"
+	consensus "github.com/erigontech/erigon/execution/consensus"
 )
 
 // MockStateReceiver is a mock of StateReceiver interface.

@@ -19,7 +19,7 @@ package snaptype_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/erigon-lib/snaptype"
 )
 
 func TestEnumeration(t *testing.T) {

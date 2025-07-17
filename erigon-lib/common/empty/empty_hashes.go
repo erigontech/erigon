@@ -20,7 +20,7 @@
 package empty
 
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // `empty` package doesn't have any dependencies by intention - to reduce future "circular deps problems"

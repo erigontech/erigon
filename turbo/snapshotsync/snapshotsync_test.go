@@ -20,8 +20,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon/erigon-lib/snaptype"
 )
 
 func TestBlackListForPruning(t *testing.T) {

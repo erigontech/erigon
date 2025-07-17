@@ -19,7 +19,7 @@ package state
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 // SaveExecV3PruneProgress saves latest pruned key in given table to the database.

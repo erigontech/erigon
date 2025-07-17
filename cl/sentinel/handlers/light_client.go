@@ -17,10 +17,11 @@
 package handlers
 
 import (
+	"github.com/libp2p/go-libp2p/core/network"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/libp2p/go-libp2p/core/network"
 )
 
 const maxLightClientsPerRequest = 100

@@ -21,7 +21,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/crate-crypto/go-eth-kzg"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 )
 

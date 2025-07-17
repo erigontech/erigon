@@ -65,8 +65,8 @@ grpc: protoc-clean protoc-all
 		--go_opt=Mtypes/types.proto=./typesproto \
 		types/types.proto
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces --go-grpc_out=gointerfaces -I=$(PROTOC_INCLUDE) \
-		--go_opt=Mtypes/types.proto=github.com/erigontech/erigon-lib/gointerfaces/typesproto \
-		--go-grpc_opt=Mtypes/types.proto=github.com/erigontech/erigon-lib/gointerfaces/typesproto \
+		--go_opt=Mtypes/types.proto=github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto \
+		--go-grpc_opt=Mtypes/types.proto=github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto \
 		--go_opt=Mp2psentry/sentry.proto=./sentryproto \
 		--go-grpc_opt=Mp2psentry/sentry.proto=./sentryproto \
 		--go_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
@@ -107,12 +107,3 @@ lint-mod-tidy:
 
 lint-deps: lintci-deps
 lint: lintci lint-mod-tidy
-
-test-short:
-	$(GOTEST_NOFUZZ) -short -coverprofile=coverage-test.out ./...
-
-test-all:
-	$(GOTEST) -coverprofile=coverage-test-all.out ./...
-
-test-all-race:
-	$(GOTEST) -coverprofile=coverage-test-all.out -race ./...

@@ -16,7 +16,7 @@
 
 package txpool
 
-import "github.com/erigontech/erigon-lib/metrics"
+import "github.com/erigontech/erigon/erigon-lib/metrics"
 
 var (
 	processBatchTxnsTimer   = metrics.NewSummary(`pool_process_remote_txs`)

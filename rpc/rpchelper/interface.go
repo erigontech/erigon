@@ -20,10 +20,10 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/common"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/p2p"
 )
 

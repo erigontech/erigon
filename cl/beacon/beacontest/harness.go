@@ -34,7 +34,6 @@ import (
 	"text/template"
 
 	"github.com/Masterminds/sprig/v3"
-
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/spf13/afero"

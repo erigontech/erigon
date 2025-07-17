@@ -19,8 +19,9 @@ package solid_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 func TestParticipationBitListStatic(t *testing.T) {

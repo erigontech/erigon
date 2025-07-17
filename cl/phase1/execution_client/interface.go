@@ -20,11 +20,11 @@ import (
 	"context"
 	"math/big"
 
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/cltypes"
+	common "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 

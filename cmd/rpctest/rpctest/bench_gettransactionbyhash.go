@@ -25,8 +25,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/estimate"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // BenchEthGetTransactionByHash compares response of Erigon with Geth

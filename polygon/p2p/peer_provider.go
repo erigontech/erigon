@@ -22,7 +22,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 )
 
 //go:generate mockgen -typed=true -source=./peer_provider.go -destination=./peer_provider_mock.go -package=p2p

@@ -23,7 +23,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/seg/sais"
+	"github.com/erigontech/erigon/erigon-lib/seg/sais"
 )
 
 // Implementation of paticia tree for efficient search of substrings from a dictionary in a given string

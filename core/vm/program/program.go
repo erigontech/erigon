@@ -26,8 +26,9 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/core/vm"
 )
 
 // Program is a simple bytecode container. It can be used to construct

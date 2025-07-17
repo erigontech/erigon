@@ -25,8 +25,8 @@ import (
 	"math/rand/v2"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 )
 
 var (

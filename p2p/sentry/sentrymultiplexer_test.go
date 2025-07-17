@@ -11,18 +11,17 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/erigontech/secp256k1"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/secp256k1"
-
-	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon/erigon-lib/direct"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 

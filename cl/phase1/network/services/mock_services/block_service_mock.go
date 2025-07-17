@@ -13,8 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	gomock "go.uber.org/mock/gomock"
+
+	cltypes "github.com/erigontech/erigon/cl/cltypes"
 )
 
 // MockBlockService is a mock of BlockService interface.

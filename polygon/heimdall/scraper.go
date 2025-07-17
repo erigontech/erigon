@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	commonerrors "github.com/erigontech/erigon-lib/common/errors"
-	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon-lib/event"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	commonerrors "github.com/erigontech/erigon/erigon-lib/common/errors"
+	"github.com/erigontech/erigon/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/erigon-lib/event"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 type Scraper[TEntity Entity] struct {

@@ -17,7 +17,7 @@
 package rawdb
 
 import (
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 func GetStateVersion(tx kv.Tx) (uint64, error) {

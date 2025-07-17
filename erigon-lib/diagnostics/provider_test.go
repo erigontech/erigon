@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 type testInfo struct {

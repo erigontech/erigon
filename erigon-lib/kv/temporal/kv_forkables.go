@@ -3,8 +3,8 @@ package temporal
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/state"
 )
 
 type Num = kv.Num

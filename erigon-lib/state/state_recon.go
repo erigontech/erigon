@@ -19,7 +19,7 @@ package state
 import (
 	"bytes"
 
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/seg"
 )
 
 // Algorithms for reconstituting the state from state history

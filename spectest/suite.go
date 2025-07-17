@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/transition/machine"
-
 	"gfx.cafe/util/go/generic"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/transition/machine"
 )
 
 func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs.FS) {

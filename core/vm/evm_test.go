@@ -23,9 +23,9 @@ import (
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestInterpreterReadonly(t *testing.T) {

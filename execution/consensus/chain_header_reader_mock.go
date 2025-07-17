@@ -13,10 +13,11 @@ import (
 	big "math/big"
 	reflect "reflect"
 
-	chain "github.com/erigontech/erigon-lib/chain"
-	common "github.com/erigontech/erigon-lib/common"
-	types "github.com/erigontech/erigon-lib/types"
 	gomock "go.uber.org/mock/gomock"
+
+	chain "github.com/erigontech/erigon/erigon-lib/chain"
+	common "github.com/erigontech/erigon/erigon-lib/common"
+	types "github.com/erigontech/erigon/erigon-lib/types"
 )
 
 // MockChainHeaderReader is a mock of ChainHeaderReader interface.

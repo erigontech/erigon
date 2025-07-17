@@ -19,7 +19,7 @@ package p2p
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 )
 
 func NewPeerPenalizer(sentryClient sentryproto.SentryClient) *PeerPenalizer {

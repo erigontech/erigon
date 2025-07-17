@@ -3,7 +3,7 @@ package multiencseq
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano32"
 )
 
 // Encode sequences up to this length using simple encoding.

@@ -24,13 +24,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigonwatch"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigonwatch"
 
 	"github.com/erigontech/erigon/cmd/diag/flags"
 )

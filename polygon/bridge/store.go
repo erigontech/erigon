@@ -20,8 +20,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 

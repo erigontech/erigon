@@ -10,7 +10,8 @@ import (
 
 	"github.com/FastFilter/xorfilter"
 	"github.com/edsrzf/mmap-go"
-	mm "github.com/erigontech/erigon-lib/mmap"
+
+	mm "github.com/erigontech/erigon/erigon-lib/mmap"
 )
 
 type Features uint32
