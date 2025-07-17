@@ -53,13 +53,12 @@ type TraceWorker struct {
 	evm          *vm.EVM
 
 	// calculated by .changeBlock()
-	blockHash common.Hash
-	blockNum  uint64
-	header    *types.Header
-	blockCtx  *evmtypes.BlockContext
-	rules     *chain.Rules
-	signer    *types.Signer
-	vmConfig  *vm.Config
+	blockNum uint64
+	header   *types.Header
+	blockCtx *evmtypes.BlockContext
+	rules    *chain.Rules
+	signer   *types.Signer
+	vmConfig *vm.Config
 }
 
 func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineReader, br services.HeaderReader, tracer GenericTracer) *TraceWorker {
@@ -92,7 +91,6 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockNum = header.Number.Uint64()
 	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.headerReader, e.evm.ChainConfig())
 	e.blockCtx = &blockCtx
-	e.blockHash = header.Hash()
 	e.header = header
 	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
 	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
