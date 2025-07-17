@@ -967,17 +967,8 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64
 	}
-	originalLimit := limit
 
 	ii := iit.ii
-	//defer func() {
-	//	ii.logger.Error("[snapshots] prune index",
-	//		"name", ii.filenameBase,
-	//		"forced", forced,
-	//		"pruned tx", fmt.Sprintf("%.2f-%.2f", float64(minTxnum)/float64(iit.aggStep), float64(maxTxnum)/float64(iit.aggStep)),
-	//		"pruned values", pruneCount,
-	//		"tx until limit", limit)
-	//}()
 
 	keysCursor, err := rwTx.RwCursorDupSort(ii.keysTable)
 	if err != nil {
