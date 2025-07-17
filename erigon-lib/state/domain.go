@@ -365,8 +365,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 					if !fileVer.Less(d.version.DataKV.MinSupported) {
 						d.version.DataKV.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm kv domain snapshots")
-						//return false
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.version.DataKV)
 					}
 				}
 
@@ -397,8 +397,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 						if !fileVer.Less(d.version.AccessorKVI.MinSupported) {
 							d.version.AccessorKVI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm kvi domain snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, d.version.AccessorKVI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
@@ -420,8 +420,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 						if !fileVer.Less(d.version.AccessorBT.MinSupported) {
 							d.version.AccessorBT.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm bt domain snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, d.version.AccessorBT)
 						}
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
@@ -443,8 +443,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 						if !fileVer.Less(d.version.AccessorKVEI.MinSupported) {
 							d.version.AccessorKVEI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm kvei domain snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, d.version.AccessorKVEI)
 						}
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
@@ -2124,3 +2124,7 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 
 func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
+
+func versionTooLowPanic(filename string, version version.Versions) {
+	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon seg reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
+}
