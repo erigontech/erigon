@@ -1794,9 +1794,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	}
 
 	return nil, 0, false, nil
-}
-
-// GetLatest returns value, step in which the value last changed, and bool value which is true if the value
+} // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
 	if dt.d.disable {
