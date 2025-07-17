@@ -133,9 +133,6 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	data := common.CopyBytes(buffer.Bytes())
 	responsePacket, _, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid request") {
-			b.BanPeer(pid)
-		}
 		return nil, pid, 0, err
 	}
 
