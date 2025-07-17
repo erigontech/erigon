@@ -178,7 +178,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -275,7 +275,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -356,7 +356,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 2455
+            "y": 5342
           },
           "id": 278,
           "options": {
@@ -372,7 +372,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -453,7 +453,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 2455
+            "y": 5342
           },
           "id": 276,
           "options": {
@@ -469,7 +469,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -550,7 +550,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2494
+            "y": 5349
           },
           "id": 273,
           "options": {
@@ -566,7 +566,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -647,7 +647,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2494
+            "y": 5349
           },
           "id": 275,
           "options": {
@@ -663,7 +663,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -744,7 +744,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2502
+            "y": 5357
           },
           "id": 274,
           "options": {
@@ -841,7 +841,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2502
+            "y": 5357
           },
           "id": 272,
           "options": {
@@ -1033,7 +1033,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -1139,7 +1139,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -1234,7 +1234,7 @@
             "showThresholdMarkers": true,
             "sizing": "auto"
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -1334,7 +1334,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -1434,7 +1434,7 @@
             "h": 4,
             "w": 12,
             "x": 0,
-            "y": 2409
+            "y": 2752
           },
           "id": 222,
           "options": {
@@ -1454,7 +1454,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -1502,7 +1502,7 @@
             "h": 4,
             "w": 12,
             "x": 0,
-            "y": 2490
+            "y": 2756
           },
           "id": 223,
           "options": {
@@ -1522,7 +1522,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -1608,7 +1608,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -1760,7 +1760,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -1842,7 +1842,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2491
+            "y": 115
           },
           "id": 229,
           "options": {
@@ -1860,7 +1860,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -1909,7 +1909,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2491
+            "y": 115
           },
           "id": 215,
           "options": {
@@ -1929,7 +1929,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "disableTextWrap": false,
@@ -2003,7 +2003,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2499
+            "y": 123
           },
           "id": 236,
           "options": {
@@ -2028,7 +2028,7 @@
             "xTickLabelRotation": 0,
             "xTickLabelSpacing": 0
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "disableTextWrap": false,
@@ -2081,7 +2081,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2499
+            "y": 123
           },
           "id": 214,
           "options": {
@@ -2101,7 +2101,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "disableTextWrap": false,
@@ -2154,7 +2154,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2507
+            "y": 131
           },
           "id": 235,
           "options": {
@@ -2174,7 +2174,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "disableTextWrap": false,
@@ -2260,7 +2260,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2507
+            "y": 131
           },
           "id": 210,
           "options": {
@@ -2276,7 +2276,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "disableTextWrap": false,
@@ -2329,7 +2329,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2515
+            "y": 139
           },
           "id": 234,
           "options": {
@@ -2349,7 +2349,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "disableTextWrap": false,
@@ -2460,7 +2460,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2515
+            "y": 139
           },
           "id": 211,
           "options": {
@@ -2476,7 +2476,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "12.1.0-91038.patch3-91166",
+          "pluginVersion": "12.1.0-91295",
           "targets": [
             {
               "editorMode": "code",
@@ -2558,7 +2558,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2523
+            "y": 147
           },
           "id": 231,
           "options": {
@@ -2646,7 +2646,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2523
+            "y": 147
           },
           "id": 221,
           "options": {
@@ -2833,7 +2833,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2531
+            "y": 155
           },
           "id": 216,
           "options": {
@@ -2962,7 +2962,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2531
+            "y": 155
           },
           "id": 217,
           "options": {
@@ -3060,7 +3060,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2539
+            "y": 163
           },
           "id": 228,
           "options": {
@@ -3125,7 +3125,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2539
+            "y": 163
           },
           "id": 213,
           "options": {
@@ -3198,7 +3198,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2547
+            "y": 171
           },
           "id": 226,
           "options": {
@@ -3304,7 +3304,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2547
+            "y": 171
           },
           "id": 227,
           "options": {
@@ -3430,7 +3430,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 2555
+            "y": 179
           },
           "id": 224,
           "options": {
@@ -3566,7 +3566,7 @@
             "h": 12,
             "w": 24,
             "x": 0,
-            "y": 2564
+            "y": 188
           },
           "id": 209,
           "options": {
@@ -3895,7 +3895,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 76
+            "y": 73
           },
           "id": 238,
           "options": {
@@ -3987,7 +3987,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 76
+            "y": 73
           },
           "id": 239,
           "options": {
@@ -4023,636 +4023,6 @@
           ],
           "title": "state load Skip Ratio",
           "type": "stat"
-        }
-      ],
-      "title": "E3 Files Timings",
-      "type": "row"
-    },
-    {
-      "collapsed": true,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 6
-      },
-      "id": 171,
-      "panels": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "decimals": 2,
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "short"
-            },
-            "overrides": [
-              {
-                "__systemRef": "hideSeriesFrom",
-                "matcher": {
-                  "id": "byNames",
-                  "options": {
-                    "mode": "exclude",
-                    "names": [
-                      "execution: validator-bm-holesky-e3caplin-cluster1-n1"
-                    ],
-                    "prefix": "All except:",
-                    "readOnly": true
-                  }
-                },
-                "properties": []
-              }
-            ]
-          },
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 0,
-            "y": 7
-          },
-          "id": 196,
-          "options": {
-            "minVizHeight": 75,
-            "minVizWidth": 75,
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "showThresholdLabels": false,
-            "showThresholdMarkers": true,
-            "sizing": "auto"
-          },
-          "pluginVersion": "12.1.0-91295",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "expr": "sync{instance=~\"$instance\",stage=\"execution\"} > 0 ",
-              "instant": false,
-              "legendFormat": "{{ stage }}: {{instance}}",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Sync Stages progress",
-          "type": "gauge"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "never",
-                "spanNulls": 3600000,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "ops"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 12,
-            "y": 7
-          },
-          "id": 158,
-          "options": {
-            "legend": {
-              "calcs": [
-                "mean"
-              ],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "multi",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "12.1.0-91295",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "exemplar": true,
-              "expr": "rate(sync{instance=~\"$instance\",stage=\"execution\"}[$__rate_interval]) ",
-              "format": "time_series",
-              "interval": "",
-              "intervalFactor": 1,
-              "legendFormat": "{{ stage }}:  {{instance}}",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Sync Stages progress rate",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": true,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "s"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 0,
-            "y": 16
-          },
-          "id": 282,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "12.1.0-91295",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "run_stage_duration_secs{instance=~\"$instance\", quantile=\"$quantile\"}",
-              "fullMetaSearch": false,
-              "hide": false,
-              "includeNullMetadata": true,
-              "instant": false,
-              "legendFormat": "run {{stage}} {{instance}}",
-              "range": true,
-              "refId": "B",
-              "useBackend": false
-            },
-            {
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "prune_stage_duration_secs{instance=~\"$instance\", quantile=\"$quantile\"}",
-              "fullMetaSearch": false,
-              "includeNullMetadata": true,
-              "legendFormat": "prune {{stage}} {{instance}}",
-              "range": true,
-              "refId": "A",
-              "useBackend": false,
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "unwind_stage_duration_secs{instance=~\"$instance\", quantile=\"$quantile\"}",
-              "fullMetaSearch": false,
-              "hide": false,
-              "includeNullMetadata": true,
-              "instant": false,
-              "legendFormat": "unwind {{stage}} {{instance}}",
-              "range": true,
-              "refId": "C",
-              "useBackend": false
-            }
-          ],
-          "title": "Stage Durations",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "s"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 12,
-            "y": 16
-          },
-          "id": 283,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "12.1.0-91295",
-          "targets": [
-            {
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "initial_cycle_duration_secs{instance=~\"$instance\"}",
-              "fullMetaSearch": false,
-              "includeNullMetadata": true,
-              "legendFormat": "{{instance}}",
-              "range": true,
-              "refId": "A",
-              "useBackend": false,
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            }
-          ],
-          "title": "Time in initial cycle",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "smooth",
-                "lineWidth": 1,
-                "pointSize": 4,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 60
-                  }
-                ]
-              },
-              "unit": "s"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 0,
-            "y": 25
-          },
-          "id": 200,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "multi",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "12.1.0-91295",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "expr": "prune_seconds{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "instant": false,
-              "legendFormat": "{{instance}} {{type}} ",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Prune, seconds",
-          "transparent": true,
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 2
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 12,
-            "y": 25
-          },
-          "id": 202,
-          "options": {
-            "displayMode": "lcd",
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": false
-            },
-            "maxVizHeight": 81,
-            "minVizHeight": 16,
-            "minVizWidth": 8,
-            "namePlacement": "auto",
-            "orientation": "horizontal",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "showUnfilled": true,
-            "sizing": "manual",
-            "valueMode": "color"
-          },
-          "pluginVersion": "12.1.0-91295",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "expr": "domain_prunable{instance=~\"$instance\",type=\"domain\"}",
-              "hide": false,
-              "legendFormat": "{{instance}} {{type}}-{{table}}",
-              "range": true,
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "expr": "domain_prunable{instance=~\"$instance\",type=\"history\",table!=\"commitment\"}/1562500",
-              "hide": false,
-              "legendFormat": "{{instance}} {{type}}-{{table}}",
-              "range": true,
-              "refId": "C"
-            }
-          ],
-          "title": "pruning availability, steps",
-          "transparent": true,
-          "type": "bargauge"
         },
         {
           "datasource": {
@@ -4720,9 +4090,9 @@
           },
           "gridPos": {
             "h": 10,
-            "w": 8,
+            "w": 12,
             "x": 0,
-            "y": 34
+            "y": 81
           },
           "id": 197,
           "options": {
@@ -4878,9 +4248,9 @@
           },
           "gridPos": {
             "h": 10,
-            "w": 8,
-            "x": 8,
-            "y": 34
+            "w": 12,
+            "x": 12,
+            "y": 81
           },
           "id": 198,
           "options": {
@@ -4989,7 +4359,804 @@
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
                 "axisColorMode": "text",
-                "axisGridShow": true,
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "smooth",
+                "lineWidth": 1,
+                "pointSize": 4,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 60
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 8,
+            "x": 0,
+            "y": 91
+          },
+          "id": 200,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "editorMode": "code",
+              "expr": "prune_seconds{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "instant": false,
+              "legendFormat": "{{type}} {{instance}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Prune Duration - Blocks/State/Bor",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 8,
+            "x": 8,
+            "y": 91
+          },
+          "id": 286,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "histogram_quantile($quantile, sum by(le, instance, type) (rate(domain_prune_took_bucket{instance=~\"$instance\"}[$__rate_interval])))",
+              "fullMetaSearch": false,
+              "includeNullMetadata": false,
+              "legendFormat": "prune {{type}} {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Prune Duration - State",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 8,
+            "x": 16,
+            "y": 91
+          },
+          "id": 202,
+          "options": {
+            "displayMode": "lcd",
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": false
+            },
+            "maxVizHeight": 81,
+            "minVizHeight": 16,
+            "minVizWidth": 8,
+            "namePlacement": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true,
+            "sizing": "manual",
+            "valueMode": "color"
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "editorMode": "code",
+              "expr": "domain_prunable{instance=~\"$instance\",type=\"domain\"}",
+              "hide": false,
+              "legendFormat": "{{instance}} {{type}}-{{table}}",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "editorMode": "code",
+              "expr": "domain_prunable{instance=~\"$instance\",type=\"history\",table!=\"commitment\"}/1562500",
+              "hide": false,
+              "legendFormat": "{{instance}} {{type}}-{{table}}",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "pruning availability, steps",
+          "type": "bargauge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 100
+          },
+          "id": 287,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "domain_commitment_took{instance=~\"$instance\", quantile=\"$quantile\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "commitment {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "State: Commitment Duration",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 100
+          },
+          "id": 290,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "domain_flush_took{instance=~\"$instance\", quantile=\"$quantile\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "flush {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "State: Domains Flush Duration",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 100
+          },
+          "id": 284,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "histogram_quantile($quantile, sum by(le, instance, type) (rate(domain_collate_took_bucket{instance=~\"$instance\"}[$__rate_interval])))",
+              "fullMetaSearch": false,
+              "includeNullMetadata": false,
+              "legendFormat": "collate {{type}} {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "State: Collate Duration",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 100
+          },
+          "id": 285,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "domain_step_took{instance=~\"$instance\", quantile=\"$quantile\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "step {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Step Duration",
+          "type": "timeseries"
+        }
+      ],
+      "title": "E3 Files Timings",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 171,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "decimals": 2,
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": [
+              {
+                "__systemRef": "hideSeriesFrom",
+                "matcher": {
+                  "id": "byNames",
+                  "options": {
+                    "mode": "exclude",
+                    "names": [
+                      "execution: validator-bm-holesky-e3caplin-cluster1-n1"
+                    ],
+                    "prefix": "All except:",
+                    "readOnly": true
+                  }
+                },
+                "properties": []
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 7964
+          },
+          "id": 196,
+          "options": {
+            "minVizHeight": 75,
+            "minVizWidth": 75,
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true,
+            "sizing": "auto"
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "editorMode": "code",
+              "expr": "sync{instance=~\"$instance\",stage=\"execution\"} > 0 ",
+              "instant": false,
+              "legendFormat": "{{ stage }}: {{instance}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Sync Stages progress",
+          "type": "gauge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
                 "axisLabel": "",
                 "axisPlacement": "auto",
                 "barAlignment": 0,
@@ -5010,6 +5177,246 @@
                   "type": "linear"
                 },
                 "showPoints": "never",
+                "spanNulls": 3600000,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 7964
+          },
+          "id": 158,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "editorMode": "code",
+              "exemplar": true,
+              "expr": "rate(sync{instance=~\"$instance\",stage=\"execution\"}[$__rate_interval]) ",
+              "format": "time_series",
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "{{ stage }}:  {{instance}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Sync Stages progress rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 7973
+          },
+          "id": 282,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "run_stage_duration_secs{instance=~\"$instance\", quantile=\"$quantile\"}",
+              "fullMetaSearch": false,
+              "hide": false,
+              "includeNullMetadata": true,
+              "instant": false,
+              "legendFormat": "run {{stage}} {{instance}}",
+              "range": true,
+              "refId": "B",
+              "useBackend": false
+            },
+            {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "prune_stage_duration_secs{instance=~\"$instance\", quantile=\"$quantile\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "prune {{stage}} {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "unwind_stage_duration_secs{instance=~\"$instance\", quantile=\"$quantile\"}",
+              "fullMetaSearch": false,
+              "hide": false,
+              "includeNullMetadata": true,
+              "instant": false,
+              "legendFormat": "unwind {{stage}} {{instance}}",
+              "range": true,
+              "refId": "C",
+              "useBackend": false
+            }
+          ],
+          "title": "Stage Durations",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
                 "spanNulls": false,
                 "stacking": {
                   "group": "A",
@@ -5038,94 +5445,44 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 10,
-            "w": 8,
-            "x": 16,
-            "y": 34
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 7973
           },
-          "id": 112,
+          "id": 283,
           "options": {
             "legend": {
-              "calcs": [
-                "mean"
-              ],
+              "calcs": [],
               "displayMode": "list",
               "placement": "bottom",
               "showLegend": true
             },
             "tooltip": {
               "hideZeros": false,
-              "mode": "multi",
+              "mode": "single",
               "sort": "none"
             }
           },
           "pluginVersion": "12.1.0-91295",
           "targets": [
             {
+              "disableTextWrap": false,
+              "editorMode": "builder",
+              "expr": "initial_cycle_duration_secs{instance=~\"$instance\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "{{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "expr": "rate(domain_collate_took_sum{instance=~\"$instance\"}[$__rate_interval]) > 0",
-              "format": "time_series",
-              "instant": false,
-              "legendFormat": "collation took: {{instance}}",
-              "range": true,
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "expr": "rate(domain_step_took_sum{instance=~\"$instance\"}[$__rate_interval]) > 0",
-              "hide": false,
-              "legendFormat": "step took: {{instance}}",
-              "range": true,
-              "refId": "C"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "expr": "rate(domain_prune_took_sum{instance=~\"$instance\"}[$__rate_interval]) > 0",
-              "hide": false,
-              "legendFormat": "prune took [{{type}}]: {{instance}}",
-              "range": true,
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "expr": "rate(domain_commitment_took_sum{instance=~\"$instance\"}[$__rate_interval]) > 0",
-              "hide": false,
-              "legendFormat": "commitment took: {{instance}}",
-              "range": true,
-              "refId": "D"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "exemplar": false,
-              "expr": "rate(domain_commitment_write_took_sum{instance=~\"$instance\"}[$__rate_interval]) > 0",
-              "hide": false,
-              "instant": false,
-              "legendFormat": "commitment update write took: {{instance}}",
-              "range": true,
-              "refId": "F"
+              }
             }
           ],
-          "title": "State: timins",
+          "title": "Time in initial cycle",
           "type": "timeseries"
         },
         {
@@ -5193,7 +5550,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 44
+            "y": 7982
           },
           "id": 201,
           "options": {
@@ -5328,7 +5685,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 44
+            "y": 7982
           },
           "id": 199,
           "options": {
@@ -5433,7 +5790,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 54
+            "y": 7992
           },
           "id": 206,
           "options": {
@@ -5537,7 +5894,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 54
+            "y": 7992
           },
           "id": 207,
           "options": {
@@ -5668,7 +6025,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 54
+            "y": 7992
           },
           "id": 194,
           "options": {
@@ -5786,9 +6143,9 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 8,
+            "w": 6,
             "x": 0,
-            "y": 62
+            "y": 8000
           },
           "id": 246,
           "options": {
@@ -5807,21 +6164,6 @@
           "pluginVersion": "12.1.0-91295",
           "targets": [
             {
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "update_fork_choice{type=\"arrival_delay\", instance=\"$instance\", quantile=\"$quantile\"}",
-              "fullMetaSearch": false,
-              "includeNullMetadata": true,
-              "legendFormat": "arrival_delay $instance",
-              "range": true,
-              "refId": "A",
-              "useBackend": false,
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            },
-            {
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
@@ -5839,7 +6181,7 @@
               "useBackend": false
             }
           ],
-          "title": "Update Fork Choice Delays",
+          "title": "Update Fork Choice Execution Duration",
           "type": "timeseries"
         },
         {
@@ -5905,9 +6247,9 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 62
+            "w": 6,
+            "x": 6,
+            "y": 8000
           },
           "id": 281,
           "options": {
@@ -6006,9 +6348,9 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 62
+            "w": 6,
+            "x": 12,
+            "y": 8000
           },
           "id": 245,
           "options": {
@@ -6043,6 +6385,104 @@
             }
           ],
           "title": "Update Fork Choice Depth",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 8000
+          },
+          "id": 289,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.1.0-91295",
+          "targets": [
+            {
+              "editorMode": "builder",
+              "expr": "update_fork_choice{type=\"arrival_delay\", instance=~\"$instance\", quantile=\"$quantile\"}",
+              "legendFormat": "arrival delay {{instance}}",
+              "range": true,
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Update Fork Choice Arrival Delay",
           "type": "timeseries"
         },
         {
@@ -6126,7 +6566,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 70
+            "y": 8008
           },
           "id": 208,
           "options": {
@@ -6243,7 +6683,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2324
+            "y": 10575
           },
           "id": 243,
           "options": {
@@ -6362,7 +6802,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2324
+            "y": 10575
           },
           "id": 244,
           "options": {
@@ -6478,7 +6918,7 @@
             "h": 9,
             "w": 8,
             "x": 0,
-            "y": 71
+            "y": 9
           },
           "id": 159,
           "options": {
@@ -6588,7 +7028,7 @@
             "h": 9,
             "w": 8,
             "x": 8,
-            "y": 71
+            "y": 9
           },
           "id": 280,
           "options": {
@@ -6690,7 +7130,7 @@
             "h": 9,
             "w": 8,
             "x": 16,
-            "y": 71
+            "y": 9
           },
           "id": 167,
           "options": {
@@ -6804,7 +7244,7 @@
             "h": 9,
             "w": 8,
             "x": 0,
-            "y": 80
+            "y": 18
           },
           "id": 169,
           "options": {
@@ -6936,7 +7376,7 @@
             "h": 9,
             "w": 8,
             "x": 8,
-            "y": 80
+            "y": 18
           },
           "id": 166,
           "options": {
@@ -7095,7 +7535,7 @@
             "h": 9,
             "w": 8,
             "x": 16,
-            "y": 80
+            "y": 18
           },
           "id": 141,
           "options": {
@@ -7195,7 +7635,7 @@
             "h": 9,
             "w": 8,
             "x": 0,
-            "y": 89
+            "y": 27
           },
           "id": 168,
           "options": {
@@ -7509,7 +7949,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 72
+            "y": 37
           },
           "id": 106,
           "options": {
@@ -7617,7 +8057,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 72
+            "y": 37
           },
           "id": 128,
           "options": {
@@ -7729,7 +8169,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 72
+            "y": 37
           },
           "id": 154,
           "options": {
@@ -7914,7 +8354,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 80
+            "y": 45
           },
           "id": 86,
           "options": {
@@ -8035,7 +8475,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 80
+            "y": 45
           },
           "id": 148,
           "options": {
@@ -8204,7 +8644,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 80
+            "y": 45
           },
           "id": 124,
           "options": {
@@ -8309,7 +8749,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 88
+            "y": 53
           },
           "id": 153,
           "options": {
@@ -8412,7 +8852,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 88
+            "y": 53
           },
           "id": 155,
           "options": {
@@ -8534,7 +8974,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 88
+            "y": 53
           },
           "id": 150,
           "options": {
@@ -8650,7 +9090,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 96
+            "y": 61
           },
           "id": 85,
           "options": {
@@ -8783,7 +9223,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 881
+            "y": 9132
           },
           "id": 185,
           "options": {
@@ -8908,7 +9348,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 881
+            "y": 9132
           },
           "id": 186,
           "options": {
@@ -9009,7 +9449,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 889
+            "y": 9140
           },
           "id": 187,
           "options": {
@@ -9110,7 +9550,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 889
+            "y": 9140
           },
           "id": 188,
           "options": {
@@ -9219,7 +9659,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 897
+            "y": 9148
           },
           "id": 189,
           "options": {
@@ -9364,7 +9804,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 897
+            "y": 9148
           },
           "id": 184,
           "options": {
@@ -9520,7 +9960,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 3473
+            "y": 11724
           },
           "id": 96,
           "options": {
@@ -9643,7 +10083,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 3473
+            "y": 11724
           },
           "id": 77,
           "options": {
@@ -9789,7 +10229,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3474
+            "y": 11725
           },
           "id": 175,
           "options": {
@@ -9950,7 +10390,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3474
+            "y": 11725
           },
           "id": 177,
           "options": {
@@ -10110,7 +10550,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 3482
+            "y": 11733
           },
           "id": 178,
           "options": {
@@ -10213,7 +10653,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 3482
+            "y": 11733
           },
           "id": 180,
           "options": {
@@ -10326,7 +10766,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 3488
+            "y": 11739
           },
           "id": 176,
           "options": {
@@ -10428,7 +10868,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 3488
+            "y": 11739
           },
           "id": 181,
           "options": {
@@ -10555,7 +10995,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3475
+            "y": 11726
           },
           "id": 268,
           "options": {
@@ -10656,7 +11096,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3475
+            "y": 11726
           },
           "id": 267,
           "options": {
@@ -10775,7 +11215,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3483
+            "y": 11734
           },
           "id": 266,
           "options": {
@@ -10877,7 +11317,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3483
+            "y": 11734
           },
           "id": 265,
           "options": {
@@ -10978,7 +11418,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3491
+            "y": 11742
           },
           "id": 264,
           "options": {
@@ -11079,7 +11519,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3491
+            "y": 11742
           },
           "id": 263,
           "options": {
@@ -11198,7 +11638,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3499
+            "y": 11750
           },
           "id": 262,
           "options": {
@@ -11300,7 +11740,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3499
+            "y": 11750
           },
           "id": 261,
           "options": {
@@ -11401,7 +11841,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3507
+            "y": 11758
           },
           "id": 259,
           "options": {
@@ -11502,7 +11942,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3507
+            "y": 11758
           },
           "id": 269,
           "options": {
@@ -11620,7 +12060,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3515
+            "y": 11766
           },
           "id": 255,
           "options": {
@@ -11738,7 +12178,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3515
+            "y": 11766
           },
           "id": 257,
           "options": {
@@ -11840,7 +12280,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3523
+            "y": 11774
           },
           "id": 260,
           "options": {
@@ -11942,7 +12382,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3523
+            "y": 11774
           },
           "id": 258,
           "options": {
@@ -12044,7 +12484,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3531
+            "y": 11782
           },
           "id": 254,
           "options": {
@@ -12145,7 +12585,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3531
+            "y": 11782
           },
           "id": 253,
           "options": {
@@ -12264,7 +12704,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3539
+            "y": 11790
           },
           "id": 252,
           "options": {
@@ -12365,7 +12805,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 3539
+            "y": 11790
           },
           "id": 251,
           "options": {
@@ -12483,7 +12923,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 3547
+            "y": 11798
           },
           "id": 256,
           "options": {
@@ -12532,8 +12972,8 @@
     "list": [
       {
         "current": {
-          "text": "0.97",
-          "value": "0.97"
+          "text": "0.99",
+          "value": "0.99"
         },
         "includeAll": false,
         "name": "quantile",
@@ -12559,12 +12999,12 @@
             "value": "0.9"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": "0.97",
             "value": "0.97"
           },
           {
-            "selected": false,
+            "selected": true,
             "text": "0.99",
             "value": "0.99"
           },
@@ -12618,7 +13058,7 @@
     ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-6h",
     "to": "now"
   },
   "timepicker": {
@@ -12637,6 +13077,6 @@
   "timezone": "",
   "title": "1. Erigon CUSTOM METRICS",
   "uid": "b42a61d7-02b1-416c-8ab4-b9c864356174",
-  "version": 448,
+  "version": 452,
   "weekStart": ""
 }
