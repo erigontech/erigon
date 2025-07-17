@@ -158,16 +158,13 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
-		{
-			cnt, _ := tx.Count(ii.valuesTable)
-			fmt.Printf("after pruning count: %d\n", cnt)
+		valuesCountBefore, err := tx.Count(ii.valuesTable)
+		require.NoError(t, err)
 
-		}
 		// this should prune exactly pruneLimit*pruneIter transactions
 		for i := 0; i < pruneIters; i++ {
-			stat, err := ic.Prune(context.Background(), tx, 0, 1000, pruneLimit, logEvery, true, nil)
+			_, err := ic.Prune(context.Background(), tx, 0, 1000, pruneLimit, logEvery, true, nil)
 			require.NoError(t, err)
-			t.Logf("[%d] stats: %v", i, stat)
 		}
 
 		// ascending - empty
@@ -194,13 +191,42 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInSep0, int(binary.BigEndian.Uint64(txn)-1))
 		icc.Close()
 
-		// check second table
+		// check valuesTable - comprehensive pruning validation
 		icc, err = tx.CursorDupSort(ii.valuesTable)
+		require.NoError(t, err)
+
+		// Count remaining entries in valuesTable
+		remainingCount := 0
+		minRemainingTxNum := uint64(math.MaxUint64)
+		maxRemainingTxNum := uint64(0)
+
+		for k, v, err := icc.First(); k != nil; k, v, err = icc.Next() {
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, len(k), 9) // step(8) + addr(>=1)
+
+			txNum := binary.BigEndian.Uint64(v)
+			minRemainingTxNum = min(minRemainingTxNum, txNum)
+			maxRemainingTxNum = max(maxRemainingTxNum, txNum)
+			remainingCount++
+		}
+
+		require.Greater(t, remainingCount, 0, "valuesTable should not be empty after pruning")
+
+		// Check last entry details
 		key, txn, err := icc.Last()
+		require.NoError(t, err)
+		icc.Close()
 		step := ^binary.BigEndian.Uint64(key)
 		require.Equal(t, 2, int(step))
 		require.GreaterOrEqual(t, len(key), 9)
-		icc.Close()
+
+		require.Less(t, remainingCount, 1000)
+		require.LessOrEqual(t, maxRemainingTxNum, uint64(1000))
+
+		valuesCountAfter, err := tx.Count(ii.valuesTable)
+		require.NoError(t, err)
+		actualPrunedCount := valuesCountBefore - valuesCountAfter
+		require.Greater(t, actualPrunedCount, uint64(50))
 	})
 
 }
@@ -915,12 +941,12 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 	fmt.Printf("[dbg] 1 step dirt=%s\n", datasize.ByteSize(a).HR())
 	log.Warn("[dbg] 1 step", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 
-	//pruneLimit := uint64(1_000)
-	//ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
-	//log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
-	//
-	//start = time.Now()
-	//pruneLimit = ic.aggStep * 10
-	//ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
-	//log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+	pruneLimit := uint64(1_000)
+	ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
+	log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+
+	start = time.Now()
+	pruneLimit = ic.aggStep * 10
+	ic.Prune(context.Background(), tx, 0, txCnt, txCnt, logEvery, true, nil)
+	log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
 }

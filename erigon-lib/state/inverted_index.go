@@ -1400,12 +1400,6 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 		}
 	}
 
-	if !asc { // Reverse the iterators array for descending order
-		for i, j := 0, len(iterators)-1; i < j; i, j = i+1, j-1 {
-			iterators[i], iterators[j] = iterators[j], iterators[i]
-		}
-	}
-
 	return iterators, nil
 }
 
