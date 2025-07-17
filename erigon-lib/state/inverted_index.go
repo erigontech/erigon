@@ -1411,19 +1411,19 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	ii.dirtyFiles.Set(fi)
 }
 
-// recentIterateRangeBySteps creates iterators for each step that contains data in the given txNum range
+// recentIterateRangeBySteps creates iterators for each step that contains data in the given txNum range - which not in visible files yet
 func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) ([]stream.U64, error) {
 	if roTx == nil {
 		return []stream.U64{}, nil
 	}
 
+	lastVisibleStepInFiles := iit.files.EndTxNum() / iit.aggStep
+
 	var fromStep, toStep uint64
 	if startTxNum >= 0 {
 		fromStep = uint64(startTxNum) / iit.aggStep
-	} else {
-		// startTxNum is -1 (unbounded), start from step 0
-		fromStep = 0
 	}
+
 	if endTxNum >= 0 {
 		toStep = uint64(endTxNum) / iit.aggStep
 	} else {
@@ -1432,14 +1432,20 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 		toStep = uint64(maxStepFloat) + 1
 	}
 
+	if fromStep > toStep {
+		fromStep, toStep = toStep, fromStep
+	}
+
+	// Only iterate through steps that are not in visible files
+	if fromStep < lastVisibleStepInFiles {
+		fromStep = lastVisibleStepInFiles
+	}
+
 	var iterators []stream.U64
 
-	if asc {
-		for step := fromStep; step <= toStep; step++ {
-			// Skip steps that are already in visible files
-			if iit.isStepInVisibleFiles(step) {
-				continue
-			}
+	// Create iterators for each step
+	for step := fromStep; step <= toStep; step++ {
+		if !iit.isStepInVisibleFiles(step) {
 			stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
 			if err != nil {
 				return nil, err
@@ -1448,34 +1454,12 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 				iterators = append(iterators, stepIt)
 			}
 		}
-	} else {
-		// For descending order, iterate from max step to min step
-		maxStep := toStep
-		minStep := fromStep
-		if fromStep > toStep {
-			maxStep = fromStep
-			minStep = toStep
-		}
-		for step := maxStep; step >= minStep; step-- {
-			// Skip steps that are already in visible files
-			if iit.isStepInVisibleFiles(step) {
-				// Prevent underflow when step is 0
-				if step == 0 {
-					break
-				}
-				continue
-			}
-			stepIt, err := iit.recentIterateRangeForStep(key, step, startTxNum, endTxNum, asc, limit, roTx)
-			if err != nil {
-				return nil, err
-			}
-			if stepIt != nil {
-				iterators = append(iterators, stepIt)
-			}
-			// Prevent underflow when step is 0
-			if step == 0 {
-				break
-			}
+	}
+
+	if !asc {
+		// Reverse the iterators array for descending order
+		for i, j := 0, len(iterators)-1; i < j; i, j = i+1, j-1 {
+			iterators[i], iterators[j] = iterators[j], iterators[i]
 		}
 	}
 
@@ -1498,6 +1482,7 @@ func (iit *InvertedIndexRoTx) isStepInVisibleFiles(step uint64) bool {
 	if len(iit.files) == 0 {
 		return false
 	}
+
 	return step < (iit.files.EndTxNum() / iit.aggStep)
 }
 
