@@ -32,16 +32,16 @@ type serialExecutor struct {
 	worker          *exec3.Worker
 }
 
-func (se *serialExecutor) LogExecuted(tx kv.Tx) {
-	se.progress.LogExecuted(tx, se.rs.StateV3, se)
+func (se *serialExecutor) LogExecuted() {
+	se.progress.LogExecuted(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitted(tx kv.Tx, commitStart time.Time) {
-	se.progress.LogCommitted(tx, commitStart, se.rs.StateV3, se)
+func (se *serialExecutor) LogCommitted(commitStart time.Time,stepsIndDb float64) {
+	se.progress.LogCommitted(se.rs.StateV3, se,commitStart, stepsIndDb )
 }
 
-func (se *serialExecutor) LogComplete(tx kv.Tx) {
-	se.progress.LogComplete(tx, se.rs.StateV3, se)
+func (se *serialExecutor) LogComplete(stepsInDb float64) {
+	se.progress.LogComplete(se.rs.StateV3, se, stepsInDb)
 }
 
 func (se *serialExecutor) wait(ctx context.Context) error {

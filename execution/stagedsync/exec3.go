@@ -136,7 +136,7 @@ type Progress struct {
 	logger    log.Logger
 }
 
-func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
+func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevExecTime)
 
@@ -190,6 +190,10 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		mxExecAccountReadDuration.SetUint64(uint64(curAccountReadDur / time.Duration(curActivations)))
 		mxExecStoreageReadDuration.SetUint64(uint64(curStorageReadDur / time.Duration(curActivations)))
 		mxExecCodeReadDuration.SetUint64(uint64(curCodeReadDur / time.Duration(curActivations)))
+
+		fmt.Println("acc", (curAccountReadDur / time.Duration(curActivations)).Microseconds(),
+			"st", (curStorageReadDur / time.Duration(curActivations)).Microseconds(),
+			"cd", (curCodeReadDur / time.Duration(curActivations)).Microseconds())
 
 		if avgTaskDur > 0 {
 			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
@@ -298,8 +302,8 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 	executedDiffBlocks := max(te.lastExecutedBlockNum.Load()-int64(p.prevExecutedBlockNum), 0)
 	executedDiffTxs := uint64(max(te.lastExecutedTxNum.Load()-int64(p.prevExecutedTxNum), 0))
 
-	p.log("executed", suffix, tx, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
-		executedDiffTxs, executedTxSec, executedGasSec, false, execVals)
+	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
+		executedDiffTxs, executedTxSec, executedGasSec, 0, execVals)
 
 	p.prevExecTime = currentTime
 
@@ -310,7 +314,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 	}
 }
 
-func (p *Progress) LogCommitted(tx kv.Tx, commitStart time.Time, rs *state.StateV3, ex executor) {
+func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64) {
 	var te *txExecutor
 	var suffix string
 
@@ -342,8 +346,8 @@ func (p *Progress) LogCommitted(tx kv.Tx, commitStart time.Time, rs *state.State
 	}
 	committedDiffBlocks := max(int64(te.lastCommittedBlockNum)-int64(p.prevCommittedBlockNum), 0)
 
-	p.log("committed", suffix, tx, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
-		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, true, nil)
+	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
+		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, stepsInDb, nil)
 
 	p.prevCommitTime = currentTime
 
@@ -354,7 +358,7 @@ func (p *Progress) LogCommitted(tx kv.Tx, commitStart time.Time, rs *state.State
 	}
 }
 
-func (p *Progress) LogComplete(tx kv.Tx, rs *state.StateV3, ex executor) {
+func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64) {
 	interval := time.Since(p.initialTime)
 	var te *txExecutor
 	var suffix string
@@ -394,17 +398,15 @@ func (p *Progress) LogComplete(tx kv.Tx, rs *state.StateV3, ex executor) {
 	}
 	diffBlocks := max(int64(lastBlockNum)-int64(p.initialBlockNum), 0)
 
-	p.log("done", suffix, tx, te, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, true, nil)
+	p.log("done", suffix, te, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, stepsInDb, nil)
 }
 
-func (p *Progress) log(mode string, suffix string, tx kv.Tx, te *txExecutor, rs *state.StateV3, interval time.Duration,
-	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, logSteps bool, extraVals []interface{}) {
+func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.StateV3, interval time.Duration,
+	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, stepsInDb float64, extraVals []interface{}) {
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
-
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(tx)
 	mxExecStepsInDB.Set(stepsInDb * 100)
 
 	if len(suffix) > 0 {
@@ -424,7 +426,7 @@ func (p *Progress) log(mode string, suffix string, tx kv.Tx, te *txExecutor, rs 
 		vals = append(vals, extraVals...)
 	}
 
-	if logSteps {
+	if stepsInDb > 0 {
 		vals = append(vals, []interface{}{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
 			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum)/float64(config3.DefaultStepSize)),
@@ -720,8 +722,9 @@ func ExecV3(ctx context.Context,
 
 	executor.resetWorkers(ctx, rs, applyTx)
 
+	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx)
 	defer func() {
-		executor.LogComplete(applyTx)
+		executor.LogComplete(stepsInDb)
 	}()
 
 	computeCommitmentDuration := time.Duration(0)
@@ -897,7 +900,7 @@ func ExecV3(ctx context.Context,
 						break
 					}
 
-					executor.LogExecuted(applyTx)
+					executor.LogExecuted()
 
 					//TODO: https://github.com/erigontech/erigon/issues/10724
 					//if executor.tx().(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {
@@ -957,7 +960,10 @@ func ExecV3(ctx context.Context,
 
 					pruneDuration = time.Since(timeStart)
 
-					applyTx, commitDuration, err := executor.(*serialExecutor).commit(ctx, execStage, applyTx, nil, useExternalTx)
+					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
+
+					var commitDuration time.Duration
+					applyTx, commitDuration, err = executor.(*serialExecutor).commit(ctx, execStage, applyTx, nil, useExternalTx)
 					if err != nil {
 						return err
 					}
@@ -968,7 +974,7 @@ func ExecV3(ctx context.Context,
 					}
 
 					if !useExternalTx {
-						executor.LogCommitted(applyTx, commitStart)
+						executor.LogCommitted(commitStart, stepsInDb)
 					}
 
 					logger.Info("Committed", "time", time.Since(commitStart),
@@ -1146,7 +1152,7 @@ func ExecV3(ctx context.Context,
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					pe.LogExecuted(applyTx)
+					pe.LogExecuted()
 					if pe.agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
@@ -1207,14 +1213,14 @@ func ExecV3(ctx context.Context,
 			uncommittedGas = 0
 
 			commitStart := time.Now()
-
-			_, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
+			stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
+			applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
 			if err != nil {
 				return err
 			}
 
 			if !useExternalTx {
-				executor.LogCommitted(applyTx, commitStart)
+				executor.LogCommitted(commitStart, stepsInDb)
 			}
 		} else {
 			fmt.Printf("[dbg] mmmm... do we need action here????\n")

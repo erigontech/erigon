@@ -90,9 +90,9 @@ type executor interface {
 	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
 	resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error
 
-	LogExecuted(tx kv.Tx)
-	LogCommitted(tx kv.Tx, commitStart time.Time)
-	LogComplete(tx kv.Tx)
+	LogExecuted()
+	LogCommitted(commitStart time.Time, stepsInDb float64)
+	LogComplete(stepsInDb float64)
 }
 
 type applyResult interface {
@@ -167,6 +167,9 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	if task.IsBlockEnd() || txIndex < 0 {
+		if txIndex < 0 {
+			fmt.Println("finalize", task.Version())
+		}
 		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
 		return nil, nil
 	}
@@ -1130,16 +1133,16 @@ type parallelExecutor struct {
 	blockExecutors map[uint64]*blockExecutor
 }
 
-func (pe *parallelExecutor) LogExecuted(tx kv.Tx) {
-	pe.progress.LogExecuted(tx, pe.rs.StateV3, pe)
+func (pe *parallelExecutor) LogExecuted() {
+	pe.progress.LogExecuted(pe.rs.StateV3, pe)
 }
 
-func (pe *parallelExecutor) LogCommitted(tx kv.Tx, commitStart time.Time) {
-	pe.progress.LogCommitted(tx, commitStart, pe.rs.StateV3, pe)
+func (pe *parallelExecutor) LogCommitted(commitStart time.Time, stepsInDb float64) {
+	pe.progress.LogCommitted(pe.rs.StateV3, pe, commitStart, stepsInDb)
 }
 
-func (pe *parallelExecutor) LogComplete(tx kv.Tx) {
-	pe.progress.LogComplete(tx, pe.rs.StateV3, pe)
+func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
+	pe.progress.LogComplete(pe.rs.StateV3, pe, stepsInDb)
 }
 
 func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
