@@ -1046,9 +1046,12 @@ func ExecV3(ctx context.Context,
 					case *txResult:
 						uncommittedGas += applyResult.gasUsed
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
-						if err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
+						pe.rs.SetTrace(traceBlock(applyResult.blockNum))
+						err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
 							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
-							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
+							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false)
+						pe.rs.SetTrace(false)
+						if err != nil {
 							return err
 						}
 					case *blockResult:

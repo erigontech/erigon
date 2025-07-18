@@ -352,11 +352,8 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 }
 
 func (a *Aggregator) WaitForFiles() {
-	for {
-		select {
-		case <-a.WaitForBuildAndMerge(a.ctx):
-			return
-		}
+	for range a.WaitForBuildAndMerge(a.ctx) {
+		return
 	}
 }
 

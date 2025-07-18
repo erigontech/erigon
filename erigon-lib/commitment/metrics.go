@@ -278,7 +278,7 @@ func (am *AccountMetrics) Values() [][]string {
 	//am.m.Lock()
 	//defer am.m.Unlock()
 
-	values := make([][]string, len(am.AccountStats)+1, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
+	values := make([][]string, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
 	vi := 1
 	for addr, stat := range am.AccountStats {
 		values[vi] = []string{
