@@ -14,7 +14,7 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v4
         with:
-          repository: erigontech/hive
+          repository: ethereum/hive
           # ref: prague-devnet-4
           path: hive
 
