@@ -148,6 +148,10 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	blockNum := task.Version().BlockNum
 	txIndex := task.Version().TxIndex
 	txIncarnation := task.Version().Incarnation
+
+	fmt.Println("finalize", blockNum, txIndex)
+	defer fmt.Println("done finalize", blockNum, txIndex)
+
 	// we want to force a re-read of the conbiase & burnt contract address
 	// if thay where referenced by the tx
 	delete(result.TxIn, result.Coinbase)
