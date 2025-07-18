@@ -104,19 +104,28 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		"chain", chainName,
 	)
 	removeFunc := func(path string) error {
-		logger.Info("Removing snapshot file", "path", path)
+		logger.Debug("Removing snapshot file", "path", path)
 		return os.Remove(filepath.Join(dirs.Snap, path))
 	}
 	if dryRun {
 		removeFunc = dryRunRemove
 	}
-	reset := reset{removeUnknown: removeUnknown}
+	reset := reset{
+		removeUnknown: removeUnknown,
+		logger:        logger,
+	}
 	logger.Info("Resetting snapshots directory", "path", dirs.Snap)
-	err = reset.walkSnapshots(logger, dirs.Snap, cfg.Preverified.Items, removeFunc)
+	err = reset.walkSnapshots(dirs.Snap, cfg.Preverified.Items, removeFunc)
 	if err != nil {
 		err = fmt.Errorf("walking snapshots: %w", err)
 		return
 	}
+	logger.Info("Files NOT removed from snapshots directory",
+		"torrents", reset.stats.retained.torrentFiles,
+		"data", reset.stats.retained.dataFiles)
+	logger.Info("Files removed from snapshots directory",
+		"torrents", reset.stats.removed.torrentFiles,
+		"data", reset.stats.removed.dataFiles)
 	// Remove chaindata last, so that the config is available if there's an error.
 	if removeChainData {
 		logger.Warn("Removing chaindata dir", "path", dirs.Chaindata)
@@ -167,16 +176,34 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 }
 
 func dryRunRemove(path string) error {
-	fmt.Printf("%v\n", path)
 	return nil
 }
 
-type reset struct {
-	removeUnknown bool
+type resetStats struct {
+	torrentFiles int
+	dataFiles    int
+	unknownFiles int
 }
 
-func (me reset) walkSnapshots(
-	logger log.Logger,
+type reset struct {
+	logger        log.Logger
+	removeUnknown bool
+	stats         struct {
+		removed  resetStats
+		retained resetStats
+	}
+}
+
+type resetItemInfo struct {
+	path          string
+	realFilePath  func() string
+	hash          g.Option[string]
+	isTorrent     bool
+	inPreverified bool
+}
+
+// Walks the given snapshots directory, removing files that are not in the preverified set.
+func (me *reset) walkSnapshots(
 	// Could almost pass fs.FS here except metainfo.LoadFromFile expects a string filepath.
 	snapDir string,
 	preverified snapcfg.PreverifiedItems,
@@ -196,34 +223,63 @@ func (me reset) walkSnapshots(
 			if d.IsDir() {
 				return nil
 			}
-			itemName, isTorrent := strings.CutSuffix(filepath.ToSlash(path), ".torrent")
+			slashPath := filepath.ToSlash(path)
+			itemName, _ := strings.CutSuffix(slashPath, ".part")
+			itemName, isTorrent := strings.CutSuffix(itemName, ".torrent")
 			item, ok := preverified.Get(itemName)
-			if !ok {
-				logger.Debug("file not in preverified list", "path", path)
-				if me.removeUnknown {
-					return remove(path)
-				} else {
-					return nil
+			doRemove := me.decideRemove(resetItemInfo{
+				path:          path,
+				realFilePath:  func() string { return filepath.Join(snapDir, path) },
+				hash:          func() g.Option[string] { return g.OptionFromTuple(item.Hash, ok) }(),
+				isTorrent:     isTorrent,
+				inPreverified: ok,
+			})
+			stats := &me.stats.retained
+			if doRemove {
+				stats = &me.stats.removed
+				err = remove(path)
+				if err != nil {
+					return fmt.Errorf("removing file %v: %w", path, err)
 				}
 			}
 			if isTorrent {
-				fullPath := filepath.Join(snapDir, path)
-				mi, err := metainfo.LoadFromFile(fullPath)
-				if err != nil {
-					logger.Error("error loading metainfo file", "path", path, "err", err)
-					return remove(path)
-				}
-				if mi.HashInfoBytes().String() == item.Hash {
-					logger.Debug("torrent file matches preverified hash", "path", path)
-				} else {
-					logger.Info("torrent file hash does not match preverified", "path", path, "expected", item.Hash, "actual", mi.HashInfoBytes())
-					return remove(path)
-				}
+				stats.torrentFiles++
 			} else {
-				// No checks required. Downloader will clobber it into shape after reset on next run.
-				logger.Debug("file is in preverified", "path", path)
+				stats.dataFiles++
 			}
 			return nil
 		},
 	)
+}
+
+// Decides whether to remove a file, and logs the reasoning.
+func (me *reset) decideRemove(file resetItemInfo) bool {
+	logger := me.logger
+	path := file.path
+	if !file.inPreverified {
+		logger.Debug("file NOT in preverified list", "path", path)
+		return me.removeUnknown
+	}
+	if file.isTorrent {
+		mi, err := metainfo.LoadFromFile(file.realFilePath())
+		if err != nil {
+			logger.Error("error loading metainfo file", "path", path, "err", err)
+			return true
+		}
+		expectedHash := file.hash.Unwrap()
+		if mi.HashInfoBytes().String() == expectedHash {
+			logger.Debug("torrent file matches preverified hash", "path", path)
+			return false
+		} else {
+			logger.Info("torrent file infohash does NOT match preverified",
+				"path", path,
+				"expected", expectedHash,
+				"actual", mi.HashInfoBytes())
+			return true
+		}
+	} else {
+		// No checks required. Downloader will clobber it into shape after reset on next run.
+		logger.Debug("data file is in preverified", "path", path)
+		return false
+	}
 }
