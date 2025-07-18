@@ -119,8 +119,9 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 	for _, t := range s.d.torrentClient.Torrents() {
 		t.AddWebSeeds(s.d.cfg.WebSeedUrls, s.d.addWebSeedOpts...)
 	}
-	if err := wg.Wait(); err != nil {
-		return nil, fmt.Errorf("adding torrents: %w", err)
+	log.Warn("[dbg] adding trackers to all torrents")
+	for _, t := range s.d.torrentClient.Torrents() {
+		t.AddTrackers(Trackers)
 	}
 	progress.Store(int32(len(request.Items)))
 

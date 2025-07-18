@@ -326,7 +326,6 @@ func (d *Downloader) addTorrentSpec(
 	name string,
 ) (t *torrent.Torrent, first bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
-	ts.Trackers = Trackers
 	ts.Webseeds = nil
 	// I wonder how this should be handled for AddNewSeedableFile. What if there's bad piece
 	// completion data? We might want to clobber any piece completion and force the client to accept
