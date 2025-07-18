@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -81,26 +82,35 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 		}
 	}()
 
+	wg, ctx := errgroup.WithContext(ctx)
 	for i, it := range request.Items {
-		progress.Store(int32(i))
 		if it.Path == "" {
 			return nil, errors.New("field 'path' is required")
 		}
 
-		if it.TorrentHash == nil {
-			// if we don't have the torrent hash then we seed a new snapshot
-			// TODO: Make the torrent in place then call addPreverifiedTorrent.
-			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
-				return nil, err
+		i := i
+		it := it
+		wg.Go(func() error {
+			defer progress.Store(int32(i))
+			if it.TorrentHash == nil {
+				// if we don't have the torrent hash then we seed a new snapshot
+				// TODO: Make the torrent in place then call addPreverifiedTorrent.
+				if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
+					return err
+				}
+				return nil
+			} else {
+				ih := Proto2InfoHash(it.TorrentHash)
+				if err := s.d.RequestSnapshot(ih, it.Path); err != nil {
+					err = fmt.Errorf("requesting snapshot %s with infohash %v: %w", it.Path, ih, err)
+					return err
+				}
 			}
-			continue
-		} else {
-			ih := Proto2InfoHash(it.TorrentHash)
-			if err := s.d.RequestSnapshot(ih, it.Path); err != nil {
-				err = fmt.Errorf("requesting snapshot %s with infohash %v: %w", it.Path, ih, err)
-				return nil, err
-			}
-		}
+			return nil
+		})
+	}
+	if err := wg.Wait(); err != nil {
+		return nil, fmt.Errorf("adding torrents: %w", err)
 	}
 	progress.Store(int32(len(request.Items)))
 

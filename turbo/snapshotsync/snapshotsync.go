@@ -436,6 +436,7 @@ func SyncSnapshots(
 				return ctx.Err()
 			default:
 			}
+
 			if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
 				log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
 				time.Sleep(10 * time.Second)
