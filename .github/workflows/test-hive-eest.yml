@@ -9,7 +9,7 @@ on:
 
 jobs:
   test-hive-eest:
-    runs-on: ubuntu-latest-devops-large
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Hive
         uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --client erigon --sim.parallelism=4 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eest/consume-engine' --client erigon --sim.parallelism=2 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
