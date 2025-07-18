@@ -356,9 +356,9 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 	compositeS := string(append(address[:], key[:]...))
 	vb := value.Bytes32() // using [32]byte instead of []byte to avoid heap escape
 	w.writeLists[kv.StorageDomain.String()].Push(compositeS, vb[32-value.ByteLen():])
-	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, key, vb[32-value.ByteLen():])
-	}
+	//if w.trace {
+	fmt.Printf("storage: %x,%x,%x\n", address, key, vb[32-value.ByteLen():])
+	//}
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(address, incarnation, key, vb[32-value.ByteLen():])
 	}

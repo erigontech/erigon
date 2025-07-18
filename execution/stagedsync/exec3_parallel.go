@@ -157,9 +157,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	ibs.SetTrace(task.execTask.Task.(*exec.TxTask).Trace)
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
-	ibs.SetTrace(txIndex < 0)
 	ibs.ApplyVersionedWrites(result.TxOut)
-	ibs.SetTrace(false)
 	ibs.SetVersionMap(&state.VersionMap{})
 
 	txTask, ok := task.Task.(*exec.TxTask)
