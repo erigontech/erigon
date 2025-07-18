@@ -19,7 +19,6 @@ package freezeblocks_test
 import (
 	"context"
 	"math/big"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -67,9 +66,9 @@ func TestDump(t *testing.T) {
 		t.Skip()
 	}
 
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win")
-	}
+	// if runtime.GOOS == "windows" {
+	// 	t.Skip("fix me on win")
+	// }
 
 	type test struct {
 		chainConfig *chain.Config
@@ -261,7 +260,7 @@ func TestDump(t *testing.T) {
 
 			logger := log.New()
 
-			tmpDir, snapDir := t.TempDir(), t.TempDir()
+			tmpDir, snapDir := t.TempDir(), m.Dirs.Snap
 			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 

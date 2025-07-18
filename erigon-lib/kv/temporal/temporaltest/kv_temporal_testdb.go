@@ -36,7 +36,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 	}
 
 	var rawDB kv.RwDB
-	if tb != nil {
+	if len(dirs.DataDir) == 0 {
 		rawDB = memdb.NewTestDB(tb, kv.ChainDB)
 	} else {
 		rawDB = memdb.New(dirs.DataDir, kv.ChainDB)
