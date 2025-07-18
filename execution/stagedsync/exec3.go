@@ -1074,7 +1074,7 @@ func ExecV3(ctx context.Context,
 							}
 
 							if blockApplyCount != applyResult.ApplyCount {
-								return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, applyResult.ApplyCount, blockApplyCount)
+								return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockApplyCount, applyResult.ApplyCount)
 							}
 							blockApplyCount = 0
 

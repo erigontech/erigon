@@ -1323,7 +1323,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 				result := blockExecutor.results[len(blockExecutor.results)-1]
 
-				writeSet, err := func() (map[string]*libstate.KvList, error) {
+				writeSet, err := func() (state.WriteLists, error) {
 					pe.RLock()
 					defer pe.RUnlock()
 
@@ -1371,6 +1371,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if err != nil {
 					return err
 				}
+
+				blockResult.ApplyCount += writeSet.ApplyCount()
 
 				blockExecutor.applyResults <- &txResult{
 					blockNum:   blockResult.BlockNum,
