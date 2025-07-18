@@ -128,7 +128,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		"data", reset.stats.removed.dataFiles)
 	// Remove chaindata last, so that the config is available if there's an error.
 	if removeChainData {
-		logger.Warn("Removing chaindata dir", "path", dirs.Chaindata)
+		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
 		if !dryRun {
 			err = os.RemoveAll(dirs.Chaindata)
 		}
