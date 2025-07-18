@@ -85,7 +85,7 @@ func (noopBridgeStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo u
 func (noopBridgeStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	return nil, errors.New("noop")
 }
-func (noopBridgeStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, ok bool, err error) {
+func (noopBridgeStore) BlockEventIdsRange(ctx context.Context, blockHash common.Hash, blockNum uint64) (start uint64, end uint64, ok bool, err error) {
 	return 0, 0, false, errors.New("noop")
 }
 func (noopBridgeStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[common.Hash]uint64) error {
@@ -106,7 +106,7 @@ func (noopBridgeStore) Unwind(ctx context.Context, blockNum uint64) error {
 func (noopBridgeStore) BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error) {
 	return 0, errors.New("noop")
 }
-func (noopBridgeStore) EventsByBlock(ctx context.Context, blockNum uint64) ([]rlp.RawValue, error) {
+func (noopBridgeStore) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return nil, errors.New("noop")
 }
 func (noopBridgeStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
