@@ -327,6 +327,7 @@ func (d *Downloader) addTorrentSpec(
 ) (t *torrent.Torrent, first bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.Webseeds = nil
+	ts.Trackers = nil // to reduce mutex contention. will add later to all torrents
 	// I wonder how this should be handled for AddNewSeedableFile. What if there's bad piece
 	// completion data? We might want to clobber any piece completion and force the client to accept
 	// what we provide, assuming we trust our own metainfo generation more.
