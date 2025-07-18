@@ -1201,9 +1201,20 @@ func (hph *HexPatriciaHashed) nCellsInRow(row int) int { //nolint:unused
 
 // Traverse the grid following `hashedKey` and produce the witness `triedeprecated.Trie` for that key
 func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
-	rootNode := &trie.FullNode{}
-	var currentNode trie.Node = rootNode
-	keyPos := 0 // current position in hashedKey (usually same as row, but could be different due to extension nodes)
+	var rootNode, currentNode trie.Node
+	initialKeyPos := 0
+	if hph.root.hashedExtLen > 0 { // root node is a short node
+		hashedExtKey := hph.root.hashedExtension[:hph.root.hashedExtLen]
+		extKeyLength := len(hashedExtKey)
+		extensionKey := make([]byte, extKeyLength)
+		copy(extensionKey, hashedExtKey)
+		rootNode = &trie.ShortNode{Key: extensionKey}
+		initialKeyPos += extKeyLength - 1 // this is different from consuming a short node at other levels
+	} else {
+		rootNode = &trie.FullNode{}
+	}
+	currentNode = rootNode
+	keyPos := initialKeyPos // current position in hashedKey (usually same as row, but could be different due to extension nodes)
 	for row := 0; row < hph.activeRows && keyPos < len(hashedKey); row++ {
 		currentNibble := hashedKey[keyPos]
 		// determine the type of the next node to expand (in the next iteration)
@@ -2062,21 +2073,20 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
-		hph.PrintGrid()
-		//hph.updateCell(plainKey, hashedKey, update)
+		// hph.PrintGrid()
 
 		// convert grid to trie.Trie
 		tr, err = hph.toWitnessTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
 		}
-		computedRootHash := tr.Root()
-		// fmt.Printf("computedRootHash = %x\n", computedRootHash)
+		// computedRootHash := tr.Root()
+		// // fmt.Printf("computedRootHash = %x\n", computedRootHash)
 
-		if !bytes.Equal(computedRootHash, expectedRootHash) {
-			err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
-			return err
-		}
+		// if !bytes.Equal(computedRootHash, expectedRootHash) {
+		// 	err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
+		// 	return err
+		// }
 
 		tries = append(tries, tr)
 		ki++

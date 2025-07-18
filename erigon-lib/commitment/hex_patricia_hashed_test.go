@@ -1859,11 +1859,12 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 	addrWithSingleton := []byte{}
 	builder := NewUpdateBuilder()
-	for i, _ := range plainKeysList {
+	for i := range plainKeysList {
 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 	}
 	addrWithSingleton = common.Copy(plainKeysList[1])
 	_ = addrWithSingleton
+	// TODO: test storage slots later
 	// builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
 
 	plainKeys, updates := builder.Build()
@@ -1878,12 +1879,9 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 	toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 	defer toWitness.Close()
-	toWitness.TouchPlainKey(string(plainKeysList[3]), nil, toProcess.TouchAccount)
-
-	// toWitness.HashSort(context.Background(), func(hk []byte, pk []byte, update *Update) error {
-	// 	fmt.Printf("toWitness %x -> %x\n", pk, hk)
-	// 	return nil
-	// })
+	for i := range plainKeysList {
+		toWitness.TouchPlainKey(string(plainKeysList[i]), nil, toProcess.TouchAccount)
+	}
 
 	witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, root, "")
 	require.NoError(t, err)
