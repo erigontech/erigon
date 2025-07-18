@@ -1037,6 +1037,8 @@ func ExecV3(ctx context.Context,
 				executor.domains().SetChangesetAccumulator(changeset)
 			}
 
+			blockApplyCount := 0
+
 			for {
 				select {
 				case request := <-asyncTxChan:
@@ -1047,6 +1049,7 @@ func ExecV3(ctx context.Context,
 						uncommittedGas += applyResult.gasUsed
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 						pe.rs.SetTrace(dbg.TraceApply && traceBlock(applyResult.blockNum))
+						blockApplyCount += applyResult.writeSet.ApplyCount()
 						err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
 							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false)
@@ -1069,6 +1072,11 @@ func ExecV3(ctx context.Context,
 							if b.NumberU64() != applyResult.BlockNum {
 								return fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, b.NumberU64(), applyResult.BlockHash)
 							}
+
+							if blockApplyCount != applyResult.ApplyCount {
+								return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, applyResult.ApplyCount, blockApplyCount)
+							}
+							blockApplyCount = 0
 
 							if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 								b.HeaderNoCopy(), pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {

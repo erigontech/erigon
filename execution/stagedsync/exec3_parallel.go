@@ -109,6 +109,7 @@ type blockResult struct {
 	lastTxNum   uint64
 	complete    bool
 	isPartial   bool
+	ApplyCount  int
 	TxIO        *state.VersionedIO
 	Receipts    types.Receipts
 	Stats       map[int]ExecutionStat
@@ -125,7 +126,7 @@ type txResult struct {
 	logs       []*types.Log
 	traceFroms map[common.Address]struct{}
 	traceTos   map[common.Address]struct{}
-	writeSet   map[string]*libstate.KvList
+	writeSet   state.WriteLists
 }
 
 type execTask struct {
@@ -992,21 +993,21 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 		applyResult.writeSet = stateWriter.WriteSet()
 
-		if dbg.TraceApply && traceBlock(applyResult.blockNum) {
-			if applyResult.writeSet != nil {
+		if applyResult.writeSet != nil {
+			be.applyCount += applyResult.writeSet.ApplyCount()
+			if dbg.TraceApply && traceBlock(applyResult.blockNum) {
 				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
 					list, ok := applyResult.writeSet[domain.String()]
 					if !ok {
 						continue
 					}
 
-					for _, _ = range list.Keys {
-						be.applyCount++
-						//if list.Vals[i] == nil {
-						//	fmt.Printf("%d del %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key))
-						//} else {
-						//	fmt.Printf("%d put %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key), list.Vals[i])
-						//}
+					for i, key := range list.Keys {
+						if list.Vals[i] == nil {
+							fmt.Printf("%d del %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key))
+						} else {
+							fmt.Printf("%d put %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key), list.Vals[i])
+						}
 					}
 				}
 			}
@@ -1042,9 +1043,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		if dbg.TraceApply && traceBlock(be.blockNum) {
-			fmt.Println(be.blockNum, "apply count", be.applyCount)
-		}
+		fmt.Println(be.blockNum, "apply count", be.applyCount)
+
 		be.result = &blockResult{
 			be.blockNum,
 			txTask.BlockTime(),
@@ -1056,6 +1056,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txTask.Version().TxNum,
 			true,
 			isPartial,
+			be.applyCount,
 			be.blockIO,
 			receipts,
 			be.stats,
@@ -1083,6 +1084,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		lastTxNum,
 		false,
 		len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
+		be.applyCount,
 		be.blockIO,
 		nil,
 		be.stats,

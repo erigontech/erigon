@@ -255,7 +255,7 @@ func (s *StateV3Buffered) WithDomains(domains *state.SharedDomains) *StateV3Buff
 type BufferedWriter struct {
 	rs           *StateV3Buffered
 	trace        bool
-	writeLists   map[string]*state.KvList
+	writeLists   WriteLists
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
@@ -279,7 +279,7 @@ func (w *BufferedWriter) SetTxNum(ctx context.Context, txNum uint64) {
 }
 func (w *BufferedWriter) SetTx(tx kv.Tx) {}
 
-func (w *BufferedWriter) WriteSet() map[string]*state.KvList {
+func (w *BufferedWriter) WriteSet() WriteLists {
 	return w.writeLists
 }
 
@@ -758,6 +758,21 @@ type WriteLists map[string]*state.KvList
 
 func (v WriteLists) Return() {
 	returnWriteList(v)
+}
+
+func (v WriteLists) ApplyCount() int {
+	applyCount := 0
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
+		list, ok := v[domain.String()]
+		if !ok {
+			continue
+		}
+
+		for _, _ = range list.Keys {
+			applyCount++
+		}
+	}
+	return applyCount
 }
 
 var writeListPool = sync.Pool{
