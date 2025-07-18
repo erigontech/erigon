@@ -762,7 +762,7 @@ func (v WriteLists) Return() {
 
 func (v WriteLists) ApplyCount() int {
 	applyCount := 0
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		list, ok := v[domain.String()]
 		if !ok {
 			continue
