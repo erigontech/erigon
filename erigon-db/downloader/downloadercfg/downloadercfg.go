@@ -291,7 +291,7 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		return snapcfg.NewNonSeededCfg(chainName), nil
 	}
 
-	preverifiedPath := filepath.Join(dirs.Snap, "preverified.toml")
+	preverifiedPath := dirs.PreverifiedPath()
 	exists, err := dir.FileExist(preverifiedPath)
 	if err != nil {
 		return nil, err
@@ -321,9 +321,8 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 // from the network. Should only occur when full preverified snapshot is complete. Probably doesn't
 // belong in this package, and neither does LoadSnapshotHashes.
 func SaveSnapshotHashes(dirs datadir.Dirs, chainName string) (err error) {
-	preverifiedPath := filepath.Join(dirs.Snap, "preverified.toml")
 	// TODO: Should the file data be checked to match?
-	err = dir.WriteExclusiveFileWithFsync(preverifiedPath, snapcfg.GetToml(chainName), 0o444)
+	err = dir.WriteExclusiveFileWithFsync(dirs.PreverifiedPath(), snapcfg.GetToml(chainName), 0o444)
 	if errors.Is(err, os.ErrExist) {
 		err = nil
 	}

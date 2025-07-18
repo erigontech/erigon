@@ -356,3 +356,9 @@ func (d Dirs) RenameNewVersions() error {
 
 	return nil
 }
+
+func (d Dirs) PreverifiedPath() string {
+	return filepath.Join(d.Snap, PreverifiedFileName)
+}
+
+const PreverifiedFileName = "preverified.toml"

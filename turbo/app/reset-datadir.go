@@ -104,7 +104,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		"chain", chainName,
 	)
 	removeFunc := func(path string) error {
-		logger.Debug("Removing snapshot file", "path", path)
+		logger.Debug("Removing snapshot dir file", "path", path)
 		return os.Remove(filepath.Join(dirs.Snap, path))
 	}
 	if dryRun {
@@ -137,7 +137,16 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 			return
 		}
 	}
-	return
+	err = removeFunc(datadir.PreverifiedFileName)
+	if err == nil {
+		logger.Info("Removed snapshots lock file", "path", datadir.PreverifiedFileName)
+	} else {
+		if !errors.Is(err, fs.ErrNotExist) {
+			err = fmt.Errorf("removing snapshot lock file: %w", err)
+			return
+		}
+	}
+	return nil
 }
 
 func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
@@ -221,6 +230,9 @@ func (me *reset) walkSnapshots(
 				return fmt.Errorf("error walking path %v: %w", path, err)
 			}
 			if d.IsDir() {
+				return nil
+			}
+			if path == datadir.PreverifiedFileName {
 				return nil
 			}
 			slashPath := filepath.ToSlash(path)
