@@ -171,10 +171,10 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 
 	p.prevTaskGas = taskGas
 	p.prevTaskDuration = taskDur
-	p.prevTaskReadDuration = curTaskReadDur
-	p.prevAccountReadDuration = curAccountReadDur
-	p.prevStorageReadDuration = curStorageReadDur
-	p.prevCodeReadDuration = curCodeReadDur
+	p.prevTaskReadDuration = taskReadDur
+	p.prevAccountReadDuration = accountReadDur
+	p.prevStorageReadDuration = storageReadDur
+	p.prevCodeReadDuration = codeReadDur
 	p.prevActivations = activations
 
 	var readRatio float64
@@ -264,7 +264,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
-			"tsrdur", fmt.Sprintf("%dµs,a=%dµs,s=%dµs,c=%dµs(%.2f%%)", avgReadDur.Microseconds(), avgAccountReadDur.Microseconds(), avgStorageReadDur.Microseconds(), avgCodeReadDur.Microseconds(), readRatio),
+			"tsrdur", fmt.Sprintf("%dµs(%.2f%%),a=%dµs,s=%dµs,c=%dµs", avgReadDur.Microseconds(), readRatio, avgAccountReadDur.Microseconds(), avgStorageReadDur.Microseconds(), avgCodeReadDur.Microseconds()),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
 			"rd", common.PrettyCounter(curReadCount),
 			"wrt", common.PrettyCounter(curReadCount),
