@@ -27,8 +27,9 @@ import (
 
 const (
 	GasLimitBoundDivisor uint64 = 1024               // The bound divisor of the gas limit, used in update calculations.
-	MinGasLimit          uint64 = 5000               // Minimum the gas limit may ever be.
-	MaxGasLimit          uint64 = 0x7fffffffffffffff // Maximum the gas limit may ever be.
+	MinBlockGasLimit     uint64 = 5000               // Minimum the block gas limit may ever be.
+	MaxBlockGasLimit     uint64 = 0x7fffffffffffffff // Maximum the block gas limit may ever be.
+	MaxTxnGasLimit       uint64 = 30_000_000         // See EIP-7825: Transaction Gas Limit Cap.
 	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
@@ -128,14 +129,21 @@ const (
 	// Introduced in Tangerine Whistle (Eip 150)
 	CreateBySelfdestructGas uint64 = 25000
 
-	BaseFeeChangeDenominator          = 8          // Bounds the amount the base fee can change between blocks.
-	BaseFeeChangeDenominatorPostDelhi = 16         // Bounds the amount the base fee can change between blocks post delhi hard fork for polygon networks.
-	ElasticityMultiplier              = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
-	InitialBaseFee                    = 1000000000 // Initial base fee for EIP-1559 blocks.
+	BaseFeeChangeDenominator           = 8          // Bounds the amount the base fee can change between blocks.
+	BaseFeeChangeDenominatorPostDelhi  = 16         // Bounds the amount the base fee can change between blocks post delhi hard fork for polygon networks.
+	BaseFeeChangeDenominatorPostBhilai = 64         // Bounds the amount the base fee can change between blocks post bhilai hard fork for polygon networks.
+	ElasticityMultiplier               = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
+	InitialBaseFee                     = 1000000000 // Initial base fee for EIP-1559 blocks.
 
 	MaxCodeSize              = 24576           // Maximum bytecode to permit for a contract
 	MaxCodeSizePostAhmedabad = 32768           // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
 	MaxInitCodeSize          = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
+
+	// EIP-7907: Meter Contract Code Size And Increase Limit
+	MaxCodeSizeEip7907             = 262144                 // Maximum bytecode to permit for a contract post EIP-7907
+	MaxInitCodeSizeEip7907         = 2 * MaxCodeSizeEip7907 // Maximum initcode to permit in a creation transaction and create instructions post EIP 7907
+	LargeCodeThresholdEip7907      = 24576                  // We charge extra gas if the code size exceeds this threshold
+	LargeCodeAccessWordCostEip7907 = 2                      // How much extra we charge per word above large code threshold
 
 	// Precompiled contract gas prices
 
@@ -177,7 +185,15 @@ const (
 	PointEvaluationGas   uint64 = 50000
 	FieldElementsPerBlob        = 4096 // each field element is 32 bytes
 	BlobSize                    = FieldElementsPerBlob * 32
-	BlobGasPerBlob       uint64 = 0x20000
+	GasPerBlob           uint64 = 1 << 17
+	BlobBaseCost         uint64 = 1 << 14 // EIP-7918: Blob base fee bounded by execution cost
+
+	// EIP-7594: PeerDAS - Peer Data Availability Sampling
+	// See https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/polynomial-commitments-sampling.md
+	FieldElementsPerExtBlob        = 2 * FieldElementsPerBlob                       // Number of field elements in a Reed-Solomon extended blob
+	FieldElementsPerCell    uint64 = 64                                             // Number of Field elements in a cell
+	BytesPerCell                   = FieldElementsPerCell * 32                      // The number of bytes in a cell
+	CellsPerExtBlob                = FieldElementsPerExtBlob / FieldElementsPerCell // The number of cells in an extended blob
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas uint64 = 3450
@@ -191,36 +207,36 @@ const (
 	PerEmptyAccountCost = 25000
 	PerAuthBaseCost     = 12500
 
-	// Arbiturm constants
-	BlobTxBlobGasPerBlob             = 1 << 17                  // Gas consumption of a single data blob (== blob byte size)
-	BlobTxMinBlobGasprice            = 1                        // Minimum gas price for a blob transaction
-	BlobTxBlobGaspriceUpdateFraction = 3338477                  // Controls the maximum rate of change for blob gas price
-	BlobTxFieldElementsPerBlob       = 4096                     // Number of field elements stored in a single data blob
-	BlobTxTargetBlobGasPerBlock      = 3 * BlobTxBlobGasPerBlob // Target consumable blob gas for data blobs per block (for 1559-like pricing)
-	MaxBlobGasPerBlock               = 6 * BlobTxBlobGasPerBlob // Maximum consumable blob gas for data blobs per block
-	SloadGas                         = uint64(50)               // Multiplied by the number of 32-byte words that are copied (round up) for any *COPY operation and added.
+	// EIP-7934: RLP Execution Block Size Limit
+	MaxBlockSize             = 10_485_760 // 10 MiB
+	MaxBlockSizeSafetyMargin = 2_097_152  // 2 MiB
+	MaxRlpBlockSize          = MaxBlockSize - MaxBlockSizeSafetyMargin
 )
 
-// EIP-7702: Set EOA account code
-var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
-var DelegatedCodeHash = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
+var (
+	// EIP-7702: Set EOA account code
+	DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
+	DelegatedCodeHash          = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
 
-// EIP-4788: Beacon block root in the EVM
-var BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
+	// EIP-4788: Beacon block root in the EVM
+	BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
 
-// EIP-2935: Historical block hashes in state
-var HistoryStorageAddress = common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935")
+	// EIP-2935: Historical block hashes in state
+	HistoryStorageAddress = common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935")
 
-// EIP-7002: Execution layer triggerable withdrawals
-var WithdrawalRequestAddress = common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002")
+	// EIP-7002: Execution layer triggerable withdrawals
+	WithdrawalRequestAddress = common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002")
 
-// EIP-7251
-var ConsolidationRequestAddress = common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251")
+	// EIP-7251
+	ConsolidationRequestAddress = common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251")
+)
 
-// Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
-var Bls12381MSMDiscountTableG1 = [128]uint64{1000, 949, 848, 797, 764, 750, 738, 728, 719, 712, 705, 698, 692, 687, 682, 677, 673, 669, 665, 661, 658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627, 625, 623, 621, 619, 617, 615, 613, 611, 609, 608, 606, 604, 603, 601, 599, 598, 596, 595, 593, 592, 591, 589, 588, 586, 585, 584, 582, 581, 580, 579, 577, 576, 575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545, 544, 543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531, 530, 529, 528, 528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519}
+var (
+	// Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
+	Bls12381MSMDiscountTableG1 = [128]uint64{1000, 949, 848, 797, 764, 750, 738, 728, 719, 712, 705, 698, 692, 687, 682, 677, 673, 669, 665, 661, 658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627, 625, 623, 621, 619, 617, 615, 613, 611, 609, 608, 606, 604, 603, 601, 599, 598, 596, 595, 593, 592, 591, 589, 588, 586, 585, 584, 582, 581, 580, 579, 577, 576, 575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545, 544, 543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531, 530, 529, 528, 528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519}
 
-var Bls12381MSMDiscountTableG2 = [128]uint64{1000, 1000, 923, 884, 855, 832, 812, 796, 782, 770, 759, 749, 740, 732, 724, 717, 711, 704, 699, 693, 688, 683, 679, 674, 670, 666, 663, 659, 655, 652, 649, 646, 643, 640, 637, 634, 632, 629, 627, 624, 622, 620, 618, 615, 613, 611, 609, 607, 606, 604, 602, 600, 598, 597, 595, 593, 592, 590, 589, 587, 586, 584, 583, 582, 580, 579, 578, 576, 575, 574, 573, 571, 570, 569, 568, 567, 566, 565, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 552, 551, 550, 549, 548, 547, 546, 545, 545, 544, 543, 542, 541, 541, 540, 539, 538, 537, 537, 536, 535, 535, 534, 533, 532, 532, 531, 530, 530, 529, 528, 528, 527, 526, 526, 525, 524, 524}
+	Bls12381MSMDiscountTableG2 = [128]uint64{1000, 1000, 923, 884, 855, 832, 812, 796, 782, 770, 759, 749, 740, 732, 724, 717, 711, 704, 699, 693, 688, 683, 679, 674, 670, 666, 663, 659, 655, 652, 649, 646, 643, 640, 637, 634, 632, 629, 627, 624, 622, 620, 618, 615, 613, 611, 609, 607, 606, 604, 602, 600, 598, 597, 595, 593, 592, 590, 589, 587, 586, 584, 583, 582, 580, 579, 578, 576, 575, 574, 573, 571, 570, 569, 568, 567, 566, 565, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 552, 551, 550, 549, 548, 547, 546, 545, 545, 544, 543, 542, 541, 541, 540, 539, 538, 537, 537, 536, 535, 535, 534, 533, 532, 532, 531, 530, 530, 529, 528, 528, 527, 526, 526, 525, 524, 524}
+)
 
 var (
 	DifficultyBoundDivisor = big.NewInt(2048)   // The bound divisor of the difficulty, used in the update calculations.
@@ -229,29 +245,28 @@ var (
 	DurationLimit          = big.NewInt(13)     // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
 )
 
-// System Arbitrum contracts.
-var (
-	// SystemAddress is where the system-transaction is sent from as per EIP-4788
-	SystemAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
+// See EIP-7840: Add blob schedule to EL config files
+type BlobConfig struct {
+	Target                uint64 `json:"target"`
+	Max                   uint64 `json:"max"`
+	BaseFeeUpdateFraction uint64 `json:"baseFeeUpdateFraction"`
+}
 
-	// EIP-4788 - Beacon block root in the EVM
-	//BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
-	BeaconRootsCode = common.FromHex("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500")
+var DefaultCancunBlobConfig = BlobConfig{
+	Target:                3,
+	Max:                   6,
+	BaseFeeUpdateFraction: 3338477,
+}
 
-	// EIP-2935 - Serve historical block hashes from state
-	//HistoryStorageAddress = common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935")
-	HistoryStorageCode = common.FromHex("3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500")
-	// EIP-2935 - Serve historical block hashes from state (Arbitrum), majorly differ from the original in two aspects:
-	// 1. The buffer size is 393168 blocks instead of 8191.
-	// 2. Instead of using number (L1 block number), it uses arb_block_num (L2 block number).
-	// https://github.com/OffchainLabs/sys-asm/blob/main/src/execution_hash/main.eas
-	HistoryStorageCodeArbitrum = common.FromHex("3373fffffffffffffffffffffffffffffffffffffffe1460605760203603605c575f3563a3b1b31d5f5260205f6004601c60645afa15605c575f51600181038211605c57816205ffd0910311605c576205ffd09006545f5260205ff35b5f5ffd5b5f356205ffd0600163a3b1b31d5f5260205f6004601c60645afa15605c575f5103065500")
+var DefaultPragueBlobConfig = BlobConfig{
+	Target:                6,
+	Max:                   9,
+	BaseFeeUpdateFraction: 5007716,
+}
 
-	// EIP-7002 - Execution layer triggerable withdrawals
-	WithdrawalQueueAddress = common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002")
-	WithdrawalQueueCode    = common.FromHex("3373fffffffffffffffffffffffffffffffffffffffe1460cb5760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff146101f457600182026001905f5b5f82111560685781019083028483029004916001019190604d565b909390049250505036603814608857366101f457346101f4575f5260205ff35b34106101f457600154600101600155600354806003026004013381556001015f35815560010160203590553360601b5f5260385f601437604c5fa0600101600355005b6003546002548082038060101160df575060105b5f5b8181146101835782810160030260040181604c02815460601b8152601401816001015481526020019060020154807fffffffffffffffffffffffffffffffff00000000000000000000000000000000168252906010019060401c908160381c81600701538160301c81600601538160281c81600501538160201c81600401538160181c81600301538160101c81600201538160081c81600101535360010160e1565b910180921461019557906002556101a0565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff14156101cd57505f5b6001546002828201116101e25750505f6101e8565b01600290035b5f555f600155604c025ff35b5f5ffd")
-
-	// EIP-7251 - Increase the MAX_EFFECTIVE_BALANCE
-	ConsolidationQueueAddress = common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251")
-	ConsolidationQueueCode    = common.FromHex("3373fffffffffffffffffffffffffffffffffffffffe1460d35760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1461019a57600182026001905f5b5f82111560685781019083028483029004916001019190604d565b9093900492505050366060146088573661019a573461019a575f5260205ff35b341061019a57600154600101600155600354806004026004013381556001015f358155600101602035815560010160403590553360601b5f5260605f60143760745fa0600101600355005b6003546002548082038060021160e7575060025b5f5b8181146101295782810160040260040181607402815460601b815260140181600101548152602001816002015481526020019060030154905260010160e9565b910180921461013b5790600255610146565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff141561017357505f5b6001546001828201116101885750505f61018e565b01600190035b5f555f6001556074025ff35b5f5ffd")
-)
+// TODO(yperbasis): update when Fusaka's blob config is decided
+var DefaultOsakaBlobConfig = BlobConfig{
+	Target:                6,
+	Max:                   9,
+	BaseFeeUpdateFraction: 5007716,
+}

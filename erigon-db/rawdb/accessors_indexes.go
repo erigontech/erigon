@@ -22,23 +22,23 @@ package rawdb
 import (
 	"encoding/binary"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // TxLookupEntry is a positional metadata to help looking up the data content of
 // a transaction or receipt given only its hash.
 type TxLookupEntry struct {
-	BlockHash  libcommon.Hash
+	BlockHash  common.Hash
 	BlockIndex uint64
 	Index      uint64
 }
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (blockNumber *uint64, txNum *uint64, err error) {
+func ReadTxLookupEntry(db kv.Getter, txnHash common.Hash) (blockNumber *uint64, txNum *uint64, err error) {
 	data, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
 	if err != nil {
 		return nil, nil, err
@@ -67,6 +67,6 @@ func WriteTxLookupEntries(db kv.Putter, block *types.Block, txNum uint64) {
 }
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
-func DeleteTxLookupEntry(db kv.Putter, hash libcommon.Hash) error {
+func DeleteTxLookupEntry(db kv.Putter, hash common.Hash) error {
 	return db.Delete(kv.TxLookup, hash.Bytes())
 }

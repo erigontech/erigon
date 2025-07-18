@@ -22,10 +22,10 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
@@ -75,7 +75,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.S
 		return nil, err
 	}
 
-	result, err := syscall(libcommon.HexToAddress(c.borConfig.ValidatorContract), data)
+	result, err := syscall(common.HexToAddress(c.borConfig.ValidatorContract), data)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ type ChainHeaderReader interface {
 	// bor span with given ID
 	BorSpan(spanId uint64) *heimdall.Span
 	GetHeaderByNumber(number uint64) *types.Header
-	GetHeader(hash libcommon.Hash, number uint64) *types.Header
+	GetHeader(hash common.Hash, number uint64) *types.Header
 	FrozenBlocks() uint64
 }
 
@@ -185,7 +185,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.
 		return err
 	}
 
-	_, err = syscall(libcommon.HexToAddress(c.borConfig.ValidatorContract), data)
+	_, err = syscall(common.HexToAddress(c.borConfig.ValidatorContract), data)
 
 	return err
 }

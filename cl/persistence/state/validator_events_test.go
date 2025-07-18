@@ -19,7 +19,7 @@ package state_accessors
 import (
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
 )
@@ -47,41 +47,41 @@ func TestStateEvents(t *testing.T) {
 		return nil
 	}, func(validatorIndex, exitEpoch uint64) error {
 		if validatorIndex == 1 {
-			require.Equal(t, exitEpoch, uint64(3))
+			require.Equal(t, uint64(3), exitEpoch)
 		} else {
-			require.Equal(t, exitEpoch, uint64(2))
+			require.Equal(t, uint64(2), exitEpoch)
 		}
 		return nil
 	}, func(validatorIndex, withdrawableEpoch uint64) error {
 		if validatorIndex == 1 {
-			require.Equal(t, withdrawableEpoch, uint64(4))
+			require.Equal(t, uint64(4), withdrawableEpoch)
 		} else {
-			require.Equal(t, withdrawableEpoch, uint64(3))
+			require.Equal(t, uint64(3), withdrawableEpoch)
 		}
 		return nil
-	}, func(validatorIndex uint64, withdrawalCredentials libcommon.Hash) error {
+	}, func(validatorIndex uint64, withdrawalCredentials common.Hash) error {
 		if validatorIndex == 1 {
-			require.Equal(t, withdrawalCredentials, libcommon.Hash([32]byte{2}))
+			require.Equal(t, withdrawalCredentials, common.Hash([32]byte{2}))
 		} else {
-			require.Equal(t, withdrawalCredentials, libcommon.Hash([32]byte{1}))
+			require.Equal(t, withdrawalCredentials, common.Hash([32]byte{1}))
 		}
 		return nil
 	}, func(validatorIndex, activationEpoch uint64) error {
 		if validatorIndex == 1 {
-			require.Equal(t, activationEpoch, uint64(5))
+			require.Equal(t, uint64(5), activationEpoch)
 		} else {
-			require.Equal(t, activationEpoch, uint64(4))
+			require.Equal(t, uint64(4), activationEpoch)
 		}
 		return nil
 	}, func(validatorIndex, activationEligibilityEpoch uint64) error {
 		if validatorIndex == 1 {
-			require.Equal(t, activationEligibilityEpoch, uint64(6))
+			require.Equal(t, uint64(6), activationEligibilityEpoch)
 		} else {
-			require.Equal(t, activationEligibilityEpoch, uint64(5))
+			require.Equal(t, uint64(5), activationEligibilityEpoch)
 		}
 		return nil
 	}, func(validatorIndex uint64, slashed bool) error {
-		require.Equal(t, slashed, true)
+		require.True(t, slashed)
 		return nil
 	}, events)
 

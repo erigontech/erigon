@@ -22,9 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 type readonlyGetSetter interface {
@@ -42,6 +40,8 @@ type testVM struct {
 	isEVMSliceTest    []bool
 	readOnlySliceTest []bool
 	currentIdx        *int
+
+	depth int
 }
 
 func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err error) {
@@ -66,13 +66,13 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	*evm.currentIdx++
 
 	if *evm.currentIdx < len(evm.readOnlySliceTest) {
-		res, err := run(evm.env, NewContract(
+		res, err := evm.env.interpreter.Run(NewContract(
 			&dummyContractRef{},
-			libcommon.Address{},
+			common.Address{},
 			new(uint256.Int),
 			0,
 			false,
-			evm.env.JumpDestCache,
+			evm.env.config.JumpDestCache,
 		), nil, evm.readOnlySliceTest[*evm.currentIdx])
 		return res, err
 	}
@@ -80,9 +80,10 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	return
 }
 
-func (evm *testVM) Depth() int {
-	return 0
-}
+func (evm *testVM) Depth() int { return evm.depth }
+
+func (evm *testVM) IncDepth() { evm.depth++ }
+func (evm *testVM) DecDepth() { evm.depth-- }
 
 type readOnlyState struct {
 	outer  bool
@@ -99,11 +100,11 @@ type dummyContractRef struct {
 	calledForEach bool
 }
 
-func (dummyContractRef) ReturnGas(*big.Int)             {}
-func (dummyContractRef) Address() libcommon.Address     { return libcommon.Address{} }
-func (dummyContractRef) Value() *big.Int                { return new(big.Int) }
-func (dummyContractRef) SetCode(libcommon.Hash, []byte) {}
-func (d *dummyContractRef) ForEachStorage(callback func(key, value libcommon.Hash) bool) {
+func (dummyContractRef) ReturnGas(*big.Int)          {}
+func (dummyContractRef) Address() common.Address     { return common.Address{} }
+func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
+func (dummyContractRef) SetCode(common.Hash, []byte) {}
+func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
 	d.calledForEach = true
 }
 func (d *dummyContractRef) SubBalance(amount *big.Int) {}
@@ -111,9 +112,3 @@ func (d *dummyContractRef) AddBalance(amount *big.Int) {}
 func (d *dummyContractRef) SetBalance(*big.Int)        {}
 func (d *dummyContractRef) SetNonce(uint64)            {}
 func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
-
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }

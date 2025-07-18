@@ -43,6 +43,7 @@ type BorConfig struct {
 	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already on Agra)
 	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
 	AhmedabadBlock             *big.Int          `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
+	BhilaiBlock                *big.Int          `json:"bhilaiBlock"`                // Bhilai switch block (nil = no fork, 0 = already on Ahmedabad)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 
 	sprints sprints
@@ -54,7 +55,7 @@ func (c *BorConfig) String() string {
 }
 
 func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
-	return chain.ConfigValueLookup(c.ProducerDelay, number)
+	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.ProducerDelay), number)
 }
 
 func (c *BorConfig) IsSprintStart(number uint64) bool {
@@ -112,11 +113,11 @@ func (c *BorConfig) CalculateSprintNumber(number uint64) uint64 {
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
-	return chain.ConfigValueLookup(c.BackupMultiplier, number)
+	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.BackupMultiplier), number)
 }
 
 func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
-	return chain.ConfigValueLookup(c.Period, number)
+	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.Period), number)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
@@ -168,8 +169,16 @@ func (c *BorConfig) GetAhmedabadBlock() *big.Int {
 	return c.AhmedabadBlock
 }
 
+func (c *BorConfig) IsBhilai(number uint64) bool {
+	return isForked(c.BhilaiBlock, number)
+}
+
+func (c *BorConfig) GetBhilaiBlock() *big.Int {
+	return c.BhilaiBlock
+}
+
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
-	return chain.ConfigValueLookup(c.StateSyncConfirmationDelay, number)
+	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.StateSyncConfirmationDelay), number)
 }
 
 func (c *BorConfig) StateReceiverContractAddress() common.Address {

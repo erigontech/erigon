@@ -21,20 +21,20 @@ import (
 	"fmt"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 // TxPoolAPI the interface for the txpool_ RPC commands
 type TxPoolAPI interface {
 	Content(ctx context.Context) (map[string]map[string]map[string]*ethapi.RPCTransaction, error)
-	ContentFrom(ctx context.Context, addr libcommon.Address) (map[string]map[string]*ethapi.RPCTransaction, error)
+	ContentFrom(ctx context.Context, addr common.Address) (map[string]map[string]*ethapi.RPCTransaction, error)
 }
 
 // TxPoolAPIImpl data structure to store things needed for net_ commands
@@ -65,9 +65,9 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		"queued":  make(map[string]map[string]*ethapi.RPCTransaction),
 	}
 
-	pending := make(map[libcommon.Address][]types.Transaction, 8)
-	baseFee := make(map[libcommon.Address][]types.Transaction, 8)
-	queued := make(map[libcommon.Address][]types.Transaction, 8)
+	pending := make(map[common.Address][]types.Transaction, 8)
+	baseFee := make(map[common.Address][]types.Transaction, 8)
+	queued := make(map[common.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
 		txn, err := types.DecodeWrappedTransaction(reply.Txs[i].RlpTx)
 		if err != nil {
@@ -109,7 +109,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	}
 	// Flatten the pending transactions
 	for account, txs := range pending {
-		dump := make(map[string]*ethapi.RPCTransaction)
+		dump := make(map[string]*ethapi.RPCTransaction, len(txs))
 		for _, txn := range txs {
 			dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn, curHeader, cc)
 		}
@@ -117,7 +117,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	}
 	// Flatten the baseFee transactions
 	for account, txs := range baseFee {
-		dump := make(map[string]*ethapi.RPCTransaction)
+		dump := make(map[string]*ethapi.RPCTransaction, len(txs))
 		for _, txn := range txs {
 			dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn, curHeader, cc)
 		}
@@ -125,7 +125,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	}
 	// Flatten the queued transactions
 	for account, txs := range queued {
-		dump := make(map[string]*ethapi.RPCTransaction)
+		dump := make(map[string]*ethapi.RPCTransaction, len(txs))
 		for _, txn := range txs {
 			dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn, curHeader, cc)
 		}
@@ -134,7 +134,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	return content, nil
 }
 
-func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr libcommon.Address) (map[string]map[string]*ethapi.RPCTransaction, error) {
+func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) (map[string]map[string]*ethapi.RPCTransaction, error) {
 	reply, err := api.pool.All(ctx, &proto_txpool.AllRequest{})
 	if err != nil {
 		return nil, err
@@ -184,19 +184,19 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr libcommon.Addres
 		return nil, nil
 	}
 	// Flatten the pending transactions
-	dump := make(map[string]*ethapi.RPCTransaction)
+	dump := make(map[string]*ethapi.RPCTransaction, len(pending))
 	for _, txn := range pending {
 		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn, curHeader, cc)
 	}
 	content["pending"] = dump
 	// Flatten the baseFee transactions
-	dump = make(map[string]*ethapi.RPCTransaction)
+	dump = make(map[string]*ethapi.RPCTransaction, len(baseFee))
 	for _, txn := range baseFee {
 		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn, curHeader, cc)
 	}
 	content["baseFee"] = dump
 	// Flatten the queued transactions
-	dump = make(map[string]*ethapi.RPCTransaction)
+	dump = make(map[string]*ethapi.RPCTransaction, len(queued))
 	for _, txn := range queued {
 		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn, curHeader, cc)
 	}

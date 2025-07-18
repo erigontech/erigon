@@ -237,7 +237,7 @@ func checkNumberText(input []byte) (raw []byte, err error) {
 }
 
 func wrapTypeError(err error, typ reflect.Type) error {
-	// keeping compatiblity with go ethereum tests
+	// keeping compatibility with go ethereum tests
 	// nolint:errorlint
 	//if _, ok := err.(*decError); ok {
 	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
@@ -261,23 +261,4 @@ func UnmarshalFixedJSON(typ reflect.Type, input, out []byte) error {
 		return &json.UnmarshalTypeError{Value: "non-string", Type: typ}
 	}
 	return wrapTypeError(UnmarshalFixedText(typ.String(), input[1:len(input)-1], out), typ)
-}
-
-// ImplementsGraphQLType returns true if Bytes implements the specified GraphQL type.
-func (b Bytes) ImplementsGraphQLType(name string) bool { return name == "Bytes" }
-
-// UnmarshalGraphQL unmarshals the provided GraphQL query data.
-func (b *Bytes) UnmarshalGraphQL(input interface{}) error {
-	var err error
-	switch input := input.(type) {
-	case string:
-		data, err := Decode(input)
-		if err != nil {
-			return err
-		}
-		*b = data
-	default:
-		err = fmt.Errorf("unexpected type %T for Bytes", input)
-	}
-	return err
 }

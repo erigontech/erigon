@@ -30,10 +30,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (
@@ -57,7 +56,7 @@ type ID struct {
 // Filter is a fork id filter to validate a remotely advertised ID.
 type Filter func(id ID) error
 
-func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) ID {
+func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
@@ -68,7 +67,7 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, hea
 			hash = checksumUpdate(hash, fork)
 			continue
 		}
-		return ID{Hash: checksumToBytes(hash), Next: fork}
+		return ID{Hash: ChecksumToBytes(hash), Next: fork}
 	}
 	var next uint64
 	for _, fork := range timeForks {
@@ -80,27 +79,27 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, hea
 		next = fork
 		break
 	}
-	return ID{Hash: checksumToBytes(hash), Next: next}
+	return ID{Hash: ChecksumToBytes(hash), Next: next}
 }
 
-func NextForkHashFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) [4]byte {
+func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) [4]byte {
 	id := NewIDFromForks(heightForks, timeForks, genesis, headHeight, headTime)
 	if id.Next == 0 {
 		return id.Hash
 	} else {
 		hash := binary.BigEndian.Uint32(id.Hash[:])
-		return checksumToBytes(checksumUpdate(hash, id.Next))
+		return ChecksumToBytes(checksumUpdate(hash, id.Next))
 	}
 }
 
 // NewFilterFromForks creates a filter that returns if a fork ID should be rejected or not
 // based on the provided current head.
-func NewFilterFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) Filter {
+func NewFilterFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
 	return newFilter(heightForks, timeForks, genesis, headHeight, headTime)
 }
 
 // NewStaticFilter creates a filter at block zero.
-func NewStaticFilter(config *chain.Config, genesisHash libcommon.Hash, genesisTime uint64) Filter {
+func NewStaticFilter(config *chain.Config, genesisHash common.Hash, genesisTime uint64) Filter {
 	heightForks, timeForks := GatherForks(config, genesisTime)
 	return newFilter(heightForks, timeForks, genesisHash, 0 /* headHeight */, genesisTime)
 }
@@ -111,7 +110,7 @@ func forkIsTimeBased(fork uint64) bool {
 	return fork >= 1670000000
 }
 
-func newFilter(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) Filter {
+func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
 	var forks []uint64
 	forks = append(forks, heightForks...)
 	forks = append(forks, timeForks...)
@@ -119,10 +118,10 @@ func newFilter(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeig
 	// Calculate the all the valid fork hash and fork next combos
 	sums := make([][4]byte, len(forks)+1) // 0th is the genesis
 	hash := crc32.ChecksumIEEE(genesis[:])
-	sums[0] = checksumToBytes(hash)
+	sums[0] = ChecksumToBytes(hash)
 	for i, fork := range forks {
 		hash = checksumUpdate(hash, fork)
-		sums[i+1] = checksumToBytes(hash)
+		sums[i+1] = ChecksumToBytes(hash)
 	}
 	// Add two sentries to simplify the fork checks and don't require special
 	// casing the last one.
@@ -203,8 +202,8 @@ func checksumUpdate(hash uint32, fork uint64) uint32 {
 	return crc32.Update(hash, crc32.IEEETable, blob[:])
 }
 
-// checksumToBytes converts a uint32 checksum into a [4]byte array.
-func checksumToBytes(hash uint32) [4]byte {
+// ChecksumToBytes converts a uint32 checksum into a [4]byte array.
+func ChecksumToBytes(hash uint32) [4]byte {
 	var blob [4]byte
 	binary.BigEndian.PutUint32(blob[:], hash)
 	return blob
@@ -254,14 +253,17 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 		if config.Bor.GetNapoliBlock() != nil {
 			heightForks = append(heightForks, config.Bor.GetNapoliBlock().Uint64())
 		}
+		if config.Bor.GetBhilaiBlock() != nil {
+			heightForks = append(heightForks, config.Bor.GetBhilaiBlock().Uint64())
+		}
 	}
 
 	// Sort the fork block numbers & times to permit chronological XOR
 	slices.Sort(heightForks)
 	slices.Sort(timeForks)
 	// Deduplicate block numbers/times applying to multiple forks
-	heightForks = libcommon.RemoveDuplicatesFromSorted(heightForks)
-	timeForks = libcommon.RemoveDuplicatesFromSorted(timeForks)
+	heightForks = common.RemoveDuplicatesFromSorted(heightForks)
+	timeForks = common.RemoveDuplicatesFromSorted(timeForks)
 	// Skip any forks in block 0, that's the genesis ruleset
 	if len(heightForks) > 0 && heightForks[0] == 0 {
 		heightForks = heightForks[1:]

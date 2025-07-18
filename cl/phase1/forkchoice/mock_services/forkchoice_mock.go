@@ -23,9 +23,9 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
@@ -66,6 +67,22 @@ type ForkChoiceStorageMock struct {
 	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
+}
+
+type MockPeerDas struct{}
+
+func (m *MockPeerDas) InitLocalNodeId(nodeId enode.ID) {}
+func (m *MockPeerDas) DownloadMissingColumnsByBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+	return nil
+}
+func (m *MockPeerDas) IsDataAvailable(ctx context.Context, blockRoot common.Hash) (bool, error) {
+	return true, nil
+}
+func (m *MockPeerDas) CustodyGroupCount() uint64 {
+	return 0
+}
+func (m *MockPeerDas) DataRecoverAndPrune(ctx context.Context) error {
+	return nil
 }
 
 func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {
@@ -142,6 +159,10 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		GetBeaconCommitteeMock:    nil,
 		SyncContributionPool:      makeSyncContributionPoolMock(t),
 	}
+}
+
+func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
+	return &MockPeerDas{}
 }
 
 func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) common.Hash {
@@ -302,43 +323,43 @@ func (f *ForkChoiceStorageMock) GetLightClientUpdate(
 }
 
 func (f *ForkChoiceStorageMock) GetHeader(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (*cltypes.BeaconBlockHeader, bool) {
 	return f.Headers[blockRoot], f.Headers[blockRoot] != nil
 }
 
-func (f *ForkChoiceStorageMock) GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
+func (f *ForkChoiceStorageMock) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetInactivitiesScores(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (solid.Uint64ListSSZ, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetPreviousParticipationIndicies(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (*solid.ParticipationBitList, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetValidatorSet(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (*solid.ValidatorSet, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetCurrentParticipationIndicies(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 ) (*solid.ParticipationBitList, error) {
 	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
-	blockRoot libcommon.Hash,
+	blockRoot common.Hash,
 	idx uint64,
-) (libcommon.Bytes48, error) {
+) (common.Bytes48, error) {
 	panic("implement me")
 }
 

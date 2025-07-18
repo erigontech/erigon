@@ -26,32 +26,32 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 func TestUseBridgeReader(t *testing.T) {
 	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
 	var br *mockBridgeReader
-	bor := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor := New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
 	require.False(t, bor.useBridgeReader)
 	br = &mockBridgeReader{}
-	bor = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor = New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
 	require.True(t, bor.useBridgeReader)
 }
 
 func TestUseSpanReader(t *testing.T) {
 	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
 	var sr *mockSpanReader
-	b := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
+	b := New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
 	require.False(t, b.useSpanReader)
 	sr = &mockSpanReader{}
-	b = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
+	b = New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
 	require.True(t, b.useSpanReader)
 }
 
@@ -67,7 +67,7 @@ func (m mockBridgeReader) EventsWithinTime(context.Context, time.Time, time.Time
 	panic("mock")
 }
 
-func (m mockBridgeReader) EventTxnLookup(context.Context, libcommon.Hash) (uint64, bool, error) {
+func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
 	panic("mock")
 }
 
@@ -88,14 +88,14 @@ func TestCommitStatesIndore(t *testing.T) {
 	cr := consensus.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
-	bor := New(params.BorDevnetChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor := New(polychain.BorDevnetChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
 
 	header := &types.Header{
 		Number: big.NewInt(112),
 		Time:   1744000028,
 	}
 
-	contractAddr := libcommon.HexToAddress("a1")
+	contractAddr := common.HexToAddress("a1")
 
 	cr.EXPECT().GetHeaderByNumber(uint64(96)).Return(&types.Header{
 		Number: big.NewInt(96),
@@ -104,7 +104,7 @@ func TestCommitStatesIndore(t *testing.T) {
 	br.EXPECT().EventsWithinTime(gomock.Any(), time.Unix(1744000000-128, 0), time.Unix(1744000028-128, 0)).Return(
 		[]*types.Message{
 			types.NewMessage(
-				libcommon.HexToAddress(""),
+				common.HexToAddress(""),
 				&contractAddr,
 				0,
 				uint256.NewInt(0),
@@ -123,7 +123,7 @@ func TestCommitStatesIndore(t *testing.T) {
 
 	called := 0
 
-	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+	syscall := func(contract common.Address, data []byte) ([]byte, error) {
 		require.Equal(t, contract, contractAddr)
 		called++
 
@@ -134,6 +134,6 @@ func TestCommitStatesIndore(t *testing.T) {
 		Chain: cr,
 	}, syscall, nil, true)
 
-	require.Nil(t, err)
-	require.Equal(t, called, 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, called)
 }

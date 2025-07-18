@@ -23,16 +23,16 @@ import (
 	"sort"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 )
 
 type syncDutyResponse struct {
-	Pubkey                         libcommon.Bytes48 `json:"pubkey"`
-	ValidatorIndex                 uint64            `json:"validator_index,string"`
-	ValidatorSyncCommitteeIndicies []string          `json:"validator_sync_committee_indices"`
+	Pubkey                         common.Bytes48 `json:"pubkey"`
+	ValidatorIndex                 uint64         `json:"validator_index,string"`
+	ValidatorSyncCommitteeIndicies []string       `json:"validator_sync_committee_indices"`
 }
 
 func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -107,7 +107,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		if err != nil {
 			return nil, err
 		}
-		if publicKey == (libcommon.Bytes48{}) {
+		if publicKey == (common.Bytes48{}) {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with index %d", idx))
 		}
 		dutiesSet[idx] = &syncDutyResponse{

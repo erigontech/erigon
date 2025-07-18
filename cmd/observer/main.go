@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/cmd/observer/observer"
 	"github.com/erigontech/erigon/cmd/observer/reports"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.Logger) error {
@@ -48,7 +48,7 @@ func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.
 		return err
 	}
 
-	networkID := uint(params.NetworkIDByChainName(flags.Chain))
+	networkID := uint(chainspec.NetworkIDByChainName(flags.Chain))
 	go observer.StatusLoggerLoop(ctx, db, networkID, flags.StatusLogPeriod, log.Root())
 
 	crawlerConfig := observer.CrawlerConfig{
@@ -85,7 +85,7 @@ func reportWithFlags(ctx context.Context, flags reports.CommandFlags) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	networkID := uint(params.NetworkIDByChainName(flags.Chain))
+	networkID := uint(chainspec.NetworkIDByChainName(flags.Chain))
 
 	if flags.Estimate {
 		report, err := reports.CreateClientsEstimateReport(ctx, db, flags.ClientsLimit, flags.MaxPingTries, networkID)

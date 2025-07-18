@@ -48,5 +48,5 @@ func TestRemoveContents(t *testing.T) {
 	list, err = os.ReadDir(rootName)
 	require.NoError(t, err)
 
-	require.Len(t, list, 0)
+	require.Empty(t, list)
 }

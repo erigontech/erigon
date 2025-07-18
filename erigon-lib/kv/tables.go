@@ -58,12 +58,6 @@ const (
 
 const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
 
-// Mapping [block number] => [Verkle Root]
-const VerkleRoots = "VerkleRoots"
-
-// Mapping [Verkle Root] => [Rlp-Encoded Verkle Node]
-const VerkleTrie = "VerkleTrie"
-
 const (
 	// DatabaseInfo is used to store information about data layout.
 	DatabaseInfo = "DbInfo"
@@ -83,7 +77,7 @@ const (
 
 	// Naming:
 	//  TxNum - Ethereum canonical transaction number - same across all nodes.
-	//  TxnID - auto-increment ID - can be differrent across all nodes
+	//  TxnID - auto-increment ID - can be different across all nodes
 	//  BlockNum/BlockID - same
 	//
 	// EthTx - stores all transactions of Canonical/NonCanonical/Bad blocks
@@ -98,8 +92,6 @@ const (
 	// In Erigon3: table MaxTxNum storing TxNum (not TxnID). History/Indices are using TxNum (not TxnID).
 	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
 	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
-
-	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txn_index_u32 -> rlp(receipt)
 
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
@@ -159,7 +151,7 @@ const (
 	BittorrentInfo       = "BittorrentInfo"
 
 	// Domains/History/InvertedIndices
-	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
+	// Constants have "Tbl" prefix, to avoid collision with actual Domain names
 	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
 	TblAccountVals        = "AccountVals"
 	TblAccountHistoryKeys = "AccountHistoryKeys"
@@ -185,6 +177,11 @@ const (
 	TblReceiptHistoryKeys = "ReceiptHistoryKeys"
 	TblReceiptHistoryVals = "ReceiptHistoryVals"
 	TblReceiptIdx         = "ReceiptIdx"
+
+	TblRCacheVals        = "ReceiptCacheVals"
+	TblRCacheHistoryKeys = "ReceiptCacheHistoryKeys"
+	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
+	TblRCacheIdx         = "ReceiptCacheIdx"
 
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
@@ -232,7 +229,8 @@ const (
 	LastBeaconSnapshot    = "LastBeaconSnapshot"
 	LastBeaconSnapshotKey = "LastBeaconSnapshotKey"
 
-	BlockRootToKzgCommitments = "BlockRootToKzgCommitments"
+	BlockRootToKzgCommitments  = "BlockRootToKzgCommitments"
+	BlockRootToDataColumnCount = "BlockRootToDataColumnCount"
 
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot  = "BlockRootToParentRoot"
@@ -269,7 +267,7 @@ const (
 
 	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
 	RandaoMixes      = "RandaoMixes"      // [validator_index+slot] => [randao_mix]
-	Proposers        = "BlockProposers"   // epoch => proposers indicies
+	Proposers        = "BlockProposers"   // epoch => proposers indices
 
 	// Electra
 	PendingDepositsDump           = "PendingDepositsDump"           // block_num => dump
@@ -296,7 +294,7 @@ const (
 
 // Keys
 var (
-	// ExperimentalGetProofsLayout is used to keep track whether we store indecies to facilitate eth_getProof
+	// ExperimentalGetProofsLayout is used to keep track whether we store indices to facilitate eth_getProof
 	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
 
 	PruneTypeOlder = []byte("older")
@@ -332,7 +330,6 @@ var ChaindataTables = []string{
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
-	ReceiptsCache,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
@@ -391,6 +388,11 @@ var ChaindataTables = []string{
 	TblReceiptHistoryVals,
 	TblReceiptIdx,
 
+	TblRCacheVals,
+	TblRCacheHistoryKeys,
+	TblRCacheHistoryVals,
+	TblRCacheIdx,
+
 	TblLogAddressKeys,
 	TblLogAddressIdx,
 	TblLogTopicsKeys,
@@ -401,12 +403,16 @@ var ChaindataTables = []string{
 	TblTracesToKeys,
 	TblTracesToIdx,
 
+	ArbOSUtilsBucket,
+	ArbNodeBucket,
+	ArbNodeTxStreamBucket,
+	ArbWasmPrefixBucket,
+	ArbWasmActivationBucket,
+
 	TblPruningProgress,
 
 	MaxTxNum,
 
-	VerkleRoots,
-	VerkleTrie,
 	// Beacon stuff
 	BeaconBlocks,
 	CanonicalBlockRoots,
@@ -422,6 +428,7 @@ var ChaindataTables = []string{
 	ParentRootToBlockRoots,
 	// Blob Storage
 	BlockRootToKzgCommitments,
+	BlockRootToDataColumnCount,
 	// State Reconstitution
 	ValidatorEffectiveBalance,
 	ValidatorBalance,
@@ -454,13 +461,6 @@ var ChaindataTables = []string{
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,
 	HashedStorageDeprecated,
-	// arbiturm
-	ArbWasmPrefixBucket,
-	ArbOSUtilsBucket,
-	ArbNodeBucket,
-	ArbInboxTrackerBucket,
-	ArbWasmActivationBucket,
-	ArbNodeTxStreamBucket,
 }
 
 const (
@@ -556,38 +556,57 @@ var ChaindataTablesCfg = TableCfg{
 		DupToLen:                  28,
 	},
 
-	TblAccountVals:           {Flags: DupSort},
-	TblAccountHistoryKeys:    {Flags: DupSort},
-	TblAccountHistoryVals:    {Flags: DupSort},
-	TblAccountIdx:            {Flags: DupSort},
-	TblStorageVals:           {Flags: DupSort},
-	TblStorageHistoryKeys:    {Flags: DupSort},
-	TblStorageHistoryVals:    {Flags: DupSort},
-	TblStorageIdx:            {Flags: DupSort},
-	TblCodeHistoryKeys:       {Flags: DupSort},
-	TblCodeIdx:               {Flags: DupSort},
+	TblAccountVals:        {Flags: DupSort},
+	TblAccountHistoryKeys: {Flags: DupSort},
+	TblAccountHistoryVals: {Flags: DupSort},
+	TblAccountIdx:         {Flags: DupSort},
+
+	TblStorageVals:        {Flags: DupSort},
+	TblStorageHistoryKeys: {Flags: DupSort},
+	TblStorageHistoryVals: {Flags: DupSort},
+	TblStorageIdx:         {Flags: DupSort},
+
+	TblCodeHistoryKeys: {Flags: DupSort},
+	TblCodeIdx:         {Flags: DupSort},
+
 	TblCommitmentVals:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
-	TblReceiptVals:           {Flags: DupSort},
-	TblReceiptHistoryKeys:    {Flags: DupSort},
-	TblReceiptHistoryVals:    {Flags: DupSort},
-	TblReceiptIdx:            {Flags: DupSort},
-	TblLogAddressKeys:        {Flags: DupSort},
-	TblLogAddressIdx:         {Flags: DupSort},
-	TblLogTopicsKeys:         {Flags: DupSort},
-	TblLogTopicsIdx:          {Flags: DupSort},
-	TblTracesFromKeys:        {Flags: DupSort},
-	TblTracesFromIdx:         {Flags: DupSort},
-	TblTracesToKeys:          {Flags: DupSort},
-	TblTracesToIdx:           {Flags: DupSort},
-	ArbWasmPrefixBucket:      {},
-	ArbOSUtilsBucket:         {},
-	ArbNodeBucket:            {},
-	ArbNodeTxStreamBucket:    {},
-	ArbWasmActivationBucket:  {},
-	ArbInboxTrackerBucket:    {},
+
+	TblReceiptVals:        {Flags: DupSort},
+	TblReceiptHistoryKeys: {Flags: DupSort},
+	TblReceiptHistoryVals: {Flags: DupSort},
+	TblReceiptIdx:         {Flags: DupSort},
+
+	TblRCacheHistoryKeys: {Flags: DupSort},
+	TblRCacheIdx:         {Flags: DupSort},
+
+	TblLogAddressKeys: {Flags: DupSort},
+	TblLogAddressIdx:  {Flags: DupSort},
+	TblLogTopicsKeys:  {Flags: DupSort},
+	TblLogTopicsIdx:   {Flags: DupSort},
+
+	TblTracesFromKeys: {Flags: DupSort},
+	TblTracesFromIdx:  {Flags: DupSort},
+	TblTracesToKeys:   {Flags: DupSort},
+	TblTracesToIdx:    {Flags: DupSort},
+
+	ArbWasmPrefixBucket:     {},
+	ArbOSUtilsBucket:        {},
+	ArbWasmActivationBucket: {},
+	ArbNodeBucket:           {},
+	ArbInboxTrackerBucket:   {},
+	ArbNodeTxStreamBucket:   {},
+}
+
+var ArbitrumTablesCfg = TableCfg{
+	ArbWasmPrefixBucket:     {},
+	ArbOSUtilsBucket:        {},
+	ArbWasmActivationBucket: {},
+	ArbNodeBucket:           {},
+	ArbInboxTrackerBucket:   {},
+	ArbNodeTxStreamBucket:   {},
 }
 
 var AuRaTablesCfg = TableCfg{
@@ -623,18 +642,9 @@ var ReconTablesCfg = TableCfg{
 	PlainContractD: {Flags: DupSort},
 }
 
-var ArbitrumTablesCfg = TableCfg{
-	ArbWasmPrefixBucket:     {},
-	ArbOSUtilsBucket:        {},
-	ArbWasmActivationBucket: {},
-	ArbNodeBucket:           {},
-	ArbInboxTrackerBucket:   {},
-	ArbNodeTxStreamBucket:   {},
-}
-
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case ChainDB, TemporaryDB, CaplinDB: //TODO: move caplindb tables to own table config
+	case ChainDB, TemporaryDB, CaplinDB, ArbitrumDB, ArbClassicDB, ArbWasmDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case TxPoolDB:
 		return TxpoolTablesCfg
@@ -650,9 +660,6 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return PolygonBridgeTablesCfg
 	case ConsensusDB:
 		return ConsensusTablesCfg
-	case ArbitrumDB, ArbClassicDB, ArbWasmDB:
-		// return ArbitrumTablesCfg
-		return ChaindataTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
@@ -746,28 +753,84 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain   Domain = 0
-	StorageDomain    Domain = 1
-	CodeDomain       Domain = 2
-	CommitmentDomain Domain = 3
-	ReceiptDomain    Domain = 4
-	DomainLen        Domain = 5
+	AccountsDomain   Domain = 0 // Eth Accounts
+	StorageDomain    Domain = 1 // Eth Account's Storage
+	CodeDomain       Domain = 2 // Eth Smart-Contract Code
+	CommitmentDomain Domain = 3 // Merkle Trie
+	ReceiptDomain    Domain = 4 // Tiny Receipts - without logs. Required for node-operations.
+	RCacheDomain     Domain = 5 // Fat Receipts - with logs. Optional.
+	DomainLen        Domain = 6 // Technical marker of Enum. Not real Domain.
 )
 
 var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
 
 const (
-	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
-	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
-	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
-	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
-	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
+	AccountsHistoryIdx   InvertedIdx = 0
+	StorageHistoryIdx    InvertedIdx = 1
+	CodeHistoryIdx       InvertedIdx = 2
+	CommitmentHistoryIdx InvertedIdx = 3
+	ReceiptHistoryIdx    InvertedIdx = 4
+	RCacheHistoryIdx     InvertedIdx = 5
 
-	LogTopicIdx   InvertedIdx = "LogTopicIdx"
-	LogAddrIdx    InvertedIdx = "LogAddrIdx"
-	TracesFromIdx InvertedIdx = "TracesFromIdx"
-	TracesToIdx   InvertedIdx = "TracesToIdx"
+	LogTopicIdx   InvertedIdx = 6
+	LogAddrIdx    InvertedIdx = 7
+	TracesFromIdx InvertedIdx = 8
+	TracesToIdx   InvertedIdx = 9
 )
+
+func (idx InvertedIdx) String() string {
+	switch idx {
+	case AccountsHistoryIdx:
+		return "accounts"
+	case StorageHistoryIdx:
+		return "storage"
+	case CodeHistoryIdx:
+		return "code"
+	case CommitmentHistoryIdx:
+		return "commitment"
+	case ReceiptHistoryIdx:
+		return "receipt"
+	case RCacheHistoryIdx:
+		return "rcache"
+	case LogAddrIdx:
+		return "logaddrs"
+	case LogTopicIdx:
+		return "logtopics"
+	case TracesFromIdx:
+		return "tracesfrom"
+	case TracesToIdx:
+		return "tracesto"
+	default:
+		return "unknown index"
+	}
+}
+
+func String2InvertedIdx(in string) (InvertedIdx, error) {
+	switch in {
+	case "accounts":
+		return AccountsHistoryIdx, nil
+	case "storage":
+		return StorageHistoryIdx, nil
+	case "code":
+		return CodeHistoryIdx, nil
+	case "commitment":
+		return CommitmentHistoryIdx, nil
+	case "receipt":
+		return ReceiptHistoryIdx, nil
+	case "rcache":
+		return RCacheHistoryIdx, nil
+	case "logaddrs":
+		return LogAddrIdx, nil
+	case "logtopics":
+		return LogTopicIdx, nil
+	case "tracesfrom":
+		return TracesFromIdx, nil
+	case "tracesto":
+		return TracesToIdx, nil
+	default:
+		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
+	}
+}
 
 const (
 	ReceiptsAppendable Appendable = 0
@@ -786,6 +849,8 @@ func (d Domain) String() string {
 		return "commitment"
 	case ReceiptDomain:
 		return "receipt"
+	case RCacheDomain:
+		return "rcache"
 	default:
 		return "unknown domain"
 	}
@@ -803,30 +868,14 @@ func String2Domain(in string) (Domain, error) {
 		return CommitmentDomain, nil
 	case "receipt":
 		return ReceiptDomain, nil
+	case "rcache":
+		return RCacheDomain, nil
 	default:
-		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
+		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
 	}
 }
 
 const MaxUint16 uint16 = 1<<16 - 1
-
-func (iip Appendable) String() string {
-	switch iip {
-	case ReceiptsAppendable:
-		return "receipts"
-	default:
-		return "unknown Appendable"
-	}
-}
-
-func String2Appendable(in string) (Appendable, error) {
-	switch in {
-	case "receipts":
-		return ReceiptsAppendable, nil
-	default:
-		return Appendable(MaxUint16), fmt.Errorf("unknown Appendable name: %s", in)
-	}
-}
 
 // --- Deprecated
 const (
@@ -834,7 +883,7 @@ const (
 	// ChaindataTables
 
 	// Dictionary:
-	// "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
+	// "Plain State" - state where keys aren't hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
 	// "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
 
 	/*

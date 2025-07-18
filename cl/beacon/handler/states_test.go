@@ -85,9 +85,9 @@ func TestGetStateFork(t *testing.T) {
 			// unmarshal the json
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
 			data := jsonVal["data"].(map[string]interface{})
-			require.Equal(t, data["current_version"], "0x00000000")
-			require.Equal(t, data["previous_version"], "0x00000000")
-			require.Equal(t, data["epoch"], "0")
+			require.Equal(t, "0x00000000", data["current_version"])
+			require.Equal(t, "0x00000000", data["previous_version"])
+			require.Equal(t, "0", data["epoch"])
 		})
 	}
 }
@@ -377,7 +377,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }
@@ -435,7 +435,7 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }
@@ -493,7 +493,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }
@@ -550,7 +550,7 @@ func TestGetRandao(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }

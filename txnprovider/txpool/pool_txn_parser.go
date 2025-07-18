@@ -25,6 +25,8 @@ import (
 	"io"
 	"math/bits"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
@@ -37,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 const (
@@ -47,38 +49,12 @@ const (
 	BlobTxnType       byte = 3 // EIP-4844
 	SetCodeTxnType    byte = 4 // EIP-7702
 	AATxnType         byte = 5 // RIP-7560
-
-	ArbitrumDepositTxType         byte = 0x64
-	ArbitrumUnsignedTxType        byte = 0x65
-	ArbitrumContractTxType        byte = 0x66
-	ArbitrumRetryTxType           byte = 0x68
-	ArbitrumSubmitRetryableTxType byte = 0x69
-	ArbitrumInternalTxType        byte = 0x6a
-	ArbitrumLegacyTxType          byte = 0x78
 )
 
-var ValidTxnTypes = map[byte]struct{}{
-	LegacyTxnType:                 {},
-	AccessListTxnType:             {},
-	DynamicFeeTxnType:             {},
-	BlobTxnType:                   {},
-	SetCodeTxnType:                {},
-	AATxnType: {},
-	ArbitrumDepositTxType:         {},
-	ArbitrumUnsignedTxType:        {},
-	ArbitrumContractTxType:        {},
-	ArbitrumRetryTxType:           {},
-	ArbitrumSubmitRetryableTxType: {},
-	ArbitrumInternalTxType:        {},
-	ArbitrumLegacyTxType:          {},
-}
-
-var (
-	ErrParseTxn     = fmt.Errorf("%w transaction", rlp.ErrParse)
-	ErrRejected     = errors.New("rejected")
-	ErrAlreadyKnown = errors.New("already known")
-	ErrRlpTooBig    = errors.New("txn rlp too big")
-)
+var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
+var ErrRejected = errors.New("rejected")
+var ErrAlreadyKnown = errors.New("already known")
+var ErrRlpTooBig = errors.New("txn rlp too big")
 
 type TxnParseConfig struct {
 	ChainID uint256.Int
@@ -177,16 +153,13 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 
 	p = dataPos
-	if payload[p] >= ArbitrumDepositTxType && payload[p] <= ArbitrumLegacyTxType && legacy { // TODO Arbitrum remove later, need to understand if there a legacy txns as well
-		fmt.Printf("arbTxType %x isLegacyList %t\n", payload[p], legacy)
-	}
 
 	var wrapperDataPos, wrapperDataLen int
 
 	// If it is non-legacy transaction, the transaction type follows, and then the list
 	if !legacy {
 		slot.Type = payload[p]
-		if _, knownType := ValidTxnTypes[slot.Type]; !knownType {
+		if slot.Type > AATxnType {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
@@ -219,14 +192,18 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	if err != nil {
 		return p, err
 	}
-	// TODO arbitrum
-	if slot.Type >= ArbitrumDepositTxType && slot.Type <= ArbitrumLegacyTxType {
-		return p, nil
-	}
 
 	if slot.Type == BlobTxnType && wrappedWithBlobs {
 		if p != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: unexpected leftover after blob txn body", ErrParseTxn)
+		}
+
+		// Check if blob txn has wrapperVersion
+		proofsPerBlob := 1
+		_, dataLen, err = rlp.ParseString(payload, p)
+		if err == nil && dataLen == 1 {
+			p = p + 1
+			proofsPerBlob = int(params.CellsPerExtBlob)
 		}
 
 		dataPos, dataLen, err = rlp.ParseList(payload, p)
@@ -234,13 +211,16 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: blobs len: %s", ErrParseTxn, err) //nolint
 		}
 		blobPos := dataPos
+		blobIdx := 0
 		for blobPos < dataPos+dataLen {
+			slot.BlobBundles = append(slot.BlobBundles, PoolBlobBundle{})
 			blobPos, err = rlp.StringOfLen(payload, blobPos, params.BlobSize)
 			if err != nil {
 				return 0, fmt.Errorf("%w: blob: %s", ErrParseTxn, err) //nolint
 			}
-			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+params.BlobSize])
+			slot.BlobBundles[blobIdx].Blob = payload[blobPos : blobPos+params.BlobSize]
 			blobPos += params.BlobSize
+			blobIdx++
 		}
 		if blobPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in blobs", ErrParseTxn)
@@ -252,6 +232,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: commitments len: %s", ErrParseTxn, err) //nolint
 		}
 		commitmentPos := dataPos
+		blobIdx = 0
 		for commitmentPos < dataPos+dataLen {
 			commitmentPos, err = rlp.StringOfLen(payload, commitmentPos, 48)
 			if err != nil {
@@ -259,8 +240,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			}
 			var commitment gokzg4844.KZGCommitment
 			copy(commitment[:], payload[commitmentPos:commitmentPos+48])
-			slot.Commitments = append(slot.Commitments, commitment)
+			slot.BlobBundles[blobIdx].Commitment = commitment
 			commitmentPos += 48
+			blobIdx++
 		}
 		if commitmentPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in commitments", ErrParseTxn)
@@ -272,6 +254,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: proofs len: %s", ErrParseTxn, err) //nolint
 		}
 		proofPos := dataPos
+		proofs := make([]gokzg4844.KZGProof, 0)
 		for proofPos < dataPos+dataLen {
 			proofPos, err = rlp.StringOfLen(payload, proofPos, 48)
 			if err != nil {
@@ -279,8 +262,18 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			}
 			var proof gokzg4844.KZGProof
 			copy(proof[:], payload[proofPos:proofPos+48])
-			slot.Proofs = append(slot.Proofs, proof)
+			proofs = append(proofs, proof)
 			proofPos += 48
+		}
+		if len(proofs) != proofsPerBlob*len(slot.BlobBundles) {
+			return 0, fmt.Errorf("%w: unexpected proofs len=%d expected=%d ", ErrParseTxn, len(proofs), proofsPerBlob*len(slot.BlobBundles)) //nolint
+		}
+		proofsIdx := 0
+		for blobIdx = 0; blobIdx < len(slot.BlobBundles); blobIdx++ {
+			for range proofsPerBlob {
+				slot.BlobBundles[blobIdx].Proofs = append(slot.BlobBundles[blobIdx].Proofs, proofs[proofsIdx])
+				proofsIdx++
+			}
 		}
 		if proofPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in proofs", ErrParseTxn)
@@ -375,24 +368,6 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		if err := ctx.validateRlp(slot.Rlp); err != nil {
 			return p, err
 		}
-	}
-	if slot.Type >= ArbitrumDepositTxType && slot.Type <= ArbitrumLegacyTxType {
-		// Arb txs have different parsing, but who cares
-		switch slot.Type {
-		case ArbitrumDepositTxType, ArbitrumUnsignedTxType, ArbitrumContractTxType, ArbitrumRetryTxType, ArbitrumSubmitRetryableTxType, ArbitrumInternalTxType, ArbitrumLegacyTxType:
-			_, _ = ctx.Keccak1.(io.Reader).Read(slot.IDHash[:32])
-			if validateHash != nil {
-				if err := validateHash(slot.IDHash[:32]); err != nil {
-					return p, err
-				}
-			}
-			p = len(payload)
-			return p, nil
-		}
-	}
-
-	if slot.Type == AATxnType {
-		return parseTransactionBodyAA(ctx, payload, p, slot, sender)
 	}
 
 	if slot.Type == AATxnType {
@@ -524,7 +499,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		p = dataPos + dataLen
 	}
 	if slot.Type == SetCodeTxnType {
-		slot.Authorities = make([]*common.Address, 0)
+		slot.AuthAndNonces = make([]AuthAndNonce, 0)
 		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
@@ -566,9 +541,9 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 
 			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
 			if err != nil {
-				return 0, fmt.Errorf("%w: recover authorization signer: %s", ErrParseTxn, err) //nolint
+				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
-			slot.Authorities = append(slot.Authorities, authority)
+			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{authority.String(), auth.Nonce})
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
@@ -863,6 +838,17 @@ func getData(payload []byte, p int) ([]byte, int, error) {
 	return payload[dataPos : dataPos+dataLen], dataPos + dataLen, nil
 }
 
+type AuthAndNonce struct {
+	authority string
+	nonce     uint64
+}
+
+type PoolBlobBundle struct {
+	Commitment gokzg4844.KZGCommitment
+	Blob       []byte
+	Proofs     []gokzg4844.KZGProof // Can be 1 or more Proofs/CellProofs
+}
+
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues
 type TxnSlot struct {
@@ -887,11 +873,9 @@ type TxnSlot struct {
 	// EIP-4844: Shard Blob Transactions
 	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
 	BlobHashes  []common.Hash
-	Blobs       [][]byte
-	Commitments []gokzg4844.KZGCommitment
-	Proofs      []gokzg4844.KZGProof
+	BlobBundles []PoolBlobBundle
 
-	Authorities []*common.Address // Indexed authorization signers for EIP-7702 txns (type-4)
+	AuthAndNonces []AuthAndNonce // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
 
 	// RIP-7560: account abstraction
 	SenderAddress, Paymaster, Deployer                               *common.Address
@@ -903,6 +887,30 @@ type TxnSlot struct {
 func (tx *TxnSlot) PrintDebug(prefix string) {
 	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.SenderID, tx.Nonce, tx.Tip, tx.Value.Uint64())
 	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.IdHash)
+}
+
+func (tx *TxnSlot) Blobs() [][]byte {
+	b := make([][]byte, 0, len(tx.BlobBundles))
+	for _, bb := range tx.BlobBundles {
+		b = append(b, bb.Blob)
+	}
+	return b
+}
+
+func (tx *TxnSlot) Commitments() []gokzg4844.KZGCommitment {
+	c := make([]gokzg4844.KZGCommitment, 0, len(tx.BlobBundles))
+	for _, bb := range tx.BlobBundles {
+		c = append(c, bb.Commitment)
+	}
+	return c
+}
+
+func (tx *TxnSlot) Proofs() []gokzg4844.KZGProof {
+	p := make([]gokzg4844.KZGProof, 0, len(tx.BlobBundles))
+	for _, bb := range tx.BlobBundles {
+		p = append(p, bb.Proofs...)
+	}
+	return p
 }
 
 // ToProtoAccountAbstractionTxn converts a TxnSlot to a typesproto.AccountAbstractionTransaction

@@ -20,9 +20,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func Retry(
@@ -40,7 +39,7 @@ func Retry(
 	for i := 0; i <= retryCount; i++ {
 		if i > 0 {
 			logger.Trace("retrying", "op", opName, "attempt", i, "err", err)
-			if err := libcommon.Sleep(ctx, delayForAttempt(i)); err != nil {
+			if err := common.Sleep(ctx, delayForAttempt(i)); err != nil {
 				return nil, err
 			}
 		}

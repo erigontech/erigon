@@ -24,17 +24,15 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // Tests that the custom union field encoder and decoder works correctly.
 func TestGetBlockHeadersDataEncodeDecode(t *testing.T) {
 	// Create a "random" hash for testing
-	var hash libcommon.Hash
+	var hash common.Hash
 	for i := range hash {
 		hash[i] = byte(i)
 	}
@@ -95,11 +93,11 @@ func TestEth66EmptyMessages(t *testing.T) {
 		// Headers
 		BlockHeadersPacket66{1111, BlockHeadersPacket([]*types.Header{})},
 		// Bodies
-		GetBlockBodiesPacket66{1111, GetBlockBodiesPacket([]libcommon.Hash{})},
+		GetBlockBodiesPacket66{1111, GetBlockBodiesPacket([]common.Hash{})},
 		BlockBodiesPacket66{1111, BlockBodiesPacket([]*types.Body{})},
 		BlockBodiesRLPPacket66{1111, BlockBodiesRLPPacket([]rlp.RawValue{})},
 		// Receipts
-		GetReceiptsPacket66{1111, GetReceiptsPacket([]libcommon.Hash{})},
+		GetReceiptsPacket66{1111, GetReceiptsPacket([]common.Hash{})},
 		ReceiptsPacket66{1111, ReceiptsPacket([][]*types.Receipt{})},
 	} {
 		if have, _ := rlp.EncodeToBytes(msg); !bytes.Equal(have, want) {
@@ -118,7 +116,7 @@ func TestEth66Messages(t *testing.T) {
 		blockBody    *types.Body
 		blockBodyRlp rlp.RawValue
 		txs          []types.Transaction
-		hashes       []libcommon.Hash
+		hashes       []common.Hash
 		receipts     []*types.Receipt
 		receiptsRlp  rlp.RawValue
 
@@ -157,9 +155,9 @@ func TestEth66Messages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hashes = []libcommon.Hash{
-		libcommon.HexToHash("deadc0de"),
-		libcommon.HexToHash("feedbeef"),
+	hashes = []common.Hash{
+		common.HexToHash("deadc0de"),
+		common.HexToHash("feedbeef"),
 	}
 	// init the receipts
 	{
@@ -169,13 +167,13 @@ func TestEth66Messages(t *testing.T) {
 				CumulativeGasUsed: 1,
 				Logs: []*types.Log{
 					{
-						Address: libcommon.BytesToAddress([]byte{0x11}),
-						Topics:  []libcommon.Hash{libcommon.HexToHash("dead"), libcommon.HexToHash("beef")},
+						Address: common.BytesToAddress([]byte{0x11}),
+						Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
 						Data:    []byte{0x01, 0x00, 0xff},
 					},
 				},
 				TxHash:          hashes[0],
-				ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+				ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 				GasUsed:         111111,
 			},
 		}
@@ -195,7 +193,7 @@ func TestEth66Messages(t *testing.T) {
 			common.FromHex("e8820457e4a000000000000000000000000000000000000000000000000000000000deadc0de050580"),
 		},
 		{
-			GetBlockHeadersPacket66{1111, &GetBlockHeadersPacket{HashOrNumber{libcommon.Hash{}, 9999}, 5, 5, false}},
+			GetBlockHeadersPacket66{1111, &GetBlockHeadersPacket{HashOrNumber{common.Hash{}, 9999}, 5, 5, false}},
 			common.FromHex("ca820457c682270f050580"),
 		},
 		{

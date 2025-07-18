@@ -24,9 +24,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
@@ -69,26 +69,26 @@ func (t *noopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpC
 
 func (t *noopTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {}
 
-func (t *noopTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *noopTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 func (t *noopTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 }
 
-func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 }
 
 func (*noopTracer) OnTxEnd(receipt *types.Receipt, err error) {}
 
-func (*noopTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+func (*noopTracer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 }
 
-func (*noopTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {}
+func (*noopTracer) OnNonceChange(a common.Address, prev, new uint64) {}
 
-func (*noopTracer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+func (*noopTracer) OnCodeChange(a common.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
 }
 
-func (*noopTracer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {}
+func (*noopTracer) OnStorageChange(a common.Address, k common.Hash, prev, new uint256.Int) {}
 
 func (*noopTracer) OnLog(log *types.Log) {}
 

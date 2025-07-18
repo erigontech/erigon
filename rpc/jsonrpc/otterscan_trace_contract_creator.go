@@ -22,9 +22,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -66,7 +65,7 @@ func (t *CreateTracer) OnEnter(depth int, typ byte, from common.Address, to comm
 	if t.found {
 		return
 	}
-	if vm.OpCode(typ) != vm.CREATE {
+	if vm.OpCode(typ) != vm.CREATE && vm.OpCode(typ) != vm.CREATE2 {
 		return
 	}
 	if to != t.target {

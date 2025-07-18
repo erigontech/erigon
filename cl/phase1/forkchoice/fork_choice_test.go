@@ -19,11 +19,11 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"testing"
 
 	"github.com/spf13/afero"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -35,8 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/stretchr/testify/require"
 
@@ -64,7 +62,7 @@ var attestationEncoded []byte
 func TestForkChoiceBasic(t *testing.T) {
 	ctx := context.Background()
 	expectedCheckpoint := &solid.Checkpoint{
-		Root:  libcommon.HexToHash("0x564d76d91f66c1fb2977484a6184efda2e1c26dd01992e048353230e10f83201"),
+		Root:  common.HexToHash("0x564d76d91f66c1fb2977484a6184efda2e1c26dd01992e048353230e10f83201"),
 		Epoch: 0,
 	}
 	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
@@ -90,36 +88,36 @@ func TestForkChoiceBasic(t *testing.T) {
 	store.OnTick(12)
 	require.NoError(t, store.OnBlock(ctx, block0x3a, false, true, false))
 	// Check if we get correct status (1)
-	require.Equal(t, store.Time(), uint64(12))
-	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0xc9bd7bcb6dfa49dc4e5a67ca75e89062c36b5c300bc25a1b31db4e1a89306071"))
-	require.Equal(t, store.JustifiedCheckpoint(), *expectedCheckpoint)
-	require.Equal(t, store.FinalizedCheckpoint(), *expectedCheckpoint)
+	require.Equal(t, uint64(12), store.Time())
+	require.Equal(t, store.ProposerBoostRoot(), common.HexToHash("0xc9bd7bcb6dfa49dc4e5a67ca75e89062c36b5c300bc25a1b31db4e1a89306071"))
+	require.Equal(t, *expectedCheckpoint, store.JustifiedCheckpoint())
+	require.Equal(t, *expectedCheckpoint, store.FinalizedCheckpoint())
 	headRoot, headSlot, err := store.GetHead(nil)
 	require.NoError(t, err)
-	require.Equal(t, headRoot, libcommon.HexToHash("0xc9bd7bcb6dfa49dc4e5a67ca75e89062c36b5c300bc25a1b31db4e1a89306071"))
-	require.Equal(t, headSlot, uint64(1))
+	require.Equal(t, headRoot, common.HexToHash("0xc9bd7bcb6dfa49dc4e5a67ca75e89062c36b5c300bc25a1b31db4e1a89306071"))
+	require.Equal(t, uint64(1), headSlot)
 	// process another tick and another block
 	store.OnTick(36)
 	require.NoError(t, store.OnBlock(ctx, block0xc2, false, true, false))
 	// Check if we get correct status (2)
-	require.Equal(t, store.Time(), uint64(36))
-	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
-	require.Equal(t, store.JustifiedCheckpoint(), *expectedCheckpoint)
-	require.Equal(t, store.FinalizedCheckpoint(), *expectedCheckpoint)
+	require.Equal(t, uint64(36), store.Time())
+	require.Equal(t, store.ProposerBoostRoot(), common.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
+	require.Equal(t, *expectedCheckpoint, store.JustifiedCheckpoint())
+	require.Equal(t, *expectedCheckpoint, store.FinalizedCheckpoint())
 	headRoot, headSlot, err = store.GetHead(nil)
 	require.NoError(t, err)
-	require.Equal(t, headSlot, uint64(3))
-	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
+	require.Equal(t, uint64(3), headSlot)
+	require.Equal(t, headRoot, common.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	// last block
 	require.NoError(t, store.OnBlock(ctx, block0xd4, false, true, false))
-	require.Equal(t, store.Time(), uint64(36))
-	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
-	require.Equal(t, store.JustifiedCheckpoint(), *expectedCheckpoint)
-	require.Equal(t, store.FinalizedCheckpoint(), *expectedCheckpoint)
+	require.Equal(t, uint64(36), store.Time())
+	require.Equal(t, store.ProposerBoostRoot(), common.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
+	require.Equal(t, *expectedCheckpoint, store.JustifiedCheckpoint())
+	require.Equal(t, *expectedCheckpoint, store.FinalizedCheckpoint())
 	headRoot, headSlot, err = store.GetHead(nil)
 	require.NoError(t, err)
-	require.Equal(t, headSlot, uint64(3))
-	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
+	require.Equal(t, uint64(3), headSlot)
+	require.Equal(t, headRoot, common.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	// lastly do attestation
 	require.NoError(t, store.OnAttestation(testAttestation, false, false))
 	bs, err := store.GetStateAtBlockRoot(headRoot, true)
@@ -130,6 +128,10 @@ func TestForkChoiceBasic(t *testing.T) {
 }
 
 func TestForkChoiceChainBellatrix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	ctx := context.Background()
 	blocks, anchorState, _ := tests.GetBellatrixRandom()
 	cfg := clparams.MainnetBeaconConfig
@@ -158,14 +160,14 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	root1, err := blocks[20].Block.HashSSZ()
 	require.NoError(t, err)
 
-	rewards, ok := store.BlockRewards(libcommon.Hash(root1))
+	rewards, ok := store.BlockRewards(common.Hash(root1))
 	require.True(t, ok)
-	require.Equal(t, rewards.Attestations, uint64(0x511ad))
+	require.Equal(t, uint64(0x511ad), rewards.Attestations)
 	// test randao mix
 	mixes := solid.NewHashVector(int(clparams.MainnetBeaconConfig.EpochsPerHistoricalVector))
 	require.True(t, store.RandaoMixes(intermediaryBlockRoot, mixes))
 	for i := 0; i < mixes.Length(); i++ {
-		require.Equal(t, mixes.Get(i), intermediaryState.RandaoMixes().Get(i), fmt.Sprintf("mixes mismatch at index %d, have: %x, expected: %x", i, mixes.Get(i), intermediaryState.RandaoMixes().Get(i)))
+		require.Equal(t, mixes.Get(i), intermediaryState.RandaoMixes().Get(i), "mixes mismatch at index %d, have: %x, expected: %x", i, mixes.Get(i), intermediaryState.RandaoMixes().Get(i))
 	}
 	currentIntermediarySyncCommittee, nextIntermediarySyncCommittee, ok := store.GetSyncCommittees(cfg.SyncCommitteePeriod(store.HighestSeen()))
 	require.True(t, ok)
@@ -177,5 +179,5 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	require.True(t, has)
 	bsRoot, err := bs.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, libcommon.Hash(bsRoot), libcommon.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
+	require.Equal(t, common.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
 }

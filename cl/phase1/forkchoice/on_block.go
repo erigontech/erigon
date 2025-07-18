@@ -23,12 +23,10 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -40,23 +38,25 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 )
 
 const foreseenProposers = 16
 
-var ErrEIP4844DataNotAvailable = errors.New("EIP-4844 blob data is not available")
+var (
+	ErrEIP4844DataNotAvailable = errors.New("EIP-4844 blob data is not available")
+	ErrEIP7594DataNotAvailable = errors.New("EIP-7594 column data is not available")
+)
 
-func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.Eth1Block, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
+func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
 	expectedBlobHashes := []common.Hash{}
-	transactions, err := types.DecodeTransactions(block.Transactions.UnderlyngReference())
+	transactions, err := types.DecodeTransactions(block.Body.ExecutionPayload.Transactions.UnderlyngReference())
 	if err != nil {
 		return fmt.Errorf("unable to decode transactions: %v", err)
 	}
-	kzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
-		var kzg libcommon.Hash
-		kzg, err = utils.KzgCommitmentToVersionedHash(libcommon.Bytes48(*value))
+	block.Body.BlobKzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
+		var kzg common.Hash
+		kzg, err = utils.KzgCommitmentToVersionedHash(common.Bytes48(*value))
 		if err != nil {
 			return false
 		}
@@ -68,7 +68,10 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	}
 
 	maxBlobsPerBlock := cfg.MaxBlobsPerBlockByVersion(block.Version())
-	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
+	if block.Version() >= clparams.FuluVersion {
+		maxBlobsPerBlock = cfg.GetBlobParameters(block.Slot / cfg.SlotsPerEpoch).MaxBlobsPerBlock
+	}
+	return ethutils.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
 func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
@@ -83,7 +86,7 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.headHash = libcommon.Hash{}
+	f.headHash = common.Hash{}
 	start := time.Now()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
@@ -99,11 +102,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		return nil
 	}
 	// Now we find the versioned hashes
-	var versionedHashes []libcommon.Hash
+	var versionedHashes []common.Hash
 	if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
-		versionedHashes = []libcommon.Hash{}
+		versionedHashes = []common.Hash{}
 		solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
-			versionedHash, err := utils.KzgCommitmentToVersionedHash(libcommon.Bytes48(*k))
+			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
 			if err != nil {
 				return err
 			}
@@ -113,15 +116,25 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check if blob data is available
-	if block.Version() >= clparams.DenebVersion && checkDataAvaiability {
-		if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
-			if errors.Is(err, ErrEIP4844DataNotAvailable) {
+	if checkDataAvaiability && !clparams.IsDevnet() && block.Block.Body.BlobKzgCommitments.Len() > 0 {
+		if block.Version() >= clparams.FuluVersion {
+			available, err := f.peerDas.IsDataAvailable(ctx, blockRoot)
+			if err != nil {
 				return err
 			}
-			return fmt.Errorf("OnBlock: data is not available for block %x: %v", libcommon.Hash(blockRoot), err)
-		}
-		if f.highestSeen.Load() < block.Block.Slot {
-			collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
+			if !available {
+				return fmt.Errorf("OnBlock: some column data is not available for block %x, err: %v", common.Hash(blockRoot), ErrEIP7594DataNotAvailable)
+			}
+		} else if block.Version() >= clparams.DenebVersion {
+			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
+				if errors.Is(err, ErrEIP4844DataNotAvailable) {
+					return err
+				}
+				return fmt.Errorf("OnBlock: data is not available for block %x: %v", common.Hash(blockRoot), err)
+			}
+			if f.highestSeen.Load() < block.Block.Slot {
+				collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
+			}
 		}
 	}
 
@@ -134,7 +147,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	startEngine := time.Now()
 	if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
 		if block.Version() >= clparams.DenebVersion {
-			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
+			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
 				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
 			}
 		}
@@ -144,13 +157,13 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		log.Debug("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
-			log.Debug("OnBlock: block is not validated yet", "block", libcommon.Hash(blockRoot))
+			log.Debug("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
 			// optimistic block candidate
 			if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
 				return fmt.Errorf("failed to add block to optimistic store: %v", err)
 			}
 		case execution_client.PayloadStatusInvalidated:
-			log.Warn("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot), "err", err)
+			log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			// remove from optimistic candidate
 			if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
@@ -158,7 +171,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			return errors.New("block is invalid")
 		case execution_client.PayloadStatusValidated:
-			log.Trace("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
+			log.Trace("OnBlock: block is validated", "block", common.Hash(blockRoot))
 			// remove from optimistic candidate
 			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
 				return fmt.Errorf("failed to validate block in optimistic store: %v", err)
@@ -200,8 +213,8 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Add proposer score boost if the block is timely
 	timeIntoSlot := (f.time.Load() - f.genesisTime) % lastProcessedState.BeaconConfig().SecondsPerSlot
 	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
-	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot.Load().(libcommon.Hash) == (libcommon.Hash{}) {
-		f.proposerBoostRoot.Store(libcommon.Hash(blockRoot))
+	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
+		f.proposerBoostRoot.Store(common.Hash(blockRoot))
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		// Update randao mixes
@@ -276,14 +289,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	return nil
 }
 
-func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, blockRoot libcommon.Hash, blobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
+func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, blockRoot common.Hash, blobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
 	if f.blobStorage == nil {
 		return nil
 	}
 
-	commitmentsLeftToCheck := map[libcommon.Bytes48]struct{}{}
+	commitmentsLeftToCheck := map[common.Bytes48]struct{}{}
 	blobKzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
-		commitmentsLeftToCheck[libcommon.Bytes48(*value)] = struct{}{}
+		commitmentsLeftToCheck[common.Bytes48(*value)] = struct{}{}
 		return true
 	})
 	// Blobs are preverified so we skip verification, we just need to check if commitments checks out.

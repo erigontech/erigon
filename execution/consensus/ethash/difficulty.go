@@ -24,7 +24,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 const (
@@ -152,7 +153,7 @@ func MakeDifficultyCalculatorU256(bombDelay uint64) func(time uint64, parent *ty
 		*/
 		x := (time - parent.Time) / 9 // (block_timestamp - parent_timestamp) // 9
 		c := uint64(1)                // if parent.unclehash == emptyUncleHashHash
-		if parent.UncleHash != types.EmptyUncleHash {
+		if parent.UncleHash != empty.UncleHash {
 			c = 2
 		}
 		xNeg := x >= c

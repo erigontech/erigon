@@ -42,7 +42,7 @@ func TestRequestGenerator_TxpoolContent(t *testing.T) {
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
 		_, got := reqGen.txpoolContent()
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -83,6 +83,6 @@ func TestParseResponse(t *testing.T) {
 
 	for _, testCase := range testCases {
 		got, _ := parseResponse(testCase.input)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }

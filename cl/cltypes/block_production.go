@@ -20,21 +20,21 @@ import (
 	"errors"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 )
 
 // BlindOrExecutionBeaconBlock is a union type that can be either a BlindedBeaconBlock or a BeaconBlock, depending on the context.
 // It's an intermediate type used in the block production process.
 type BlindOrExecutionBeaconBlock struct {
-	Slot          uint64         `json:"-"`
-	ProposerIndex uint64         `json:"-"`
-	ParentRoot    libcommon.Hash `json:"-"`
-	StateRoot     libcommon.Hash `json:"-"`
+	Slot          uint64      `json:"-"`
+	ProposerIndex uint64      `json:"-"`
+	ParentRoot    common.Hash `json:"-"`
+	StateRoot     common.Hash `json:"-"`
 	// Full body
-	BeaconBody *BeaconBody         `json:"-"`
-	KzgProofs  []libcommon.Bytes48 `json:"-"`
-	Blobs      []*Blob             `json:"-"`
+	BeaconBody *BeaconBody      `json:"-"`
+	KzgProofs  []common.Bytes48 `json:"-"`
+	Blobs      []*Blob          `json:"-"`
 	// Blinded body
 	BlindedBeaconBody *BlindedBeaconBody `json:"-"`
 
@@ -67,7 +67,7 @@ func (b *BlindOrExecutionBeaconBlock) ToExecution() *DenebBeaconBlock {
 		StateRoot:     b.StateRoot,
 		Body:          b.BeaconBody,
 	}
-	DenebBeaconBlock := NewDenebBeaconBlock(b.Cfg, b.Version())
+	DenebBeaconBlock := NewDenebBeaconBlock(b.Cfg, b.Version(), b.Slot)
 	DenebBeaconBlock.Block = beaconBlock
 	for _, kzgProof := range b.KzgProofs {
 		proof := KZGProof{}

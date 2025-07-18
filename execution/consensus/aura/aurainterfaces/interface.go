@@ -19,13 +19,13 @@ package aurainterfaces
 import (
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
 // see openethereum/crates/ethcore/res/contracts/block_reward.json
 type BlockRewardABI interface {
-	Reward(benefactors []libcommon.Address, kind []consensus.RewardKind) ([]libcommon.Address, []*uint256.Int, error)
+	Reward(benefactors []common.Address, kind []consensus.RewardKind) ([]common.Address, []*uint256.Int, error)
 }
 
 type abiDecoder func([]byte, interface{}) error
@@ -33,7 +33,7 @@ type abiDecoder func([]byte, interface{}) error
 // see openethereum/crates/ethcore/res/contracts/validator_set.json
 type ValidatorSetABI interface {
 	GetValidators() ([]byte, abiDecoder)
-	ShouldValidatorReport(ourAddr, maliciousValidatorAddress libcommon.Address, blockNum uint64) ([]byte, abiDecoder)
+	ShouldValidatorReport(ourAddr, maliciousValidatorAddress common.Address, blockNum uint64) ([]byte, abiDecoder)
 }
 
 type SealKind [][]byte

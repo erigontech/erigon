@@ -21,7 +21,7 @@ import (
 	"io"
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cbor"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
@@ -42,13 +42,13 @@ import (
 // It keeps track of attributes such as withdrawal credentials, slashed status, and various epochs
 // that typically change at most twice during the validator's lifespan.
 type StaticValidator struct {
-	publicKeys            []staticValidatorField[libcommon.Bytes48] // Tracks changes in public keys.
-	withdrawalCredentials []staticValidatorField[libcommon.Hash]    // Tracks changes in withdrawal credentials.
-	slashed               []staticValidatorField[bool]              // Tracks changes in slashed status.
-	activationEligibility []staticValidatorField[uint64]            // Tracks changes in activation eligibility epoch.
-	activationEpoch       []staticValidatorField[uint64]            // Tracks changes in activation epoch.
-	exitEpoch             []staticValidatorField[uint64]            // Tracks changes in exit epoch.
-	withdrawableEpoch     []staticValidatorField[uint64]            // Tracks changes in withdrawable epoch.
+	publicKeys            []staticValidatorField[common.Bytes48] // Tracks changes in public keys.
+	withdrawalCredentials []staticValidatorField[common.Hash]    // Tracks changes in withdrawal credentials.
+	slashed               []staticValidatorField[bool]           // Tracks changes in slashed status.
+	activationEligibility []staticValidatorField[uint64]         // Tracks changes in activation eligibility epoch.
+	activationEpoch       []staticValidatorField[uint64]         // Tracks changes in activation epoch.
+	exitEpoch             []staticValidatorField[uint64]         // Tracks changes in exit epoch.
+	withdrawableEpoch     []staticValidatorField[uint64]         // Tracks changes in withdrawable epoch.
 }
 
 // NewStaticValidatorFromValidator creates a new StaticValidator from a given Validator and Slot,
@@ -56,8 +56,8 @@ type StaticValidator struct {
 func NewStaticValidatorFromValidator(v solid.Validator, slot uint64) *StaticValidator {
 	return &StaticValidator{
 		// Initializes each field with the current state of the validator.
-		publicKeys:            []staticValidatorField[libcommon.Bytes48]{{slot, v.PublicKey()}},
-		withdrawalCredentials: []staticValidatorField[libcommon.Hash]{{slot, v.WithdrawalCredentials()}},
+		publicKeys:            []staticValidatorField[common.Bytes48]{{slot, v.PublicKey()}},
+		withdrawalCredentials: []staticValidatorField[common.Hash]{{slot, v.WithdrawalCredentials()}},
 		slashed:               []staticValidatorField[bool]{{slot, v.Slashed()}},
 		activationEligibility: []staticValidatorField[uint64]{{slot, v.ActivationEligibilityEpoch()}},
 		activationEpoch:       []staticValidatorField[uint64]{{slot, v.ActivationEpoch()}},
@@ -68,14 +68,14 @@ func NewStaticValidatorFromValidator(v solid.Validator, slot uint64) *StaticVali
 
 // AddWithdrawalCredentials adds a new withdrawal credential entry to the validator.
 // This method is used to track changes in withdrawal credentials over time.
-func (s *StaticValidator) AddWithdrawalCredentials(slot uint64, withdrawalCredentials libcommon.Hash) {
-	s.withdrawalCredentials = append(s.withdrawalCredentials, staticValidatorField[libcommon.Hash]{slot, withdrawalCredentials})
+func (s *StaticValidator) AddWithdrawalCredentials(slot uint64, withdrawalCredentials common.Hash) {
+	s.withdrawalCredentials = append(s.withdrawalCredentials, staticValidatorField[common.Hash]{slot, withdrawalCredentials})
 }
 
 // cborStaticValidator is a struct used for CBOR serialization of StaticValidator data.
 type cborStaticValidator struct {
-	PublicKeys            []staticValidatorField[libcommon.Bytes48]
-	WithdrawalCredentials []staticValidatorField[libcommon.Hash]
+	PublicKeys            []staticValidatorField[common.Bytes48]
+	WithdrawalCredentials []staticValidatorField[common.Hash]
 	Slashed               []staticValidatorField[bool]
 	ActivationEligibility []staticValidatorField[uint64]
 	ActivationEpoch       []staticValidatorField[uint64]
@@ -132,7 +132,7 @@ func (s *StaticValidator) AddWithdrawableEpoch(slot uint64, withdrawableEpoch ui
 	s.withdrawableEpoch = append(s.withdrawableEpoch, staticValidatorField[uint64]{slot, withdrawableEpoch})
 }
 
-func (s *StaticValidator) WithdrawalCredentials(slot uint64) libcommon.Hash {
+func (s *StaticValidator) WithdrawalCredentials(slot uint64) common.Hash {
 	currIndex := 0
 	for i, v := range s.withdrawalCredentials {
 		if v.Slot > slot {
@@ -198,7 +198,7 @@ func (s *StaticValidator) WithdrawableEpoch(slot uint64) uint64 {
 	return s.withdrawableEpoch[currIndex].Field
 }
 
-func (s *StaticValidator) PublicKey(slot uint64) libcommon.Bytes48 {
+func (s *StaticValidator) PublicKey(slot uint64) common.Bytes48 {
 	currIndex := 0
 	for i, v := range s.publicKeys {
 		if v.Slot > slot {
@@ -297,7 +297,7 @@ func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, s
 	return nil
 }
 
-func (s *StaticValidatorTable) AddWithdrawalCredentials(validatorIndex, slot uint64, withdrawalCredentials libcommon.Hash) error {
+func (s *StaticValidatorTable) AddWithdrawalCredentials(validatorIndex, slot uint64, withdrawalCredentials common.Hash) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
 	if slot <= s.slot && s.slot != 0 {
@@ -391,7 +391,7 @@ func (s *StaticValidatorTable) ForEach(fn func(validatorIndex uint64, validator 
 	}
 }
 
-func (s *StaticValidatorTable) WithdrawalCredentials(validatorIndex uint64, slot uint64) libcommon.Hash {
+func (s *StaticValidatorTable) WithdrawalCredentials(validatorIndex uint64, slot uint64) common.Hash {
 	s.sync.RLock()
 	defer s.sync.RUnlock()
 	return s.validatorTable[validatorIndex].WithdrawalCredentials(slot)

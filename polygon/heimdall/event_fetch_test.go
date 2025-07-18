@@ -2,12 +2,27 @@ package heimdall
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/stretchr/testify/require"
 )
+
+func TestEventFetchReponse(t *testing.T) {
+	output := []byte(`{"event_records":[{"id":"1","contract":"0xf8e3d5a3b7d6006e21379a857108280cfe324eec","data":"AAAAAAAAAAAAAAAAINhDPcgZrwhzNqclQi30z77ylxAAAAAAAAAAAAAAAACNJo0nhdQBcOCP5UVCMv0YFePRwwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABWvHXi1jEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAyqME=","tx_hash":"0x7fcc0fdae1aaca66fde7341314d802f09b28a0799e1b4c7f68218b08f8abfb30","log_index":"3","bor_chain_id":"2756","record_time":"2025-06-23T15:23:51.278830863Z"}]}`)
+
+	var v StateSyncEventsResponseV2
+
+	err := json.Unmarshal(output, &v)
+	require.Nil(t, err)
+
+	events, err := v.GetEventRecords()
+	require.Nil(t, err)
+	require.Len(t, events, 1)
+}
 
 func TestOver50EventBlockFetch(t *testing.T) {
 	if _, ok := os.LookupEnv("ENABLE_TEST_OVER_50_EVENT_BLOCK_FETCH"); !ok {

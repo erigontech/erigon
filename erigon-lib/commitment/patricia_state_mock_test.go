@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -34,7 +35,10 @@ import (
 
 // In memory commitment and state to use with the tests
 type MockState struct {
-	t      *testing.T
+	t          *testing.T
+	concurrent atomic.Bool
+
+	mu     sync.Mutex            // to protect sm and cm for concurrent trie
 	sm     map[string][]byte     // backbone of the state
 	cm     map[string]BranchData // backbone of the commitments
 	numBuf [binary.MaxVarintLen64]byte
@@ -49,17 +53,29 @@ func NewMockState(t *testing.T) *MockState {
 	}
 }
 
+func (ms *MockState) SetConcurrentCommitment(concurrent bool) {
+	ms.concurrent.Store(concurrent)
+}
+
 func (ms *MockState) TempDir() string {
 	return ms.t.TempDir()
 }
 
 func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
 	// updates already merged by trie
+	if ms.concurrent.Load() {
+		ms.mu.Lock()
+		defer ms.mu.Unlock()
+	}
 	ms.cm[string(prefix)] = data
 	return nil
 }
 
 func (ms *MockState) Branch(prefix []byte) ([]byte, uint64, error) {
+	if ms.concurrent.Load() {
+		ms.mu.Lock()
+		defer ms.mu.Unlock()
+	}
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
 		//fmt.Printf("GetBranch prefix %x, exBytes (%d) %x [%v]\n", prefix, len(exBytes), []byte(exBytes), BranchData(exBytes).String())
 		return exBytes, 0, nil
@@ -68,7 +84,13 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, uint64, error) {
 }
 
 func (ms *MockState) Account(plainKey []byte) (*Update, error) {
+	if ms.concurrent.Load() {
+		ms.mu.Lock()
+	}
 	exBytes, ok := ms.sm[string(plainKey[:])]
+	if ms.concurrent.Load() {
+		ms.mu.Unlock()
+	}
 	if !ok {
 		//ms.t.Logf("%p GetAccount not found key [%x]", ms, plainKey)
 		u := new(Update)
@@ -98,7 +120,13 @@ func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 }
 
 func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
+	if ms.concurrent.Load() {
+		ms.mu.Lock()
+	}
 	exBytes, ok := ms.sm[string(plainKey[:])]
+	if ms.concurrent.Load() {
+		ms.mu.Unlock()
+	}
 	if !ok {
 		ms.t.Logf("GetStorage not found key [%x]", plainKey)
 		u := new(Update)
@@ -130,6 +158,7 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 	return &ex, nil
 }
 
+// / called sequentially outside of the trie so no need to protect
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
 	for i, key := range plainKeys {
 		update := updates[i]
@@ -155,6 +184,7 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 	return nil
 }
 
+// / called sequentially outside of the trie so no need to protect
 func (ms *MockState) applyBranchNodeUpdates(updates map[string]BranchData) {
 	for key, update := range updates {
 		if pre, ok := ms.cm[key]; ok {

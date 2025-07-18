@@ -17,16 +17,15 @@
 package cltypes
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 type HistoricalSummary struct {
-	BlockSummaryRoot libcommon.Hash `json:"block_summary_root"`
-	StateSummaryRoot libcommon.Hash `json:"state_summary_root"`
+	BlockSummaryRoot common.Hash `json:"block_summary_root"`
+	StateSummaryRoot common.Hash `json:"state_summary_root"`
 }
 
 func (h *HistoricalSummary) EncodeSSZ(buf []byte) ([]byte, error) {

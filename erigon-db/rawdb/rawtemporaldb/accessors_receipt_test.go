@@ -9,39 +9,38 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAppendReceipt(t *testing.T) {
 	dirs, require := datadir.New(t.TempDir()), require.New(t)
-	db, _ := temporaltest.NewTestDB(t, dirs)
-	tx, err := db.BeginRw(context.Background())
+	db := temporaltest.NewTestDB(t, dirs)
+	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
 
-	ttx := tx.(kv.TemporalTx)
+	ttx := tx
 	doms, err := state.NewSharedDomains(ttx, log.New())
 	require.NoError(err)
 	defer doms.Close()
-	doms.SetTx(ttx)
 
 	doms.SetTxNum(0) // block1
-	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 10, FirstLogIndexWithinBlock: 0}, 0)
+	err = AppendReceipt(doms.AsPutDel(ttx), &types.Receipt{CumulativeGasUsed: 10, FirstLogIndexWithinBlock: 0}, 0, 0)
 	require.NoError(err)
 
 	doms.SetTxNum(1) // block1
-	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 11, FirstLogIndexWithinBlock: 1}, 0)
+	err = AppendReceipt(doms.AsPutDel(ttx), &types.Receipt{CumulativeGasUsed: 11, FirstLogIndexWithinBlock: 1}, 0, 1)
 	require.NoError(err)
 
 	doms.SetTxNum(2) // block1
 
 	doms.SetTxNum(3) // block2
-	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 12, FirstLogIndexWithinBlock: 0}, 0)
+	err = AppendReceipt(doms.AsPutDel(ttx), &types.Receipt{CumulativeGasUsed: 12, FirstLogIndexWithinBlock: 0}, 0, 3)
 	require.NoError(err)
 
 	doms.SetTxNum(4) // block2
-	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 14, FirstLogIndexWithinBlock: 4}, 0)
+	err = AppendReceipt(doms.AsPutDel(ttx), &types.Receipt{CumulativeGasUsed: 14, FirstLogIndexWithinBlock: 4}, 0, 4)
 	require.NoError(err)
 
 	doms.SetTxNum(5) // block2

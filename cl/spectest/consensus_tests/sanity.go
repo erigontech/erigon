@@ -50,7 +50,7 @@ var SanitySlots = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest
 	haveRoot, err := testState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, expectedRoot, haveRoot)
+	assert.Equal(t, expectedRoot, haveRoot)
 	return nil
 })
 
@@ -99,7 +99,7 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 	haveRoot, err := testState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, finalRoot, haveRoot)
+	assert.Equal(t, finalRoot, haveRoot)
 
 	return nil
 })

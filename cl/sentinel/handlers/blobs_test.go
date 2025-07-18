@@ -32,8 +32,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -48,10 +47,11 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
-	s, err := initial_state.GetGenesisState(networkid.MainnetChainID)
+	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
 	require.NoError(t, err)
 	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
 }
@@ -62,8 +62,8 @@ func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltype
 		out = append(out, cltypes.NewBlobSidecar(
 			uint64(i),
 			&cltypes.Blob{byte(i)},
-			libcommon.Bytes48{byte(i)},
-			libcommon.Bytes48{byte(i)},
+			common.Bytes48{byte(i)},
+			common.Bytes48{byte(i)},
 			blockHeader,
 			solid.NewHashVector(cltypes.CommitmentBranchSize),
 		))
@@ -120,7 +120,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, nil, true,
 	)
 	c.Start()
 	req := &cltypes.BlobsByRangeRequest{
@@ -133,7 +133,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		return
 	}
 
-	reqData := libcommon.CopyBytes(reqBuf.Bytes())
+	reqData := common.CopyBytes(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRangeProtocolV1))
 	require.NoError(t, err)
 
@@ -241,7 +241,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, nil, true,
 	)
 	c.Start()
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
@@ -255,7 +255,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		return
 	}
 
-	reqData := libcommon.CopyBytes(reqBuf.Bytes())
+	reqData := common.CopyBytes(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRootProtocolV1))
 	require.NoError(t, err)
 

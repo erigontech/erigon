@@ -195,12 +195,11 @@ func (c *MockPoolFilterKnownIdHashesCall) DoAndReturn(f func(kv.Tx, Hashes) (Has
 }
 
 // GetBlobs mocks base method.
-func (m *MockPool) GetBlobs(blobhashes []common.Hash) ([][]byte, [][]byte) {
+func (m *MockPool) GetBlobs(blobhashes []common.Hash) []PoolBlobBundle {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetBlobs", blobhashes)
-	ret0, _ := ret[0].([][]byte)
-	ret1, _ := ret[1].([][]byte)
-	return ret0, ret1
+	ret0, _ := ret[0].([]PoolBlobBundle)
+	return ret0
 }
 
 // GetBlobs indicates an expected call of GetBlobs.
@@ -216,19 +215,19 @@ type MockPoolGetBlobsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockPoolGetBlobsCall) Return(arg0, arg1 [][]byte) *MockPoolGetBlobsCall {
-	c.Call = c.Call.Return(arg0, arg1)
+func (c *MockPoolGetBlobsCall) Return(arg0 []PoolBlobBundle) *MockPoolGetBlobsCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolGetBlobsCall) Do(f func([]common.Hash) ([][]byte, [][]byte)) *MockPoolGetBlobsCall {
+func (c *MockPoolGetBlobsCall) Do(f func([]common.Hash) []PoolBlobBundle) *MockPoolGetBlobsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolGetBlobsCall) DoAndReturn(f func([]common.Hash) ([][]byte, [][]byte)) *MockPoolGetBlobsCall {
+func (c *MockPoolGetBlobsCall) DoAndReturn(f func([]common.Hash) []PoolBlobBundle) *MockPoolGetBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

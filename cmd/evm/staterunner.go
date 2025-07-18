@@ -31,9 +31,9 @@ import (
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -57,12 +57,13 @@ var stateTestCommand = cli.Command{
 // StatetestResult contains the execution status after running a state test, any
 // error that might have occurred and a dump of the final state if requested.
 type StatetestResult struct {
-	Name  string          `json:"name"`
-	Pass  bool            `json:"pass"`
-	Root  *libcommon.Hash `json:"stateRoot,omitempty"`
-	Fork  string          `json:"fork"`
-	Error string          `json:"error,omitempty"`
-	State *state.Dump     `json:"state,omitempty"`
+	Name  string       `json:"name"`
+	Pass  bool         `json:"pass"`
+	Root  *common.Hash `json:"stateRoot,omitempty"`
+	Fork  string       `json:"fork"`
+	Error string       `json:"error,omitempty"`
+	State *state.Dump  `json:"state,omitempty"`
+	Stats *execStats   `json:"benchStats,omitempty"`
 }
 
 func stateTestCmd(ctx *cli.Context) error {
@@ -88,7 +89,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	}
 
 	if len(ctx.Args().First()) != 0 {
-		return runStateTest(ctx.Args().First(), cfg, ctx.Bool(MachineFlag.Name))
+		return runStateTest(ctx.Args().First(), cfg, ctx.Bool(MachineFlag.Name), ctx.Bool(BenchFlag.Name))
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -96,7 +97,7 @@ func stateTestCmd(ctx *cli.Context) error {
 		if len(fname) == 0 {
 			return nil
 		}
-		if err := runStateTest(fname, cfg, ctx.Bool(MachineFlag.Name)); err != nil {
+		if err := runStateTest(fname, cfg, ctx.Bool(MachineFlag.Name), ctx.Bool(BenchFlag.Name)); err != nil {
 			return err
 		}
 	}
@@ -104,7 +105,7 @@ func stateTestCmd(ctx *cli.Context) error {
 }
 
 // runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
+func runStateTest(fname string, cfg vm.Config, jsonOut bool, bench bool) error {
 	// Load the test content from the input file
 	src, err := os.ReadFile(fname)
 	if err != nil {
@@ -116,7 +117,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
 	}
 
 	// Iterate over all the stateTests, run them and aggregate the results
-	results, err := aggregateResultsFromStateTests(stateTests, cfg, jsonOut)
+	results, err := aggregateResultsFromStateTests(stateTests, cfg, jsonOut, bench)
 	if err != nil {
 		return err
 	}
@@ -128,7 +129,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
 
 func aggregateResultsFromStateTests(
 	stateTests map[string]tests.StateTest, cfg vm.Config,
-	jsonOut bool) ([]StatetestResult, error) {
+	jsonOut bool, bench bool) ([]StatetestResult, error) {
 	dirs := datadir.New(filepath.Join(os.TempDir(), "erigon-statetest"))
 	//this DB is shared. means:
 	// - faster sequential tests: don't need create/delete db
@@ -152,7 +153,7 @@ func aggregateResultsFromStateTests(
 	}
 	defer db.Close()
 
-	tx, txErr := db.BeginRw(context.Background())
+	tx, txErr := db.BeginTemporalRw(context.Background())
 	if txErr != nil {
 		return nil, txErr
 	}
@@ -180,6 +181,17 @@ func aggregateResultsFromStateTests(
 					}
 				}
 			}
+
+			// if benchmark requested rerun test w/o verification and collect stats
+			if bench {
+				_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
+					_, _, gasUsed, _ := test.RunNoVerify(tx, st, cfg, dirs)
+					return nil, gasUsed, nil
+				})
+
+				result.Stats = &stats
+			}
+
 			results = append(results, *result)
 		}
 	}

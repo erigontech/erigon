@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
-
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 )
@@ -50,7 +50,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 
 	// Checkpoint blocks need to enforce zero beneficiary
 	checkpoint := (number % c.config.Epoch) == 0
-	if checkpoint && header.Coinbase != (libcommon.Address{}) {
+	if checkpoint && header.Coinbase != (common.Address{}) {
 		return errInvalidCheckpointBeneficiary
 	}
 
@@ -79,11 +79,11 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return errInvalidCheckpointSigners
 	}
 	// Ensure that the mix digest is zero as we don't have fork protection currently
-	if header.MixDigest != (libcommon.Hash{}) {
+	if header.MixDigest != (common.Hash{}) {
 		return errInvalidMixDigest
 	}
 	// Ensure that the block doesn't contain any uncles which are meaningless in PoA
-	if header.UncleHash != types.EmptyUncleHash {
+	if header.UncleHash != empty.UncleHash {
 		return errInvalidUncleHash
 	}
 	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
@@ -170,7 +170,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	return c.verifySeal(chain, header, snap)
 }
 
-func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash libcommon.Hash, parents []*types.Header) (*Snapshot, error) {
+func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
 		headers []*types.Header
@@ -199,7 +199,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			if checkpoint != nil {
 				hash := checkpoint.Hash()
 
-				signers := make([]libcommon.Address, (len(checkpoint.Extra)-ExtraVanity-ExtraSeal)/length.Addr)
+				signers := make([]common.Address, (len(checkpoint.Extra)-ExtraVanity-ExtraSeal)/length.Addr)
 				for i := 0; i < len(signers); i++ {
 					copy(signers[i][:], checkpoint.Extra[ExtraVanity+i*length.Addr:])
 				}

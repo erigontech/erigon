@@ -52,7 +52,7 @@ const (
 	//   Problem is "nature of false-positives" - they are randomly/smashed across .seg files.
 	//   It makes .seg files "warm" - which is bad because they are big and
 	//      data-locality of touches is bad (and maybe need visit a lot of shards to find key).
-	//   Can add build-in "existence filter" (like bloom/cucko/ribbon/xor-filter/fuse-filter) it will improve
+	//   Can add a built-in "existence filter" (like bloom/cuckoo/ribbon/xor-filter/fuse-filter); it will improve
 	//      data-locality - filters are small-enough and existance-chekcs will be co-located on disk.
 	//   But there are 2 additional properties we have in our data:
 	//      "keys are known", "keys are hashed" (.idx works on murmur3), ".idx can calc key-number by key".
@@ -85,7 +85,7 @@ type Index struct {
 	bucketSize         int
 	size               int64
 	modTime            time.Time
-	baseDataID         uint64 // Index internaly organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
+	baseDataID         uint64 // Index internally organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
 	bucketCount        uint64 // Number of buckets
 	keyCount           uint64
 	recMask            uint64
@@ -145,7 +145,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
-	defer idx.EnableReadAhead().DisableReadAhead()
+	defer idx.MadvSequential().DisableReadAhead()
 
 	// Read number of keys and bytes per record
 	idx.baseDataID = binary.BigEndian.Uint64(idx.data[:8])
@@ -454,14 +454,26 @@ func (idx *Index) DisableReadAhead() {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
 	}
 }
-func (idx *Index) EnableReadAhead() *Index {
+func (idx *Index) MadvSequential() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
 	idx.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
-func (idx *Index) EnableWillNeed() *Index {
+func (idx *Index) MadvNormal() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
 	idx.readAheadRefcnt.Add(1)
-	fmt.Printf("[dbg] madv_will_need: %s\n", idx.fileName)
+	_ = mmap.MadviseNormal(idx.mmapHandle1)
+	return idx
+}
+func (idx *Index) MadvWillNeed() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
 	_ = mmap.MadviseWillNeed(idx.mmapHandle1)
 	return idx
 }

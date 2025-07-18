@@ -31,14 +31,15 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {
@@ -61,7 +62,7 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.Big)(uint256.NewInt(300000000000000000).ToBig()),
 		common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.Big)(uint256.NewInt(9000000000000000000).ToBig()),
 	}
-	assert.Equal(len(expected), len(balances))
+	assert.Len(balances, len(expected))
 	for i := range balances {
 		assert.Contains(expected, i, "%s is not expected to be present in the output.", i)
 		assert.Equal(balances[i], expected[i], "the value for %s is expected to be %v, but got %v.", i, expected[i], balances[i])
@@ -256,10 +257,10 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 func TestUseBridgeReader(t *testing.T) {
 	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
 	var br *mockBridgeReader
-	api := NewBaseApi(nil, nil, nil, false, time.Duration(0), nil, datadir.Dirs{}, br)
+	api := NewBaseApi(nil, nil, (*freezeblocks.BlockReader)(nil), false, time.Duration(0), nil, datadir.Dirs{}, br)
 	require.False(t, api.useBridgeReader)
 	br = &mockBridgeReader{}
-	api = NewBaseApi(nil, nil, nil, false, time.Duration(0), nil, datadir.Dirs{}, br)
+	api = NewBaseApi(nil, nil, (*freezeblocks.BlockReader)(nil), false, time.Duration(0), nil, datadir.Dirs{}, br)
 	require.True(t, api.useBridgeReader)
 }
 

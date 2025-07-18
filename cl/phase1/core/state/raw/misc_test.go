@@ -32,7 +32,7 @@ func TestGetters(t *testing.T) {
 
 	val, err := state.ValidatorBalance(0)
 	require.NoError(t, err)
-	require.Equal(t, val, uint64(0x3d5972c17))
+	require.Equal(t, uint64(0x3d5972c17), val)
 
 	root, err := state.BlockRoot()
 	require.NoError(t, err)

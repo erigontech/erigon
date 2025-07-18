@@ -42,6 +42,8 @@ var DefaultFlags = []cli.Flag{
 	&PruneDistanceFlag,
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
+	&utils.KeepExecutionProofsFlag,
+
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,
@@ -87,7 +89,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
-	&utils.KeepExecutionProofsFlag,
 
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,
@@ -117,6 +118,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentConnsPerFileFlag,
 	&utils.TorrentDownloadSlotsFlag,
 	&utils.TorrentStaticPeersFlag,
+	&utils.TorrentDisableTrackers,
 	&utils.TorrentUploadRateFlag,
 	&utils.TorrentDownloadRateFlag,
 	&utils.TorrentVerbosityFlag,
@@ -138,7 +140,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DeveloperPeriodFlag,
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
-	&utils.PersistReceiptsFlag,
+	&utils.PersistReceiptsV2Flag,
 	&utils.FakePoWFlag,
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
@@ -174,10 +176,9 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithHeimdallMilestones,
 	&utils.WithHeimdallWaypoints,
 	&utils.PolygonSyncFlag,
-	&utils.PolygonSyncStageFlag,
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
-	&utils.OverridePragueFlag,
+	&utils.OverrideOsakaFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,
@@ -231,6 +232,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinValidatorMonitorFlag,
 	&utils.CaplinCustomConfigFlag,
 	&utils.CaplinCustomGenesisFlag,
+	&utils.CaplinUseEngineApiFlag,
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,

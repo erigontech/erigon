@@ -24,7 +24,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/version"
@@ -38,15 +37,15 @@ import (
 )
 
 func main() {
-	defer func() {
-		panicResult := recover()
-		if panicResult == nil {
-			return
-		}
-
-		log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
-		os.Exit(1)
-	}()
+	//defer func() {
+	//	panicResult := recover()
+	//	if panicResult == nil {
+	//		return
+	//	}
+	//
+	//	log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
+	//	os.Exit(1)
+	//}()
 
 	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {

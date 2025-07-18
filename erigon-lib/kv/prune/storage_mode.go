@@ -28,16 +28,98 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-var DefaultMode = Mode{
-	Initialised: true,
-	History:     Distance(math.MaxUint64),
-	Blocks:      Distance(math.MaxUint64),
+var (
+	ArchiveMode = Mode{
+		Initialised: true,
+		History:     Distance(math.MaxUint64),
+		Blocks:      KeepAllBlocksPruneMode,
+	}
+	FullMode = Mode{
+		Initialised: true,
+		Blocks:      DefaultBlocksPruneMode,
+		History:     Distance(config3.DefaultPruneDistance),
+	}
+	BlocksMode = Mode{
+		Initialised: true,
+		Blocks:      KeepAllBlocksPruneMode,
+		History:     Distance(config3.DefaultPruneDistance),
+	}
+	MinimalMode = Mode{
+		Initialised: true,
+		Blocks:      Distance(config3.DefaultPruneDistance),
+		History:     Distance(config3.DefaultPruneDistance),
+	}
+
+	DefaultMode = ArchiveMode
+	MockMode    = Mode{
+		Initialised: true,
+		History:     Distance(math.MaxUint64),
+		Blocks:      Distance(math.MaxUint64),
+	}
+
+	ErrUnknownPruneMode       = fmt.Errorf("--prune.mode must be one of %s, %s, %s", archiveModeStr, fullModeStr, minimalModeStr)
+	ErrDistanceOnlyForArchive = fmt.Errorf("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=%s", archiveModeStr)
+)
+
+const (
+	archiveModeStr = "archive"
+	blockModeStr   = "blocks"
+	fullModeStr    = "full"
+	minimalModeStr = "minimal"
+)
+
+type Mode struct {
+	Initialised bool // Set when the values are initialised (not default)
+	History     BlockAmount
+	Blocks      BlockAmount
 }
 
-func FromCli(distanceHistory, distanceBlocks uint64) (Mode, error) {
-	mode := DefaultMode
-	mode.History = Distance(distanceHistory)
-	mode.Blocks = Distance(distanceBlocks)
+func (m Mode) String() string {
+	if !m.Initialised {
+		return archiveModeStr
+	}
+	if m.History.toValue() == FullMode.History.toValue() && m.Blocks.toValue() == FullMode.Blocks.toValue() {
+		return fullModeStr
+	}
+	if m.History.toValue() == MinimalMode.History.toValue() && m.Blocks.toValue() == MinimalMode.Blocks.toValue() {
+		return minimalModeStr
+	}
+
+	if m.Blocks.toValue() == BlocksMode.Blocks.toValue() && m.History.toValue() == BlocksMode.History.toValue() {
+		return blockModeStr
+	}
+
+	short := archiveModeStr
+	if m.History.toValue() != DefaultMode.History.toValue() {
+		short += fmt.Sprintf(" --prune.distance=%d", m.History.toValue())
+	}
+	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
+		short += fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue())
+	}
+	return strings.TrimLeft(short, " ")
+}
+
+func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, error) {
+	var mode Mode
+	switch pruneMode {
+	case archiveModeStr, "":
+		mode = ArchiveMode
+	case fullModeStr:
+		mode = FullMode
+	case minimalModeStr:
+		mode = MinimalMode
+	case blockModeStr:
+		mode = BlocksMode
+	default:
+		return Mode{}, ErrUnknownPruneMode
+	}
+
+	if distanceHistory > 0 {
+		mode.History = Distance(distanceHistory)
+	}
+	if distanceBlocks > 0 {
+		mode.Blocks = Distance(distanceBlocks)
+	}
 	return mode, nil
 }
 
@@ -64,11 +146,10 @@ func Get(db kv.Getter) (Mode, error) {
 	return prune, nil
 }
 
-type Mode struct {
-	Initialised bool // Set when the values are initialised (not default)
-	History     BlockAmount
-	Blocks      BlockAmount
-}
+const (
+	DefaultBlocksPruneMode = Distance(math.MaxUint64)     // Use chain-specific history pruning (aka. history-expiry)
+	KeepAllBlocksPruneMode = Distance(math.MaxUint64 - 1) // Keep all history
+)
 
 type BlockAmount interface {
 	PruneTo(stageHead uint64) uint64
@@ -99,53 +180,9 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 	return stageHead - uint64(p)
 }
 
-func (m Mode) String() string {
-	if !m.Initialised {
-		return "default"
-	}
-	const defaultVal uint64 = config3.FullImmutabilityThreshold
-	long := ""
-	short := ""
-	if m.History.Enabled() {
-		if m.History.useDefaultValue() {
-			short += fmt.Sprintf(" --prune.h.older=%d", defaultVal)
-		} else {
-			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
-		}
-	}
-	if m.Blocks.Enabled() {
-		if m.Blocks.useDefaultValue() {
-			short += fmt.Sprintf(" --prune.b.older=%d", defaultVal)
-		} else {
-			long += fmt.Sprintf(" --prune.b.%s=%d", m.Blocks.dbType(), m.Blocks.toValue())
-		}
-	}
-
-	return strings.TrimLeft(short+long, " ")
-}
-
-func Override(db kv.RwTx, sm Mode) error {
-	var (
-		err error
-	)
-
-	err = set(db, kv.PruneHistory, sm.History)
-	if err != nil {
-		return err
-	}
-
-	err = set(db, kv.PruneBlocks, sm.Blocks)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
 func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
-	err := setIfNotExist(tx, pruneMode)
-	if err != nil {
+	if err := setIfNotExist(tx, pruneMode); err != nil {
 		return pruneMode, err
 	}
 
@@ -155,19 +192,21 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
-
+		// Little initial design flaw: we used maxUint64 as default value for prune distance so history expiry was not accounted for.
+		// We need to use because we are changing defaults in archive node from DefaultBlocksPruneMode to KeepAllBlocksPruneMode which is a different value so it would fail if we are running --prune.mode=archive.
+		if (pm.History == DefaultBlocksPruneMode && pruneMode.History == DefaultBlocksPruneMode) &&
+			(pm.Blocks == DefaultBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
+			return pruneMode, nil
+		}
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
-			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
+			return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())
 		}
 	}
 	return pm, nil
 }
 
-func setIfNotExist(db kv.GetPut, pm Mode) error {
-	var (
-		err error
-	)
+func setIfNotExist(db kv.GetPut, pm Mode) (err error) {
 	if !pm.Initialised {
 		pm = DefaultMode
 	}
@@ -178,12 +217,10 @@ func setIfNotExist(db kv.GetPut, pm Mode) error {
 	}
 
 	for key, value := range pruneDBData {
-		err = setOnEmpty(db, []byte(key), value)
-		if err != nil {
+		if err = setOnEmpty(db, []byte(key), value); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -220,22 +257,6 @@ func get(db kv.Getter, key []byte) (BlockAmount, error) {
 	}
 
 	return nil, nil
-}
-
-func set(db kv.Putter, key []byte, blockAmount BlockAmount) error {
-	v := make([]byte, 8)
-	binary.BigEndian.PutUint64(v, blockAmount.toValue())
-	if err := db.Put(kv.DatabaseInfo, key, v); err != nil {
-		return err
-	}
-
-	keyType := keyType(key)
-
-	if err := db.Put(kv.DatabaseInfo, keyType, blockAmount.dbType()); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func keyType(name []byte) []byte {

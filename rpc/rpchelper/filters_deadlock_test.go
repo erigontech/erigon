@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
 )
 
@@ -33,7 +33,7 @@ func TestFiltersDeadlock(t *testing.T) {
 	f := New(context.TODO(), config, nil, nil, nil, func() {}, logger)
 	crit := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]libcommon.Hash{},
+		Topics:    [][]common.Hash{},
 	}
 	subCount := 20
 	logCount := 100

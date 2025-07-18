@@ -30,7 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
@@ -59,7 +59,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		root := Root{}
 		err = yaml.Unmarshal(rootBytes, &root)
 		require.NoError(t, err)
-		expectedRoot := libcommon.HexToHash(root.Root)
+		expectedRoot := common.HexToHash(root.Root)
 		object := ref.Clone().(unmarshalerMarshalerHashable)
 		if versionObj, ok := object.(interface{ SetVersion(clparams.StateVersion) }); ok {
 			// Note: a bit tricky to change version here :(
@@ -85,7 +85,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		}
 		haveEncoded, err := object.EncodeSSZ(nil)
 		require.NoError(t, err)
-		require.EqualValues(t, haveEncoded, encoded)
+		require.Equal(t, haveEncoded, encoded)
 		// Now let it do the encoding in snapshot format
 		if blk, ok := object.(*cltypes.SignedBeaconBlock); ok {
 			var b bytes.Buffer
@@ -126,7 +126,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 
 		haveRoot, err = obj2.(unmarshalerMarshalerHashable).HashSSZ()
 		require.NoError(t, err)
-		require.Equal(t, expectedRoot, libcommon.Hash(haveRoot))
+		require.Equal(t, expectedRoot, common.Hash(haveRoot))
 
 		return nil
 	})
@@ -159,7 +159,7 @@ func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 		require.NoError(t, err)
 		root := Root{}
 		require.NoError(t, yaml.Unmarshal(rootBytes, &root))
-		expectedRoot := libcommon.HexToHash(root.Root)
+		expectedRoot := common.HexToHash(root.Root)
 
 		// new container
 		object := newObjFunc(c.Version())
@@ -181,7 +181,7 @@ func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 		// 2. check ssz bytes
 		sszBytes, err := object.EncodeSSZ(nil)
 		require.NoError(t, err)
-		require.EqualValues(t, encoded, sszBytes, "ssz bytes not equal")
+		require.Equal(t, encoded, sszBytes, "ssz bytes not equal")
 
 		if testOptions.testJson {
 			jsonObject := newObjFunc(c.Version())
@@ -192,7 +192,7 @@ func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 			// check hash root again
 			hashRoot, err := jsonObject.HashSSZ()
 			require.NoError(t, err, "failed in HashSSZ")
-			require.Equal(t, expectedRoot, libcommon.Hash(hashRoot), "json not equal")
+			require.Equal(t, expectedRoot, common.Hash(hashRoot), "json not equal")
 		}
 		return nil
 	})

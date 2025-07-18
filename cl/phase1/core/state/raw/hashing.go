@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -33,12 +33,15 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 		return [32]byte{}, err
 	}
 	// for i := 0; i < len(b.leaves); i += 32 {
-	// 	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
+	// 	fmt.Println(i/32, common.BytesToHash(b.leaves[i:i+32]))
 	// }
 	// Pad to 32 of length
-	endIndex := StateLeafSize * 32
-	if b.Version() <= clparams.DenebVersion {
-		endIndex = StateLeafSizeDeneb * 32
+	endIndex := StateLeafSizeDeneb * 32
+	if b.Version() >= clparams.ElectraVersion {
+		endIndex = StateLeafSizeElectra * 32
+	}
+	if b.Version() >= clparams.FuluVersion {
+		endIndex = StateLeafSizeFulu * 32
 	}
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:endIndex], out[:])
 	return
@@ -47,7 +50,7 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 func (b *BeaconState) PrintLeaves() {
 	fmt.Println("TRACE: BeaconState leaves:")
 	for i := 0; i < len(b.leaves); i += 32 {
-		fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
+		fmt.Println(i/32, common.BytesToHash(b.leaves[i:i+32]))
 	}
 }
 
@@ -59,7 +62,11 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 	leafSize := StateLeafSizeDeneb
 	if b.Version() >= clparams.ElectraVersion {
 		depth = 6
-		leafSize = StateLeafSize
+		leafSize = StateLeafSizeElectra
+	}
+	if b.Version() >= clparams.FuluVersion {
+		depth = 7
+		leafSize = StateLeafSizeFulu
 	}
 
 	schema := []interface{}{}
@@ -78,7 +85,11 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 	leafSize := StateLeafSizeDeneb
 	if b.Version() >= clparams.ElectraVersion {
 		depth = 6
-		leafSize = StateLeafSize
+		leafSize = StateLeafSizeElectra
+	}
+	if b.Version() >= clparams.FuluVersion {
+		depth = 7
+		leafSize = StateLeafSizeFulu
 	}
 
 	schema := []interface{}{}
@@ -96,7 +107,11 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 	leafSize := StateLeafSizeDeneb
 	if b.Version() >= clparams.ElectraVersion {
 		depth = 6
-		leafSize = StateLeafSize
+		leafSize = StateLeafSizeElectra
+	}
+	if b.Version() >= clparams.FuluVersion {
+		depth = 7
+		leafSize = StateLeafSizeFulu
 	}
 
 	schema := []interface{}{}
@@ -136,7 +151,7 @@ func (p *beaconStateHasher) run() {
 				p.b.updateLeaf(idx, root)
 			case uint64:
 				p.b.updateLeaf(idx, merkle_tree.Uint64Root(obj))
-			case libcommon.Hash:
+			case common.Hash:
 				p.b.updateLeaf(idx, obj)
 			}
 
@@ -223,13 +238,17 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.add(PendingConsolidationsLeafIndex, b.pendingConsolidations)
 	}
 
+	if b.version >= clparams.FuluVersion {
+		beaconStateHasher.add(ProposerLookaheadLeafIndex, b.proposerLookahead)
+	}
+
 	beaconStateHasher.run()
 
 	return nil
 }
 
 // updateLeaf updates the leaf with the new value and marks it as clean. It's safe to call this function concurrently.
-func (b *BeaconState) updateLeaf(idx StateLeafIndex, leaf libcommon.Hash) {
+func (b *BeaconState) updateLeaf(idx StateLeafIndex, leaf common.Hash) {
 	// Update leaf with new value.
 	copy(b.leaves[idx*32:], leaf[:])
 	// Now leaf is clean :).

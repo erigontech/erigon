@@ -438,7 +438,7 @@ func TestCodeNodeGetExistingAccountEmptyCode(t *testing.T) {
 
 	address := getAddressForIndex(0)
 
-	codeHash := EmptyCodeHash
+	codeHash := emptyCodeHash
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
@@ -673,16 +673,16 @@ func TestShortNode(t *testing.T) {
 //func _TestEmptyRoot(t *testing.T) {
 //	sc := shards.NewStateCache(32, 64*1024)
 //
-//	sc.SetAccountHashesRead(common.FromHex("00"), 0b111, 0b111, 0b111, []libcommon.Hash{{}, {}, {}})
-//	sc.SetAccountHashesRead(common.FromHex("01"), 0b111, 0b111, 0b111, []libcommon.Hash{{}, {}, {}})
-//	sc.SetAccountHashesRead(common.FromHex("02"), 0b111, 0b111, 0b111, []libcommon.Hash{{}, {}, {}})
+//	sc.SetAccountHashesRead(common.FromHex("00"), 0b111, 0b111, 0b111, []common.Hash{{}, {}, {}})
+//	sc.SetAccountHashesRead(common.FromHex("01"), 0b111, 0b111, 0b111, []common.Hash{{}, {}, {}})
+//	sc.SetAccountHashesRead(common.FromHex("02"), 0b111, 0b111, 0b111, []common.Hash{{}, {}, {}})
 //
 //	rl := NewRetainList(0)
 //	rl.AddHex(common.FromHex("01"))
 //	rl.AddHex(common.FromHex("0101"))
 //	canUse := func(prefix []byte) bool { return !rl.Retain(prefix) }
 //	i := 0
-//	if err := sc.AccountTree([]byte{}, func(ihK []byte, h libcommon.Hash, hasTree, skipState bool) (toChild bool, err error) {
+//	if err := sc.AccountTree([]byte{}, func(ihK []byte, h common.Hash, hasTree, skipState bool) (toChild bool, err error) {
 //		i++
 //		switch i {
 //		case 1:

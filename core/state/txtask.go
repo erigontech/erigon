@@ -22,16 +22,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 )
 
 type AAValidationResult struct {
@@ -49,22 +50,22 @@ type TxTask struct {
 	Header          *types.Header
 	Txs             types.Transactions
 	Uncles          []*types.Header
-	Coinbase        libcommon.Address
+	Coinbase        common.Address
 	Withdrawals     types.Withdrawals
-	BlockHash       libcommon.Hash
-	sender          *libcommon.Address
+	BlockHash       common.Hash
+	sender          *common.Address
 	SkipAnalysis    bool
 	TxIndex         int // -1 for block initialisation
 	Final           bool
 	Failed          bool
 	Tx              types.Transaction
-	GetHashFn       func(n uint64) libcommon.Hash
+	GetHashFn       func(n uint64) (common.Hash, error)
 	TxAsMessage     *types.Message
 	EvmBlockContext evmtypes.BlockContext
 
 	HistoryExecution bool // use history reader for that txn instead of state reader
 
-	BalanceIncreaseSet map[libcommon.Address]BalanceIncreaseEntry
+	BalanceIncreaseSet map[common.Address]BalanceIncreaseEntry
 	ReadLists          map[string]*state.KvList
 	WriteLists         map[string]*state.KvList
 	AccountPrevs       map[string][]byte
@@ -73,10 +74,10 @@ type TxTask struct {
 	CodePrevs          map[string]uint64
 	Error              error
 	Logs               []*types.Log
-	TraceFroms         map[libcommon.Address]struct{}
-	TraceTos           map[libcommon.Address]struct{}
+	TraceFroms         map[common.Address]struct{}
+	TraceTos           map[common.Address]struct{}
 
-	UsedGas uint64
+	GasUsed uint64
 
 	// BlockReceipts is used only by Gnosis:
 	//  - it does store `proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})`
@@ -91,8 +92,14 @@ type TxTask struct {
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 	ValidationResults     []AAValidationResult
 }
+type GenericTracer interface {
+	TracingHooks() *tracing.Hooks
+	SetTransaction(tx types.Transaction)
+	Found() bool
+}
 
-func (t *TxTask) Sender() *libcommon.Address {
+func (t *TxTask) Sender() *common.Address {
+	//consumer.NewTracer().TracingHooks()
 	if t.sender != nil {
 		return t.sender
 	}
@@ -110,8 +117,12 @@ func (t *TxTask) Sender() *libcommon.Address {
 	return t.sender
 }
 
-func (t *TxTask) CreateReceipt(tx kv.Tx) {
-	if t.TxIndex < 0 || t.Final {
+func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
+	if t.TxIndex < 0 {
+		return
+	}
+	if t.Final {
+		t.BlockReceipts.AssertLogIndex(t.BlockNum)
 		return
 	}
 
@@ -124,15 +135,15 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
 		} else {
 			var err error
-			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
+			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, t.TxNum)
 			if err != nil {
 				panic(err)
 			}
 		}
 	}
 
-	cumulativeGasUsed += t.UsedGas
-	//if t.UsedGas == 0 { // TODO comment for arbitrum
+	cumulativeGasUsed += t.GasUsed
+	//if t.GasUsed == 0 { // TODO arbitrum does not need this but others do
 	//	msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
 	//	panic(msg)
 	//}
@@ -153,7 +164,7 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *
 		BlockHash:         t.BlockHash,
 		TransactionIndex:  uint(t.TxIndex),
 		Type:              t.Tx.Type(),
-		GasUsed:           t.UsedGas,
+		GasUsed:           t.GasUsed,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,
@@ -172,9 +183,8 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
 
-	receipt.Bloom = types.LogsBloom(receipt.Logs) // why do we need to add this?
 	// if the transaction created a contract, store the creation address in the receipt.
-	if t.TxAsMessage.To() == nil {
+	if t.TxAsMessage != nil && t.TxAsMessage.To() == nil {
 		receipt.ContractAddress = crypto.CreateAddress(*t.Sender(), t.Tx.GetNonce())
 	}
 
@@ -357,8 +367,8 @@ func (q *QueueWithRetry) Close() {
 
 // ResultsQueue thread-safe priority-queue of execution results
 type ResultsQueue struct {
-	limit  int
-	closed bool
+	heapLimit int
+	closed    bool
 
 	resultCh chan *TxTask
 	iter     *ResultsQueueIter
@@ -371,10 +381,10 @@ type ResultsQueue struct {
 
 func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
 	r := &ResultsQueue{
-		results:  &TxTaskQueue{},
-		limit:    heapLimit,
-		resultCh: make(chan *TxTask, resultChannelLimit),
-		ticker:   time.NewTicker(2 * time.Second),
+		results:   &TxTaskQueue{},
+		heapLimit: heapLimit,
+		resultCh:  make(chan *TxTask, resultChannelLimit),
+		ticker:    time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
 	r.iter = &ResultsQueueIter{q: r, results: r.results}
@@ -410,7 +420,7 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (err erro
 				continue
 			}
 			heap.Push(q.results, txTask)
-			if q.results.Len() > q.limit {
+			if q.results.Len() > q.heapLimit {
 				return nil
 			}
 		default: // we are inside mutex section, can't block here
@@ -504,13 +514,16 @@ func (q *ResultsQueue) Close() {
 }
 func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
 func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }
-func (q *ResultsQueue) Limit() int       { return q.limit }
+func (q *ResultsQueue) Limit() int       { return q.heapLimit }
 func (q *ResultsQueue) Len() (l int) {
 	q.m.Lock()
 	l = q.results.Len()
 	q.m.Unlock()
 	return l
 }
+func (q *ResultsQueue) Capacity() int            { return q.heapLimit }
+func (q *ResultsQueue) ChanLen() int             { return len(q.resultCh) }
+func (q *ResultsQueue) ChanCapacity() int        { return cap(q.resultCh) }
 func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].TxNum }
 func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
 func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }

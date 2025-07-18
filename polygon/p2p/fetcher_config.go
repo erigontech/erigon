@@ -22,7 +22,7 @@ import (
 )
 
 var defaultFetcherConfig = FetcherConfig{
-	responseTimeout:    5 * time.Second,
+	responseTimeout:    10 * time.Second,
 	retryBackOff:       time.Second,
 	maxRetries:         1,
 	requestIdGenerator: rand.Uint64,

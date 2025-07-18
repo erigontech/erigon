@@ -16,13 +16,11 @@
 
 package utils
 
-import (
-	libcommon "github.com/erigontech/erigon-lib/common"
-)
+import "github.com/erigontech/erigon-lib/common"
 
 const VERSIONED_HASH_VERSION_KZG byte = byte(1)
 
-func KzgCommitmentToVersionedHash(kzgCommitment libcommon.Bytes48) (libcommon.Hash, error) {
+func KzgCommitmentToVersionedHash(kzgCommitment common.Bytes48) (common.Hash, error) {
 	versionedHash := [32]byte{}
 	kzgCommitmentHash := Sha256(kzgCommitment[:])
 

@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
@@ -37,10 +37,10 @@ import (
 // max number of blocks to look for a transaction in
 const defaultMaxNumberOfEmptyBlockChecks = 25
 
-func AwaitTransactions(ctx context.Context, hashes ...libcommon.Hash) (map[libcommon.Hash]uint64, error) {
+func AwaitTransactions(ctx context.Context, hashes ...common.Hash) (map[common.Hash]uint64, error) {
 	devnet.Logger(ctx).Info("Awaiting transactions in confirmed blocks...")
 
-	hashmap := map[libcommon.Hash]bool{}
+	hashmap := map[common.Hash]bool{}
 
 	for _, hash := range hashes {
 		hashmap[hash] = true
@@ -62,16 +62,16 @@ func AwaitTransactions(ctx context.Context, hashes ...libcommon.Hash) (map[libco
 
 func searchBlockForHashes(
 	ctx context.Context,
-	hashmap map[libcommon.Hash]bool,
+	hashmap map[common.Hash]bool,
 	maxNumberOfEmptyBlockChecks int,
-) (map[libcommon.Hash]uint64, error) {
+) (map[common.Hash]uint64, error) {
 	logger := devnet.Logger(ctx)
 
 	if len(hashmap) == 0 {
 		return nil, errors.New("no hashes to search for")
 	}
 
-	txToBlock := make(map[libcommon.Hash]uint64, len(hashmap))
+	txToBlock := make(map[common.Hash]uint64, len(hashmap))
 
 	headsSub := services.GetSubscription(devnet.CurrentChainName(ctx), requests.Methods.ETHNewHeads)
 
@@ -113,12 +113,12 @@ func searchBlockForHashes(
 // Block represents a simple block for queries
 type Block struct {
 	Number       *hexutil.Big
-	Transactions []libcommon.Hash
-	BlockHash    libcommon.Hash
+	Transactions []common.Hash
+	BlockHash    common.Hash
 }
 
 // txHashInBlock checks if the block with block number has the transaction hash in its list of transactions
-func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNumber string, txToBlockMap map[libcommon.Hash]uint64, logger log.Logger) (uint64, int, error) {
+func txHashInBlock(client *rpc.Client, hashmap map[common.Hash]bool, blockNumber string, txToBlockMap map[common.Hash]uint64, logger log.Logger) (uint64, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel() // releases the resources held by the context
 

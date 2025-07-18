@@ -23,18 +23,18 @@ import (
 	"bytes"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func BenchmarkCutOriginal(b *testing.B) {
-	value := libcommon.HexToHash("0x01")
+	value := common.HexToHash("0x01")
 	for i := 0; i < b.N; i++ {
 		bytes.TrimLeft(value[:], "\x00")
 	}
 }
 
 func BenchmarkCutsetterFn(b *testing.B) {
-	value := libcommon.HexToHash("0x01")
+	value := common.HexToHash("0x01")
 	cutSetFn := func(r rune) bool { return r == 0 }
 	for i := 0; i < b.N; i++ {
 		bytes.TrimLeftFunc(value[:], cutSetFn)
@@ -42,8 +42,8 @@ func BenchmarkCutsetterFn(b *testing.B) {
 }
 
 func BenchmarkCutCustomTrim(b *testing.B) {
-	value := libcommon.HexToHash("0x01")
+	value := common.HexToHash("0x01")
 	for i := 0; i < b.N; i++ {
-		libcommon.TrimLeftZeroes(value[:])
+		common.TrimLeftZeroes(value[:])
 	}
 }

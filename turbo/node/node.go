@@ -25,6 +25,8 @@ import "C"
 import (
 	"context"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -37,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
-	"github.com/urfave/cli/v2"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.
@@ -130,6 +131,7 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 
 	return nodeConfig, nil
 }
+
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
 	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
 	utils.SetEthConfig(ctx, nodeConfig, &ethConfig, logger)
@@ -168,7 +170,7 @@ func New(
 
 func NewNodeConfig() *nodecfg.Config {
 	nodeConfig := nodecfg.DefaultConfig
-	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
+	// see similar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {

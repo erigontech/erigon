@@ -19,12 +19,14 @@ package chain
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
-	"strconv"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/generics"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -32,6 +34,8 @@ import (
 // Config is stored in the database on a per block basis. This means
 // that any network, identified by its genesis block, can have its own
 // set of configuration options.
+//
+// Config must be copied only with jinzhu/copier since it contains a sync.Once.
 type Config struct {
 	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
@@ -63,6 +67,7 @@ type Config struct {
 	TerminalTotalDifficulty       *big.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
 	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
 	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
+	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
 	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
@@ -70,9 +75,16 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
-	// Optional EIP-4844 parameters (see also EIP-7691 & EIP-7840)
-	MinBlobGasPrice *uint64       `json:"minBlobGasPrice,omitempty"`
-	BlobSchedule    *BlobSchedule `json:"blobSchedule,omitempty"`
+	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
+	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
+	Bpo1Time              *big.Int                      `json:"bpo1Time,omitempty"`
+	Bpo2Time              *big.Int                      `json:"bpo2Time,omitempty"`
+	Bpo3Time              *big.Int                      `json:"bpo3Time,omitempty"`
+	Bpo4Time              *big.Int                      `json:"bpo4Time,omitempty"`
+	Bpo5Time              *big.Int                      `json:"bpo5Time,omitempty"`
+	parseBlobScheduleOnce sync.Once                     `copier:"-"`
+	parsedBlobSchedule    map[uint64]*params.BlobConfig
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -83,6 +95,8 @@ type Config struct {
 	// (Optional) deposit contract of PoS chains
 	// See also EIP-6110: Supply validator deposits on chain
 	DepositContract common.Address `json:"depositContractAddress,omitempty"`
+
+	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -96,11 +110,6 @@ type Config struct {
 	AllowAA bool
 
 	ArbitrumChainParams ArbitrumChainParams `json:"arbitrum,omitempty"`
-
-	DAOForkSupport bool `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
-
-	// arbitrum state clearing? (https://github.com/ethereum/EIPs/issues/158)
-	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block - nitro related stuff
 }
 
 var (
@@ -134,58 +143,32 @@ var (
 		LondonBlock:           big.NewInt(0),
 		Aura:                  &AuRaConfig{},
 	}
+
+	// AllProtocolChanges contains every protocol change (EIPs) introduced
+	// and accepted by the Ethereum core developers into the main net protocol.
+	AllProtocolChanges = &Config{
+		ChainID:                       big.NewInt(1337),
+		Consensus:                     EtHashConsensus,
+		HomesteadBlock:                big.NewInt(0),
+		TangerineWhistleBlock:         big.NewInt(0),
+		SpuriousDragonBlock:           big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  big.NewInt(0),
+		CancunTime:                    big.NewInt(0),
+		PragueTime:                    big.NewInt(0),
+		Ethash:                        new(EthashConfig),
+	}
 )
-
-type BlobConfig struct {
-	Target                *uint64 `json:"target,omitempty"`
-	Max                   *uint64 `json:"max,omitempty"`
-	BaseFeeUpdateFraction *uint64 `json:"baseFeeUpdateFraction,omitempty"`
-}
-
-// See EIP-7840: Add blob schedule to EL config files
-type BlobSchedule struct {
-	Cancun *BlobConfig `json:"cancun,omitempty"`
-	Prague *BlobConfig `json:"prague,omitempty"`
-}
-
-func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.Target != nil {
-			return *b.Prague.Target
-		}
-		return 6 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.Target != nil {
-		return *b.Cancun.Target
-	}
-	return 3 // EIP-4844
-}
-
-func (b *BlobSchedule) MaxBlobsPerBlock(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.Max != nil {
-			return *b.Prague.Max
-		}
-		return 9 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.Max != nil {
-		return *b.Cancun.Max
-	}
-	return 6 // EIP-4844
-}
-
-func (b *BlobSchedule) BaseFeeUpdateFraction(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.BaseFeeUpdateFraction != nil {
-			return *b.Prague.BaseFeeUpdateFraction
-		}
-		return 5007716 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.BaseFeeUpdateFraction != nil {
-		return *b.Cancun.BaseFeeUpdateFraction
-	}
-	return 3338477 // EIP-4844
-}
 
 type BorConfig interface {
 	fmt.Stringer
@@ -195,6 +178,8 @@ type BorConfig interface {
 	GetNapoliBlock() *big.Int
 	IsAhmedabad(number uint64) bool
 	GetAhmedabadBlock() *big.Int
+	IsBhilai(num uint64) bool
+	GetBhilaiBlock() *big.Int
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
@@ -212,22 +197,28 @@ func (c *Config) String() string {
 	engine := c.getEngine()
 
 	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Engine: %v}",
 			c.ChainID,
 			c.Bor.GetAgraBlock(),
 			c.Bor.GetNapoliBlock(),
 			c.Bor.GetAhmedabadBlock(),
+			c.Bor.GetBhilaiBlock(),
 			engine,
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
 		c.ChainID,
 		c.TerminalTotalDifficulty,
 		timestampToTime(c.ShanghaiTime),
 		timestampToTime(c.CancunTime),
 		timestampToTime(c.PragueTime),
 		timestampToTime(c.OsakaTime),
+		timestampToTime(c.Bpo1Time),
+		timestampToTime(c.Bpo2Time),
+		timestampToTime(c.Bpo3Time),
+		timestampToTime(c.Bpo4Time),
+		timestampToTime(c.Bpo5Time),
 		engine,
 	)
 }
@@ -338,6 +329,11 @@ func (c *Config) IsNapoli(num uint64) bool {
 	return (c != nil) && (c.Bor != nil) && c.Bor.IsNapoli(num)
 }
 
+// Refer to https://forum.polygon.technology/t/pip-63-bhilai-hardfork
+func (c *Config) IsBhilai(num uint64) bool {
+	return (c != nil) && (c.Bor != nil) && c.Bor.IsBhilai(num)
+}
+
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time, currentArbosVersion uint64) bool {
 	if c.IsArbitrum() {
@@ -363,7 +359,7 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	if len(c.BurntContract) == 0 {
 		return nil
 	}
-	addr := ConfigValueLookup(c.BurntContract, num)
+	addr := ConfigValueLookup(common.ParseMapKeysIntoUint64(c.BurntContract), num)
 	return &addr
 }
 
@@ -374,32 +370,83 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobGasPerBlock(t uint64, currentArbosVersion uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(t, currentArbosVersion) * params.BlobGasPerBlob
+func (c *Config) getBlobConfig(time uint64, currentArbosVer uint64) *params.BlobConfig {
+	c.parseBlobScheduleOnce.Do(func() {
+		// Populate with default values
+		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
+			0: {},
+		}
+		if c.CancunTime != nil {
+			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
+		}
+		if c.PragueTime != nil {
+			if c.IsPrague(time, currentArbosVer) {
+				c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+			}
+		}
+		if c.OsakaTime != nil {
+			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
+		}
+
+		// Override with supplied values
+		val, ok := c.BlobSchedule["cancun"]
+		if ok && c.CancunTime != nil {
+			c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["prague"]
+		if ok && c.PragueTime != nil {
+			c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["osaka"]
+		if ok && c.OsakaTime != nil {
+			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo1"]
+		if ok && c.Bpo1Time != nil {
+			c.parsedBlobSchedule[c.Bpo1Time.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo2"]
+		if ok && c.Bpo2Time != nil {
+			c.parsedBlobSchedule[c.Bpo2Time.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo3"]
+		if ok && c.Bpo3Time != nil {
+			c.parsedBlobSchedule[c.Bpo3Time.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo4"]
+		if ok && c.Bpo4Time != nil {
+			c.parsedBlobSchedule[c.Bpo4Time.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo5"]
+		if ok && c.Bpo5Time != nil {
+			c.parsedBlobSchedule[c.Bpo5Time.Uint64()] = val
+		}
+	})
+
+	return ConfigValueLookup(c.parsedBlobSchedule, time)
 }
 
-func (c *Config) GetMaxBlobsPerBlock(time uint64, currentArbosVersion uint64) uint64 {
-	var b *BlobSchedule
-	if c != nil {
-		b = c.BlobSchedule
-	}
-	return b.MaxBlobsPerBlock(c.IsPrague(time, currentArbosVersion))
+func (c *Config) GetMaxBlobsPerBlock(time uint64, currentArbosVer uint64) uint64 {
+	return c.getBlobConfig(time, currentArbosVer).Max
 }
 
-func (c *Config) GetTargetBlobGasPerBlock(t uint64, currentArbosVersion uint64) uint64 {
-	var b *BlobSchedule
-	if c != nil {
-		b = c.BlobSchedule
-	}
-	return b.TargetBlobsPerBlock(c.IsPrague(t, currentArbosVersion)) * params.BlobGasPerBlob
+func (c *Config) GetMaxBlobGasPerBlock(time uint64, currentArbosVer uint64) uint64 {
+	return c.GetMaxBlobsPerBlock(time, currentArbosVer) * params.GasPerBlob
 }
 
-func (c *Config) GetBlobGasPriceUpdateFraction(t uint64, currentArbosVersion uint64) uint64 {
-	var b *BlobSchedule
-	if c != nil {
-		b = c.BlobSchedule
+func (c *Config) GetTargetBlobsPerBlock(time uint64, currentArbosVer uint64) uint64 {
+	return c.getBlobConfig(time, currentArbosVer).Target
+}
+
+func (c *Config) GetBlobGasPriceUpdateFraction(time uint64, currentArbosVer uint64) uint64 {
+	return c.getBlobConfig(time, currentArbosVer).BaseFeeUpdateFraction
+}
+
+func (c *Config) GetMaxRlpBlockSize(time uint64) int {
+	if c.IsOsaka(time) {
+		return params.MaxRlpBlockSize
 	}
-	return b.BaseFeeUpdateFraction(c.IsPrague(t, currentArbosVersion))
+	return math.MaxInt
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
@@ -607,28 +654,21 @@ func (c *CliqueConfig) String() string {
 
 // Looks up a config value as of a given block number (or time).
 // The assumption here is that config is a càdlàg map of starting_from_block -> value.
-// For example, config of {"0": "0xA", "10": "0xB", "20": "0xC"}
-// means that the config value is 0xA for blocks 0–9,
-// 0xB for blocks 10–19, and 0xC for block 20 and above.
-func ConfigValueLookup[T uint64 | common.Address](field map[string]T, number uint64) T {
-	fieldUint := make(map[uint64]T)
-	for k, v := range field {
-		keyUint, err := strconv.ParseUint(k, 10, 64)
-		if err != nil {
-			panic(err)
-		}
-		fieldUint[keyUint] = v
+// For example, config of {5: "A", 10: "B", 20: "C"}
+// means that the config value is "A" for blocks 5–9,
+// "B" for blocks 10–19, and "C" for block 20 and above.
+// For blocks 0–4 an empty string will be returned.
+func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
+	keys := common.SortedKeys(field)
+	if number < keys[0] {
+		return generics.Zero[T]()
 	}
-
-	keys := common.SortedKeys(fieldUint)
-
 	for i := 0; i < len(keys)-1; i++ {
 		if number >= keys[i] && number < keys[i+1] {
-			return fieldUint[keys[i]]
+			return field[keys[i]]
 		}
 	}
-
-	return fieldUint[keys[len(keys)-1]]
+	return field[keys[len(keys)-1]]
 }
 
 // Rules is syntactic sugar over Config. It can be used for functions
@@ -641,7 +681,7 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
-	IsCancun, IsNapoli                                bool
+	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
 	IsArbitrum, IsStylus                              bool
@@ -669,7 +709,8 @@ func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 		IsShanghai:         c.IsShanghai(time, currentArbosVersion) || c.IsAgra(num),
 		IsCancun:           c.IsCancun(time, currentArbosVersion),
 		IsNapoli:           c.IsNapoli(num),
-		IsPrague:           c.IsPrague(time, currentArbosVersion),
+		IsBhilai:           c.IsBhilai(num),
+		IsPrague:           c.IsPrague(time, currentArbosVersion) || c.IsBhilai(num),
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
 		ArbOSVersion:       currentArbosVersion,
@@ -684,6 +725,10 @@ func isForked(s *big.Int, head uint64) bool {
 		return false
 	}
 	return s.Uint64() <= head
+}
+
+func (c *Config) IsPreMerge(blockNumber uint64) bool {
+	return c.MergeHeight != nil && blockNumber < c.MergeHeight.Uint64()
 }
 
 func (c *Config) IsArbitrum() bool {
@@ -835,7 +880,6 @@ func ArbitrumOneChainConfig() *Config {
 		ChainID:             big.NewInt(42161),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
@@ -856,7 +900,6 @@ func ArbitrumNovaChainConfig() *Config {
 		ChainID:             big.NewInt(42170),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
@@ -877,7 +920,6 @@ func ArbitrumRollupGoerliTestnetChainConfig() *Config {
 		ChainID:             big.NewInt(421613),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
@@ -898,7 +940,6 @@ func ArbitrumDevTestChainConfig() *Config {
 		ChainID:             big.NewInt(412346),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
@@ -919,7 +960,6 @@ func ArbitrumDevTestDASChainConfig() *Config {
 		ChainID:             big.NewInt(412347),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
@@ -940,7 +980,6 @@ func ArbitrumAnytrustGoerliTestnetChainConfig() *Config {
 		ChainID:             big.NewInt(421703),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
@@ -963,11 +1002,6 @@ var ArbitrumSupportedChainConfigs = []*Config{
 	ArbitrumDevTestChainConfig(),
 	ArbitrumDevTestDASChainConfig(),
 	ArbitrumAnytrustGoerliTestnetChainConfig(),
-}
-
-// IsEIP158 returns whether num is either equal to the EIP158 fork block or greater.
-func (c *Config) IsEIP158(num *big.Int) bool {
-	return isBlockForked(c.EIP158Block, num)
 }
 
 // DefaultCacheConfigWithScheme returns a deep copied default cache config with

@@ -20,13 +20,12 @@
 package state
 
 import (
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // transientStorage is a representation of EIP-1153 "Transient Storage".
-type transientStorage map[libcommon.Address]Storage
+type transientStorage map[common.Address]Storage
 
 // newTransientStorage creates a new instance of a transientStorage.
 func newTransientStorage() transientStorage {
@@ -34,7 +33,7 @@ func newTransientStorage() transientStorage {
 }
 
 // Set sets the transient-storage `value` for `key` at the given `addr`.
-func (t transientStorage) Set(addr libcommon.Address, key libcommon.Hash, value uint256.Int) {
+func (t transientStorage) Set(addr common.Address, key common.Hash, value uint256.Int) {
 	if _, ok := t[addr]; !ok {
 		t[addr] = make(Storage)
 	}
@@ -42,7 +41,7 @@ func (t transientStorage) Set(addr libcommon.Address, key libcommon.Hash, value 
 }
 
 // Get gets the transient storage for `key` at the given `addr`.
-func (t transientStorage) Get(addr libcommon.Address, key libcommon.Hash) uint256.Int {
+func (t transientStorage) Get(addr common.Address, key common.Hash) uint256.Int {
 	val, ok := t[addr]
 	if !ok {
 		return *uint256.NewInt(0)

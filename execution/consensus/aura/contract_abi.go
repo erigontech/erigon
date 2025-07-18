@@ -17,18 +17,17 @@
 package aura
 
 import (
-	"bytes"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura/contracts"
 )
 
-func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []consensus.RewardKind) ([]libcommon.Address, []*uint256.Int) {
+func callBlockRewardAbi(contractAddr common.Address, syscall consensus.SystemCall, beneficiaries []common.Address, rewardKind []consensus.RewardKind) ([]common.Address, []*uint256.Int) {
 	castedKind := make([]uint16, len(rewardKind))
 	for i := range rewardKind {
 		castedKind[i] = uint16(rewardKind[i])
@@ -48,7 +47,7 @@ func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.System
 	if err != nil {
 		panic(err)
 	}
-	beneficiariesRes := res[0].([]libcommon.Address)
+	beneficiariesRes := res[0].([]common.Address)
 	rewardsBig := res[1].([]*big.Int)
 	rewardsU256 := make([]*uint256.Int, len(rewardsBig))
 	for i := 0; i < len(rewardsBig); i++ {
@@ -61,7 +60,7 @@ func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.System
 	return beneficiariesRes, rewardsU256
 }
 
-func callBlockGasLimitAbi(contractAddr libcommon.Address, syscall consensus.SystemCall) *uint256.Int {
+func callBlockGasLimitAbi(contractAddr common.Address, syscall consensus.SystemCall) *uint256.Int {
 	packed, err := blockGasLimitAbi().Pack("blockGasLimit")
 	if err != nil {
 		panic(err)
@@ -85,52 +84,16 @@ func callBlockGasLimitAbi(contractAddr libcommon.Address, syscall consensus.Syst
 	return val
 }
 
-func blockGasLimitAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockGasLimit))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
+func blockGasLimitAbi() abi.ABI { return contracts.BlockGasLimitABI }
+func blockRewardAbi() abi.ABI   { return contracts.BlockRewardABI }
+func certifierAbi() abi.ABI     { return contracts.CertifierABI }
+func registrarAbi() abi.ABI     { return contracts.RegistrarABI }
+func withdrawalAbi() abi.ABI    { return contracts.WithdrawalABI }
 
-func blockRewardAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockReward))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
+var serviceTransactionCheckerHashedKey, _ = common.HashData([]byte("service_transaction_checker"))
 
-func certifierAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Certifier))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func registrarAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Registrar))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func withdrawalAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Withdrawal))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *libcommon.Address {
-	hashedKey, err := libcommon.HashData([]byte("service_transaction_checker"))
-	if err != nil {
-		panic(err)
-	}
-	packed, err := registrarAbi().Pack("getAddress", hashedKey, "A")
+func getCertifier(registrar common.Address, syscall consensus.SystemCall) *common.Address {
+	packed, err := registrarAbi().Pack("getAddress", serviceTransactionCheckerHashedKey, "A")
 	if err != nil {
 		panic(err)
 	}
@@ -145,6 +108,6 @@ func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *li
 	if err != nil {
 		panic(err)
 	}
-	certifier := res[0].(libcommon.Address)
+	certifier := res[0].(common.Address)
 	return &certifier
 }
