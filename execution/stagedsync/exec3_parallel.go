@@ -991,24 +991,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 		applyResult.writeSet = stateWriter.WriteSet()
 
-		//if traceBlock(applyResult.blockNum) {
-		if applyResult.writeSet != nil {
-			for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
-				list, ok := applyResult.writeSet[domain.String()]
-				if !ok {
-					continue
-				}
+		if traceBlock(applyResult.blockNum) {
+			if applyResult.writeSet != nil {
+				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
+					list, ok := applyResult.writeSet[domain.String()]
+					if !ok {
+						continue
+					}
 
-				for i, key := range list.Keys {
-					if list.Vals[i] == nil {
-						fmt.Printf("%d del %s: %x %x", applyResult.blockNum, domain.String(), []byte(key))
-					} else {
-						fmt.Printf("%d put %s: %x %x", applyResult.blockNum, domain.String(), []byte(key), list.Vals[i])
+					for i, key := range list.Keys {
+						if list.Vals[i] == nil {
+							fmt.Printf("%d del %s: %x %x", applyResult.blockNum, domain.String(), []byte(key))
+						} else {
+							fmt.Printf("%d put %s: %x %x", applyResult.blockNum, domain.String(), []byte(key), list.Vals[i])
+						}
 					}
 				}
 			}
 		}
-		//}
 
 		be.applyResults <- &applyResult
 	}
