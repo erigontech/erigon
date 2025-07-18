@@ -79,7 +79,7 @@ var DefaultCfg = Cfg{
 	MinPatternScore: 1024,
 	MinPatternLen:   5,
 	MaxPatternLen:   128,
-	SamplingFactor:  4,
+	SamplingFactor:  1,
 	MaxDictPatterns: 64 * 1024,
 
 	DictReducerSoftLimit: 1_000_000,
