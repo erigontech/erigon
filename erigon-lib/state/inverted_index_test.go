@@ -810,7 +810,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	ii.Close()
 }
 
-func BenchmarkInvIndexPruningPerf(b *testing.B) {
+func TestInvIndexPruningPerf(t *testing.T) {
 	//t.Skip("for manual benchmarks ")
 	testDbAndInvertedIndex2 := func(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
 		tb.Helper()
@@ -871,13 +871,13 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 
 	txCnt := uint64(1_000) * 10_000
 	mod := uint64(1) * 31
-	db, ii := testDbAndInvertedIndex2(b, 16*1_000, log.New())
-	_ = filledInvIndexOfSize2(b, txCnt, mod, db, ii)
+	db, ii := testDbAndInvertedIndex2(t, 16*1_000, log.New())
+	_ = filledInvIndexOfSize2(t, txCnt, mod, db, ii)
 	defer ii.Close()
 
-	require.NoError(b, db.View(context.Background(), func(tx kv.Tx) error {
+	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
 		collation, err := ii.collate(context.Background(), 0, tx)
-		require.NoError(b, err)
+		require.NoError(t, err)
 		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
 		txFrom, txTo := firstTxNumOfStep(0, ii.aggregationStep), firstTxNumOfStep(1, ii.aggregationStep)
 		ii.integrateDirtyFiles(sf, txFrom, txTo)
@@ -890,35 +890,60 @@ func BenchmarkInvIndexPruningPerf(b *testing.B) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	b.ReportAllocs()
-	b.ResetTimer()
+	{ //first rwtx - does some additional job and slow. do it and skip it
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		ic := ii.BeginFilesRo()
+		ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+		tx.Rollback()
+		ic.Close()
+	}
+
+	//t.ReportAllocs()
+	//t.ResetTimer()
 	//for i := 0; i < b.N; i++ {
 	//	tx, err := db.BeginRw(context.Background())
-	//	require.NoError(b, err)
+	//	require.NoError(t, err)
 	//	ic := ii.BeginFilesRo()
 	//	ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
 	//	ic.Close()
 	//	tx.Rollback()
 	//}
 
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	ic := ii.BeginFilesRo()
-	defer ic.Close()
+	{
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		ic := ii.BeginFilesRo()
+		start := time.Now()
+		ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+		a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
+		log.Warn("[dbg] 1 step", "took", time.Since(start), "dirt", datasize.ByteSize(a).HR())
+		tx.Rollback()
+		ic.Close()
+	}
 
-	start := time.Now()
-	st, _ := ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
-	a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
-	fmt.Printf("[dbg] 1 step dirt=%s\n", datasize.ByteSize(a).HR())
-	log.Warn("[dbg] 1 step", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
-
-	pruneLimit := uint64(1_000)
-	ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
-	log.Warn("[dbg] 1K keys", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
-
-	start = time.Now()
-	pruneLimit = ic.aggStep * 10
-	ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
-	log.Warn("[dbg] 10 steps", "took", time.Since(start), "st.PruneCountTx", st.PruneCountTx, "st.PruneCountValues", st.PruneCountValues)
+	{
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		ic := ii.BeginFilesRo()
+		start := time.Now()
+		pruneLimit := uint64(1_000)
+		ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
+		a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
+		log.Warn("[dbg] 1K", "took", time.Since(start), "dirt", datasize.ByteSize(a).HR())
+		tx.Rollback()
+		ic.Close()
+	}
+	{
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		ic := ii.BeginFilesRo()
+		start := time.Now()
+		pruneLimit := ic.aggStep * 10
+		ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
+		a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
+		log.Warn("[dbg] 10 steps", "took", time.Since(start), "dirt", datasize.ByteSize(a).HR())
+		tx.Rollback()
+		ic.Close()
+	}
 }
