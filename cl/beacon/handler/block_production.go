@@ -1290,17 +1290,17 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	}
 
 	if blk.Version() >= clparams.FuluVersion && len(columnsSidecars) > 0 {
-		for idx, column := range columnsSidecars {
-			idx64 := uint64(idx)
+		for _, column := range columnsSidecars {
 			columnSSZ, err := column.EncodeSSZ(nil)
 			if err != nil {
 				a.logger.Error("Failed to encode column sidecar", "err", err)
 				continue
 			}
+			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
 			if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
 				Name:     gossip.TopicNamePrefixDataColumnSidecar,
 				Data:     columnSSZ,
-				SubnetId: &idx64,
+				SubnetId: &subnet,
 			}); err != nil {
 				a.logger.Error("Failed to publish data column sidecar", "err", err)
 			}
