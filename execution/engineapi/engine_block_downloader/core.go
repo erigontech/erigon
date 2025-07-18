@@ -149,8 +149,8 @@ func (e *EngineBlockDownloader) download(
 	}
 	if status == execution.ExecutionStatus_BadBlock {
 		e.logger.Warn("[EngineBlockDownloader] block segments downloaded are invalid")
-		e.status.Store(Idle)
 		e.hd.ReportBadHeaderPoS(chainTip.Hash(), latestValidHash)
+		e.status.Store(Idle)
 		return
 	}
 	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
