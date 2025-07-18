@@ -218,6 +218,7 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 		if result.TopLevelDeployed != nil {
 			receipt.ContractAddress = *result.TopLevelDeployed
 		}
+		evm.ProcessingHook.FillReceiptInfo(receipt)
 	}
 
 	return receipt, result, err
@@ -242,6 +243,16 @@ func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) (com
 
 	// ibss := ibs.(*state.IntraBlockState)
 
+	return applyArbTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
+}
+
+// ApplyArbTransactionVmenv attempts to apply a transaction to the given
+// state database using given environment. It returns the receipt
+// for the transaction, gas used and an error if the transaction failed,
+// indicating the block was invalid.
+func ApplyArbTransactionVmenv(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs state.IntraBlockStateArbitrum, stateWriter state.StateWriter,
+	header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64, cfg vm.Config, vmenv *vm.EVM,
+) (*types.Receipt, *evmtypes.ExecutionResult, error) {
 	return applyArbTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
 }
 

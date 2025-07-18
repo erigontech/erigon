@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/nitro-erigon/arbos"
 	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
 )
@@ -198,6 +199,20 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, err
 	}
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
+	vmcfg := vm.Config{
+		SkipAnalysis: core.SkipAnalysis(cfg, header.Number.Uint64()),
+	}
+	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vmcfg)
+	msg, err := txn.AsMessage(*types.MakeSigner(cfg, blockNum, header.Time), header.BaseFee, vmenv.ChainRules())
+	if err != nil {
+		return nil, err
+	}
+	if vmenv.ProcessingHookSet.CompareAndSwap(false, true) {
+		vmenv.ProcessingHook = arbos.NewTxProcessorIBS(vmenv, state.NewArbitrum(genEnv.ibs), msg)
+	} else {
+		vmenv.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
+	}
 
 	if txn.Type() == types.AccountAbstractionTxType {
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
@@ -216,7 +231,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
-		receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{})
+		receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmcfg, vmenv)
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 		}
@@ -279,7 +294,22 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	for i, txn := range block.Transactions() {
 		genEnv.ibs.SetTxContext(blockNum, i)
-		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{})
+		blockContext := core.NewEVMBlockContext(block.Header(), core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
+		vmcfg := vm.Config{
+			SkipAnalysis: core.SkipAnalysis(cfg, block.NumberU64()),
+		}
+		vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vmcfg)
+		msg, err := txn.AsMessage(*types.MakeSigner(cfg, block.NumberU64(), block.Time()), block.BaseFee(), vmenv.ChainRules())
+		if err != nil {
+			return nil, err
+		}
+		if vmenv.ProcessingHookSet.CompareAndSwap(false, true) {
+			vmenv.ProcessingHook = arbos.NewTxProcessorIBS(vmenv, state.NewArbitrum(genEnv.ibs), msg)
+		} else {
+			vmenv.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
+		}
+		receipt, _, err := core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmcfg, vmenv)
+
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 		}
