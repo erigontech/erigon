@@ -146,6 +146,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 			return
 		}
 	}
+	logger.Info("Reset complete. Start Erigon as usual, missing files will be downloaded.")
 	return nil
 }
 
