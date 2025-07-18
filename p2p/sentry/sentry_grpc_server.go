@@ -280,8 +280,8 @@ func makeP2PServer(
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
 	if len(p2pConfig.BootstrapNodes) == 0 {
-		urls := chainspec.BootnodeURLsByGenesisHash(genesisHash)
-		bootstrapNodes, err := enode.ParseNodesFromURLs(urls)
+		spec := chainspec.ChainSpecByGenesisHash(genesisHash)
+		bootstrapNodes, err := enode.ParseNodesFromURLs(spec.Bootnodes)
 		if err != nil {
 			return nil, fmt.Errorf("bad bootnodes option: %w", err)
 		}
@@ -1003,7 +1003,8 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
 		if len(ss.p2p.DiscoveryDNS) == 0 {
-			if url := chainspec.KnownDNSNetwork(genesisHash); url != "" {
+			s := chainspec.ChainSpecByGenesisHash(genesisHash)
+			if url := s.DNSNetwork; url != "" {
 				ss.p2p.DiscoveryDNS = []string{url}
 			}
 
