@@ -1846,14 +1846,63 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
+func Test_WitnessTrie_GenerateWitness(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(length.Addr, ms)
+	hph.SetTrace(false)
+
+	// generate list of updates diverging from first nibble (good case for parallelization))
+	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, length.Addr, 2, 4)
+
+	addrWithSingleton := []byte{}
+	builder := NewUpdateBuilder()
+	for i, _ := range plainKeysList {
+		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+	}
+	addrWithSingleton = common.Copy(plainKeysList[1])
+	_ = addrWithSingleton
+	// builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+
+	plainKeys, updates := builder.Build()
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess.Close()
+
+	root, err := hph.Process(ctx, toProcess, "")
+	require.NoError(t, err)
+
+	toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+	defer toWitness.Close()
+	toWitness.TouchPlainKey(string(plainKeysList[3]), nil, toProcess.TouchAccount)
+
+	// toWitness.HashSort(context.Background(), func(hk []byte, pk []byte, update *Update) error {
+	// 	fmt.Printf("toWitness %x -> %x\n", pk, hk)
+	// 	return nil
+	// })
+
+	witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, root, "")
+	require.NoError(t, err)
+	_ = witnessTrie
+	require.NotNil(t, witnessTrie, "witness trie should not be nil")
+	require.NotNil(t, rootWitness, "root witness should not be nil")
+	require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
+}
+
 // longer prefixLen - harder to find required keys
 func generatePlainKeysWithSameHashPrefix(tb testing.TB, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
 	tb.Helper()
 	plainKeys = make([][]byte, 0, keyCount)
 	hashedKeys = make([][]byte, 0, keyCount)
+	source := rand.NewSource(52)
+	rng := rand.New(source)
 	for {
 		key := make([]byte, keyLen)
-		rand.Read(key)
+		rng.Read(key)
 
 		hashed := KeyToHexNibbleHash(key)
 		if len(plainKeys) == 0 {

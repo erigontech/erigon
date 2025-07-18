@@ -2062,7 +2062,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
-		//hph.PrintGrid()
+		hph.PrintGrid()
 		//hph.updateCell(plainKey, hashedKey, update)
 
 		// convert grid to trie.Trie
@@ -2070,13 +2070,13 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		if err != nil {
 			return err
 		}
-		//computedRootHash := tr.Root()
-		//// fmt.Printf("computedRootHash = %x\n", computedRootHash)
-		//
-		//if !bytes.Equal(computedRootHash, expectedRootHash) {
-		//	err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
-		//	return err
-		//}
+		computedRootHash := tr.Root()
+		// fmt.Printf("computedRootHash = %x\n", computedRootHash)
+
+		if !bytes.Equal(computedRootHash, expectedRootHash) {
+			err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
+			return err
+		}
 
 		tries = append(tries, tr)
 		ki++
