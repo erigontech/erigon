@@ -259,7 +259,7 @@ func NewBufferedWriter(rs *StateV3Buffered, accumulator *shards.Accumulator) *Bu
 		rs:          rs,
 		writeLists:  newWriteList(),
 		accumulator: accumulator,
-		trace:       true,
+		//trace:       true,
 	}
 }
 
