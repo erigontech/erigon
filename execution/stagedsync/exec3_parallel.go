@@ -1043,8 +1043,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		fmt.Println(be.blockNum, "apply count", be.applyCount)
-
 		be.result = &blockResult{
 			be.blockNum,
 			txTask.BlockTime(),
@@ -1373,6 +1371,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				blockResult.ApplyCount += writeSet.ApplyCount()
+
+				fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 
 				blockExecutor.applyResults <- &txResult{
 					blockNum:   blockResult.BlockNum,
