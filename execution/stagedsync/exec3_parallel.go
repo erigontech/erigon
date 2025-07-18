@@ -723,6 +723,8 @@ type blockExecutor struct {
 
 	execStarted time.Time
 	result      *blockResult
+
+	stateWriter *state.BufferedWriter
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, applyResults chan applyResult, profile bool) *blockExecutor {
@@ -930,10 +932,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	maxValidated := be.validateTasks.maxComplete()
 
 	var applyResult txResult
-	var stateWriter *state.BufferedWriter
 
 	if be.finalizeTasks.minPending() != -1 {
-		stateWriter = state.NewBufferedWriter(pe.rs, nil)
+		if be.stateWriter == nil {
+			be.stateWriter = state.NewBufferedWriter(pe.rs, nil)
+		}
 		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
 
 		applyResult = txResult{
@@ -964,7 +967,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 
-			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
+			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, be.stateWriter)
 
 			if err != nil {
 				return nil, err
@@ -993,7 +996,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	if applyResult.txNum > 0 {
 		pe.executedGas.Add(int64(applyResult.gasUsed))
 		pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
-		applyResult.writeSet = stateWriter.WriteSet()
+		applyResult.writeSet = be.stateWriter.WriteSet()
+		be.stateWriter = nil
 		be.applyResults <- &applyResult
 	}
 
