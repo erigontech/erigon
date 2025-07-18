@@ -62,8 +62,6 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	dirs := datadir.Open(dataDirPath)
 
 	configChainName, chainNameErr := getChainNameFromChainData(cliCtx, logger, dirs.Chaindata)
-	if err != nil {
-	}
 
 	chainName := utils.ChainFlag.Get(cliCtx)
 	if cliCtx.IsSet(utils.ChainFlag.Name) {
