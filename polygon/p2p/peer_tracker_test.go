@@ -54,6 +54,12 @@ func TestPeerTracker(t *testing.T) {
 	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
 	require.Equal(t, PeerIdFromUint64(2), peerIds[1])
 
+	peerIds = peerTracker.ListPeers()
+	require.Len(t, peerIds, 2)
+	sortPeerIdsAssumingUints(peerIds)
+	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
+	require.Equal(t, PeerIdFromUint64(2), peerIds[1])
+
 	peerTracker.BlockNumMissing(PeerIdFromUint64(1), 50)
 	peerIds = peerTracker.ListPeersMayHaveBlockNum(100)
 	require.Len(t, peerIds, 1)
@@ -69,6 +75,11 @@ func TestPeerTracker(t *testing.T) {
 	peerTracker.PeerDisconnected(PeerIdFromUint64(2))
 	peerIds = peerTracker.ListPeersMayHaveBlockNum(100)
 	require.Len(t, peerIds, 1)
+	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
+
+	peerIds = peerTracker.ListPeers()
+	require.Len(t, peerIds, 1)
+	sortPeerIdsAssumingUints(peerIds)
 	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
 
 	peerTracker.PeerConnected(PeerIdFromUint64(2))
