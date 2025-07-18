@@ -169,19 +169,11 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	var tracePrefix string
-	//if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
-	tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
-	//}
+	if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
+		tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
+	}
 
 	if task.IsBlockEnd() || txIndex < 0 {
-
-		//if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
-		for _, vw := range result.TxOut {
-			fmt.Println(tracePrefix, "WRT", vw.String())
-		}
-		fmt.Println(tracePrefix+" end", ibs.VersionedWrites(true))
-		//}
-
 		if txTask.Config.IsByzantium(blockNum) {
 			ibs.SetTrace(true)
 			ibs.FinalizeTx(txTask.Config.Rules(blockNum, txTask.BlockTime()), stateWriter)

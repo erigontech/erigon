@@ -242,9 +242,6 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 			return value, nil
 		})
 
-	if so.db.trace {
-		fmt.Printf("prev=%x value=%x\n", prev, value)
-	}
 	if !force && prev == value {
 		return false
 	}
@@ -290,10 +287,11 @@ func (so *stateObject) setState(key common.Hash, value uint256.Int) {
 // updateStotage writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateStotage(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
+		blockOriginValue := so.blockOriginStorage[key]
 		if dbg.TraceTransactionIO && (so.db.trace || traceAccount(so.address)) {
-			fmt.Printf("%d (%d.%d) Update Storage: %x,%x,%s\n", so.db.blockNum, so.db.txIndex, so.db.version, so.address, key, value.Hex())
+			fmt.Printf("%d (%d.%d) Update Storage: %x,%x,%s->%s\n", so.db.blockNum, so.db.txIndex, so.db.version, so.address, key, blockOriginValue.Hex(), value.Hex())
 		}
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, so.blockOriginStorage[key], value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, blockOriginValue, value); err != nil {
 			return err
 		}
 		so.originStorage[key] = value
