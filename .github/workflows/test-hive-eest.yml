@@ -48,12 +48,13 @@ jobs:
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
+          cat /proc/meminfo
           cd hive
           run_suite() {
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=4 --client erigon --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eest/consume-engine' --client erigon --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
