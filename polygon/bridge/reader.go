@@ -118,7 +118,7 @@ func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uin
 		return nil, err
 	}
 
-	if len(events) > 0 {
+	if len(events) > 0 && dbg.Enabled(ctx) {
 		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "len", len(events))
 	}
 
