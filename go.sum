@@ -140,8 +140,8 @@ github.com/anacrolix/sync v0.5.4/go.mod h1:21cUWerw9eiu/3T3kyoChu37AVO+YFue1/H15
 github.com/anacrolix/tagflag v0.0.0-20180109131632-2146c8d41bf0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.0.0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.1.0/go.mod h1:Scxs9CV10NQatSmbyjqmqmeQNwGzlNe0CMUMIxqHIG8=
-github.com/anacrolix/torrent v1.58.2-0.20250711050233-2297350498bc h1:qYlBR6wZTmpGyjLS1JNxs3H+GB5A6DNJ4pGhodtpr18=
-github.com/anacrolix/torrent v1.58.2-0.20250711050233-2297350498bc/go.mod h1:tKZnHtdMef8BsqGoRR553+oUJFb014khOp42A73pXe8=
+github.com/anacrolix/torrent v1.58.2-0.20250714121614-df7052d6b54e h1:ewkzLBRWNvUW+lUmPDutvZmg0Zp0Xkfy0W02GEmOaEA=
+github.com/anacrolix/torrent v1.58.2-0.20250714121614-df7052d6b54e/go.mod h1:tKZnHtdMef8BsqGoRR553+oUJFb014khOp42A73pXe8=
 github.com/anacrolix/upnp v0.1.4 h1:+2t2KA6QOhm/49zeNyeVwDu1ZYS9dB9wfxyVvh/wk7U=
 github.com/anacrolix/upnp v0.1.4/go.mod h1:Qyhbqo69gwNWvEk1xNTXsS5j7hMHef9hdr984+9fIic=
 github.com/anacrolix/utp v0.1.0 h1:FOpQOmIwYsnENnz7tAGohA+r6iXpRjrq8ssKSre2Cp4=
@@ -267,8 +267,8 @@ github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1m
 github.com/envoyproxy/go-control-plane v0.9.7/go.mod h1:cwu0lG7PUMfa9snN8LXBig5ynNVH9qI8YYLbd1fK2po=
 github.com/envoyproxy/go-control-plane v0.9.9-0.20201210154907-fd9021fe5dad/go.mod h1:cXg6YxExXjJnVBQHBLXeUAgxn2UodCpnH306RInaBQk=
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20250619025539-884f4110f6af h1:GCtT79xiFnf2QR2cjXUgg83L18UH2N2eSAa61tkiM0M=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20250619025539-884f4110f6af/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d h1:8EEw4EDiVVx84WKrHSyNGuWLrbxJ3x+OnoXUsYIXo9U=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXEfZoBjV4buzjWmCmoqVLXiGCq0ZmQ2OjeRvQ=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
 github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86 h1:UKcIbFZUGIKzK4aQbkv/dYiOVxZSUuD3zKadhmfwdwU=
