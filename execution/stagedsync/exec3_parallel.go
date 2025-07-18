@@ -1001,9 +1001,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 					for i, key := range list.Keys {
 						if list.Vals[i] == nil {
-							fmt.Printf("%d del %s: %x %x", applyResult.blockNum, domain.String(), []byte(key))
+							fmt.Printf("%d del %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key))
 						} else {
-							fmt.Printf("%d put %s: %x %x", applyResult.blockNum, domain.String(), []byte(key), list.Vals[i])
+							fmt.Printf("%d put %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key), list.Vals[i])
 						}
 					}
 				}

@@ -76,14 +76,14 @@ func (rs *StateV3) applyState(roTx kv.Tx, txNum uint64, writeLists map[string]*s
 			for i, key := range list.Keys {
 				if list.Vals[i] == nil {
 					if rs.trace {
-						fmt.Printf("apply del %s: %x %x", domain.String(), []byte(key))
+						fmt.Printf("apply del %s: %x %x\n", domain.String(), []byte(key))
 					}
 					if err := domains.DomainDel(domain, roTx, []byte(key), txNum, nil, 0); err != nil {
 						return err
 					}
 				} else {
 					if rs.trace {
-						fmt.Printf("apply put %s: %x %x", domain.String(), []byte(key), list.Vals[i])
+						fmt.Printf("apply put %s: %x %x\n", domain.String(), []byte(key), list.Vals[i])
 					}
 					if err := domains.DomainPut(domain, roTx, []byte(key), list.Vals[i], txNum, nil, 0); err != nil {
 						return err
