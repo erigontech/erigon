@@ -1857,13 +1857,13 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	// generate list of updates diverging from first nibble (good case for parallelization))
 	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, length.Addr, 2, 4)
 
-	addrWithSingleton := []byte{}
+	// addrWithSingleton := []byte{}
 	builder := NewUpdateBuilder()
 	for i := range plainKeysList {
 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 	}
-	addrWithSingleton = common.Copy(plainKeysList[1])
-	_ = addrWithSingleton
+	// addrWithSingleton = common.Copy(plainKeysList[1])
+	// _ = addrWithSingleton
 	// TODO: test storage slots later
 	// builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
 
