@@ -269,14 +269,6 @@ func (w *BufferedWriter) SetTxNum(ctx context.Context, txNum uint64) {
 }
 func (w *BufferedWriter) SetTx(tx kv.Tx) {}
 
-func (w *BufferedWriter) ResetWriteSet() {
-	w.writeLists = newWriteList()
-	w.accountPrevs = nil
-	w.accountDels = nil
-	w.storagePrevs = nil
-	w.codePrevs = nil
-}
-
 func (w *BufferedWriter) WriteSet() map[string]*state.KvList {
 	return w.writeLists
 }
@@ -357,7 +349,7 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 	vb := value.Bytes32() // using [32]byte instead of []byte to avoid heap escape
 	w.writeLists[kv.StorageDomain.String()].Push(compositeS, vb[32-value.ByteLen():])
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, key, vb[32-value.ByteLen():])
+		fmt.Printf("BufferedWriter: storage: %x,%x,%x\n", address, key, vb[32-value.ByteLen():])
 	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(address, incarnation, key, vb[32-value.ByteLen():])
@@ -406,7 +398,6 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 }
 
 func (w *Writer) SetTxNum(v uint64) { w.txNum = v }
-func (w *Writer) ResetWriteSet()    {}
 
 func (w *Writer) WriteSet() map[string]*state.KvList {
 	return nil
