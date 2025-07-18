@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -77,6 +78,9 @@ type EngineBlockDownloader struct {
 	timeout int
 	config  *chain.Config
 	syncCfg ethconfig.Sync
+
+	// lock
+	lock sync.Mutex
 
 	// logs
 	logger log.Logger
