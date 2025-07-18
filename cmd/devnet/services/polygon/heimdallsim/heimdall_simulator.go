@@ -106,7 +106,7 @@ func (noopBridgeStore) Unwind(ctx context.Context, blockNum uint64) error {
 func (noopBridgeStore) BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error) {
 	return 0, errors.New("noop")
 }
-func (noopBridgeStore) EventsByBlock(ctx context.Context, blockNum uint64) ([]rlp.RawValue, error) {
+func (noopBridgeStore) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return nil, errors.New("noop")
 }
 func (noopBridgeStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {

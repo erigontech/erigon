@@ -251,7 +251,12 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 	return 0, 0, false, nil
 }
 
-func (s *SnapshotStore) events(ctx context.Context, start, end, blockNumber uint64) ([][]byte, error) {
+func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+	lastFrozenEventId := s.LastFrozenEventId()
+	if start > lastFrozenEventId || lastFrozenEventId == 0 {
+		return s.Store.Events(ctx, start, end)
+	}
+
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
 	segments := tx.Segments
@@ -260,13 +265,6 @@ func (s *SnapshotStore) events(ctx context.Context, start, end, blockNumber uint
 	var result [][]byte
 
 	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].From() > blockNumber {
-			continue
-		}
-		if segments[i].To() <= blockNumber {
-			break
-		}
-
 		gg0 := segments[i].Src().MakeGetter()
 
 		if !gg0.HasNext() {
@@ -337,7 +335,7 @@ func (s *SnapshotStore) BorStartEventId(ctx context.Context, hash common.Hash, b
 	return startEventId, nil
 }
 
-func (s *SnapshotStore) EventsByBlock(ctx context.Context, blockHeight uint64) ([]rlp.RawValue, error) {
+func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	startEventId, endEventId, ok, err := s.BlockEventIdsRange(ctx, blockHeight)
 	if err != nil {
 		return nil, err
@@ -345,13 +343,7 @@ func (s *SnapshotStore) EventsByBlock(ctx context.Context, blockHeight uint64) (
 	if !ok {
 		return []rlp.RawValue{}, nil
 	}
-
-	lastFrozenEventId := s.LastFrozenEventId()
-	if startEventId > lastFrozenEventId || lastFrozenEventId == 0 {
-		return s.Store.EventsByBlock(ctx, blockHeight)
-	}
-
-	bytevals, err := s.events(ctx, startEventId, endEventId+1, blockHeight)
+	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
 	if err != nil {
 		return nil, err
 	}
