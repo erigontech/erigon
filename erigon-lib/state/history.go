@@ -122,6 +122,8 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 		_visibleFiles: []visibleFile{},
 	}
 
+	cfg.iiCfg.name = h.historyIdx
+
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggStep, logger)
 	if err != nil {
@@ -134,7 +136,6 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 	if h.version.AccessorVI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
 	}
-	h.InvertedIndex.name = h.historyIdx
 
 	return &h, nil
 }
