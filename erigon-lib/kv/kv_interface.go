@@ -231,6 +231,7 @@ const (
 	ArbitrumDB      = "arbitrum"
 	ArbWasmDB       = "arb-wasm" // ArbWasmDB - is a separate DB for arbitrum Wasm cod
 	ArbClassicDB    = "arb-classic"
+	ArbStreamerDB   = "arb_streamer"
 )
 
 type GetPut interface {
