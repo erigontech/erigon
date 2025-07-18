@@ -33,9 +33,6 @@ func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer *Pee
 		&ErrNonSequentialHeaderHashes{},
 	}
 
-	fetchHeadersBackwardsPenalizeErrs := append([]error{}, fetchHeadersPenalizeErrs...)
-	fetchHeadersBackwardsPenalizeErrs = append(fetchHeadersBackwardsPenalizeErrs, &ErrUnexpectedHeaderHash{})
-
 	fetchBodiesPenalizeErrs := []error{
 		&ErrTooManyBodies{},
 		&ErrMissingBodies{},
@@ -50,7 +47,6 @@ func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer *Pee
 		logger:                                 logger,
 		peerPenalizer:                          peerPenalizer,
 		fetchHeadersPenalizeErrs:               fetchHeadersPenalizeErrs,
-		fetchHeadersBackwardsPenalizeErrs:      fetchHeadersBackwardsPenalizeErrs,
 		fetchBodiesPenalizeErrs:                fetchBodiesPenalizeErrs,
 		fetchBlocksBackwardsByHashPenalizeErrs: fetchBlocksBackwardsByHashPenalizeErrs,
 	}
@@ -61,7 +57,6 @@ type PenalizingFetcher struct {
 	logger                                 log.Logger
 	peerPenalizer                          *PeerPenalizer
 	fetchHeadersPenalizeErrs               []error
-	fetchHeadersBackwardsPenalizeErrs      []error
 	fetchBodiesPenalizeErrs                []error
 	fetchBlocksBackwardsByHashPenalizeErrs []error
 }
@@ -76,21 +71,6 @@ func (pf *PenalizingFetcher) FetchHeaders(
 	headers, err := pf.Fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
 	if err != nil {
 		return FetcherResponse[[]*types.Header]{}, pf.maybePenalize(ctx, peerId, err, pf.fetchHeadersPenalizeErrs...)
-	}
-
-	return headers, nil
-}
-
-func (pf *PenalizingFetcher) FetchHeadersBackwards(
-	ctx context.Context,
-	hash common.Hash,
-	amount uint64,
-	peerId *PeerId,
-	opts ...FetcherOption,
-) (FetcherResponse[[]*types.Header], error) {
-	headers, err := pf.Fetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
-	if err != nil {
-		return FetcherResponse[[]*types.Header]{}, pf.maybePenalize(ctx, peerId, err, pf.fetchHeadersBackwardsPenalizeErrs...)
 	}
 
 	return headers, nil

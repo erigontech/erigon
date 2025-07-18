@@ -142,15 +142,6 @@ func (e *EngineServer) Start(
 	if err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger); err != nil {
 		e.logger.Error(err.Error())
 	}
-
-	if e.blockDownloader != nil {
-		go func() {
-			err := e.blockDownloader.Run(ctx)
-			if err != nil {
-				e.logger.Error("[EngineBlockDownloader] background goroutine failed", "err", err)
-			}
-		}()
-	}
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
@@ -454,14 +445,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
-			return parent == nil && s.blockDownloader.Status() == engine_block_downloader.Busy, nil
+			return parent == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
-			return header == nil && s.blockDownloader.Status() == engine_block_downloader.Busy, nil
+			return header == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -779,7 +770,7 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
-		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerNumber-1, block, engine_block_downloader.NewPayloadTrigger) {
+		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerNumber-1, block) {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
@@ -789,7 +780,7 @@ func (e *EngineServer) HandleNewPayload(
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
 			if stillSyncing, _ := waitForStuff(waitTime, func() (bool, error) {
-				return e.blockDownloader.Status() == engine_block_downloader.Busy, nil
+				return e.blockDownloader.Status() != headerdownload.Synced, nil
 			}); stillSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
@@ -801,7 +792,7 @@ func (e *EngineServer) HandleNewPayload(
 					if e.test {
 						return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 					}
-					if e.blockDownloader.StartDownloading(0, missingBlkHash, 0, block, engine_block_downloader.SegmentRecoveryTrigger) {
+					if e.blockDownloader.StartDownloading(0, missingBlkHash, 0, block) {
 						e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 					}
 					return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -844,7 +835,7 @@ func (e *EngineServer) HandleNewPayload(
 			if e.test {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			if e.blockDownloader.StartDownloading(0, missingBlkHash, 0, block, engine_block_downloader.SegmentRecoveryTrigger) {
+			if e.blockDownloader.StartDownloading(0, missingBlkHash, 0, block) {
 				e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 			}
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -903,7 +894,7 @@ func (e *EngineServer) HandlesForkChoice(
 	if headerNumber == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
 		if !e.test {
-			e.blockDownloader.StartDownloading(requestId, headerHash, 0, nil, engine_block_downloader.FcuTrigger)
+			e.blockDownloader.StartDownloading(requestId, headerHash, 0, nil)
 		}
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
@@ -913,7 +904,7 @@ func (e *EngineServer) HandlesForkChoice(
 	if header == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
 		if !e.test {
-			e.blockDownloader.StartDownloading(requestId, headerHash, *headerNumber, nil, engine_block_downloader.FcuTrigger)
+			e.blockDownloader.StartDownloading(requestId, headerHash, *headerNumber, nil)
 		}
 
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
