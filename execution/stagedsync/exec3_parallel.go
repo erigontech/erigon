@@ -719,6 +719,7 @@ type blockExecutor struct {
 
 	execStarted time.Time
 	result      *blockResult
+	applyCount  int
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, applyResults chan applyResult, profile bool) *blockExecutor {
@@ -991,7 +992,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 		applyResult.writeSet = stateWriter.WriteSet()
 
-		if traceBlock(applyResult.blockNum) {
+		if dbg.TraceApply && traceBlock(applyResult.blockNum) {
 			if applyResult.writeSet != nil {
 				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
 					list, ok := applyResult.writeSet[domain.String()]
@@ -999,12 +1000,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						continue
 					}
 
-					for i, key := range list.Keys {
-						if list.Vals[i] == nil {
-							fmt.Printf("%d del %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key))
-						} else {
-							fmt.Printf("%d put %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key), list.Vals[i])
-						}
+					for _, _ = range list.Keys {
+						be.applyCount++
+						//if list.Vals[i] == nil {
+						//	fmt.Printf("%d del %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key))
+						//} else {
+						//	fmt.Printf("%d put %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key), list.Vals[i])
+						//}
 					}
 				}
 			}
@@ -1040,6 +1042,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		if dbg.TraceApply && traceBlock(be.blockNum) {
+			fmt.Println(be.blockNum, "apply count", be.applyCount)
+		}
 		be.result = &blockResult{
 			be.blockNum,
 			txTask.BlockTime(),
