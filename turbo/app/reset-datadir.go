@@ -282,7 +282,7 @@ func (me *reset) decideRemove(file resetItemInfo) bool {
 			logger.Debug("torrent file matches preverified hash", "path", path)
 			return false
 		} else {
-			logger.Info("torrent file infohash does NOT match preverified",
+			logger.Debug("torrent file infohash does NOT match preverified",
 				"path", path,
 				"expected", expectedHash,
 				"actual", mi.HashInfoBytes())
