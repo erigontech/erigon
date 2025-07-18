@@ -1666,7 +1666,7 @@ func (c *Bor) CommitStates(
 				return err
 			}
 		} else {
-			events, err = c.bridgeReader.Events(c.execCtx, header.Hash(), blockNum)
+			events, err = c.bridgeReader.Events(ctx, header.Hash(), blockNum)
 			if err != nil {
 				return err
 			}
