@@ -17,6 +17,7 @@
 package commands
 
 import (
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
@@ -145,6 +146,10 @@ func withBatchSize(cmd *cobra.Command) {
 
 func withDomain(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&domain, "domain", "", "Comma separated names of domain/inverted_indices")
+}
+
+func withExperimentalCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&libstate.ExperimentalConcurrentCommitment, "experimental.commitment-concurrent", false, "Enable experimental commitment calculation")
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {
