@@ -76,7 +76,9 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			case <-ctx.Done():
 				return
 			case <-time.After(interval):
-				interval *= 2
+				if interval < 30*time.Second {
+					interval *= 2
+				}
 			}
 			logProgress()
 		}
@@ -108,6 +110,14 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			}
 			return nil
 		})
+	}
+	if err := wg.Wait(); err != nil {
+		return nil, fmt.Errorf("adding torrents: %w", err)
+	}
+
+	log.Warn("[dbg] adding web seeds to all torrents")
+	for _, t := range s.d.torrentClient.Torrents() {
+		t.AddWebSeeds(s.d.cfg.WebSeedUrls, s.d.addWebSeedOpts...)
 	}
 	if err := wg.Wait(); err != nil {
 		return nil, fmt.Errorf("adding torrents: %w", err)
