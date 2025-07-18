@@ -1085,6 +1085,7 @@ func ExecV3(ctx context.Context,
 								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 								var trace bool
 								if traceBlock(applyResult.BlockNum) {
+									fmt.Println(applyResult.BlockNum, "Commitment")
 									trace = true
 								}
 								pe.doms.SetTrace(trace, !dbg.BatchCommitments)
