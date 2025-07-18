@@ -85,15 +85,14 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 	}()
 
 	wg, ctx := errgroup.WithContext(ctx)
-	for i, it := range request.Items {
+	for _, it := range request.Items {
 		if it.Path == "" {
 			return nil, errors.New("field 'path' is required")
 		}
 
-		i := i
 		it := it
 		wg.Go(func() error {
-			defer progress.Store(int32(i))
+			defer progress.Add(1)
 			if it.TorrentHash == nil {
 				// if we don't have the torrent hash then we seed a new snapshot
 				// TODO: Make the torrent in place then call addPreverifiedTorrent.
