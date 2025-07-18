@@ -157,7 +157,7 @@ type BlockRetire interface {
 		seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
 		onDelete func(l []string) error,
 		onFinishRetire func() error,
-		onDone func())
+		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
 	SetWorkers(workers int)
 	GetWorkers() int

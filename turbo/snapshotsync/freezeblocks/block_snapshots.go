@@ -399,13 +399,13 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	onDeleteSnapshots func(l []string) error,
 	onFinishRetire func() error,
 	onDone func(),
-) {
+) bool {
 	if maxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
 
 	if !br.working.CompareAndSwap(false, true) {
-		return
+		return false
 	}
 
 	go func() {
@@ -430,6 +430,8 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			return
 		}
 	}()
+
+	return true
 }
 
 func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum uint64, requestedMaxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {

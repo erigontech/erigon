@@ -119,8 +119,9 @@ type MockSentry struct {
 	ReceiveWg            sync.WaitGroup
 	Address              common.Address
 	Eth1ExecutionService *eth1.EthereumExecutionModule
-	RetirementDone       chan struct{}
-	RetirementWg         sync.WaitGroup
+	retirementStart      chan bool
+	retirementDone       chan struct{}
+	retirementWg         sync.WaitGroup
 
 	Notifications *shards.Notifications
 
@@ -320,13 +321,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		HistoryV3:      true,
 		cfg:            cfg,
 	}
-	mock.RetirementDone, _ = mock.Notifications.Events.AddRetirementDoneSubscription()
+	mock.retirementStart, _ = mock.Notifications.Events.AddRetirementStartSubscription()
+	mock.retirementDone, _ = mock.Notifications.Events.AddRetirementDoneSubscription()
 
 	if tb != nil {
 		tb.Cleanup(mock.Close)
 		tb.Cleanup(func() {
 			// Wait for all the background snapshot retirements launched by any stages2.StageLoopIteration to finish
-			mock.RetirementWg.Wait()
+			mock.retirementWg.Wait()
 		})
 	}
 
@@ -793,14 +795,17 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	initialCycle, firstCycle := MockInsertAsInitialCycle, false
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
 
-	// Add one more background retirement to wait for and start a task watching its completion
-	ms.RetirementWg.Add(1)
-	go func() {
-		defer ms.RetirementWg.Done()
-		<-ms.RetirementDone
-	}()
 	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.NewTxContainer(nil, nil), ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
+	}
+	// Wait to know if a new background retirement has started
+	if retirementStarted := <-ms.retirementStart; retirementStarted {
+		// If so, increment the background retirement counter and start a task to watch for its completion
+		ms.retirementWg.Add(1)
+		go func() {
+			defer ms.retirementWg.Done()
+			<-ms.retirementDone
+		}()
 	}
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Wait() // Wait for TxPool notification
