@@ -231,7 +231,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
-		receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vmcfg, vmenv)
+		receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmcfg, vmenv)
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 		}
@@ -308,7 +308,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		} else {
 			vmenv.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
 		}
-		receipt, _, err := core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vmcfg, vmenv)
+		receipt, _, err := core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmcfg, vmenv)
 
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
