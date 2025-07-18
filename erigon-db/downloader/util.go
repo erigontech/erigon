@@ -330,8 +330,10 @@ func (d *Downloader) addTorrentSpec(
 	// I wonder how this should be handled for AddNewSeedableFile. What if there's bad piece
 	// completion data? We might want to clobber any piece completion and force the client to accept
 	// what we provide, assuming we trust our own metainfo generation more.
-	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
-	ts.DisableInitialPieceCheck = d.cfg.ManualDataVerification
+	ts.IgnoreUnverifiedPieceCompletion = true
+	ts.DisableInitialPieceCheck = true
+	//ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
+	//ts.DisableInitialPieceCheck = d.cfg.ManualDataVerification
 	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
 	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
 	t, first, err = d.torrentClient.AddTorrentSpec(ts)
