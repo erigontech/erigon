@@ -354,16 +354,12 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Ha
 	return resp.ValidationStatus, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execution.ExecutionStatus, *string, common.Hash, error) {
-	timeout := c.fcuTimeoutMillis
-	if len(timeoutOverride) > 0 {
-		timeout = timeoutOverride[0]
-	}
+func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash) (execution.ExecutionStatus, *string, common.Hash, error) {
 	resp, err := c.executionModule.UpdateForkChoice(ctx, &execution.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizeHash),
-		Timeout:            timeout,
+		Timeout:            c.fcuTimeoutMillis,
 	})
 	if err != nil {
 		return 0, nil, common.Hash{}, err

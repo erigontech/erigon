@@ -713,7 +713,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := chainConfig.Bor != nil || config.ElBlockDownloaderV2
+	sentryMcDisableBlockDownload := chainConfig.Bor != nil
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -1041,7 +1041,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		engine_block_downloader.NewEngineBlockDownloader(ctx,
 			logger, backend.sentriesClient.Hd, executionRpc,
 			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
-			backend.chainDB, chainConfig, tmpdir, config.Sync, config.ElBlockDownloaderV2, sentryMux(sentries), statusDataProvider),
+			backend.chainDB, chainConfig, tmpdir, config.Sync),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
 		false,
 		config.Miner.EnabledPOS,
@@ -1079,7 +1079,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config,
 			logger,
 			chainConfig,
-			sentryMux(sentries),
+			polygonSyncSentry(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			executionRpc,
@@ -1144,9 +1144,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	var err error
 
 	if chainConfig.Bor == nil {
-		if !config.ElBlockDownloaderV2 {
-			s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
-		}
+		s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
 	}
 
 	emptyBadHash := config.BadBlockHash == common.Hash{}
@@ -1910,7 +1908,7 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 	}
 }
 
-func sentryMux(sentries []protosentry.SentryClient) protosentry.SentryClient {
+func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryClient {
 	return libsentry.NewSentryMultiplexer(sentries)
 }
 
