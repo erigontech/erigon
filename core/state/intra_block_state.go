@@ -1747,6 +1747,9 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			case StatePath:
 				stateKey := writes[i].Key
 				state := val.(uint256.Int)
+				if sdb.trace {
+					fmt.Printf("%x %x %x\n",addr, stateKey, state)
+				}
 				sdb.setState(addr, stateKey, state, true)
 			case BalancePath:
 				balance := val.(uint256.Int)

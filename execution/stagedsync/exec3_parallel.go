@@ -155,9 +155,11 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
 	ibs.SetTrace(task.execTask.Task.(*exec.TxTask).Trace)
-	ibs.SetTxContext(task.Version().BlockNum, txIndex)
+	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
+	ibs.SetTrace(txIndex < 0)
 	ibs.ApplyVersionedWrites(result.TxOut)
+	ibs.SetTrace(false)
 	ibs.SetVersionMap(&state.VersionMap{})
 
 	txTask, ok := task.Task.(*exec.TxTask)
@@ -177,16 +179,13 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		for _, vw := range result.TxOut {
 			fmt.Println(tracePrefix, "WRT", vw.String())
 		}
-		vm.SetTrace(true)
-		fmt.Println(tracePrefix+" end", ibs.VersionedWrites(false))
+		fmt.Println(tracePrefix+" end", ibs.VersionedWrites(true))
 		//}
 
-		// we need to flush the finalized writes to the version map so
-		// they are taken into account by subsequent transactions
-		vm.FlushVersionedWrites(ibs.VersionedWrites(true), true, tracePrefix)
-		vm.SetTrace(false)
-		ibs.SetTrace(true)
-		ibs.FinalizeTx(txTask.Config.Rules(blockNum, txTask.BlockTime()), stateWriter)
+		if txTask.Config.IsByzantium(blockNum) {
+			ibs.SetTrace(true)
+			ibs.FinalizeTx(txTask.Config.Rules(blockNum, txTask.BlockTime()), stateWriter)
+		}
 		return nil, nil
 	}
 
