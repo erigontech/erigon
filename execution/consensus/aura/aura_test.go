@@ -63,13 +63,7 @@ func TestEmptyBlock(t *testing.T) {
 	header.ReceiptHash = trie.EmptyRoot
 	header.Coinbase = common.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")
 	header.Difficulty = engine.CalcDifficulty(nil, time,
-		0,
-		genesisBlock.Difficulty(),
-		genesisBlock.NumberU64(),
-		genesisBlock.Hash(),
-		genesisBlock.UncleHash(),
-		genesisBlock.Header().AuRaStep,
-	)
+		genesisBlock.Header())
 
 	block := types.NewBlockWithHeader(header)
 

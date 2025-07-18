@@ -483,9 +483,9 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 // that a new block should have:
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
+func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parentHeader *types.Header) *big.Int {
 
-	snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
+	snap, err := c.Snapshot(chain, parentHeader.Number.Uint64(), parentHeader.Hash(), nil)
 	if err != nil {
 		return nil
 	}

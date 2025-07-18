@@ -215,12 +215,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 	b.header.Difficulty = b.engine.CalcDifficulty(
 		chainreader,
 		b.header.Time,
-		parent.Time(),
-		parent.Difficulty(),
-		parent.NumberU64(),
-		parent.Hash(),
-		parent.UncleHash(),
-		parent.Header().AuRaStep,
+		parent.Header(),
 	)
 }
 
@@ -459,12 +454,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 	header := MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
 	header.Coinbase = parent.Coinbase()
 	header.Difficulty = engine.CalcDifficulty(chain, time,
-		time-10,
-		parent.Difficulty(),
-		parent.NumberU64(),
-		parent.Hash(),
-		parent.UncleHash(),
-		parent.Header().AuRaStep,
+		parent.HeaderNoCopy(),
 	)
 
 	return header

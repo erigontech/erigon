@@ -63,8 +63,9 @@ func (e *UnauthorizedProposerError) Error() string {
 
 // UnauthorizedSignerError is returned if a header is [being] signed by an unauthorized entity.
 type UnauthorizedSignerError struct {
-	Number uint64
-	Signer []byte
+	Number         uint64
+	Signer         []byte
+	AllowedSigners []*Validator
 }
 
 func (e *UnauthorizedSignerError) Error() string {

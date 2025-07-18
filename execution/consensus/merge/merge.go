@@ -248,13 +248,13 @@ func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Merge) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
-	reached, err := IsTTDReached(chain, parentHash, parentNumber)
+func (s *Merge) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parentHeader *types.Header) *big.Int {
+	reached, err := IsTTDReached(chain, parentHeader.Hash(), parentHeader.Number.Uint64())
 	if err != nil {
 		return nil
 	}
 	if !reached {
-		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
+		return s.eth1Engine.CalcDifficulty(chain, time, parentHeader)
 	}
 	return ProofOfStakeDifficulty
 }
