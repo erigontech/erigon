@@ -54,9 +54,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 
 			se.txCount++
 			se.usedGas += txTask.UsedGas
-			if txTask.BlockNum==74122166 {
-				fmt.Println(txTask.BlockNum, txTask.TxIndex, "Used Gas", txTask.UsedGas, se.usedGas)
-			}
+			//if txTask.BlockNum==74122166 {
+			fmt.Println(txTask.BlockNum, txTask.TxIndex, "Used Gas", txTask.UsedGas, se.usedGas)
+			//}
 			mxExecGas.Add(float64(txTask.UsedGas))
 			mxExecTransactions.Add(1)
 
