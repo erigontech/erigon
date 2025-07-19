@@ -490,9 +490,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	if c.osaka {
 		// EIP-7883: ModExp Gas Cost Increase
 		gas = modExpMultComplexityEip7883(gas /*max_length */)
-
 		gas.Mul(gas, adjExpLen)
-		gas.Div(gas, big3)
 		if gas.BitLen() > 64 {
 			return math.MaxUint64
 		}
