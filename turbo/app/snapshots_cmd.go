@@ -796,6 +796,23 @@ func CheckBorChain(chainName string) bool {
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	var sum uint64
 	var maxTo uint64
+	verMap := map[string]map[string]version.Versions{
+		"headers": {
+			"seg": coresnaptype.Headers.Versions(),
+			"idx": coresnaptype.Headers.Indexes()[0].Version,
+		},
+		"transactions": {
+			"seg": coresnaptype.Transactions.Versions(),
+			"idx": coresnaptype.Transactions.Indexes()[0].Version,
+		},
+		"bodies": {
+			"seg": coresnaptype.Bodies.Versions(),
+			"idx": coresnaptype.Bodies.Indexes()[0].Version,
+		},
+		"transactions-to-block": {
+			"idx": coresnaptype.Transactions.Indexes()[1].Version,
+		},
+	}
 	// Check block sanity
 	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -817,21 +834,37 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		}
 		sum += res.To - res.From
 		headerSegName := info.Name()
+		headerSegVer := res.Version
+		if !headerSegVer.Eq(verMap["headers"]["seg"].Current) {
+			return fmt.Errorf("expected version %s, filename: %s", verMap["header"]["seg"].Current.String(), info.Name())
+		}
+		idxHeaderName := strings.Replace(headerSegName, ".seg", ".idx", 1)
+		headerIdxVer := verMap["headers"]["idx"].Current
+		idxHeaderName = strings.Replace(idxHeaderName, headerSegVer.String(), headerIdxVer.String(), 1)
+		if _, err := os.Stat(filepath.Join(snapDir, idxHeaderName)); err != nil {
+			return fmt.Errorf("missing index file %s", idxHeaderName)
+		}
 		// check that all files exist
 		for _, snapType := range []string{"transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
+			segVer := verMap[snapType]["seg"].Current
+			segName = strings.Replace(segName, headerSegVer.String(), segVer.String(), 1)
 			// check that the file exist
 			if _, err := os.Stat(filepath.Join(snapDir, segName)); err != nil {
 				return fmt.Errorf("missing file %s", segName)
 			}
 			// check that the index file exist
 			idxName := strings.Replace(segName, ".seg", ".idx", 1)
+			idxVer := verMap[snapType]["idx"].Current
+			idxName = strings.Replace(idxName, segVer.String(), idxVer.String(), 1)
 			if _, err := os.Stat(filepath.Join(snapDir, idxName)); err != nil {
 				return fmt.Errorf("missing index file %s", idxName)
 			}
 			if snapType == "transactions" {
 				// check that the tx index file exist
 				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
+				txIdxVer := verMap["transactions-to-block"]["idx"].Current
+				idxName = strings.Replace(idxName, idxVer.String(), txIdxVer.String(), 1)
 				if _, err := os.Stat(filepath.Join(snapDir, txIdxName)); err != nil {
 					return fmt.Errorf("missing tx index file %s", txIdxName)
 				}
@@ -1130,6 +1163,7 @@ func doPublishable(cliCtx *cli.Context) error {
 	}
 	// Iterate over all fies in dat.Snap
 	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
+		println("2")
 		return err
 	}
 	// check if salt-state.txt and salt-blocks.txt exist
