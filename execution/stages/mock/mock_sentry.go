@@ -314,7 +314,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		BlockReader:    br,
-		ReceiptsReader: receipts.NewGenerator(br, engine),
+		ReceiptsReader: receipts.NewGenerator(br, engine, 5*time.Second),
 		HistoryV3:      true,
 		cfg:            cfg,
 	}
