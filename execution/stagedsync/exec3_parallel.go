@@ -118,15 +118,15 @@ type blockResult struct {
 }
 
 type txResult struct {
-	blockNum   uint64
-	blockTime  uint64
-	txNum      uint64
-	gasUsed    int64
-	receipts   []*types.Receipt
-	logs       []*types.Log
-	traceFroms map[common.Address]struct{}
-	traceTos   map[common.Address]struct{}
-	writeSet   state.StateUpdates
+	blockNum     uint64
+	blockTime    uint64
+	txNum        uint64
+	gasUsed      int64
+	receipts     []*types.Receipt
+	logs         []*types.Log
+	traceFroms   map[common.Address]struct{}
+	traceTos     map[common.Address]struct{}
+	stateUpdates state.StateUpdates
 }
 
 type execTask struct {
@@ -991,10 +991,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	if applyResult.txNum > 0 {
 		pe.executedGas.Add(int64(applyResult.gasUsed))
 		pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
-		applyResult.writeSet = stateWriter.WriteSet()
+		applyResult.stateUpdates = stateWriter.WriteSet()
 
-		if applyResult.writeSet != nil {
-			be.applyCount += applyResult.writeSet.UpdateCount()
+		if applyResult.stateUpdates != nil {
+			be.applyCount += applyResult.stateUpdates.UpdateCount()
 			/*if dbg.TraceApply && traceBlock(applyResult.blockNum) {
 				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
 					list, ok := applyResult.writeSet[domain.String()]
@@ -1375,13 +1375,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 
 				blockExecutor.applyResults <- &txResult{
-					blockNum:   blockResult.BlockNum,
-					txNum:      blockResult.lastTxNum,
-					blockTime:  blockResult.BlockTime,
-					writeSet:   writeSet,
-					logs:       result.Logs,
-					traceFroms: result.TraceFroms,
-					traceTos:   result.TraceTos,
+					blockNum:     blockResult.BlockNum,
+					txNum:        blockResult.lastTxNum,
+					blockTime:    blockResult.BlockTime,
+					stateUpdates: writeSet,
+					logs:         result.Logs,
+					traceFroms:   result.TraceFroms,
+					traceTos:     result.TraceTos,
 				}
 
 				if !blockExecutor.execStarted.IsZero() {

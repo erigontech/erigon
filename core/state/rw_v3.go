@@ -64,7 +64,7 @@ func (rs *StateV3) SetTrace(trace bool) {
 
 func (rs *StateV3) applyStateUpdates(roTx kv.Tx, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
 	for address, update := range stateUpdates {
-		if update.deleteAccount || update.originalIncarnation > update.data.Incarnation {
+		if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
 			//del, before create: to clanup code/storage
 			if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil, 0); err != nil {
 				return err
@@ -75,10 +75,10 @@ func (rs *StateV3) applyStateUpdates(roTx kv.Tx, txNum uint64, stateUpdates Stat
 		}
 
 		if update.bufferedAccount != nil {
-			value := accounts.SerialiseV3(update.data)
-
-			if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], value, txNum, nil, 0); err != nil {
-				return err
+			if update.data != nil {
+				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(update.data), txNum, nil, 0); err != nil {
+					return err
+				}
 			}
 
 			if update.code != nil {
@@ -256,9 +256,11 @@ func (v StateUpdates) UpdateCount() int {
 			updateCount++
 		}
 		if account.bufferedAccount != nil {
-			updateCount++
+			if account.data != nil {
+				updateCount++
+			}
+			updateCount += len(account.storage)
 		}
-		updateCount += len(account.storage)
 	}
 	return updateCount
 }
@@ -331,15 +333,15 @@ func (w *BufferedWriter) UpdateAccountData(address common.Address, original, acc
 		w.accumulator.ChangeAccount(address, account.Incarnation, accounts.SerialiseV3(account))
 	}
 
-	if obj, ok := w.writeSet[address]; !ok {
+	if update, ok := w.writeSet[address]; !ok {
 		w.writeSet[address] = &stateUpdate{&bufferedAccount{
 			originalIncarnation: original.Incarnation,
 			data:                account,
 		}, false}
 	} else {
-		if original.Incarnation < obj.originalIncarnation {
-			obj.originalIncarnation = original.Incarnation
-			obj.data = account
+		if original.Incarnation < update.originalIncarnation {
+			update.originalIncarnation = original.Incarnation
+			update.data = account
 		}
 	}
 
@@ -366,7 +368,6 @@ func (w *BufferedWriter) UpdateAccountCode(address common.Address, incarnation u
 
 	if update, ok := w.writeSet[address]; !ok {
 		w.writeSet[address] = &stateUpdate{&bufferedAccount{code: code}, false}
-		w.writeSet[address] = update
 	} else {
 		update.code = code
 	}
