@@ -8,6 +8,7 @@ import (
 
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -55,7 +56,11 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			se.txCount++
 			se.usedGas += txTask.UsedGas
 			if txTask.BlockNum == 74122166 {
-				fmt.Println(txTask.BlockNum, txTask.TxIndex, txTask.Tx.Hash(), txTask.Final, txTask.UsedGas, len(txTask.Logs))
+				var hash common.Hash
+				if txTask.Tx != nil {
+					hash = txTask.Tx.Hash()
+				}
+				fmt.Println(txTask.BlockNum, txTask.TxIndex, hash, txTask.Final, txTask.UsedGas, len(txTask.Logs))
 			}
 			mxExecGas.Add(float64(txTask.UsedGas))
 			mxExecTransactions.Add(1)
