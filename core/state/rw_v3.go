@@ -62,8 +62,13 @@ func (rs *StateV3) SetTrace(trace bool) {
 	rs.trace = trace
 }
 
-func (rs *StateV3) applyStateUpdates(roTx kv.Tx, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
+func (rs *StateV3) applyUpdates(roTx kv.Tx, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
+
 	for address, update := range stateUpdates {
+		if fmt.Sprintf("%x", address) == "b75eef5d5cdba6698256de87f5bdb5dbf74d3d35" {
+			fmt.Printf("b75eef5d5cdba6698256de87f5bdb5dbf74d3d35")
+		}
+
 		if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
 			//del, before create: to clanup code/storage
 			if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil, 0); err != nil {
@@ -164,7 +169,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	if err := rs.applyStateUpdates(roTx, txNum, accountUpdates, balanceIncreases, rs.domains, rules); err != nil {
+	if err := rs.applyUpdates(roTx, txNum, accountUpdates, balanceIncreases, rs.domains, rules); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
 
@@ -341,8 +346,8 @@ func (w *BufferedWriter) UpdateAccountData(address common.Address, original, acc
 	} else {
 		if original.Incarnation < update.originalIncarnation {
 			update.originalIncarnation = original.Incarnation
-			update.data = account
 		}
+		update.data = account
 	}
 
 	w.rs.accountsMutex.Lock()
