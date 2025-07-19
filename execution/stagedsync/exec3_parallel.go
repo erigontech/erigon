@@ -126,7 +126,7 @@ type txResult struct {
 	logs       []*types.Log
 	traceFroms map[common.Address]struct{}
 	traceTos   map[common.Address]struct{}
-	writeSet   state.WriteLists
+	writeSet   state.StateUpdates
 }
 
 type execTask struct {
@@ -994,8 +994,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		applyResult.writeSet = stateWriter.WriteSet()
 
 		if applyResult.writeSet != nil {
-			be.applyCount += applyResult.writeSet.ApplyCount()
-			if dbg.TraceApply && traceBlock(applyResult.blockNum) {
+			be.applyCount += applyResult.writeSet.UpdateCount()
+			/*if dbg.TraceApply && traceBlock(applyResult.blockNum) {
 				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
 					list, ok := applyResult.writeSet[domain.String()]
 					if !ok {
@@ -1010,7 +1010,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						}
 					}
 				}
-			}
+			}*/
 		}
 
 		be.applyResults <- &applyResult
@@ -1321,7 +1321,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 				result := blockExecutor.results[len(blockExecutor.results)-1]
 
-				writeSet, err := func() (state.WriteLists, error) {
+				writeSet, err := func() (state.StateUpdates, error) {
 					pe.RLock()
 					defer pe.RUnlock()
 
@@ -1370,7 +1370,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					return err
 				}
 
-				blockResult.ApplyCount += writeSet.ApplyCount()
+				blockResult.ApplyCount += writeSet.UpdateCount()
 
 				fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 

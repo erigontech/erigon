@@ -62,37 +62,52 @@ func (rs *StateV3) SetTrace(trace bool) {
 	rs.trace = trace
 }
 
-func (rs *StateV3) applyState(roTx kv.Tx, txNum uint64, writeLists map[string]*state.KvList, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
-	var acc accounts.Account
+func (rs *StateV3) applyStateUpdates(roTx kv.Tx, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
+	for address, update := range stateUpdates {
+		if update.deleteAccount || update.originalIncarnation > update.data.Incarnation {
+			//del, before create: to clanup code/storage
+			if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil, 0); err != nil {
+				return err
+			}
+			if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+				return err
+			}
+		}
 
-	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
-	if writeLists != nil {
-		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
-			list, ok := writeLists[domain.String()]
-			if !ok {
-				continue
+		if update.bufferedAccount != nil {
+			value := accounts.SerialiseV3(update.data)
+
+			if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], value, txNum, nil, 0); err != nil {
+				return err
 			}
 
-			for i, key := range list.Keys {
-				if list.Vals[i] == nil {
-					if rs.trace {
-						fmt.Printf("apply del %s: %x %x\n", domain.String(), []byte(key))
-					}
-					if err := domains.DomainDel(domain, roTx, []byte(key), txNum, nil, 0); err != nil {
+			if update.code != nil {
+				if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil, 0); err != nil {
+					return err
+				}
+			}
+
+			for key, value := range update.storage {
+				composite := append(address[:], key[:]...)
+				v := value.Bytes()
+				if len(v) == 0 {
+					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
 						return err
 					}
 				} else {
-					if rs.trace {
-						fmt.Printf("apply put %s: %x %x\n", domain.String(), []byte(key), list.Vals[i])
-					}
-					if err := domains.DomainPut(domain, roTx, []byte(key), list.Vals[i], txNum, nil, 0); err != nil {
+					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
 						return err
 					}
 				}
 			}
+		} else if update.deleteAccount {
+			if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil, 0); err != nil {
+				return err
+			}
 		}
 	}
 
+	var acc accounts.Account
 	emptyRemoval := rules.IsSpuriousDragon
 	for addr, increase := range balanceIncreases {
 		increase := increase
@@ -135,7 +150,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	roTx kv.Tx,
 	blockNum uint64,
 	txNum uint64,
-	writeLists WriteLists,
+	accountUpdates StateUpdates,
 	balanceIncreases map[common.Address]uint256.Int,
 	receipts []*types.Receipt,
 	logs []*types.Log,
@@ -149,10 +164,9 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	if err := rs.applyState(roTx, txNum, writeLists, balanceIncreases, rs.domains, rules); err != nil {
+	if err := rs.applyStateUpdates(roTx, txNum, accountUpdates, balanceIncreases, rs.domains, rules); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
-	writeLists.Return()
 
 	if err := rs.ApplyLogsAndTraces4(roTx, txNum, receipts, logs, traceFroms, traceTos, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
@@ -228,6 +242,27 @@ type bufferedAccount struct {
 	storage             map[common.Hash]uint256.Int
 }
 
+type stateUpdate struct {
+	*bufferedAccount
+	deleteAccount bool
+}
+
+type StateUpdates map[common.Address]*stateUpdate
+
+func (v StateUpdates) UpdateCount() int {
+	updateCount := 0
+	for _, account := range v {
+		if account.deleteAccount {
+			updateCount++
+		}
+		if account.bufferedAccount != nil {
+			updateCount++
+		}
+		updateCount += len(account.storage)
+	}
+	return updateCount
+}
+
 type StateV3Buffered struct {
 	*StateV3
 	accounts      map[common.Address]*bufferedAccount
@@ -255,7 +290,7 @@ func (s *StateV3Buffered) WithDomains(domains *state.SharedDomains) *StateV3Buff
 type BufferedWriter struct {
 	rs           *StateV3Buffered
 	trace        bool
-	writeLists   WriteLists
+	writeSet     StateUpdates
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
@@ -267,7 +302,7 @@ type BufferedWriter struct {
 func NewBufferedWriter(rs *StateV3Buffered, accumulator *shards.Accumulator) *BufferedWriter {
 	return &BufferedWriter{
 		rs:          rs,
-		writeLists:  newWriteList(),
+		writeSet:    StateUpdates{},
 		accumulator: accumulator,
 		//trace:       true,
 	}
@@ -279,8 +314,8 @@ func (w *BufferedWriter) SetTxNum(ctx context.Context, txNum uint64) {
 }
 func (w *BufferedWriter) SetTx(tx kv.Tx) {}
 
-func (w *BufferedWriter) WriteSet() WriteLists {
-	return w.writeLists
+func (w *BufferedWriter) WriteSet() StateUpdates {
+	return w.writeSet
 }
 
 func (w *BufferedWriter) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
@@ -291,17 +326,22 @@ func (w *BufferedWriter) UpdateAccountData(address common.Address, original, acc
 	if w.trace {
 		fmt.Printf("BufferedWriter: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
-	value := accounts.SerialiseV3(account)
+
 	if w.accumulator != nil {
-		w.accumulator.ChangeAccount(address, account.Incarnation, value)
+		w.accumulator.ChangeAccount(address, account.Incarnation, accounts.SerialiseV3(account))
 	}
 
-	writeList := w.writeLists[kv.AccountsDomain.String()]
-	if original.Incarnation > account.Incarnation {
-		//del, before create: to clanup code/storage
-		writeList.Push(string(address[:]), nil)
+	if obj, ok := w.writeSet[address]; !ok {
+		w.writeSet[address] = &stateUpdate{&bufferedAccount{
+			originalIncarnation: original.Incarnation,
+			data:                account,
+		}, false}
+	} else {
+		if original.Incarnation < obj.originalIncarnation {
+			obj.originalIncarnation = original.Incarnation
+			obj.data = account
+		}
 	}
-	writeList.Push(string(address[:]), value)
 
 	w.rs.accountsMutex.Lock()
 	obj, ok := w.rs.accounts[address]
@@ -323,15 +363,21 @@ func (w *BufferedWriter) UpdateAccountCode(address common.Address, incarnation u
 	if w.accumulator != nil {
 		w.accumulator.ChangeCode(address, incarnation, code)
 	}
-	w.writeLists[kv.CodeDomain.String()].Push(string(address[:]), code)
+
+	if update, ok := w.writeSet[address]; !ok {
+		w.writeSet[address] = &stateUpdate{&bufferedAccount{code: code}, false}
+		w.writeSet[address] = update
+	} else {
+		update.code = code
+	}
 
 	w.rs.accountsMutex.Lock()
 	obj, ok := w.rs.accounts[address]
 	if !ok {
 		obj = &bufferedAccount{}
+		w.rs.accounts[address] = obj
 	}
 	obj.code = code
-	w.rs.accounts[address] = obj
 	w.rs.accountsMutex.Unlock()
 
 	return nil
@@ -344,7 +390,14 @@ func (w *BufferedWriter) DeleteAccount(address common.Address, original *account
 	if w.accumulator != nil {
 		w.accumulator.DeleteAccount(address)
 	}
-	w.writeLists[kv.AccountsDomain.String()].Push(string(address.Bytes()), nil)
+
+	if update, ok := w.writeSet[address]; !ok {
+		w.writeSet[address] = &stateUpdate{nil, true}
+	} else {
+		update.bufferedAccount = nil
+		update.deleteAccount = true
+	}
+
 	w.rs.accountsMutex.Lock()
 	delete(w.rs.accounts, address)
 	w.rs.accountsMutex.Unlock()
@@ -355,13 +408,26 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 	if original == value {
 		return nil
 	}
-	compositeS := string(append(address[:], key[:]...))
-	vb := value.Bytes32() // using [32]byte instead of []byte to avoid heap escape
-	w.writeLists[kv.StorageDomain.String()].Push(compositeS, vb[32-value.ByteLen():])
-	if w.trace {
-		fmt.Printf("BufferedWriter: storage: %x,%x,%x\n", address, key, vb[32-value.ByteLen():])
+
+	update, ok := w.writeSet[address]
+	if !ok {
+		update = &stateUpdate{&bufferedAccount{}, false}
+		w.writeSet[address] = update
 	}
+	if update.storage == nil {
+		update.storage = map[common.Hash]uint256.Int{
+			key: value,
+		}
+	} else {
+		update.storage[key] = value
+	}
+
+	if w.trace {
+		fmt.Printf("BufferedWriter: storage: %x,%x,%x\n", address, key, &value)
+	}
+
 	if w.accumulator != nil {
+		vb := value.Bytes32()
 		w.accumulator.ChangeStorage(address, incarnation, key, vb[32-value.ByteLen():])
 	}
 
@@ -369,6 +435,7 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 	obj, ok := w.rs.accounts[address]
 	if !ok {
 		obj = &bufferedAccount{}
+		w.rs.accounts[address] = obj
 	}
 	if obj.storage == nil {
 		obj.storage = map[common.Hash]uint256.Int{
@@ -377,7 +444,7 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 	} else {
 		obj.storage[key] = value
 	}
-	w.rs.accounts[address] = obj
+
 	w.rs.accountsMutex.Unlock()
 	return nil
 }
@@ -752,58 +819,6 @@ func (r *bufferedReader) SetGetter(getter kv.TemporalGetter) {
 
 func (r *bufferedReader) DiscardReadList() {
 	r.reader.DiscardReadList()
-}
-
-type WriteLists map[string]*state.KvList
-
-func (v WriteLists) Return() {
-	returnWriteList(v)
-}
-
-func (v WriteLists) ApplyCount() int {
-	applyCount := 0
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-		list, ok := v[domain.String()]
-		if !ok {
-			continue
-		}
-
-		for _, _ = range list.Keys {
-			applyCount++
-		}
-	}
-	return applyCount
-}
-
-var writeListPool = sync.Pool{
-
-	New: func() any {
-		return WriteLists{
-			kv.AccountsDomain.String(): {},
-			kv.StorageDomain.String():  {},
-			kv.CodeDomain.String():     {},
-		}
-	},
-}
-
-func newWriteList() WriteLists {
-	v := writeListPool.Get().(WriteLists)
-	for _, tbl := range v {
-		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	}
-	return v
-	//return writeListPool.Get().(map[string]*state.KvList)
-}
-func returnWriteList(v WriteLists) {
-	if v == nil {
-		return
-	}
-	//for _, tbl := range v {
-	//	clear(tbl.Keys)
-	//	clear(tbl.Vals)
-	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	//}
-	writeListPool.Put(v)
 }
 
 type ReadLists map[string]*state.KvList

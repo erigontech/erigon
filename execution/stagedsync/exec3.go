@@ -1049,7 +1049,7 @@ func ExecV3(ctx context.Context,
 						uncommittedGas += applyResult.gasUsed
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 						pe.rs.SetTrace(dbg.TraceApply && traceBlock(applyResult.blockNum))
-						blockApplyCount += applyResult.writeSet.ApplyCount()
+						blockApplyCount += applyResult.writeSet.UpdateCount()
 						err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
 							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false)
