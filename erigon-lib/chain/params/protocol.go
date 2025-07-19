@@ -180,7 +180,7 @@ const (
 	FieldElementsPerBlob        = 4096 // each field element is 32 bytes
 	BlobSize                    = FieldElementsPerBlob * 32
 	GasPerBlob           uint64 = 1 << 17
-	BlobBaseCost         uint64 = 1 << 14 // EIP-7918: Blob base fee bounded by execution cost
+	BlobBaseCost         uint64 = 1 << 13 // EIP-7918: Blob base fee bounded by execution cost
 
 	// EIP-7594: PeerDAS - Peer Data Availability Sampling
 	// See https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/polynomial-commitments-sampling.md
