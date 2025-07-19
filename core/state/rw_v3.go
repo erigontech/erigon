@@ -65,10 +65,6 @@ func (rs *StateV3) SetTrace(trace bool) {
 func (rs *StateV3) applyUpdates(roTx kv.Tx, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
 
 	for address, update := range stateUpdates {
-		if fmt.Sprintf("%x", address) == "b75eef5d5cdba6698256de87f5bdb5dbf74d3d35" {
-			fmt.Printf("b75eef5d5cdba6698256de87f5bdb5dbf74d3d35")
-		}
-
 		if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
 			//del, before create: to clanup code/storage
 			if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil, 0); err != nil {
@@ -253,6 +249,36 @@ type stateUpdate struct {
 }
 
 type StateUpdates map[common.Address]*stateUpdate
+
+func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
+	for address, update := range v {
+		if traceAll || traceAccount(address) {
+			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
+				fmt.Printf("%d del code/storage: %x\n", blockNum, address)
+			}
+
+			if update.bufferedAccount != nil {
+				if update.data != nil {
+					fmt.Printf("%d put account: %x\n", blockNum, address)
+				}
+
+				if update.code != nil {
+					fmt.Printf("%d put code: %x\n", blockNum, address)
+				}
+
+				for key, value := range update.storage {
+					if len(v) == 0 {
+						fmt.Printf("%d del storage: %x %x\n", blockNum, key)
+					} else {
+						fmt.Printf("%d put storage: %x %x\n", blockNum, key, &value)
+					}
+				}
+			} else if update.deleteAccount {
+				fmt.Printf("%d del account: %x\n", blockNum, address)
+			}
+		}
+	}
+}
 
 func (v StateUpdates) UpdateCount() int {
 	updateCount := 0

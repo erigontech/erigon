@@ -995,22 +995,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		if applyResult.stateUpdates != nil {
 			be.applyCount += applyResult.stateUpdates.UpdateCount()
-			/*if dbg.TraceApply && traceBlock(applyResult.blockNum) {
-				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
-					list, ok := applyResult.writeSet[domain.String()]
-					if !ok {
-						continue
-					}
-
-					for i, key := range list.Keys {
-						if list.Vals[i] == nil {
-							fmt.Printf("%d del %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key))
-						} else {
-							fmt.Printf("%d put %s: %x %x\n", applyResult.blockNum, domain.String(), []byte(key), list.Vals[i])
-						}
-					}
-				}
-			}*/
+			if dbg.TraceApply {
+				applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, traceBlock(applyResult.blockNum))
+			}
 		}
 
 		be.applyResults <- &applyResult
