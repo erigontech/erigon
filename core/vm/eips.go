@@ -341,7 +341,7 @@ func enable7702(jt *JumpTable) {
 func enable7939(jt *JumpTable) {
 	jt[CLZ] = &operation{
 		execute:     opCLZ,
-		constantGas: GasFastestStep,
+		constantGas: GasFastStep,
 		numPop:      1,
 		numPush:     1,
 	}
