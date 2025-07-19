@@ -155,7 +155,7 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 				}
 			} else {
 				if kv.DBSchemaVersion.Major != major {
-					return fmt.Errorf("cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\"", major, kv.DBSchemaVersion.Major, chaindata)
+					return fmt.Errorf("ErigonDB verison %d but on disk is %d. Do: `rm -rf %s` or `erigon seg reset --datadir", kv.DBSchemaVersion.Major, major, chaindata)
 				}
 			}
 		}
