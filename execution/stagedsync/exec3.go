@@ -1133,7 +1133,7 @@ func ExecV3(ctx context.Context,
 											}
 										}
 									}
-									return fmt.Errorf("wrong trie root: %d", blockNum)
+									return fmt.Errorf("wrong trie root: %d", applyResult.BlockNum)
 								}
 
 								pe.lastCommittedBlockNum = lastBlockResult.BlockNum
