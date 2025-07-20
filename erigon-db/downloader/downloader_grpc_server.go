@@ -102,6 +102,10 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			}
 		}
 	}
+	for _, t := range s.d.torrentClient.Torrents() {
+		t.AllowDataDownload()
+		t.AllowDataUpload()
+	}
 	progress.Store(int32(len(request.Items)))
 
 	return &emptypb.Empty{}, nil
