@@ -1001,7 +1001,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 		applyResult.stateUpdates = stateWriter.WriteSet()
 
-		if applyResult.stateUpdates != nil {
+		if applyResult.stateUpdates.BTreeG != nil {
 			be.applyCount += applyResult.stateUpdates.UpdateCount()
 			if dbg.TraceApply {
 				applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, traceBlock(applyResult.blockNum))
@@ -1349,13 +1349,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					}
 
 					if err != nil {
-						return nil, fmt.Errorf("can't finalize block: %w", err)
+						return state.StateUpdates{}, fmt.Errorf("can't finalize block: %w", err)
 					}
 
 					stateWriter := state.NewBufferedWriter(pe.rs, nil)
 
 					if err = ibs.MakeWriteSet(pe.cfg.chainConfig.Rules(result.BlockNumber(), result.BlockTime()), stateWriter); err != nil {
-						return nil, err
+						return state.StateUpdates{}, err
 					}
 
 					return stateWriter.WriteSet(), nil

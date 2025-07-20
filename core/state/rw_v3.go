@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/holiman/uint256"
+	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
@@ -64,70 +65,76 @@ func (rs *StateV3) SetTrace(trace bool) {
 
 func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
 
-	for address, update := range stateUpdates {
+	var err error
+	stateUpdates.Scan(func(update *stateUpdate) bool {
 		if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
-			if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-				fmt.Printf("%d apply:del code+storage: %x\n", blockNum, address)
+			if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+				fmt.Printf("%d apply:del code+storage: %x\n", blockNum, update.address)
 			}
 			//del, before create: to clanup code/storage
-			if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil, 0); err != nil {
-				return err
+			if err = domains.DomainDel(kv.CodeDomain, roTx, update.address[:], txNum, nil, 0); err != nil {
+				return false
 			}
-			if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
-				return err
+			if err = domains.DomainDelPrefix(kv.StorageDomain, roTx, update.address[:], txNum); err != nil {
+				return false
 			}
 		}
 
 		if update.bufferedAccount != nil {
 			if update.data != nil {
-				if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
+				if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, update.address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
 				}
-				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(update.data), txNum, nil, 0); err != nil {
-					return err
+				if err = domains.DomainPut(kv.AccountsDomain, roTx, update.address[:], accounts.SerialiseV3(update.data), txNum, nil, 0); err != nil {
+					return false
 				}
 			}
 
 			if update.code != nil {
-				if dbg.TraceApply && (rs.trace || traceAccount(address)) {
+				if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
 					code := update.code
 					if len(code) > 40 {
 						code = code[:40]
 					}
-					fmt.Printf("%d apply:put code: %x %x\n", blockNum, address, code)
+					fmt.Printf("%d apply:put code: %x %x\n", blockNum, update.address, code)
 				}
-				if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil, 0); err != nil {
-					return err
+				if err = domains.DomainPut(kv.CodeDomain, roTx, update.address[:], update.code, txNum, nil, 0); err != nil {
+					return false
 				}
 			}
 
 			for key, value := range update.storage {
-				composite := append(address[:], key[:]...)
+				composite := append(update.address[:], key[:]...)
 				v := value.Bytes()
 				if len(v) == 0 {
-					if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-						fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, address, key)
+					if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+						fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, update.address, key)
 					}
-					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
-						return err
+					if err = domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
+						return false
 					}
 				} else {
-					if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, address, key, &value)
+					if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, update.address, key, &value)
 					}
-					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
-						return err
+					if err = domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
+						return false
 					}
 				}
 			}
 		} else if update.deleteAccount {
-			if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-				fmt.Printf("%d apply:del account: %x\n", blockNum, address)
+			if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+				fmt.Printf("%d apply:del account: %x\n", blockNum, update.address)
 			}
-			if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil, 0); err != nil {
-				return err
+			if err = domains.DomainDel(kv.AccountsDomain, roTx, update.address[:], txNum, nil, 0); err != nil {
+				return false
 			}
 		}
+		return true
+	})
+
+	if err != nil {
+		return err
 	}
 
 	var acc accounts.Account
@@ -267,21 +274,36 @@ type bufferedAccount struct {
 
 type stateUpdate struct {
 	*bufferedAccount
+	address       common.Address
 	deleteAccount bool
 }
 
-type StateUpdates map[common.Address]*stateUpdate
+func newStateUpdates() StateUpdates {
+	return StateUpdates{
+		btree.NewBTreeGOptions[*stateUpdate](func(a, b *stateUpdate) bool {
+			return a.address.Cmp(b.address) < 0
+		}, btree.Options{NoLocks: true}),
+	}
+}
+
+type StateUpdates struct {
+	*btree.BTreeG[*stateUpdate]
+}
 
 func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
-	for address, update := range v {
-		if traceAll || traceAccount(address) {
+	if v.BTreeG == nil {
+		return
+	}
+
+	v.Scan(func(update *stateUpdate) bool {
+		if traceAll || traceAccount(update.address) {
 			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
-				fmt.Printf("%d del code+storage: %x\n", blockNum, address)
+				fmt.Printf("%d del code+storage: %x\n", blockNum, update.address)
 			}
 
 			if update.bufferedAccount != nil {
 				if update.data != nil {
-					fmt.Printf("%d put account: %x Balance:[%d],Nonce:[%d],CodeHash:[%x]\n", blockNum, address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
+					fmt.Printf("%d put account: %x Balance:[%d],Nonce:[%d],CodeHash:[%x]\n", blockNum, update.address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
 				}
 
 				if update.code != nil {
@@ -289,36 +311,39 @@ func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
 					if len(code) > 40 {
 						code = code[:40]
 					}
-					fmt.Printf("%d put code: %x %x\n", blockNum, address, code)
+					fmt.Printf("%d put code: %x %x\n", blockNum, update.address, code)
 				}
 
 				for key, value := range update.storage {
-					if len(v) == 0 {
-						fmt.Printf("%d del storage: %x %x %x\n", blockNum, address, key)
+					if len(value) == 0 {
+						fmt.Printf("%d del storage: %x %x %x\n", blockNum, update.address, key)
 					} else {
-						fmt.Printf("%d put storage: %x %x %x\n", blockNum, address, key, &value)
+						fmt.Printf("%d put storage: %x %x %x\n", blockNum, update.address, key, &value)
 					}
 				}
 			} else if update.deleteAccount {
-				fmt.Printf("%d del account: %x\n", blockNum, address)
+				fmt.Printf("%d del account: %x\n", blockNum, update.address)
 			}
 		}
-	}
+		return true
+	})
 }
 
 func (v StateUpdates) UpdateCount() int {
 	updateCount := 0
-	for _, account := range v {
-		if account.deleteAccount {
+	v.Scan(func(update *stateUpdate) bool {
+		if update.deleteAccount {
 			updateCount++
 		}
-		if account.bufferedAccount != nil {
-			if account.data != nil {
+		if update.bufferedAccount != nil {
+			if update.data != nil {
 				updateCount++
 			}
-			updateCount += len(account.storage)
+			updateCount += len(update.storage)
 		}
-	}
+		return true
+	})
+
 	return updateCount
 }
 
@@ -390,11 +415,12 @@ func (w *BufferedWriter) UpdateAccountData(address common.Address, original, acc
 		w.accumulator.ChangeAccount(address, account.Incarnation, accounts.SerialiseV3(account))
 	}
 
-	if update, ok := w.writeSet[address]; !ok {
-		w.writeSet[address] = &stateUpdate{&bufferedAccount{
+	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
+		update = &stateUpdate{&bufferedAccount{
 			originalIncarnation: original.Incarnation,
 			data:                account,
-		}, false}
+		}, address, false}
+		w.writeSet.Set(update)
 	} else {
 		if original.Incarnation < update.originalIncarnation {
 			update.originalIncarnation = original.Incarnation
@@ -423,8 +449,8 @@ func (w *BufferedWriter) UpdateAccountCode(address common.Address, incarnation u
 		w.accumulator.ChangeCode(address, incarnation, code)
 	}
 
-	if update, ok := w.writeSet[address]; !ok {
-		w.writeSet[address] = &stateUpdate{&bufferedAccount{code: code}, false}
+	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
+		w.writeSet.Set(&stateUpdate{&bufferedAccount{code: code}, address, false})
 	} else {
 		update.code = code
 	}
@@ -449,8 +475,8 @@ func (w *BufferedWriter) DeleteAccount(address common.Address, original *account
 		w.accumulator.DeleteAccount(address)
 	}
 
-	if update, ok := w.writeSet[address]; !ok {
-		w.writeSet[address] = &stateUpdate{nil, true}
+	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
+		w.writeSet.Set(&stateUpdate{nil, address, true})
 	} else {
 		update.bufferedAccount = nil
 		update.deleteAccount = true
@@ -467,10 +493,10 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 		return nil
 	}
 
-	update, ok := w.writeSet[address]
+	update, ok := w.writeSet.Get(&stateUpdate{address: address})
 	if !ok {
-		update = &stateUpdate{&bufferedAccount{}, false}
-		w.writeSet[address] = update
+		update = &stateUpdate{&bufferedAccount{}, address, false}
+		w.writeSet.Set(update)
 	}
 	if update.storage == nil {
 		update.storage = map[common.Hash]uint256.Int{

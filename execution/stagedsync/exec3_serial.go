@@ -36,8 +36,8 @@ func (se *serialExecutor) LogExecuted() {
 	se.progress.LogExecuted(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitted(commitStart time.Time,stepsIndDb float64) {
-	se.progress.LogCommitted(se.rs.StateV3, se,commitStart, stepsIndDb )
+func (se *serialExecutor) LogCommitted(commitStart time.Time, stepsIndDb float64) {
+	se.progress.LogCommitted(se.rs.StateV3, se, commitStart, stepsIndDb)
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {
@@ -278,7 +278,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			}
 		}
 
-		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
+		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
 			txTask.BalanceIncreaseSet, blockReceipts, result.Logs, result.TraceFroms, result.TraceTos,
 			se.cfg.chainConfig, se.cfg.chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime()), txTask.HistoryExecution); err != nil {
 			return false, err
