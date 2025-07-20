@@ -962,6 +962,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 
+			if txTask.Tx() != nil {
+				blobGasUsed := txTask.Tx().GetBlobGas()
+				if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
+					return nil, err
+				}
+				be.blobGasUsed += blobGasUsed
+			}
+
 			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
 
 			if err != nil {
