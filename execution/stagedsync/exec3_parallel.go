@@ -994,7 +994,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if applyResult.stateUpdates.BTreeG != nil {
 					be.applyCount += applyResult.stateUpdates.UpdateCount()
 					if dbg.TraceApply {
-						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, traceBlock(applyResult.blockNum))
+						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, true) //traceBlock(applyResult.blockNum))
 					}
 				}
 
@@ -1313,7 +1313,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 				result := blockExecutor.results[len(blockExecutor.results)-1]
 
-				writeSet, err := func() (state.StateUpdates, error) {
+				stateUpdates, err := func() (state.StateUpdates, error) {
 					pe.RLock()
 					defer pe.RUnlock()
 
@@ -1362,15 +1362,17 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					return err
 				}
 
-				blockResult.ApplyCount += writeSet.UpdateCount()
-
+				blockResult.ApplyCount += stateUpdates.UpdateCount()
+				if dbg.TraceApply {
+					stateUpdates.TraceBlockUpdates(blockResult.BlockNum, true) //traceBlock(blockResult.BlockNum))
+				}
 				fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 
 				blockExecutor.applyResults <- &txResult{
 					blockNum:     blockResult.BlockNum,
 					txNum:        blockResult.lastTxNum,
 					blockTime:    blockResult.BlockTime,
-					stateUpdates: writeSet,
+					stateUpdates: stateUpdates,
 					logs:         result.Logs,
 					traceFroms:   result.TraceFroms,
 					traceTos:     result.TraceTos,
