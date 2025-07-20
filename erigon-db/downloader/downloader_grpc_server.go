@@ -85,6 +85,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 	}()
 
 	wg, ctx := errgroup.WithContext(ctx)
+	wg.SetLimit(1)
 	for _, it := range request.Items {
 		if it.Path == "" {
 			return nil, errors.New("field 'path' is required")
