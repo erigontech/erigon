@@ -31,7 +31,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.5.0
 	github.com/alecthomas/kong v0.8.1
-	github.com/anacrolix/torrent v1.58.2-0.20250714121614-df7052d6b54e
+	github.com/anacrolix/torrent v1.58.2-0.20250711050233-2297350498bc
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.18.0
