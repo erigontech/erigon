@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,36 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package tool
+package bbd
 
 import (
 	"context"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 )
 
-func Check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
-
-func ChainConfig(tx kv.Tx) *chain.Config {
-	genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
-	Check(err)
-	chainConfig, err := core.ReadChainConfig(tx, genesisBlockHash)
-	Check(err)
-	return chainConfig
-}
-
-func ChainConfigFromDB(db kv.RoDB) (cc *chain.Config) {
-	err := db.View(context.Background(), func(tx kv.Tx) error {
-		cc = ChainConfig(tx)
-		return nil
-	})
-	Check(err)
-	return cc
+type HeaderReader interface {
+	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
 }

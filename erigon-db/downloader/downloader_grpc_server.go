@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -60,7 +61,7 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer s.d.resetLogInterval.Broadcast()
+	defer s.d.ResetLogInterval()
 
 	var progress atomic.Int32
 
@@ -75,32 +76,51 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			case <-ctx.Done():
 				return
 			case <-time.After(interval):
-				interval *= 2
+				if interval < 30*time.Second {
+					interval *= 2
+				}
 			}
 			logProgress()
 		}
 	}()
 
-	for i, it := range request.Items {
-		progress.Store(int32(i))
+	wg, ctx := errgroup.WithContext(ctx)
+	for _, it := range request.Items {
 		if it.Path == "" {
 			return nil, errors.New("field 'path' is required")
 		}
 
-		if it.TorrentHash == nil {
-			// if we don't have the torrent hash then we seed a new snapshot
-			// TODO: Make the torrent in place then call addPreverifiedTorrent.
-			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
-				return nil, err
+		it := it
+		wg.Go(func() error {
+			defer progress.Add(1)
+			if it.TorrentHash == nil {
+				// if we don't have the torrent hash then we seed a new snapshot
+				// TODO: Make the torrent in place then call addPreverifiedTorrent.
+				if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
+					return err
+				}
+				return nil
+			} else {
+				ih := Proto2InfoHash(it.TorrentHash)
+				if err := s.d.RequestSnapshot(ih, it.Path); err != nil {
+					err = fmt.Errorf("requesting snapshot %s with infohash %v: %w", it.Path, ih, err)
+					return err
+				}
 			}
-			continue
-		} else {
-			ih := Proto2InfoHash(it.TorrentHash)
-			if err := s.d.RequestSnapshot(ih, it.Path); err != nil {
-				err = fmt.Errorf("requesting snapshot %s with infohash %v: %w", it.Path, ih, err)
-				return nil, err
-			}
-		}
+			return nil
+		})
+	}
+	if err := wg.Wait(); err != nil {
+		return nil, fmt.Errorf("adding torrents: %w", err)
+	}
+
+	log.Warn("[dbg] adding web seeds to all torrents")
+	for _, t := range s.d.torrentClient.Torrents() {
+		t.AddWebSeeds(s.d.cfg.WebSeedUrls, s.d.addWebSeedOpts...)
+	}
+	log.Warn("[dbg] adding trackers to all torrents")
+	for _, t := range s.d.torrentClient.Torrents() {
+		t.AddTrackers(Trackers)
 	}
 	progress.Store(int32(len(request.Items)))
 
