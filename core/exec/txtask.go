@@ -407,10 +407,7 @@ func (t *TxTask) IsHistoric() bool {
 func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
 	t.BalanceIncreaseSet = nil
 	ibs.Reset()
-
-	if t.TxIndex >= 0 {
-		ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
-	}
+	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
 
 	if t.TxIndex != -1 && !t.IsBlockEnd() {
 		var vmCfg vm.Config
@@ -509,7 +506,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			// Apply the transaction to the current state (included in the env).
 			var applyRes *evmtypes.ExecutionResult
 			var applyErr error
-			
+
 			if !calcFees {
 				applyRes, applyErr = core.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool(), true, false, engine)
 			} else {
