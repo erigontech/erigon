@@ -326,7 +326,7 @@ func (d *Downloader) addTorrentSpec(
 	name string,
 ) (t *torrent.Torrent, first bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
-	ts.Trackers = nil
+	ts.Trackers = Trackers
 	ts.Webseeds = nil
 	ts.DisallowDataDownload = true
 	ts.DisallowDataUpload = true
