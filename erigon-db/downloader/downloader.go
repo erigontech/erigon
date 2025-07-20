@@ -380,9 +380,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
 		return err
 	}
 
-	for _, t := range d.torrentClient.Torrents() {
-		d.afterAdd(t)
-	}
+	d.afterAdd()
 	return nil
 }
 
