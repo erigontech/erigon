@@ -103,24 +103,29 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 				}
 			}
 
-			for key, value := range update.storage {
-				composite := append(update.address[:], key[:]...)
-				v := value.Bytes()
+			update.storage.Scan(func(i storageItem) bool {
+				composite := append(update.address[:], i.key[:]...)
+				v := i.value.Bytes()
 				if len(v) == 0 {
 					if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
-						fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, update.address, key)
+						fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, update.address, i.key)
 					}
 					if err = domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
 						return false
 					}
 				} else {
 					if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
-						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, update.address, key, &value)
+						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
 					}
 					if err = domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
 						return false
 					}
 				}
+				return true
+			})
+
+			if err != nil {
+				return false
 			}
 		} else if update.deleteAccount {
 			if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
@@ -265,11 +270,16 @@ func (rs *StateV3) ReadsValid(readLists map[string]*state.KvList) bool {
 	return rs.domains.ReadsValid(readLists)
 }
 
+type storageItem struct {
+	key   common.Hash
+	value uint256.Int
+}
+
 type bufferedAccount struct {
 	originalIncarnation uint64
 	data                *accounts.Account
 	code                []byte
-	storage             map[common.Hash]uint256.Int
+	storage             *btree.BTreeG[storageItem]
 }
 
 type stateUpdate struct {
@@ -314,13 +324,14 @@ func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
 					fmt.Printf("%d put code: %x %x\n", blockNum, update.address, code)
 				}
 
-				for key, value := range update.storage {
-					if len(value) == 0 {
-						fmt.Printf("%d del storage: %x %x %x\n", blockNum, update.address, key)
+				update.storage.Scan(func(i storageItem) bool {
+					if i.value.ByteLen() == 0 {
+						fmt.Printf("%d del storage: %x %x %x\n", blockNum, update.address, i.key)
 					} else {
-						fmt.Printf("%d put storage: %x %x %x\n", blockNum, update.address, key, &value)
+						fmt.Printf("%d put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
 					}
-				}
+					return true
+				})
 			} else if update.deleteAccount {
 				fmt.Printf("%d del account: %x\n", blockNum, update.address)
 			}
@@ -339,7 +350,9 @@ func (v StateUpdates) UpdateCount() int {
 			if update.data != nil {
 				updateCount++
 			}
-			updateCount += len(update.storage)
+			if update.storage != nil {
+				updateCount += update.storage.Len()
+			}
 		}
 		return true
 	})
@@ -498,13 +511,14 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 		update = &stateUpdate{&bufferedAccount{}, address, false}
 		w.writeSet.Set(update)
 	}
+
 	if update.storage == nil {
-		update.storage = map[common.Hash]uint256.Int{
-			key: value,
-		}
-	} else {
-		update.storage[key] = value
+		update.storage = btree.NewBTreeGOptions[storageItem](func(a, b storageItem) bool {
+			return a.key.Cmp(b.key) > 0
+		}, btree.Options{NoLocks: true})
 	}
+
+	update.storage.Set(storageItem{key, value})
 
 	if w.trace {
 		fmt.Printf("BufferedWriter: storage: %x,%x,%x\n", address, key, &value)
@@ -522,12 +536,12 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 		w.rs.accounts[address] = obj
 	}
 	if obj.storage == nil {
-		obj.storage = map[common.Hash]uint256.Int{
-			key: value,
-		}
-	} else {
-		obj.storage[key] = value
+		obj.storage = btree.NewBTreeGOptions[storageItem](func(a, b storageItem) bool {
+			return a.key.Cmp(b.key) > 0
+		}, btree.Options{NoLocks: true})
 	}
+
+	obj.storage.Set(storageItem{key, value})
 
 	w.rs.accountsMutex.Unlock()
 	return nil
@@ -821,11 +835,11 @@ func (r *bufferedReader) ReadAccountStorage(address common.Address, key common.H
 	so, ok := r.bufferedState.accounts[address]
 
 	if ok && so.storage != nil {
-		value, ok := so.storage[key]
+		item, ok := so.storage.Get(storageItem{key: key})
 
 		if ok {
 			r.bufferedState.accountsMutex.RUnlock()
-			return value, true, nil
+			return item.value, true, nil
 		}
 	}
 
@@ -838,7 +852,7 @@ func (r *bufferedReader) HasStorage(address common.Address) (bool, error) {
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
 
-	if ok && len(so.storage) > 0 {
+	if ok && so.storage != nil && so.storage.Len() > 0 {
 		// TODO - we really need to return the first key
 		// for this we need to order the list of hashes
 		r.bufferedState.accountsMutex.RUnlock()
