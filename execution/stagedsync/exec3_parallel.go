@@ -170,7 +170,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	var tracePrefix string
 	if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
-		tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
+		tracePrefix = fmt.Sprintf("%d (%d.%dF)", blockNum, txIndex, txIncarnation)
 	}
 
 	if task.IsBlockEnd() || txIndex < 0 {
@@ -927,18 +927,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	maxValidated := be.validateTasks.maxComplete()
 
-	var applyResult txResult
-	var stateWriter *state.BufferedWriter
-
 	if be.finalizeTasks.minPending() != -1 {
-		stateWriter = state.NewBufferedWriter(pe.rs, nil)
 		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
-
-		applyResult = txResult{
-			blockNum:   be.blockNum,
-			traceFroms: map[common.Address]struct{}{},
-			traceTos:   map[common.Address]struct{}{},
-		}
 
 		toFinalize := make(sort.IntSlice, 0, 2)
 
@@ -947,6 +937,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		for i := 0; i < len(toFinalize); i++ {
+			stateWriter := state.NewBufferedWriter(pe.rs, nil)
+			applyResult := txResult{
+				blockNum:   be.blockNum,
+				traceFroms: map[common.Address]struct{}{},
+				traceTos:   map[common.Address]struct{}{},
+			}
+
 			tx := toFinalize[i]
 			txTask := be.tasks[tx].Task
 			txIndex := txTask.Version().TxIndex
@@ -988,6 +985,21 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			maps.Copy(applyResult.traceTos, txResult.TraceTos)
 			be.cntFinalized++
 			be.finalizeTasks.markComplete(tx)
+
+			if applyResult.txNum > 0 {
+				pe.executedGas.Add(int64(applyResult.gasUsed))
+				pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
+				applyResult.stateUpdates = stateWriter.WriteSet()
+
+				if applyResult.stateUpdates.BTreeG != nil {
+					be.applyCount += applyResult.stateUpdates.UpdateCount()
+					if dbg.TraceApply {
+						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, traceBlock(applyResult.blockNum))
+					}
+				}
+
+				be.applyResults <- &applyResult
+			}
 		}
 	}
 
@@ -995,21 +1007,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	// that coinbase updates are considered by subsequent
 	// transactions
 	be.scheduleExecution(ctx, pe)
-
-	if applyResult.txNum > 0 {
-		pe.executedGas.Add(int64(applyResult.gasUsed))
-		pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
-		applyResult.stateUpdates = stateWriter.WriteSet()
-
-		if applyResult.stateUpdates.BTreeG != nil {
-			be.applyCount += applyResult.stateUpdates.UpdateCount()
-			if dbg.TraceApply {
-				applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, traceBlock(applyResult.blockNum))
-			}
-		}
-
-		be.applyResults <- &applyResult
-	}
 
 	if be.finalizeTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
 		pe.logger.Debug("exec summary", "block", be.blockNum, "tasks", len(be.tasks), "execs", be.cntExec,
