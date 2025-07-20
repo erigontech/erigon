@@ -689,7 +689,8 @@ func calculateRate(current, previous uint64, prevRate uint64, interval time.Dura
 		return math.MaxUint64
 	}
 	if current > previous {
-		return uint64(time.Second) * (current - previous) / uint64(interval)
+		// Well shit I was overflowing uint64, switching to float.
+		return uint64(float64(current-previous) / interval.Seconds())
 	}
 	// TODO: Probably assert and find out what is wrong.
 	return 0
