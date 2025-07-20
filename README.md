@@ -121,9 +121,6 @@ make erigon
 ./build/bin/erigon
 ```
 
-Increase download speed by `--torrent.download.rate=20mb`. <code>🔬
-See [Downloader docs](./cmd/downloader/readme.md)</code>
-
 Use `--datadir` to choose where to store data.
 
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
@@ -133,19 +130,28 @@ Erigon (https://docs.gnosischain.com/category/step--3---run-consensus-client).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
+### Upgrading from 3.0 to 3.1
+
+You'll need to update your snapshot file names to a new format. Run `erigon seg update-to-new-ver-format --datadir <your datadir>`. This translates file names to a new scheme used in 3.1+. 
+
+You should now be able to start the Erigon node. The downloader will check everything and patch up any files. In the event of an error, you can force a resync to a newer set of snapshot files. Run `erigon seg reset --datadir <your datadir>`. This will remove locally generated snapshot files that aren't present in the remote snapshot, and your chain data. If you don't want this, try with `--local=false`, to keep your local files but switch to a different snapshot.
+
 ### Datadir structure
 
 ```sh
 datadir        
-    chaindata     # "Recently-updated Latest State", "Recent History", "Recent Blocks"
-    snapshots     # contains `.seg` files - it's old blocks
-        domain    # Latest State
-        history   # Historical values 
-        idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
-        accessor # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
-    txpool        # pending transactions. safe to remove.
-    nodes         # p2p peers. safe to remove.
-    temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
+    chaindata/    # "Recently-updated Latest State", "Recent History", "Recent Blocks"
+    snapshots/    # contains `.seg` files - it's old blocks
+        domain/   # Latest State
+        history/  # Historical values 
+        idx/      # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
+        accessor/ # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+        preverified.toml # If this file exists, it contains the hashes of the snapshot that was successfully synced to entirety.
+        **.torrent # Metadata for snapshot files shared with BitTorrent. The file is only added when the corresponding snapshot file is available in its entirety.
+        **.part   # Partial snapshot files that are being downloaded. They are removed when the download is complete.
+    txpool/       # pending transactions. safe to remove.
+    nodes/        # p2p peers. safe to remove.
+    temp/         # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
    
 # There is 4 domains: account, storage, code, commitment 
 ```
