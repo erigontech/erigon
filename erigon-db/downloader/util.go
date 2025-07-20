@@ -344,14 +344,12 @@ func (d *Downloader) addTorrentSpec(
 	g.MakeMapIfNil(&d.torrentsByName)
 	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
 	panicif.Eq(first, hadOld)
-	return
-}
 
-func (d *Downloader) afterAdd(t *torrent.Torrent) {
 	t.AllowDataDownload()
 	t.AllowDataUpload()
 	t.AddTrackers(Trackers)
 	t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
+	return
 }
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
