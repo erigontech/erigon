@@ -67,7 +67,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 	for address, update := range stateUpdates {
 		if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
 			if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-				fmt.Printf("%d apply del code+storage: %x\n", blockNum, address)
+				fmt.Printf("%d apply:del code+storage: %x\n", blockNum, address)
 			}
 			//del, before create: to clanup code/storage
 			if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil, 0); err != nil {
@@ -81,7 +81,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 		if update.bufferedAccount != nil {
 			if update.data != nil {
 				if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-					fmt.Printf("%d apply put account: %x\n", blockNum, address)
+					fmt.Printf("%d apply:put account: %x Balance:[%d],Nonce:[%d],CodeHash:[%x]\n", blockNum, address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
 				}
 				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(update.data), txNum, nil, 0); err != nil {
 					return err
@@ -90,7 +90,11 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 
 			if update.code != nil {
 				if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-					fmt.Printf("%d apply put code: %x\n", blockNum, address)
+					code := update.code
+					if len(code) > 40 {
+						code = code[:40]
+					}
+					fmt.Printf("%d apply:put code: %x %x\n", blockNum, address, code)
 				}
 				if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil, 0); err != nil {
 					return err
@@ -102,14 +106,14 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 				v := value.Bytes()
 				if len(v) == 0 {
 					if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-						fmt.Printf("%d apply del storage: %x q%x\n", blockNum, address, key)
+						fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, address, key)
 					}
 					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
 						return err
 					}
 				} else {
 					if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-						fmt.Printf("%d apply put storage: %x %x %x\n", blockNum, address, key, &value)
+						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, address, key, &value)
 					}
 					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
 						return err
@@ -118,7 +122,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 			}
 		} else if update.deleteAccount {
 			if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-				fmt.Printf("%d del account: %x\n", blockNum, address)
+				fmt.Printf("%d apply:del account: %x\n", blockNum, address)
 			}
 			if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil, 0); err != nil {
 				return err
@@ -277,11 +281,15 @@ func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
 
 			if update.bufferedAccount != nil {
 				if update.data != nil {
-					fmt.Printf("%d put account: %x\n", blockNum, address)
+					fmt.Printf("%d put account: %x Balance:[%d],Nonce:[%d],CodeHash:[%x]\n", blockNum, address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
 				}
 
 				if update.code != nil {
-					fmt.Printf("%d put code: %x\n", blockNum, address)
+					code := update.code
+					if len(code) > 40 {
+						code = code[:40]
+					}
+					fmt.Printf("%d put code: %x %x\n", blockNum, address, code)
 				}
 
 				for key, value := range update.storage {
