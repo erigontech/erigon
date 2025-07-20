@@ -352,6 +352,9 @@ func (d *Downloader) addTorrentSpec(
 	return
 }
 
+func (d *Downloader) afterAdd(t *torrent.Torrent) {
+}
+
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
 		return tx.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), peerID[:])
