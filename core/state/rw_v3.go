@@ -67,7 +67,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 	for address, update := range stateUpdates {
 		if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
 			if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-				fmt.Printf("%d apply del code/storage: %x\n", blockNum, address)
+				fmt.Printf("%d apply del code+storage: %x\n", blockNum, address)
 			}
 			//del, before create: to clanup code/storage
 			if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil, 0); err != nil {
@@ -102,14 +102,14 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 				v := value.Bytes()
 				if len(v) == 0 {
 					if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-						fmt.Printf("%d apply del storage: %x\n", blockNum, key)
+						fmt.Printf("%d apply del storage: %x q%x\n", blockNum, address, key)
 					}
 					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
 						return err
 					}
 				} else {
 					if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-						fmt.Printf("%d apply put storage: %x %x\n", blockNum, key, &value)
+						fmt.Printf("%d apply put storage: %x %x %x\n", blockNum, address, key, &value)
 					}
 					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
 						return err
@@ -272,7 +272,7 @@ func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
 	for address, update := range v {
 		if traceAll || traceAccount(address) {
 			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
-				fmt.Printf("%d del code/storage: %x\n", blockNum, address)
+				fmt.Printf("%d del code+storage: %x\n", blockNum, address)
 			}
 
 			if update.bufferedAccount != nil {
@@ -286,9 +286,9 @@ func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
 
 				for key, value := range update.storage {
 					if len(v) == 0 {
-						fmt.Printf("%d del storage: %x %x\n", blockNum, key)
+						fmt.Printf("%d del storage: %x %x %x\n", blockNum, address, key)
 					} else {
-						fmt.Printf("%d put storage: %x %x\n", blockNum, key, &value)
+						fmt.Printf("%d put storage: %x %x %x\n", blockNum, address, key, &value)
 					}
 				}
 			} else if update.deleteAccount {
