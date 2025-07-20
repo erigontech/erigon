@@ -1307,6 +1307,8 @@ func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
 }
 
 func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount uint64) error) error {
+	t := time.Now()
+	defer func() { log.Info("[dbg] IterateFrozenBodies", "took", time.Since(t)) }()
 	view := r.sn.View()
 	defer view.Close()
 	for _, sn := range view.Bodies() {
