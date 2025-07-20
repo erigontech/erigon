@@ -110,18 +110,28 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			return nil
 		})
 	}
+
+	t := time.Now()
 	if err := wg.Wait(); err != nil {
 		return nil, fmt.Errorf("adding torrents: %w", err)
 	}
+	log.Warn("[dbg] adding info done", "took", time.Since(t))
 
-	log.Warn("[dbg] adding web seeds to all torrents")
+	t = time.Now()
 	for _, t := range s.d.torrentClient.Torrents() {
 		t.AddWebSeeds(s.d.cfg.WebSeedUrls, s.d.addWebSeedOpts...)
 	}
-	log.Warn("[dbg] adding trackers to all torrents")
+	log.Warn("[dbg] adding web seeds to all torrents", "took", time.Since(t))
+	t = time.Now()
 	for _, t := range s.d.torrentClient.Torrents() {
 		t.AddTrackers(Trackers)
 	}
+	log.Warn("[dbg] adding trackers to all torrents", "took", time.Since(t))
+	t = time.Now()
+	for _, t := range s.d.torrentClient.Torrents() {
+		t.AllowDataDownload()
+	}
+	log.Warn("[dbg] allow download", "took", time.Since(t))
 	progress.Store(int32(len(request.Items)))
 
 	return &emptypb.Empty{}, nil
