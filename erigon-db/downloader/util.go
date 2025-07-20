@@ -339,7 +339,11 @@ func (d *Downloader) addTorrentSpec(
 	ts.DisableInitialPieceCheck = d.cfg.ManualDataVerification
 	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
 	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
+	tt := time.Now()
 	t, first, err = d.torrentClient.AddTorrentSpec(ts)
+	if time.Since(tt) > 100*time.Millisecond {
+		log.Warn("[dbg] AddTorrentSpec", "name", name, "took", time.Since(tt))
+	}
 	if err != nil {
 		return
 	}
