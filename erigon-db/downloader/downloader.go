@@ -310,9 +310,10 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 
 	d := &Downloader{
-		cfg:                cfg,
-		torrentStorage:     m,
-		torrentClient:      torrentClient,
+		cfg:            cfg,
+		torrentStorage: m,
+		torrentClient:  torrentClient,
+
 		addWebSeedOpts:     addWebSeedOpts,
 		stats:              stats,
 		logger:             logger,
