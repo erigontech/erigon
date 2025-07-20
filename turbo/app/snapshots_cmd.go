@@ -36,9 +36,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
-
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -276,6 +275,20 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
+			Name:        "reset",
+			Description: "Reset state to resumable initial sync.",
+			Action:      resetCliAction,
+			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
+			Flags: append(
+				slices.Clone(logging.Flags),
+				&utils.DataDirFlag,
+				&utils.ChainFlag,
+				&dryRunFlag,
+				&removeUnknownFlag,
+				&chaindataFlag,
+			),
+		},
+		{
 			Name:    "rm-state-snapshots",
 			Aliases: []string{"rm-state-segments", "rm-state"},
 			Action:  doRmStateSnapshots,
@@ -310,7 +323,7 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "sqeeze",
+			Name:   "squeeze",
 			Action: doSqueeze,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,

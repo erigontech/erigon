@@ -346,7 +346,7 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {
 	var stateSyncEvents []*types.Message
 	if api.useBridgeReader {
-		events, err := api.bridgeReader.Events(ctx, blockNum)
+		events, err := api.bridgeReader.Events(ctx, blockHash, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -411,7 +411,7 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 }
 
 type bridgeReader interface {
-	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
 }
 
