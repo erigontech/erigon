@@ -347,7 +347,6 @@ func (d *Downloader) addTorrentSpec(
 
 	t.AllowDataDownload()
 	t.AllowDataUpload()
-	t.AddTrackers(Trackers)
 	t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
 	return
 }
