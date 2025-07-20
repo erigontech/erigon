@@ -341,7 +341,7 @@ func (d *Downloader) addTorrentSpec(
 	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
 	tt := time.Now()
 	t, first, err = d.torrentClient.AddTorrentSpec(ts)
-	if time.Since(tt) > 100*time.Millisecond {
+	if time.Since(tt) > 1*time.Second {
 		log.Warn("[dbg] AddTorrentSpec", "name", name, "took", time.Since(tt))
 	}
 	if err != nil {
