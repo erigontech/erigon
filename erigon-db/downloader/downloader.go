@@ -381,10 +381,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
 	}
 
 	for _, t := range d.torrentClient.Torrents() {
-		t.AllowDataDownload()
-		t.AllowDataUpload()
-		t.AddTrackers(Trackers)
-		t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
+		d.afterAdd(t)
 	}
 	return nil
 }
