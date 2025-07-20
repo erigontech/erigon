@@ -405,7 +405,7 @@ restart:
 		case <-time.After(time.Until(nextLog)):
 			d.messyLogWrapper()
 			nextLog = nextLog.Add(step)
-			step = min(step*2, time.Minute)
+			step = min(step*2, 30*time.Second)
 		case <-reset:
 			goto restart
 		}
