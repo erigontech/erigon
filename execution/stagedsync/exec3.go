@@ -1051,6 +1051,7 @@ func ExecV3(ctx context.Context,
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 						pe.rs.SetTrace(dbg.TraceApply) // && traceBlock(applyResult.blockNum))
 						blockUpdateCount += applyResult.stateUpdates.UpdateCount()
+						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum)
 						err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
 							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false)
@@ -1096,7 +1097,7 @@ func ExecV3(ctx context.Context,
 						if !dbg.DiscardCommitment() {
 							if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
-								fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount)
+								fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
 								blockApplyCount = 0
 								var trace bool
 								if traceBlock(applyResult.BlockNum) {
