@@ -67,7 +67,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 	for address, update := range stateUpdates {
 		if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
 			if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-				fmt.Printf("%d del code/storage: %x\n", blockNum, address)
+				fmt.Printf("%d apply del code/storage: %x\n", blockNum, address)
 			}
 			//del, before create: to clanup code/storage
 			if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil, 0); err != nil {
@@ -81,7 +81,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 		if update.bufferedAccount != nil {
 			if update.data != nil {
 				if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-					fmt.Printf("%d put account: %x\n", blockNum, address)
+					fmt.Printf("%d apply put account: %x\n", blockNum, address)
 				}
 				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(update.data), txNum, nil, 0); err != nil {
 					return err
@@ -90,7 +90,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 
 			if update.code != nil {
 				if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-					fmt.Printf("%d put code: %x\n", blockNum, address)
+					fmt.Printf("%d apply put code: %x\n", blockNum, address)
 				}
 				if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil, 0); err != nil {
 					return err
@@ -102,14 +102,14 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 				v := value.Bytes()
 				if len(v) == 0 {
 					if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-						fmt.Printf("%d del storage: %x\n", blockNum, key)
+						fmt.Printf("%d apply del storage: %x\n", blockNum, key)
 					}
 					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
 						return err
 					}
 				} else {
 					if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-						fmt.Printf("%d put storage: %x %x\n", blockNum, key, &value)
+						fmt.Printf("%d apply put storage: %x %x\n", blockNum, key, &value)
 					}
 					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
 						return err
