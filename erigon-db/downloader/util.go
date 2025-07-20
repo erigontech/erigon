@@ -341,6 +341,7 @@ func (d *Downloader) addTorrentSpec(
 	if err != nil {
 		return
 	}
+	t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
 	g.MakeMapIfNil(&d.torrentsByName)
 	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
 	panicif.Eq(first, hadOld)
@@ -350,7 +351,6 @@ func (d *Downloader) addTorrentSpec(
 func (d *Downloader) afterAdd() {
 	for _, t := range d.torrentClient.Torrents() {
 		// add webseed first - otherwise opts will be ignored
-		t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
 		t.AddTrackers(Trackers)
 		t.AllowDataDownload()
 		t.AllowDataUpload()
