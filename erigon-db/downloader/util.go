@@ -345,10 +345,10 @@ func (d *Downloader) addTorrentSpec(
 	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
 	panicif.Eq(first, hadOld)
 
-	t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
-	t.AddTrackers(Trackers)
 	t.AllowDataDownload()
 	t.AllowDataUpload()
+	t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
+	t.AddTrackers(Trackers)
 	return
 }
 
