@@ -130,6 +130,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 	t = time.Now()
 	for _, t := range s.d.torrentClient.Torrents() {
 		t.AllowDataDownload()
+		t.AllowDataUpload()
 	}
 	log.Warn("[dbg] allow download", "took", time.Since(t))
 	progress.Store(int32(len(request.Items)))
