@@ -327,16 +327,11 @@ func (d *Downloader) addTorrentSpec(
 ) (t *torrent.Torrent, first bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.Webseeds = nil
-	ts.Trackers = nil // to reduce mutex contention. will add later to all torrents
+	ts.Trackers = nil
 	ts.DisallowDataDownload = true
 	ts.DisallowDataUpload = true
-	// I wonder how this should be handled for AddNewSeedableFile. What if there's bad piece
-	// completion data? We might want to clobber any piece completion and force the client to accept
-	// what we provide, assuming we trust our own metainfo generation more.
-	//ts.IgnoreUnverifiedPieceCompletion = true
-	//ts.DisableInitialPieceCheck = true
 	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
-	ts.DisableInitialPieceCheck = d.cfg.ManualDataVerification
+	ts.DisableInitialPieceCheck = true //d.cfg.ManualDataVerification
 	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
 	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
 	tt := time.Now()
