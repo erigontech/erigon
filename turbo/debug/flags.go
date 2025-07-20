@@ -26,6 +26,7 @@ import (
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/felixge/fgprof"
 	"github.com/pelletier/go-toml"
@@ -190,6 +191,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 		} else {
 			StartPProf(address, nil)
 		}
+		runtime.SetMutexProfileFraction(100)
 	}
 
 	return logger
