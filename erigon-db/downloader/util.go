@@ -328,8 +328,8 @@ func (d *Downloader) addTorrentSpec(
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.Trackers = nil
 	ts.Webseeds = nil
-	ts.DisallowDataDownload = false
-	ts.DisallowDataUpload = false
+	ts.DisallowDataDownload = true
+	ts.DisallowDataUpload = true
 	// I wonder how this should be handled for AddNewSeedableFile. What if there's bad piece
 	// completion data? We might want to clobber any piece completion and force the client to accept
 	// what we provide, assuming we trust our own metainfo generation more.
