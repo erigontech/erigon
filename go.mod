@@ -125,7 +125,7 @@ require (
 	github.com/alecthomas/repr v0.4.0 // indirect
 	github.com/anacrolix/chansync v0.6.0 // indirect
 	github.com/anacrolix/dht/v2 v2.22.2-0.20250623060212-d7b7d8a52b01 // indirect
-	github.com/anacrolix/envpprof v1.3.0 // indirect
+	github.com/anacrolix/envpprof v1.4.0
 	github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647
 	github.com/anacrolix/go-libutp v1.3.2 // indirect
 	github.com/anacrolix/log v0.16.1-0.20250526073428-5cb74e15092b // indirect
