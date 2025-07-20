@@ -326,7 +326,7 @@ func (d *Downloader) addTorrentSpec(
 	name string,
 ) (t *torrent.Torrent, first bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
-	ts.Trackers = Trackers
+	ts.Trackers = nil
 	ts.Webseeds = nil
 	ts.DisallowDataDownload = true
 	ts.DisallowDataUpload = true
@@ -344,7 +344,6 @@ func (d *Downloader) addTorrentSpec(
 	g.MakeMapIfNil(&d.torrentsByName)
 	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
 	panicif.Eq(first, hadOld)
-	t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
 	return
 }
 
