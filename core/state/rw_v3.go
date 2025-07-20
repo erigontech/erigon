@@ -81,7 +81,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 		if update.bufferedAccount != nil {
 			if update.data != nil {
 				if dbg.TraceApply && (rs.trace || traceAccount(address)) {
-					fmt.Printf("%d apply:put account: %x Balance:[%d],Nonce:[%d],CodeHash:[%x]\n", blockNum, address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
+					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
 				}
 				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(update.data), txNum, nil, 0); err != nil {
 					return err
