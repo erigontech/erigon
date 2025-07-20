@@ -994,7 +994,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if applyResult.stateUpdates.BTreeG != nil {
 					be.applyCount += applyResult.stateUpdates.UpdateCount()
 					if dbg.TraceApply {
-						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, true) //traceBlock(applyResult.blockNum))
+						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, traceBlock(applyResult.blockNum))
 					}
 				}
 
@@ -1364,7 +1364,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 				blockResult.ApplyCount += stateUpdates.UpdateCount()
 				if dbg.TraceApply {
-					stateUpdates.TraceBlockUpdates(blockResult.BlockNum, true) //traceBlock(blockResult.BlockNum))
+					stateUpdates.TraceBlockUpdates(blockResult.BlockNum, traceBlock(blockResult.BlockNum))
 				}
 				fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 
