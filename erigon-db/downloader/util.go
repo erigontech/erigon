@@ -326,7 +326,7 @@ func (d *Downloader) addTorrentSpec(
 	name string,
 ) (t *torrent.Torrent, first bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
-	ts.Trackers = nil
+	ts.Trackers = nil // to reduce mutex contention - see `afterAdd`
 	ts.Webseeds = nil
 	ts.DisallowDataDownload = true
 	ts.DisallowDataUpload = true
@@ -349,6 +349,7 @@ func (d *Downloader) addTorrentSpec(
 
 func (d *Downloader) afterAdd() {
 	for _, t := range d.torrentClient.Torrents() {
+		// add webseed first - otherwise opts will be ignored
 		t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
 		t.AddTrackers(Trackers)
 		t.AllowDataDownload()
