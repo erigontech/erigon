@@ -348,6 +348,7 @@ func (d *Downloader) addTorrentSpec(
 }
 
 func (d *Downloader) afterAdd() {
+	fmt.Printf("[dbg] afterAdd WebSeedUrls: %s\n", d.cfg.WebSeedUrls)
 	for _, t := range d.torrentClient.Torrents() {
 		// add webseed first - otherwise opts will be ignored
 		t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
