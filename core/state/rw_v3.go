@@ -399,7 +399,7 @@ type BufferedWriter struct {
 func NewBufferedWriter(rs *StateV3Buffered, accumulator *shards.Accumulator) *BufferedWriter {
 	return &BufferedWriter{
 		rs:          rs,
-		writeSet:    StateUpdates{},
+		writeSet:    newStateUpdates(),
 		accumulator: accumulator,
 		//trace:       true,
 	}
