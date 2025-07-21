@@ -517,7 +517,11 @@ func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []b
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("PutWithPrev(%s, txn %d, key[%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, step, k, v, preval)
 	}
-	if err := w.h.AddPrevValue(k, txNum, preval); err != nil {
+	// Debug for specific failing case
+	if bytes.Equal(k, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2}) && (txNum == 48 || txNum == 49) {
+		fmt.Printf("[DEBUG] PutWithPrev: storing NEW value %x (was %x) at txNum=%d\n", v, preval, txNum)
+	}
+	if err := w.h.AddPrevValue(k, txNum, v); err != nil {
 		return err
 	}
 	if w.diff != nil {
@@ -1590,10 +1594,21 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		return nil, false, nil
 	}
 
+	// Debug for specific failing case
+	if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+		fmt.Printf("[DEBUG] GetAsOf: key=%x, txNum=%d, calling HistorySeek\n", key, txNum)
+	}
+
 	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
 	if err != nil {
 		return nil, false, err
 	}
+
+	// Debug for specific failing case
+	if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+		fmt.Printf("[DEBUG] GetAsOf: HistorySeek(key=%x, txNum=%d) -> hOk=%t, v=%x\n", key, txNum, hOk, v)
+	}
+
 	if hOk {
 		if len(v) == 0 { // if history successfuly found marker of key creation
 			if traceGetAsOf == dt.d.filenameBase {
@@ -1611,6 +1626,11 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 	v, _, ok, err = dt.GetLatest(key, roTx)
 	if err != nil {
 		return nil, false, err
+	}
+
+	// Debug for specific failing case
+	if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+		fmt.Printf("[DEBUG] GetAsOf: Using GetLatest fallback -> ok=%t, v=%x\n", ok, v)
 	}
 	if traceGetAsOf == dt.d.filenameBase {
 		if ok {

@@ -813,6 +813,11 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 					continue
 				}
 			}
+
+			if !bytes.Equal(v[:], val) {
+				t.Logf("GetAsOf mismatch - txNum=%d, keyNum=%d: expected %x (%d), got %x (%d)",
+					txNum, keyNum, v[:], binary.BigEndian.Uint64(v[:]), val, binary.BigEndian.Uint64(val))
+			}
 			require.Equal(t, v[:], val)
 		}
 	}
@@ -826,6 +831,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		storedV, _, found, err := dc.GetLatest(k[:], roTx)
 		require.Truef(t, found, label)
 		require.NoError(t, err, label)
+
 		require.Equal(t, v[:], storedV, label)
 	}
 }
@@ -1344,6 +1350,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 			//v[0] = 3 // value marker
+
 			err = writer.PutWithPrev(k[:], v[:], txNum, []byte(prev[string(k[:])]), 0)
 			require.NoError(t, err)
 			if _, ok := dat[keyNum]; !ok {
