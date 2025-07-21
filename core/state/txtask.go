@@ -143,6 +143,7 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 			if err != nil {
 				panic(err)
 			}
+			// not needed to handle v1.0 (buggy but was already there)
 			firstLogIndex = logIndexAfterTx
 		}
 	}
