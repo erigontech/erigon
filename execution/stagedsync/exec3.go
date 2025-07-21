@@ -624,6 +624,8 @@ func ExecV3(ctx context.Context,
 	}
 
 	if cfg.syncCfg.LoopBlockLimit > 0 && blockNum+uint64(cfg.syncCfg.LoopBlockLimit) < maxBlockNum {
+		log.Info(fmt.Sprintf("[%s] low from block encountered, limiting max", execStage.LogPrefix()),
+			"from", blockNum, "limit", cfg.syncCfg.LoopBlockLimit, "expected", maxBlockNum, "adjusted", blockNum+uint64(cfg.syncCfg.LoopBlockLimit))
 		maxBlockNum = blockNum + uint64(cfg.syncCfg.LoopBlockLimit)
 	}
 
