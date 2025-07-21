@@ -48,7 +48,9 @@ type InvertedIdxStreamFiles struct {
 	hasNext bool
 	err     error
 
-	seq *multiencseq.SequenceReader
+	seq       *multiencseq.SequenceReader
+	accessors Accessors
+	ii        *InvertedIndexRoTx
 }
 
 func (it *InvertedIdxStreamFiles) Close() {
@@ -95,20 +97,22 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			if !ok {
 				continue
 			}
+
 			g := item.getter
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()
-			if bytes.Equal(k, it.key) {
-				numSeqVal, _ := g.NextUncompressed()
-				it.seq.Reset(item.startTxNum, numSeqVal)
-				var seqIt stream.Uno[uint64]
-				if it.orderAscend {
-					seqIt = it.seq.Iterator(it.startTxNum)
-				} else {
-					seqIt = it.seq.ReverseIterator(it.startTxNum)
-				}
-				it.seqIt = seqIt
+			if !bytes.Equal(k, it.key) { // handle MPH false-positives
+				continue
 			}
+			numSeqVal, _ := g.NextUncompressed()
+			it.seq.Reset(item.startTxNum, numSeqVal)
+			var seqIt stream.Uno[uint64]
+			if it.orderAscend {
+				seqIt = it.seq.Iterator(it.startTxNum)
+			} else {
+				seqIt = it.seq.ReverseIterator(it.startTxNum)
+			}
+			it.seqIt = seqIt
 		}
 
 		//Asc:  [from, to) AND from < to

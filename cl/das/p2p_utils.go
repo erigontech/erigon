@@ -80,7 +80,7 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 
 // ComputeSubnetForDataColumnSidecar computes the subnet ID for a given data column sidecar index.
 // This function is re-entrant and thread-safe.
-func ComputeSubnetForDataColumnSidecar(columnIndex ColumnIndex) uint64 {
+func ComputeSubnetForDataColumnSidecar(columnIndex cltypes.ColumnIndex) uint64 {
 	return columnIndex % clparams.GetBeaconConfig().DataColumnSidecarSubnetCount
 }
 

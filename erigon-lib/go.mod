@@ -9,12 +9,13 @@ replace (
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250619025539-884f4110f6af
-	github.com/erigontech/interfaces v0.0.0-20250617105115-44025d7ddebf
+	github.com/erigontech/interfaces v0.0.0-20250630094144-bb8edbef4801
 	github.com/erigontech/mdbx-go v0.39.8
 	github.com/erigontech/secp256k1 v1.2.0
 )
 
 require (
+	github.com/FastFilter/xorfilter v0.2.1
 	github.com/RoaringBitmap/roaring/v2 v2.5.0
 	github.com/anacrolix/torrent v1.58.2-0.20250604010703-7c29c120a504
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b

@@ -111,7 +111,33 @@ func TestIndexLookup(t *testing.T) {
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
-	rs, err := NewRecSplit(RecSplitArgs{
+	test := func(t *testing.T, cfg RecSplitArgs) {
+		t.Helper()
+		rs, err := NewRecSplit(cfg, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rs.Close()
+		for i := 0; i < 100; i++ {
+			if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := rs.Build(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		idx := MustOpen(indexFile)
+		defer idx.Close()
+		for i := 0; i < 100; i++ {
+			reader := NewIndexReader(idx)
+			offset, ok := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+			assert.True(t, ok)
+			if offset != uint64(i*17) {
+				t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
+			}
+		}
+	}
+	cfg := RecSplitArgs{
 		KeyCount:   100,
 		BucketSize: 10,
 		Salt:       &salt,
@@ -121,29 +147,15 @@ func TestIndexLookup(t *testing.T) {
 
 		Enums:              false,
 		LessFalsePositives: true, //must not impact index when `Enums: false`
-	}, logger)
-	if err != nil {
-		t.Fatal(err)
 	}
-	defer rs.Close()
-	for i := 0; i < 100; i++ {
-		if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := rs.Build(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	idx := MustOpen(indexFile)
-	defer idx.Close()
-	for i := 0; i < 100; i++ {
-		reader := NewIndexReader(idx)
-		offset, ok := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
-		assert.True(t, ok)
-		if offset != uint64(i*17) {
-			t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
-		}
-	}
+	t.Run("v0", func(t *testing.T) {
+		test(t, cfg)
+	})
+	t.Run("v1", func(t *testing.T) {
+		cfg := cfg
+		cfg.Version = 1
+		test(t, cfg)
+	})
 }
 
 func TestTwoLayerIndex(t *testing.T) {
@@ -152,7 +164,37 @@ func TestTwoLayerIndex(t *testing.T) {
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
 	N := 2571
-	rs, err := NewRecSplit(RecSplitArgs{
+	test := func(t *testing.T, cfg RecSplitArgs) {
+		t.Helper()
+		rs, err := NewRecSplit(cfg, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rs.Close()
+		for i := 0; i < N; i++ {
+			if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := rs.Build(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+
+		idx := MustOpen(indexFile)
+		defer idx.Close()
+		for i := 0; i < N; i++ {
+			reader := NewIndexReader(idx)
+			e, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+			if e != uint64(i) {
+				t.Errorf("expected enumeration: %d, lookup up: %d", i, e)
+			}
+			offset := idx.OrdinalLookup(e)
+			if offset != uint64(i*17) {
+				t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
+			}
+		}
+	}
+	cfg := RecSplitArgs{
 		KeyCount:           N,
 		BucketSize:         10,
 		Salt:               &salt,
@@ -161,31 +203,13 @@ func TestTwoLayerIndex(t *testing.T) {
 		LeafSize:           8,
 		Enums:              true,
 		LessFalsePositives: true,
-	}, logger)
-	if err != nil {
-		t.Fatal(err)
 	}
-	defer rs.Close()
-	for i := 0; i < N; i++ {
-		if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := rs.Build(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	idx := MustOpen(indexFile)
-	defer idx.Close()
-	for i := 0; i < N; i++ {
-		reader := NewIndexReader(idx)
-		e, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
-		if e != uint64(i) {
-			t.Errorf("expected enumeration: %d, lookup up: %d", i, e)
-		}
-		offset := idx.OrdinalLookup(e)
-		if offset != uint64(i*17) {
-			t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
-		}
-	}
+	t.Run("v0", func(t *testing.T) {
+		test(t, cfg)
+	})
+	t.Run("v1", func(t *testing.T) {
+		cfg := cfg
+		cfg.Version = 1
+		test(t, cfg)
+	})
 }

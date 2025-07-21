@@ -76,7 +76,7 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 		return nil, err
 	}
 
-	segConfig := snapcfg.KnownCfg(chainName)
+	segConfig, _ := snapcfg.KnownCfg(chainName)
 
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
@@ -342,7 +342,7 @@ func (d *Downloader) addTorrentSpec(
 	g.MakeMapIfNil(&d.torrentsByName)
 	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
 	panicif.Eq(first, hadOld)
-	t.AddWebSeeds(d.cfg.WebSeedUrls)
+	t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
 	return
 }
 
