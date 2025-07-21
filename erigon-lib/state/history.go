@@ -227,8 +227,8 @@ func (h *History) openDirtyFiles() error {
 					if !fileVer.Less(h.version.DataV.MinSupported) {
 						h.version.DataV.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm v history snapshots")
-						//return false
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, h.version.DataV)
 					}
 				}
 
@@ -272,8 +272,8 @@ func (h *History) openDirtyFiles() error {
 						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
 							h.version.AccessorVI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm vi history snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, h.version.AccessorVI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
