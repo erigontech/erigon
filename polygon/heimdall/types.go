@@ -97,6 +97,8 @@ func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uin
 	startEventId := firstEventId(ctx)
 	var lastEventId uint64
 
+	logger.Debug("Extracting events to snapshots", "blockFrom", blockFrom, "blockTo", blockTo)
+
 	chainTx, err := chainDb.BeginRo(ctx)
 	if err != nil {
 		return 0, err
@@ -265,6 +267,9 @@ var (
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				spanFrom := uint64(SpanIdAt(blockFrom))
 				spanTo := uint64(SpanIdAt(blockTo))
+
+				logger.Debug("Extracting spans to snapshots", "blockFrom", blockFrom, "blockTo", blockTo, "spanFrom", spanFrom, "spanTo", spanTo)
+
 				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{Indexes.BorSpanId},
@@ -317,6 +322,8 @@ var (
 				if err != nil {
 					return 0, err
 				}
+
+				logger.Debug("Extracting checkpoints to snapshots", "blockFrom", blockFrom, "blockTo", blockTo, "checkpointFrom", checkpointFrom, "checkpointTo", checkpointTo)
 
 				return extractValueRange(ctx, kv.BorCheckpoints, uint64(checkpointFrom), uint64(checkpointTo), db, collect, workers, lvl, logger)
 			}),

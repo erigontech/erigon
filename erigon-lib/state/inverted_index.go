@@ -337,8 +337,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					if !fileVer.Less(ii.version.DataEF.MinSupported) {
 						ii.version.DataEF.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm ef snapshots")
-						//return false
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, ii.version.DataEF)
 					}
 				}
 
@@ -370,8 +370,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
 							ii.version.AccessorEFI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm efi snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, ii.version.AccessorEFI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
