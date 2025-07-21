@@ -623,6 +623,10 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
+	if cfg.syncCfg.LoopBlockLimit > 0 && blockNum+uint64(cfg.syncCfg.LoopBlockLimit) < maxBlockNum {
+		maxBlockNum = blockNum + uint64(cfg.syncCfg.LoopBlockLimit)
+	}
+
 	outputTxNum.Store(doms.TxNum())
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
