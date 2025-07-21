@@ -747,7 +747,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			be.blockIO.RecordReads(res.Version().TxIndex, res.TxIn)
-
+			var addedDependencies bool
 			if execErr.DependencyTxIndex >= 0 {
 				dependency := execErr.DependencyTxIndex + 1
 
