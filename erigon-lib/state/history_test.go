@@ -817,11 +817,24 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	return db, h, txs
 }
 
-func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
+func checkHistoryHistory(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 	t.Helper()
 	// Check the history
 	hc := h.BeginFilesRo()
 	defer hc.Close()
+
+	// Check stepsRangeInDB
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	from, to := hc.stepsRangeInDB(tx)
+	expectedSteps := txs / h.aggregationStep
+	if expectedSteps > 1 {
+		// Should have steps from recent data in DB (last 2 steps remain uncollated)
+		require.Greater(t, to, 0.0, "Should have steps in DB")
+		require.GreaterOrEqual(t, to, from, "To step should be >= from step")
+	}
 
 	for txNum := uint64(0); txNum <= txs; txNum++ {
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
@@ -879,7 +892,7 @@ func TestHistoryHistory(t *testing.T) {
 				require.NoError(err)
 			}()
 		}
-		checkHistoryHistory(t, h, txs)
+		checkHistoryHistory(t, h, db, txs)
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
@@ -958,7 +971,7 @@ func TestHistoryMergeFiles(t *testing.T) {
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
 		collateAndMergeHistory(t, db, h, txs, true)
-		checkHistoryHistory(t, h, txs)
+		checkHistoryHistory(t, h, db, txs)
 	}
 
 	t.Run("large_values", func(t *testing.T) {
@@ -991,7 +1004,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		// Recreate domain and re-scan the files
 		require.NoError(h.openFolder())
 		// Check the history
-		checkHistoryHistory(t, h, txs)
+		checkHistoryHistory(t, h, db, txs)
 	}
 
 	t.Run("large_values", func(t *testing.T) {
@@ -1571,4 +1584,65 @@ func TestHistory_OpenFolder(t *testing.T) {
 	err = h.openFolder()
 	require.NoError(t, err)
 	h.Close()
+}
+
+func TestStepsRangeInDB(t *testing.T) {
+	logger := log.New()
+	db, h := testDbAndHistory(t, false, logger)
+	ctx := context.Background()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+	writer := hc.NewWriter()
+	defer writer.close()
+
+	// Test with empty DB
+	t.Run("empty DB", func(t *testing.T) {
+		from, to := hc.stepsRangeInDB(tx)
+		require.Equal(t, 0.0, from)
+		require.Equal(t, 0.0, to)
+	})
+
+	// Add some test data across multiple steps
+	key1 := []byte("key1")
+	key2 := []byte("key2")
+
+	// Step 5: txNum 80-95
+	err = writer.AddPrevValue(key1, 85, []byte("prev1"))
+	require.NoError(t, err)
+
+	// Step 10: txNum 160-175
+	err = writer.AddPrevValue(key1, 165, []byte("prev2"))
+	require.NoError(t, err)
+	err = writer.AddPrevValue(key2, 170, []byte("prev3"))
+	require.NoError(t, err)
+
+	// Step 15: txNum 240-255
+	err = writer.AddPrevValue(key2, 245, []byte("prev4"))
+	require.NoError(t, err)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(t, err)
+
+	t.Run("multiple steps", func(t *testing.T) {
+		from, to := hc.stepsRangeInDB(tx)
+		require.Equal(t, 5.0, from, "Should return lowest step")
+		require.Equal(t, 15.0, to, "Should return highest step")
+	})
+
+	// Add one more entry in step 3 (should become new minimum)
+	err = writer.AddPrevValue(key1, 50, []byte("prev0"))
+	require.NoError(t, err)
+	err = writer.Flush(ctx, tx)
+	require.NoError(t, err)
+
+	t.Run("expanded range", func(t *testing.T) {
+		from, to := hc.stepsRangeInDB(tx)
+		require.Equal(t, 3.0, from, "Should return new lowest step")
+		require.Equal(t, 15.0, to, "Should return same highest step")
+	})
 }
