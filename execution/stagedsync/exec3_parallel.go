@@ -613,22 +613,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		}
 	}
 
-	temporalTx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return nil, t2, errors.New("tx is not a temporal tx")
-	}
-
-	doms, err := libstate.NewSharedDomains(temporalTx, te.logger)
-
-	if err != nil {
-		tx.Rollback()
-		return nil, t2, err
-	}
-
-	doms.SetTxNum(te.lastCommittedTxNum)
-	rs := te.rs.WithDomains(doms)
-
-	err = resetWorkers(ctx, rs, tx)
+	err = resetWorkers(ctx, te.rs, tx)
 
 	if err != nil {
 		if !useExternalTx {
@@ -643,10 +628,6 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 	}
 
 	te.doms.ClearRam(false)
-	te.doms.Close()
-
-	te.rs = rs
-	te.doms = doms
 
 	return tx, t2, nil
 }
@@ -1160,6 +1141,28 @@ func (pe *parallelExecutor) LogCommitted(commitStart time.Time, stepsInDb float6
 
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	pe.progress.LogComplete(pe.rs.StateV3, pe, stepsInDb)
+}
+
+func (pe *parallelExecutor) flushAndCommit(ctx context.Context, execStage *StageState, applyTx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, error) {
+	flushStart := time.Now()
+	var flushTime time.Duration
+
+	if !pe.inMemExec {
+		if err := pe.doms.Flush(ctx, applyTx); err != nil {
+			return applyTx, err
+		}
+		flushTime = time.Since(flushStart)
+	}
+
+	commitStart := time.Now()
+	var t2 time.Duration
+	var err error
+	if applyTx, t2, err = pe.commit(ctx, execStage, applyTx, asyncTxChan, useExternalTx); err != nil {
+		return applyTx, err
+	}
+
+	pe.logger.Info("Flushed", "time", time.Since(flushStart), "flush", flushTime, "commit", time.Since(commitStart), "db", t2, "externaltx", useExternalTx)
+	return applyTx, nil
 }
 
 func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
