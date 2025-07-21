@@ -816,7 +816,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 	keysTable := "Keys"
 	indexTable := "Index"
 	logger := log.New()
-	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(false).PageSize(4 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(4 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
