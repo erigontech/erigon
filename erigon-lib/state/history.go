@@ -1434,7 +1434,7 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		fromStep := txNum / ht.aggStep
 
 		// Search all steps backward (newer to older) to find most recent write before txNum
-		for step := fromStep; step <= uint64(maxStep); step++ { // step-- will underflow to max when step=0
+		for step := fromStep; step <= uint64(maxStep); step++ {
 			// Create prefix for this step+addr: [^step][addr]
 			stepPrefix := make([]byte, 8+len(key)+8)
 			binary.BigEndian.PutUint64(stepPrefix[:8], ^step)
