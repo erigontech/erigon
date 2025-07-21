@@ -259,17 +259,6 @@ func (s *MdbxStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint
 	return txStore{tx}.EventsByTimeframe(ctx, timeFrom, timeTo)
 }
 
-// Events gets raw events, start inclusive, end exclusive
-func (s *MdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	return txStore{tx}.Events(ctx, start, end)
-}
-
 func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	if len(blockNumToEventId) == 0 {
 		return nil
@@ -555,7 +544,7 @@ func (s txStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64)
 }
 
 // Events gets raw events, start inclusive, end exclusive
-func (s txStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+func (s txStore) events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	var events [][]byte
 
 	kStart := make([]byte, 8)
@@ -668,7 +657,7 @@ func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHe
 	if !ok {
 		return []rlp.RawValue{}, nil
 	}
-	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
+	bytevals, err := s.events(ctx, startEventId, endEventId+1)
 	if err != nil {
 		return nil, err
 	}

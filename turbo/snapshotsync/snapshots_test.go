@@ -166,7 +166,10 @@ func TestFindMergeRange(t *testing.T) {
 
 		var RangesNew []Range
 		start := uint64(19_000_000)
-		for i := uint64(0); i < 24; i++ {
+		for i := uint64(0); i < 4; i++ {
+			RangesNew = append(RangesNew, NewRange(start+(i*500_000), start+((i+1)*500_000)))
+		}
+		for i := uint64(20); i < 24; i++ {
 			RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 		}
 		found = merger.FindMergeRanges(RangesNew, uint64(24*100_000))
@@ -198,7 +201,10 @@ func TestFindMergeRange(t *testing.T) {
 		}
 		found = merger.FindMergeRanges(RangesNew, uint64(240*10_000))
 		expect = nil
-		for i := uint64(0); i < 24; i++ {
+		for i := uint64(0); i < 4; i++ {
+			expect = append(expect, NewRange(start+i*snaptype.Erigon2OldMergeLimit, start+(i+1)*snaptype.Erigon2OldMergeLimit))
+		}
+		for i := uint64(20); i < 24; i++ {
 			expect = append(expect, NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
 		}
 

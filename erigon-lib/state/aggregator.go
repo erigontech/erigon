@@ -694,26 +694,30 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
-	defer a.buildingFiles.Store(false)
-	if toStep > fromStep {
-		a.logger.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
-	}
-	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-		if err := a.buildFiles(ctx, step); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer a.buildingFiles.Store(false)
+		if toStep > fromStep {
+			a.logger.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+		}
+		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+			if err := a.buildFiles(ctx, step); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+					panic(err)
+				}
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				panic(err)
 			}
-			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-			panic(err)
+			a.onFilesChange(nil)
 		}
-		a.onFilesChange(nil)
-	}
 
-	go func() {
-		if err := a.MergeLoop(ctx); err != nil {
-			panic(err)
-		}
-		a.onFilesChange(nil)
+		go func() {
+			if err := a.MergeLoop(ctx); err != nil {
+				panic(err)
+			}
+			a.onFilesChange(nil)
+		}()
 	}()
 	return nil
 }
@@ -905,7 +909,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	furiousPrune := timeout > 5*time.Hour
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
 
-	var pruneLimit uint64 = 1_000
+	var pruneLimit uint64 = 100
 	if furiousPrune {
 		pruneLimit = 1_000_000
 	}

@@ -659,3 +659,42 @@ func (c *MockClientFetchStatusCall) DoAndReturn(f func(context.Context) (*Status
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// IsOnline mocks base method.
+func (m *MockClient) IsOnline(ctx context.Context) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsOnline", ctx)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsOnline indicates an expected call of IsOnline.
+func (mr *MockClientMockRecorder) IsOnline(ctx any) *MockClientIsOnlineCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsOnline", reflect.TypeOf((*MockClient)(nil).IsOnline), ctx)
+	return &MockClientIsOnlineCall{Call: call}
+}
+
+// MockClientIsOnlineCall wrap *gomock.Call
+type MockClientIsOnlineCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClientIsOnlineCall) Return(arg0 bool, arg1 error) *MockClientIsOnlineCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClientIsOnlineCall) Do(f func(context.Context) (bool, error)) *MockClientIsOnlineCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClientIsOnlineCall) DoAndReturn(f func(context.Context) (bool, error)) *MockClientIsOnlineCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

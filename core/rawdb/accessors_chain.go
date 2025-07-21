@@ -1119,7 +1119,7 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 
 		select {
 		case <-logEvery.C:
-			logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), table, "blockNum", blockNum)
+			logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), "table", table, "blockNum", blockNum)
 		default:
 		}
 
@@ -1347,6 +1347,9 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 			rlp.DecodeBytes(toWrite, storageReceipt2)
 			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
 				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
+			}
+			if storageReceipt.FirstLogIndexWithinBlock != storageReceipt2.FirstLogIndexWithinBlock {
+				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.FirstLogIndexWithinBlock, storageReceipt2.FirstLogIndexWithinBlock))
 			}
 		}
 	} else {
