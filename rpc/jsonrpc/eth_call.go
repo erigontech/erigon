@@ -368,7 +368,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// touch account
-	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil, false)
+	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
 	proofTrie, _, err := sdCtx.Witness(ctx, nil, header.Root[:], "eth_getProof")
@@ -415,7 +415,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) != 0 && len(storageKeys) != 0 {
 		// touch storage keys
 		for _, storageKey := range storageKeys {
-			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil, false)
+			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil)
 		}
 
 		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
@@ -625,7 +625,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	// marking keys we want to get witness for
 	for _, key := range touchedPlainKeys {
-		sdCtx.TouchKey(kv.AccountsDomain, string(key), nil, false)
+		sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
 	}
 
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)

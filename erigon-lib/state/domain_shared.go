@@ -542,7 +542,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 	}
 	ks := string(k)
 
-	sd.sdCtx.TouchKey(domain, ks, v, domain != kv.CommitmentDomain)
+	sd.sdCtx.TouchKey(domain, ks, v)
 	switch domain {
 	case kv.StorageDomain:
 		return sd.writeAccountStorage(ks, v, txNum, prevVal, prevStep)
@@ -578,7 +578,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 	}
 
 	ks := string(k)
-	sd.sdCtx.TouchKey(domain, ks, nil, domain != kv.CommitmentDomain)
+	sd.sdCtx.TouchKey(domain, ks, nil)
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.deleteAccount(tx, ks, txNum, prevVal, prevStep)
