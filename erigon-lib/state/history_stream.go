@@ -580,7 +580,8 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
-		hi.nextKey = k[:len(k)-8]
+		stepPrefixedKey := k[:len(k)-8]
+		hi.nextKey = extractOriginalKeyFromStepPrefixed(stepPrefixedKey)
 		hi.nextVal = v
 		return nil
 	}
@@ -621,7 +622,7 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 		}
 		foundTxNumVal := v[:8]
 		if hi.endTxNum < 0 || int(binary.BigEndian.Uint64(foundTxNumVal)) < hi.endTxNum {
-			hi.nextKey = k
+			hi.nextKey = extractOriginalKeyFromStepPrefixed(k)
 			hi.nextVal = v[8:]
 			return nil
 		}
