@@ -642,7 +642,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
 	}
 
-	te.doms.ClearRam(true)
+	te.doms.ClearRam(false)
 	te.doms.Close()
 
 	te.rs = rs
