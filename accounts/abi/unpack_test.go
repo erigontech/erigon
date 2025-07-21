@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 //
-//nolint:scopelint
+
 package abi
 
 import (
@@ -229,7 +229,7 @@ func TestLocalUnpackTests(t *testing.T) {
 	for i, test := range unpackTests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			//Unpack
-			//nolint:scopelint
+
 			def := fmt.Sprintf(`[{ "name" : "method", "type": "function", "outputs": %s}]`, test.def)
 			abi, err := JSON(strings.NewReader(def))
 			if err != nil {
@@ -237,7 +237,7 @@ func TestLocalUnpackTests(t *testing.T) {
 			}
 			encb, err := hex.DecodeString(test.enc)
 			if err != nil {
-				t.Fatalf("invalid hex %s: %v", test.enc, err) //nolint:scopelint
+				t.Fatalf("invalid hex %s: %v", test.enc, err)
 			}
 			outptr := reflect.New(reflect.TypeOf(test.want))
 			err = abi.UnpackIntoInterface(outptr.Interface(), "method", encb)

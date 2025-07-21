@@ -114,9 +114,6 @@ linters:
           - thelper
         path: rlp/.*\.go
       - linters:
-          - golint
-        text: should be
-      - linters:
           - recvcheck
         text: the methods of
       - linters:
