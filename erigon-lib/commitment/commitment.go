@@ -1178,6 +1178,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 
 // Reset clears all updates
 func (t *Updates) Reset() {
+	fmt.Println("reset updates")
 	switch t.mode {
 	case ModeDirect:
 		t.keys = nil

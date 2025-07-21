@@ -86,7 +86,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		return
 	}
 
-	fmt.Printf("touch key: %s %s", d, key)
+	fmt.Printf("touch key: %s %x\n", d, []byte(key))
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
