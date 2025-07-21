@@ -81,12 +81,15 @@ func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 
 // TouchKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
+func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte, trace bool) {
 	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return
 	}
 
-	fmt.Printf("touch key: %s %x\n", d, []byte(key))
+	if trace {
+		fmt.Printf("touch key: %s %x\n", d, []byte(key))
+	}
+
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
@@ -372,7 +375,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		sdc.TouchKey(kv.AccountsDomain, string(k), nil)
+		sdc.TouchKey(kv.AccountsDomain, string(k), nil, false)
 	}
 
 	it, err = roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
@@ -386,7 +389,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		sdc.TouchKey(kv.StorageDomain, string(k), nil)
+		sdc.TouchKey(kv.StorageDomain, string(k), nil, false)
 	}
 
 	sdc.Reset()

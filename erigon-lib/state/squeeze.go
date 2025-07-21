@@ -535,7 +535,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, blockNum, tx
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
-		sd.sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
+		sd.sdCtx.TouchKey(kv.AccountsDomain, string(key), nil, false)
 		processed++
 		if !ok {
 			break
