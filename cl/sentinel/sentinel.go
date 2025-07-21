@@ -134,6 +134,7 @@ func (s *Sentinel) createLocalNode(
 	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
 	s.setupENR(localNode)
+	go s.updateENR(localNode)
 
 	return localNode, nil
 }

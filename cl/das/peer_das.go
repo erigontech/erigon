@@ -20,7 +20,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/p2p/enode"
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 	"github.com/spf13/afero"
 	"golang.org/x/sync/semaphore"
@@ -47,7 +46,6 @@ const (
 
 type peerdas struct {
 	state         *peerdasstate.PeerDasState
-	nodeID        enode.ID
 	rpc           *rpc.BeaconRpcP2P
 	beaconConfig  *clparams.BeaconChainConfig
 	caplinConfig  *clparams.CaplinConfig
@@ -66,7 +64,6 @@ func NewPeerDas(
 	columnStorage blob_storage.DataColumnStorage,
 	blobStorage blob_storage.BlobStorage,
 	sentinel sentinelproto.SentinelClient,
-	nodeID enode.ID,
 	ethClock eth_clock.EthereumClock,
 	peerDasState *peerdasstate.PeerDasState,
 	blobRecoveryRequestDir string,
@@ -74,7 +71,6 @@ func NewPeerDas(
 	kzg.InitKZG()
 	p := &peerdas{
 		state:         peerDasState,
-		nodeID:        nodeID,
 		rpc:           rpc,
 		beaconConfig:  beaconConfig,
 		caplinConfig:  caplinConfig,
