@@ -95,7 +95,7 @@ func ReceiptStoresFirstLogIdx(tx kv.TemporalTx) bool {
 	// this check allows to put some ifchecks to handle
 	// both cases and maintain backward compatibility of
 	// snapshots.
-	return ReceiptVersion(tx).Eq(version.V1_0)
+	return tx.Debug().CurrentDomainVersion(kv.ReceiptDomain).Eq(version.V1_0)
 }
 
 func ReceiptVersion(tx kv.TemporalTx) version.Version {
