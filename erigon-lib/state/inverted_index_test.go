@@ -812,19 +812,21 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 func TestInvIndexPruningPerf(t *testing.T) {
 	//t.Skip("for manual benchmarks ")
-	testDbAndInvertedIndex2 := func(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
+	dirs := datadir.New(t.TempDir())
+	keysTable := "Keys"
+	indexTable := "Index"
+	logger := log.New()
+	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(4 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
+			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
+			kv.TblPruningProgress: kv.TableCfgItem{},
+		}
+	}).MustOpen()
+	t.Cleanup(db.Close)
+	testDbAndInvertedIndex2 := func(tb testing.TB, aggStep uint64, logger log.Logger) *InvertedIndex {
 		tb.Helper()
-		dirs := datadir.New(t.TempDir())
-		keysTable := "Keys"
-		indexTable := "Index"
-		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(4 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{
-				keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
-				indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
-				kv.TblPruningProgress: kv.TableCfgItem{},
-			}
-		}).MustOpen()
-		tb.Cleanup(db.Close)
+
 		salt := uint32(1)
 		cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 		cfg.salt.Store(&salt)
@@ -832,13 +834,11 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		ii, err := NewInvertedIndex(cfg, aggStep, logger)
 		require.NoError(tb, err)
 		ii.DisableFsync()
-		tb.Cleanup(ii.Close)
-		return db, ii
+		return ii
 	}
 	filledInvIndexOfSize2 := func(tb testing.TB, txs, module uint64, db kv.RwDB, ii *InvertedIndex) uint64 {
 		tb.Helper()
 		ctx, require := context.Background(), require.New(tb)
-		tb.Cleanup(db.Close)
 
 		err := db.Update(ctx, func(tx kv.RwTx) error {
 			if cnt, _ := tx.Count(ii.keysTable); cnt > 0 { // if db is re-usable
@@ -871,9 +871,9 @@ func TestInvIndexPruningPerf(t *testing.T) {
 
 	txCnt := uint64(1_000) * 10_000
 	mod := uint64(1) * 31
-	db, ii := testDbAndInvertedIndex2(t, 16*1_000, log.New())
+	ii := testDbAndInvertedIndex2(t, 16*1_000, logger)
+	t.Cleanup(ii.Close)
 	_ = filledInvIndexOfSize2(t, txCnt, mod, db, ii)
-	defer ii.Close()
 
 	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
 		collation, err := ii.collate(context.Background(), 0, tx)
