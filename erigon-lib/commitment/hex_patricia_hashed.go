@@ -2247,9 +2247,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
-func (hph *HexPatriciaHashed) GetCapture(clear bool) []string {
+func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
-	if clear {
+	if truncate {
 		hph.capture = nil
 	}
 	return capture

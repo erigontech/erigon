@@ -91,7 +91,7 @@ type Trie interface {
 	// Trace domain writes only (no filding etc)
 	SetTraceDomain(bool)
 	SetCapture(capture []string)
-	GetCapture(clear bool) []string
+	GetCapture(truncate bool) []string
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant

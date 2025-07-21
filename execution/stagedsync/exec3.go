@@ -167,7 +167,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	curAccountReadDur := accountReadDur - p.prevAccountReadDuration
 	curStorageReadDur := storageReadDur - p.prevStorageReadDuration
 	curCodeReadDur := codeReadDur - p.prevCodeReadDuration
-	curActivations := activations - int64(p.prevActivations)
+	curActivations := activations - p.prevActivations
 
 	p.prevTaskGas = taskGas
 	p.prevTaskDuration = taskDur
@@ -223,7 +223,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 
 		execDiff := execCount - p.prevExecCount
 
-		var repeats = max(int(execDiff)-int(max(int(te.lastExecutedTxNum.Load())-int(p.prevExecutedTxNum), 0)), 0)
+		var repeats = max(int(execDiff)-max(int(te.lastExecutedTxNum.Load())-int(p.prevExecutedTxNum), 0), 0)
 		var repeatRatio float64
 
 		if repeats > 0 {
@@ -272,7 +272,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"wrt/s", common.PrettyCounter(curWriteRate),
 		}
 
-		mxExecRepeats.AddInt(int(repeats))
+		mxExecRepeats.AddInt(repeats)
 		mxExecTriggers.AddInt(int(execCount))
 
 		p.prevExecCount = execCount

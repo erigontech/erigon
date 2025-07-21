@@ -473,7 +473,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 	}
 
 	if te.execLoopGroup == nil {
-		return fmt.Errorf("no exec group")
+		return errors.New("no exec group")
 	}
 
 	te.execLoopGroup.Go(func() (err error) {
@@ -748,8 +748,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			be.blockIO.RecordReads(res.Version().TxIndex, res.TxIn)
 
-			addedDependencies := false
-
 			if execErr.DependencyTxIndex >= 0 {
 				dependency := execErr.DependencyTxIndex + 1
 
@@ -856,9 +854,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		tx := toValidate[i]
 		txVersion := be.tasks[tx].Task.Version()
 		txIncarnation := be.txIncarnations[tx]
-		trace := false
 		tracePrefix := ""
 
+		var trace bool
 		if trace = dbg.TraceTransactionIO && traceTx(be.blockNum, txVersion.TxIndex); trace {
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation)
 			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))

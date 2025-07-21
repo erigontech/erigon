@@ -331,7 +331,7 @@ func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
 				if update.storage != nil {
 					update.storage.Scan(func(i storageItem) bool {
 						if i.value.ByteLen() == 0 {
-							fmt.Printf("%d del storage: %x %x %x\n", blockNum, update.address, i.key)
+							fmt.Printf("%d del storage: %x %x\n", blockNum, update.address, i.key)
 						} else {
 							fmt.Printf("%d put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
 						}

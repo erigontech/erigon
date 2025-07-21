@@ -154,9 +154,9 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 		p.mounts[i].SetTraceDomain(b)
 	}
 }
-func (p *ConcurrentPatriciaHashed) GetCapture(clear bool) []string {
-	capture := p.root.GetCapture(clear)
-	if clear {
+func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
+	capture := p.root.GetCapture(truncate)
+	if truncate {
 		for i := range p.mounts {
 			p.mounts[i].SetCapture(nil)
 		}
