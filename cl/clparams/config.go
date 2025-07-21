@@ -210,6 +210,8 @@ type NetworkConfig struct {
 	Eth2key                    string `yaml:"-" json:"-"` // ETH2Key is the ENR key of the Ethereum consensus object in an enr.
 	AttSubnetKey               string `yaml:"-" json:"-"` // AttSubnetKey is the ENR key of the subnet bitfield in the enr.
 	SyncCommsSubnetKey         string `yaml:"-" json:"-"` // SyncCommsSubnetKey is the ENR key of the sync committee subnet bitfield in the enr.
+	CgcKey                     string `yaml:"-" json:"-"` // CgcKey is the ENR key of the CGC in the enr.
+	NfdKey                     string `yaml:"-" json:"-"` // NfdKey is the ENR key of the NFD in the enr.
 	MinimumPeersInSubnetSearch uint64 `yaml:"-" json:"-"` // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
 
 	BootNodes   []string `yaml:"-" json:"-"`
@@ -232,6 +234,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       MainnetBootstrapNodes,
 	},
@@ -251,6 +255,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       SepoliaBootstrapNodes,
 	},
@@ -270,6 +276,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       GnosisBootstrapNodes,
 	},
@@ -289,6 +297,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
@@ -308,6 +318,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       HoleskyBootstrapNodes,
 	},
@@ -327,6 +339,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       HoodiBootstrapNodes,
 	},
