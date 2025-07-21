@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/race"
 	"math"
 	"os"
 	"sync/atomic"
@@ -871,6 +872,10 @@ func TestInvIndexPruningPerf(t *testing.T) {
 
 	txCnt := uint64(1_000) * 10_000
 	mod := uint64(1) * 31
+	if race.Enabled {
+		txCnt = uint64(10_000) // lowering PERFOMANCE test params if RACE enabled
+		mod = uint64(1) * 10
+	}
 	ii := testDbAndInvertedIndex2(t, 16*1_000, logger)
 	t.Cleanup(ii.Close)
 	_ = filledInvIndexOfSize2(t, txCnt, mod, db, ii)
