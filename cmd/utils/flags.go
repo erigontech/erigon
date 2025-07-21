@@ -970,6 +970,11 @@ var (
 		Usage: "The gas limit of the sequencer block.  Default (0) means no limit.",
 		Value: 0,
 	}
+	PessimisticForkNumber = cli.Uint64Flag{
+		Name:  "zkevm.pessimistic-fork-number",
+		Usage: "The fork number to use for networks launched as PP networks with no FEP history. Default 0.",
+		Value: 12,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",
