@@ -694,11 +694,6 @@ func (s *Sync) Run(ctx context.Context) error {
 
 	s.logger.Info(syncLogPrefix("running sync component"))
 
-	// This is set to disable heimdall checks casuing a pause during transition
-	// it can be removed post July 2025 where behavior can revert to previous
-	// behavior of waitiing for heimdall to sync
-	const HiemdalV1V2Transition = true
-
 	for {
 		// we have to check if the heimdall we are connected to is synchonised with the chain
 		// to prevent getting empty list of checkpoints/milestones during the sync
@@ -713,10 +708,6 @@ func (s *Sync) Run(ctx context.Context) error {
 		}
 
 		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
-
-		if HiemdalV1V2Transition {
-			break
-		}
 
 		if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
 			return err
