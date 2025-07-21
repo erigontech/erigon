@@ -233,3 +233,41 @@ func (c *MockForkDbWriteForkIdBlockOnceCall) DoAndReturn(f func(uint64, uint64) 
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// WriteNewForkHistory mocks base method.
+func (m *MockForkDb) WriteNewForkHistory(forkId, lastVerifiedBatch uint64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WriteNewForkHistory", forkId, lastVerifiedBatch)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// WriteNewForkHistory indicates an expected call of WriteNewForkHistory.
+func (mr *MockForkDbMockRecorder) WriteNewForkHistory(forkId, lastVerifiedBatch any) *MockForkDbWriteNewForkHistoryCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteNewForkHistory", reflect.TypeOf((*MockForkDb)(nil).WriteNewForkHistory), forkId, lastVerifiedBatch)
+	return &MockForkDbWriteNewForkHistoryCall{Call: call}
+}
+
+// MockForkDbWriteNewForkHistoryCall wrap *gomock.Call
+type MockForkDbWriteNewForkHistoryCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockForkDbWriteNewForkHistoryCall) Return(arg0 error) *MockForkDbWriteNewForkHistoryCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockForkDbWriteNewForkHistoryCall) Do(f func(uint64, uint64) error) *MockForkDbWriteNewForkHistoryCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockForkDbWriteNewForkHistoryCall) DoAndReturn(f func(uint64, uint64) error) *MockForkDbWriteNewForkHistoryCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

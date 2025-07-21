@@ -6,12 +6,14 @@ on:
       - zkevm-2.60
       - stable/**
       - project/**
+      - release/**
   pull_request:
     branches:
       - zkevm
       - zkevm-2.60
       - stable/**
       - project/**
+      - release/**
     types:
       - opened
       - reopened
