@@ -23,11 +23,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -1692,18 +1694,23 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 		return nil, err
 	}
 
-	// Get iterators for each relevant step (step-prefixed keys)
-	recentIterators, err := ht.recentRangeBySteps(ctx, startTxNum, from, to, asc, limit, roTx)
-	if err != nil {
+	dbit := &HistoryRangeAsOfDB{
+		largeValues: ht.h.historyLargeValues,
+		roTx:        roTx,
+		valsTable:   ht.h.valuesTable,
+		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
+
+		startTxNum: startTxNum,
+
+		ctx: ctx, logger: ht.h.logger,
+	}
+	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
+	if err := dbit.advance(); err != nil {
+		dbit.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 
-	// Union frozen iterator with all recent step iterators
-	var result stream.KV = hi
-	for _, recentIt := range recentIterators {
-		result = stream.UnionKV(result, recentIt, limit)
-	}
-	return result, nil
+	return stream.UnionKV(hi, dbit, limit), nil
 }
 
 func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
@@ -1793,116 +1800,50 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 		// For large values: [^step][addr][txNum] -> value
 		// For large values, we scan all and filter precisely
 		// This is inefficient but correct for the new step-prefixed format
-		it, err := roTx.Range(ht.h.valuesTable, nil, nil, asc, limit)
+		from := make([]byte, len(key)+8)
+		copy(from, key)
+		var fromTxNum uint64
+		if startTxNum >= 0 {
+			fromTxNum = uint64(startTxNum)
+		}
+		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
+		to := common.Copy(from)
+		toTxNum := uint64(math.MaxUint64)
+		if endTxNum >= 0 {
+			toTxNum = uint64(endTxNum)
+		}
+		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
+		it, err := roTx.Range(ht.h.valuesTable, from, to, asc, limit)
 		if err != nil {
 			return nil, err
 		}
-
 		return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-			if len(k) < 16 { // Need at least 8 bytes step + 8 bytes txNum
-				return 0, nil
+			if len(k) < 8 {
+				return 0, fmt.Errorf("unexpected large key length %d", len(k))
 			}
-			// Extract addr from: [^step][addr][txNum]
-			addrStart := 8
-			addrEnd := len(k) - 8
-			if addrEnd <= addrStart || addrEnd-addrStart != len(key) {
-				return 0, nil
-			}
-			extractedAddr := k[addrStart:addrEnd]
-			if !bytes.Equal(extractedAddr, key) {
-				return 0, nil // Skip non-matching keys
-			}
-
-			txNum := binary.BigEndian.Uint64(k[len(k)-8:])
-			if startTxNum >= 0 && int(txNum) < startTxNum {
-				return 0, nil
-			}
-			if endTxNum >= 0 && int(txNum) >= endTxNum {
-				return 0, nil
-			}
-			return txNum, nil
+			return binary.BigEndian.Uint64(k[len(k)-8:]), nil
 		}), nil
 	}
 
-	// For small values: [^step][addr] -> txNum + value
-	// Full table scan with precise filtering
-	it, err := roTx.Range(ht.h.valuesTable, nil, nil, asc, limit)
+	var from, to []byte
+	if startTxNum >= 0 {
+		from = make([]byte, 8)
+		binary.BigEndian.PutUint64(from, uint64(startTxNum))
+	}
+	if endTxNum >= 0 {
+		to = make([]byte, 8)
+		binary.BigEndian.PutUint64(to, uint64(endTxNum))
+	}
+	it, err := roTx.RangeDupSort(ht.h.valuesTable, key, from, to, asc, limit)
 	if err != nil {
 		return nil, err
 	}
 	return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-		if len(k) != 8+len(key) || len(v) < 8 {
-			return 0, nil
+		if len(v) < 8 {
+			return 0, fmt.Errorf("unexpected small value length %d", len(v))
 		}
-		// Extract addr from: [^step][addr]
-		extractedAddr := k[8:]
-		if !bytes.Equal(extractedAddr, key) {
-			return 0, nil // Skip non-matching keys
-		}
-
-		txNum := binary.BigEndian.Uint64(v[:8])
-		if startTxNum >= 0 && int(txNum) < startTxNum {
-			return 0, nil
-		}
-		if endTxNum >= 0 && int(txNum) >= endTxNum {
-			return 0, nil
-		}
-		return txNum, nil
+		return binary.BigEndian.Uint64(v), nil
 	}), nil
-}
-
-func (ht *HistoryRoTx) recentRangeBySteps(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) ([]stream.KV, error) {
-	if roTx == nil {
-		return []stream.KV{}, nil
-	}
-
-	// Determine step range to scan - we need to scan ALL steps up to maxStep
-	// because data for any txNum <= startTxNum could be in any step
-	fromStep := uint64(0)
-
-	// Find max step in DB
-	_, maxStepFloat := ht.stepsRangeInDB(roTx)
-	toStep := uint64(maxStepFloat)
-
-	var iterators []stream.KV
-
-	if asc {
-		for step := fromStep; step <= toStep; step++ {
-			stepIt, err := ht.recentRangeForStep(ctx, step, startTxNum, from, to, asc, limit, roTx)
-			if err != nil {
-				return nil, err
-			}
-			if stepIt != nil {
-				iterators = append(iterators, stepIt)
-
-			}
-		}
-	} else {
-		panic("desc order not implemented")
-	}
-
-	return iterators, nil
-}
-
-func (ht *HistoryRoTx) recentRangeForStep(ctx context.Context, step, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
-	dbit := &HistoryRangeAsOfDB{
-		largeValues: ht.h.historyLargeValues,
-		roTx:        roTx,
-		valsTable:   ht.h.valuesTable,
-		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
-
-		startTxNum: startTxNum,
-		step:       step,
-
-		ctx: ctx, logger: ht.h.logger,
-	}
-	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
-	if err := dbit.advance(); err != nil {
-		dbit.Close()
-		return nil, err
-	}
-
-	return dbit, nil
 }
 
 func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
