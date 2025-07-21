@@ -814,7 +814,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 	//t.Skip("for manual benchmarks ")
 	testDbAndInvertedIndex2 := func(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
 		tb.Helper()
-		dirs := datadir.New("/Users/alex/data/remove_me_test")
+		dirs := datadir.New(t.TempDir())
 		keysTable := "Keys"
 		indexTable := "Index"
 		db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(4 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
