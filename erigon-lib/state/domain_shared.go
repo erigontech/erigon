@@ -578,7 +578,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 	}
 
 	ks := string(k)
-	sd.sdCtx.TouchKey(domain, ks, nil, true)
+	sd.sdCtx.TouchKey(domain, ks, nil, domain != kv.CommitmentDomain)
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.deleteAccount(tx, ks, txNum, prevVal, prevStep)
