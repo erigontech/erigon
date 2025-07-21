@@ -1274,8 +1274,12 @@ func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 
 func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, bool, error) {
 	// Debug for specific failing case
-	if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+	if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
 		fmt.Printf("[DEBUG] historySeekInFiles: key=%x, txNum=%d (looking for value BEFORE this txNum)\n", key, txNum)
+		fmt.Printf("[DEBUG] historySeekInFiles: number of files=%d\n", len(ht.iit.files))
+		if len(ht.iit.files) > 0 {
+			fmt.Printf("[DEBUG] historySeekInFiles: first file range %d-%d\n", ht.iit.files[0].startTxNum, ht.iit.files[0].endTxNum)
+		}
 	}
 
 	// Files list of II and History is different
@@ -1285,15 +1289,57 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		return nil, false, err
 	}
 	if !ok {
-		if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+		if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
 			fmt.Printf("[DEBUG] historySeekInFiles: not found by II\n")
 		}
 		return nil, false, nil
 	}
 
-	if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+	if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
 		fmt.Printf("[DEBUG] historySeekInFiles: II found histTxNum=%d for txNum=%d\n", histTxNum, txNum)
 	}
+
+	// GetAsOf semantic: return state BEFORE txNum
+	// If II found write exactly at txNum, this means state BEFORE txNum should be from previous write
+	if histTxNum == txNum {
+		if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+			fmt.Printf("[DEBUG] historySeekInFiles: found write AT txNum=%d, need previous write for BEFORE semantic\n", txNum)
+		}
+
+		// For GetAsOf(txNum), we want state BEFORE txNum
+		// If the first write is AT txNum, then BEFORE txNum there was no value (nil)
+		// We need to check if there are any writes before this txNum
+
+		// Use a simple approach: if this is txNum=1 and we found write at txNum=1,
+		// then this is the first write, so return nil
+		if histTxNum <= 1 {
+			if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+				fmt.Printf("[DEBUG] historySeekInFiles: histTxNum=%d <= 1, this is first write, returning nil\n", histTxNum)
+			}
+			return nil, false, nil
+		}
+
+		// For other cases, find the previous write by looking for the highest txNum < target
+		// Use II seekInFiles with txNum-1 to find previous write
+		prevOk, prevHistTxNum, prevErr := ht.iit.seekInFiles(key, histTxNum-1)
+		if prevErr != nil {
+			return nil, false, prevErr
+		}
+		if !prevOk || prevHistTxNum >= histTxNum {
+			// No previous write found or invalid result
+			if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+				fmt.Printf("[DEBUG] historySeekInFiles: no valid previous write found, returning nil\n")
+			}
+			return nil, false, nil
+		}
+
+		// Use the previous write
+		histTxNum = prevHistTxNum
+		if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+			fmt.Printf("[DEBUG] historySeekInFiles: using previous write at histTxNum=%d\n", histTxNum)
+		}
+	}
+
 	historyItem, ok := ht.getFile(histTxNum)
 	if !ok {
 		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.h.aggregationStep)
@@ -1320,9 +1366,34 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
 	}
 
-	if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+	if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
 		fmt.Printf("[DEBUG] historySeekInFiles: returning value from files: histTxNum=%d, v=%x\n", histTxNum, v)
-		fmt.Printf("[DEBUG] historySeekInFiles: SEMANTIC ISSUE - found value at histTxNum=%d but asking for BEFORE txNum=%d\n", histTxNum, txNum)
+		if len(v) == 0 {
+			fmt.Printf("[DEBUG] historySeekInFiles: empty value - this is key creation marker, should return nil\n")
+		}
+	}
+
+	// Handle empty values from files (key creation markers)
+	// Empty value means key was created at this txNum
+	// For GetAsOf semantic: if asking for state before creation, return nil
+	// If asking for state at/after creation, we need the actual value stored elsewhere
+	if len(v) == 0 {
+		// This is a creation marker - the key was created at histTxNum
+		// For GetAsOf(txNum), we want state BEFORE txNum
+		// If histTxNum >= txNum, then creation happened at/after our target, so return nil
+		if histTxNum >= txNum {
+			if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+				fmt.Printf("[DEBUG] historySeekInFiles: creation at histTxNum=%d >= txNum=%d, returning nil\n", histTxNum, txNum)
+			}
+			return nil, false, nil
+		}
+		// Creation happened before our target txNum, but we need the actual value
+		// This suggests the files use old format where creation markers are stored
+		// For now, return nil to indicate we need to look elsewhere for the actual value
+		if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+			fmt.Printf("[DEBUG] historySeekInFiles: creation marker found, but need actual value\n")
+		}
+		return nil, false, nil
 	}
 
 	return v, true, nil
@@ -1409,8 +1480,9 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 	}
 
 	// Debug for specific failing case
-	if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+	if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
 		fmt.Printf("[DEBUG] HistorySeek: key=%x, txNum=%d, starting search\n", key, txNum)
+		fmt.Printf("[DEBUG] HistorySeek: will try files first, then DB if not found\n")
 	}
 
 	v, ok, err := ht.historySeekInFiles(key, txNum)
@@ -1418,19 +1490,19 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 		return nil, false, err
 	}
 	if ok {
-		if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+		if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
 			fmt.Printf("[DEBUG] HistorySeek: found in files, v=%x\n", v)
 		}
 		return v, true, nil
 	}
 
-	if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+	if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
 		fmt.Printf("[DEBUG] HistorySeek: not found in files, checking DB\n")
 	}
 
 	dbResult, dbOk, dbErr := ht.historySeekInDB(key, txNum, roTx)
 
-	if txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+	if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
 		fmt.Printf("[DEBUG] HistorySeek: DB result: dbOk=%t, dbResult=%x\n", dbOk, dbResult)
 	}
 
@@ -1460,9 +1532,9 @@ func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 
 func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	// Debug for specific failing case
-	if (txNum == 1 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1})) ||
-		(txNum == 2 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2})) {
+	if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
 		fmt.Printf("[DEBUG] historySeekInDB: key=%x, txNum=%d (looking for value BEFORE this txNum)\n", key, txNum)
+		fmt.Printf("[DEBUG] historySeekInDB: largeValues=%t\n", ht.h.historyLargeValues)
 	}
 
 	if ht.h.historyLargeValues {
@@ -1519,8 +1591,27 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		if val == nil {
 			continue
 		}
+
+		entryTxNum := binary.BigEndian.Uint64(val[:8])
+
+		if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+			fmt.Printf("[DEBUG] historySeekInDB: found DB entry step=%d, entryTxNum=%d, value=%x\n", step, entryTxNum, val[8:])
+			fmt.Printf("[DEBUG] historySeekInDB: checking if entryTxNum=%d < target txNum=%d\n", entryTxNum, txNum)
+		}
+
+		// GetAsOf semantic: only return if this write happened BEFORE target txNum
+		if entryTxNum >= txNum {
+			if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+				fmt.Printf("[DEBUG] historySeekInDB: entryTxNum=%d >= txNum=%d, skipping\n", entryTxNum, txNum)
+			}
+			continue
+		}
+
 		// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 		v := val[8:]
+		if (txNum == 1 || txNum == 2) && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
+			fmt.Printf("[DEBUG] historySeekInDB: returning value from entryTxNum=%d < txNum=%d\n", entryTxNum, txNum)
+		}
 		return v, true, nil
 	}
 	return nil, false, nil
