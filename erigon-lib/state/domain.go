@@ -517,10 +517,6 @@ func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []b
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("PutWithPrev(%s, txn %d, key[%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, step, k, v, preval)
 	}
-	// Debug for specific failing case
-	if bytes.Equal(k, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2}) && (txNum == 48 || txNum == 49) {
-		fmt.Printf("[DEBUG] PutWithPrev: storing NEW value %x (was %x) at txNum=%d\n", v, preval, txNum)
-	}
 	if err := w.h.AddPrevValue(k, txNum, preval); err != nil {
 		return err
 	}
@@ -1594,21 +1590,10 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		return nil, false, nil
 	}
 
-	// Debug for specific failing case
-	if txNum <= 5 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
-		fmt.Printf("[DEBUG] GetAsOf: key=%x, txNum=%d, calling HistorySeek\n", key, txNum)
-	}
-
 	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
 	if err != nil {
 		return nil, false, err
 	}
-
-	// Debug for specific failing case
-	if txNum <= 5 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
-		fmt.Printf("[DEBUG] GetAsOf: HistorySeek(key=%x, txNum=%d) -> hOk=%t, v=%x\n", key, txNum, hOk, v)
-	}
-
 	if hOk {
 		if len(v) == 0 { // if history successfuly found marker of key creation
 			if traceGetAsOf == dt.d.filenameBase {
@@ -1622,44 +1607,10 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		return v, v != nil, nil
 	}
 
-	// GetAsOf semantic: return state BEFORE txNum
-	// If HistorySeek found nothing, check if we should look at current domain value
-	// This handles the case where files contain creation markers but actual values are in domain
-
-	// Try to get the current value from domain
 	var ok bool
 	v, _, ok, err = dt.GetLatest(key, roTx)
 	if err != nil {
 		return nil, false, err
-	}
-
-	if ok && len(dt.ht.iit.files) > 0 {
-		// Check if this key was created before our target txNum
-		// If so, we can return the current value as it represents the state after creation
-		firstFileStart := dt.ht.iit.files[0].startTxNum
-		lastFileEnd := dt.ht.iit.files[len(dt.ht.iit.files)-1].endTxNum
-
-		if txNum >= firstFileStart && txNum < lastFileEnd {
-			// txNum is in file range - check if key was created before txNum
-			// For now, assume if domain has value and we're asking for txNum > 1, return it
-			if txNum > 1 {
-				if txNum <= 5 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
-					fmt.Printf("[DEBUG] GetAsOf: txNum=%d > 1, domain has value, returning current value\n", txNum)
-				}
-				return v, v != nil, nil
-			} else {
-				// For txNum=1, if no history found, key didn't exist before
-				if txNum <= 5 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
-					fmt.Printf("[DEBUG] GetAsOf: txNum=%d, no history, key didn't exist yet\n", txNum)
-				}
-				return nil, false, nil
-			}
-		}
-	}
-
-	// Fallback for cases not covered by files
-	if txNum <= 5 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}) {
-		fmt.Printf("[DEBUG] GetAsOf: Using GetLatest fallback for txNum=%d -> ok=%t, v=%x\n", txNum, ok, v)
 	}
 	if traceGetAsOf == dt.d.filenameBase {
 		if ok {

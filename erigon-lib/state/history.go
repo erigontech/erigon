@@ -1456,7 +1456,6 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	}
 
 	// For non-large values: [^step][addr] -> txNum+value
-	// Need to find the most recent write with txNum < target
 	c, err := ht.valsCursorDup(tx)
 	if err != nil {
 		return nil, false, err
@@ -1466,7 +1465,7 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	_, maxStep := ht.stepsRangeInDB(tx)
 	fromStep := txNum / ht.aggStep
 
-	for step := fromStep; step <= uint64(maxStep); step++ { // step-- will underflow to max when step=0
+	for step := fromStep; step <= uint64(maxStep); step++ {
 		stepKey := stepPrefixedHistoryKeyAddr(key, 0, ht.aggStep, nil)
 		binary.BigEndian.PutUint64(stepKey[:8], ^step)
 

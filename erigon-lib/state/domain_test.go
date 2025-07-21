@@ -813,6 +813,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 					continue
 				}
 			}
+
 			require.Equal(t, v[:], val)
 		}
 	}
