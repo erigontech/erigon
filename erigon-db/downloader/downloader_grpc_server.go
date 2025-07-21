@@ -75,7 +75,9 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			case <-ctx.Done():
 				return
 			case <-time.After(interval):
-				interval *= 2
+				if interval < time.Minute {
+					interval *= 2
+				}
 			}
 			logProgress()
 		}
@@ -106,6 +108,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			}
 		}
 	}
+	s.d.afterAdd()
 	progress.Store(int32(len(request.Items)))
 
 	return &emptypb.Empty{}, nil
