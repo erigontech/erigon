@@ -1180,20 +1180,21 @@ func ExecV3(ctx context.Context,
 				case <-flushEvery.C:
 					if flushPending {
 						flushPending = false
-
 						if !pe.inMemExec {
+							flushStart := time.Now()
 							if err := pe.doms.Flush(ctx, applyTx); err != nil {
 								return err
 							}
+							logger.Info("Flushed", "time", time.Since(flushStart))
 						}
 
-						var t2 time.Duration
-						commitStart := time.Now()
-						applyTx, t2, err = pe.commit(ctx, execStage, applyTx, asyncTxChan, useExternalTx)
-						if err != nil {
-							return err
-						}
-						logger.Info("Committed", "time", time.Since(commitStart), "commit", t2)
+						//var t2 time.Duration
+						//commitStart := time.Now()
+						//applyTx, t2, err = pe.commit(ctx, execStage, applyTx, asyncTxChan, useExternalTx)
+						//if err != nil {
+						//	return err
+						//}
+						//logger.Info("Committed", "time", time.Since(commitStart), "commit", t2)
 					}
 				}
 			}
