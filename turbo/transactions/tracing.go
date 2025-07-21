@@ -167,9 +167,11 @@ func AssembleTracer(
 
 		return tracer, false, cancel, nil
 	case config == nil:
-		return logger.NewJsonStreamLogger(nil, ctx, stream), true, func() {}, nil
+		ctx, cancel := context.WithTimeout(ctx, callTimeout)
+		return logger.NewJsonStreamLogger(nil, ctx, stream), true, cancel, nil
 	default:
-		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream), true, func() {}, nil
+		ctx, cancel := context.WithTimeout(ctx, callTimeout)
+		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream), true, cancel, nil
 	}
 }
 

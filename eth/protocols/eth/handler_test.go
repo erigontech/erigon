@@ -22,6 +22,7 @@ package eth_test
 import (
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -86,7 +87,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	}
 	// Assemble the test environment
 	m := mockWithGenerator(t, 4, generator)
-	receiptsGetter := receipts.NewGenerator(m.BlockReader, m.Engine)
+	receiptsGetter := receipts.NewGenerator(m.BlockReader, m.Engine, time.Minute)
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []libcommon.Hash
