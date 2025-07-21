@@ -1363,8 +1363,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				blockResult.ApplyCount += stateUpdates.UpdateCount()
-				if dbg.TraceApply {
-					stateUpdates.TraceBlockUpdates(blockResult.BlockNum, traceBlock(blockResult.BlockNum))
+				if dbg.TraceApply && traceBlock(blockResult.BlockNum) {
+					stateUpdates.TraceBlockUpdates(blockResult.BlockNum, true)
 					fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 				}
 
