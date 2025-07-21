@@ -253,7 +253,7 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	hph.SetTrace(false)
 
 	// generate list of updates diverging from first nibble (good case for parallelization))
-	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, length.Addr, 0, 150)
+	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 150)
 	builder := NewUpdateBuilder()
 	for i := 0; i < len(plainKeysList); i++ {
 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
@@ -501,7 +501,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 	t.Parallel()
 
 	// generate subtrie with 4 keys with the same prefix
-	plainKeysList, hashedKeysList := generatePlainKeysWithSameHashPrefix(t, length.Addr, 4, 4)
+	plainKeysList, hashedKeysList := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 4, 4)
 
 	builder := NewUpdateBuilder()
 
@@ -511,7 +511,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 	}
 
 	// generate another 4 keys with the same prefix
-	plainKeysList, hashedKeysList = generatePlainKeysWithSameHashPrefix(t, length.Addr, 4, 4)
+	plainKeysList, hashedKeysList = generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 4, 4)
 
 	for i := 0; i < len(plainKeysList); i++ {
 		fmt.Printf("added %x -> %x\n", plainKeysList[i], hashedKeysList[i])
@@ -1846,14 +1846,23 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
-// longer prefixLen - harder to find required keys
-func generatePlainKeysWithSameHashPrefix(tb testing.TB, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
+// longer prefixLen - harder to find required keys. Use up to 6 bytes for common prefix for quick pass.
+//
+// constPrefix is used when need to generate storage keys for same account address correctly. If constPrefix is not nil, keyLen must be > than len of constPrefix.
+// So final key in this case will be constPrefix + random bytes, producing hased key like hash(constPrefix)+hash(random bytes) and checking that hash of random bytes has common prefix of prefixLen
+func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefix []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
 	tb.Helper()
 	plainKeys = make([][]byte, 0, keyCount)
 	hashedKeys = make([][]byte, 0, keyCount)
+	if keyLen < len(constPrefix) {
+		tb.Fatalf("keyLen %d is less than constPrefix length %d, should be bigger", keyLen, len(constPrefix))
+	}
 	for {
 		key := make([]byte, keyLen)
-		rand.Read(key)
+		if constPrefix != nil {
+			copy(key, constPrefix)
+		}
+		rand.Read(key[len(constPrefix):])
 
 		hashed := KeyToHexNibbleHash(key)
 		if len(plainKeys) == 0 {
@@ -1861,7 +1870,8 @@ func generatePlainKeysWithSameHashPrefix(tb testing.TB, keyLen int, prefixLen in
 			hashedKeys = append(hashedKeys, hashed)
 			continue
 		}
-		if bytes.Equal(hashed[:prefixLen], hashedKeys[0][:prefixLen]) {
+		constPrefixOffset := len(constPrefix)
+		if bytes.Equal(hashed[constPrefixOffset:prefixLen], hashedKeys[0][constPrefixOffset:prefixLen]) {
 			plainKeys = append(plainKeys, key)
 			hashedKeys = append(hashedKeys, hashed)
 		}
@@ -1904,15 +1914,22 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	hph.SetTrace(false)
 
 	// generate list of updates diverging from first nibble (good case for parallelization))
-	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, length.Addr, 2, 4)
+	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
 
-	addrWithSingleton := []byte{}
+	addrWithSingleton := common.Copy(plainKeysList[0])
+	storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+
 	builder := NewUpdateBuilder()
 	for i := 0; i < len(plainKeysList); i++ {
 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 	}
-	addrWithSingleton = common.Copy(plainKeysList[1])
-	builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+
+	for sl := 0; sl < len(storageKeysList); sl++ {
+		builder.Storage(common.Bytes2Hex(addrWithSingleton), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
+	}
+	// fmt.Printf("addrWithSingleton %x\n", addrWithSingleton)
+	// builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+	// builder.Storage(common.Bytes2Hex(addrWithSingleton), "01044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
 
 	plainKeys, updates := builder.Build()
 	err := ms.applyPlainUpdates(plainKeys, updates)
