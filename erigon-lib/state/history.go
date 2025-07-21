@@ -1510,6 +1510,11 @@ func (ht *HistoryRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 		step := ^invertedStep
 		to = float64(step)
 	}
+	// With inverted steps, first key has highest step, last key has lowest step
+	// So we need to swap from and to
+	if from > to {
+		from, to = to, from
+	}
 	if to == 0 {
 		to = from
 	}
