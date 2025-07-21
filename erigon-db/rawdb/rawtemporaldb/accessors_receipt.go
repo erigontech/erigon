@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -96,8 +95,4 @@ func ReceiptStoresFirstLogIdx(tx kv.TemporalTx) bool {
 	// both cases and maintain backward compatibility of
 	// snapshots.
 	return tx.Debug().CurrentDomainVersion(kv.ReceiptDomain).Eq(version.V1_0)
-}
-
-func ReceiptVersion(tx kv.TemporalTx) version.Version {
-	return state.Schema.ReceiptDomain.GetVersions().Domain.DataKV.Current
 }
