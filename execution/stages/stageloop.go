@@ -217,7 +217,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	if blockReader.BorSnapshots() != nil {
-		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks()
+		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks(false)
 	}
 	canRunCycleInOneTransaction := isSynced
 	if externalTx {

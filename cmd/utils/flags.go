@@ -107,6 +107,8 @@ var (
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
 		Usage: "name of the network to join",
+		// Can we remove this default? It can be destructive.
+		// Giulio here after it broke CI: no, we cannot remove it.
 		Value: networkname.Mainnet,
 	}
 	IdentityFlag = cli.StringFlag{
