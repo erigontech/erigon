@@ -86,6 +86,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		return
 	}
 
+	fmt.Printf("touch key: %s %s", d, key)
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
@@ -130,7 +131,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.patriciaTrie.SetTrace(sdc.trace)
 	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.trace)
 	if sdc.sharedDomains.commitmentCapture {
-		if sdc.patriciaTrie.GetCapture(false)==nil {
+		if sdc.patriciaTrie.GetCapture(false) == nil {
 			sdc.patriciaTrie.SetCapture([]string{})
 		}
 	}
