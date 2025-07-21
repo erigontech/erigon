@@ -67,6 +67,9 @@ func TestLegacyBlockchain(t *testing.T) {
 }
 
 func TestExecutionSpecBlockchain(t *testing.T) {
+	// TODO @milen - enable again after all fusaka-devnet-3 PRs are merged
+	t.Skip("skip until https://github.com/erigontech/erigon/issues/16195")
+
 	if testing.Short() {
 		t.Skip()
 	}
