@@ -4,11 +4,13 @@ on:
     branches:
       - main
       - stable/**
+      - release/**
       - alpha
   pull_request:
     branches:
       - main
       - stable/**
+      - release/**
       - alpha
 env:
   CGO_ENABLED: "1"
