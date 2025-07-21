@@ -191,7 +191,7 @@ var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
 	common.BytesToAddress([]byte{0x10}):       &bls12381MapFpToG1{},
 	common.BytesToAddress([]byte{0x11}):       &bls12381MapFp2ToG2{},
-	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{eip7951: true},
 }
 
 var (
@@ -1242,10 +1242,15 @@ func (c *pointEvaluation) Run(input []byte) ([]byte, error) {
 
 // P256VERIFY (secp256r1 signature verification)
 // implemented as a native contract
-type p256Verify struct{}
+type p256Verify struct {
+	eip7951 bool
+}
 
 // RequiredGas returns the gas required to execute the precompiled contract
 func (c *p256Verify) RequiredGas(input []byte) uint64 {
+	if c.eip7951 {
+		return params.P256VerifyGasEIP7951
+	}
 	return params.P256VerifyGas
 }
 
