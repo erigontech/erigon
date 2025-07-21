@@ -542,7 +542,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 	}
 	ks := string(k)
 
-	sd.sdCtx.TouchKey(domain, ks, v, true)
+	sd.sdCtx.TouchKey(domain, ks, v, domain != kv.CommitmentDomain)
 	switch domain {
 	case kv.StorageDomain:
 		return sd.writeAccountStorage(ks, v, txNum, prevVal, prevStep)
