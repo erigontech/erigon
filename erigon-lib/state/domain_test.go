@@ -813,11 +813,6 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 					continue
 				}
 			}
-
-			if !bytes.Equal(v[:], val) {
-				t.Logf("GetAsOf mismatch - txNum=%d, keyNum=%d: expected %x (%d), got %x (%d)",
-					txNum, keyNum, v[:], binary.BigEndian.Uint64(v[:]), val, binary.BigEndian.Uint64(val))
-			}
 			require.Equal(t, v[:], val)
 		}
 	}
