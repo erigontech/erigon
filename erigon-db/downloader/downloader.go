@@ -249,7 +249,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	// to achieve this.
 	requestHandler := requestHandler{
 		Transport: http.Transport{
-			ReadBufferSize: 256 << 10,
+			ReadBufferSize: downloadercfg.DefaultNetworkChunkSize,
 			// Note this does nothing in go1.24.
 			//HTTP2: &http.HTTP2Config{
 			//	MaxConcurrentStreams: 1,
@@ -898,7 +898,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHash metainfo.Hash,
 	name string,
 ) error {
@@ -916,7 +916,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHashHint g.Option[metainfo.Hash],
 	name string,
 ) (t *torrent.Torrent, err error) {
