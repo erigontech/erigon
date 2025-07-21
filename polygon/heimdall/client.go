@@ -49,7 +49,5 @@ type Client interface {
 	// FetchMilestoneID fetches a bool value whether milestone corresponding to the given id is in process in Heimdall
 	FetchMilestoneID(ctx context.Context, milestoneID string) error
 
-	IsOnline(ctx context.Context) (bool, error)
-
 	Close()
 }

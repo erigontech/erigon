@@ -245,10 +245,6 @@ func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.
 	return nil, errors.New("TODO")
 }
 
-func (h *Heimdall) IsOnline(ctx context.Context) (bool, error) {
-	return false, errors.New("TODO")
-}
-
 func (h *Heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	return 0, errors.New("TODO")
 }
