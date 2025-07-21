@@ -207,6 +207,7 @@ type HistoryRangeAsOfDB struct {
 
 	startTxNum uint64
 	startTxKey [8]byte
+	step       uint64
 
 	k, v, kBackup, vBackup []byte
 	err                    error
@@ -226,12 +227,9 @@ func (hi *HistoryRangeAsOfDB) Trace(prefix string) *stream.TracedDuo[[]byte, []b
 }
 
 func (hi *HistoryRangeAsOfDB) advance() (err error) {
-	// not large:
-	//   keys: txNum -> key1+key2
-	//   vals: key1+key2 -> txNum + value (DupSort)
-	// large:
-	//   keys: txNum -> key1+key2
-	//   vals: key1+key2+txNum -> value (not DupSort)
+	// Step-prefixed format:
+	// not large: vals: [^step][addr] -> txNum + value (DupSort)
+	// large: vals: [^step][addr][txNum] -> value (not DupSort)
 	if hi.largeValues {
 		return hi.advanceLargeVals()
 	}
@@ -244,38 +242,69 @@ func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
 			return err
 		}
-		firstKey, _, err := hi.valsC.Seek(hi.from)
-		if err != nil {
-			return err
+		// Create step-prefixed seek: [^step][from][startTxNum]
+		invertedStep := ^hi.step
+		if len(hi.from) == 0 {
+			seek = make([]byte, 8+8)
+			binary.BigEndian.PutUint64(seek[:8], invertedStep)
+			copy(seek[8:], hi.startTxKey[:])
+		} else {
+			seek = make([]byte, 8+len(hi.from)+8)
+			binary.BigEndian.PutUint64(seek[:8], invertedStep)
+			copy(seek[8:8+len(hi.from)], hi.from)
+			copy(seek[8+len(hi.from):], hi.startTxKey[:])
 		}
-		if firstKey == nil {
-			hi.nextKey = nil
-			return nil
-		}
-		seek = append(common.Copy(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
+
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
 			hi.nextKey = nil
 			return nil
 		}
-
-		seek = append(next, hi.startTxKey[:]...)
+		// Create step-prefixed seek: [^step][next][startTxNum]
+		invertedStep := ^hi.step
+		seek = make([]byte, 8+len(next)+8)
+		binary.BigEndian.PutUint64(seek[:8], invertedStep)
+		copy(seek[8:8+len(next)], next)
+		copy(seek[8+len(next):], hi.startTxKey[:])
 	}
-	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
+
+	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Next() {
 		if err != nil {
 			return err
 		}
-		if hi.toPrefix != nil && bytes.Compare(k[:len(k)-8], hi.toPrefix) >= 0 {
-			break
-		}
-		if !bytes.Equal(seek[:len(k)-8], k[:len(k)-8]) {
-			copy(seek[:len(k)-8], k[:len(k)-8])
+
+		// Parse step-prefixed key: [^step][addr][txNum]
+		if len(k) < 16 {
 			continue
 		}
-		hi.nextKey = k[:len(k)-8]
-		hi.nextVal = v
-		return nil
+
+		keyStep := binary.BigEndian.Uint64(k[:8])
+		if keyStep != ^hi.step {
+			// Moved to different step, stop
+			break
+		}
+
+		addrLen := len(k) - 16
+		if addrLen <= 0 {
+			continue
+		}
+		addr := k[8 : 8+addrLen]
+		txNum := binary.BigEndian.Uint64(k[8+addrLen:])
+
+		// Check bounds
+		if hi.toPrefix != nil && bytes.Compare(addr, hi.toPrefix) >= 0 {
+			break
+		}
+		if len(hi.from) > 0 && bytes.Compare(addr, hi.from) < 0 {
+			continue
+		}
+
+		if txNum <= hi.startTxNum {
+			hi.nextKey = addr
+			hi.nextVal = v
+			return nil
+		}
 	}
 	hi.nextKey = nil
 	return nil
@@ -287,41 +316,83 @@ func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 		if hi.valsCDup, err = hi.roTx.CursorDupSort(hi.valsTable); err != nil {
 			return err
 		}
-		seek = hi.from
+		// Create step-prefixed seek: [^step][from]
+		invertedStep := ^hi.step
+		if len(hi.from) == 0 {
+			seek = make([]byte, 8)
+			binary.BigEndian.PutUint64(seek[:8], invertedStep)
+		} else {
+			seek = make([]byte, 8+len(hi.from))
+			binary.BigEndian.PutUint64(seek[:8], invertedStep)
+			copy(seek[8:], hi.from)
+		}
+
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
 			hi.nextKey = nil
 			return nil
 		}
-		seek = next
+		// Create step-prefixed seek: [^step][next]
+		invertedStep := ^hi.step
+		seek = make([]byte, 8+len(next))
+		binary.BigEndian.PutUint64(seek[:8], invertedStep)
+		copy(seek[8:], next)
 	}
+
 	k, _, err := hi.valsCDup.Seek(seek)
 	if err != nil {
 		return err
 	}
+
 	for k != nil {
-		if hi.toPrefix != nil && bytes.Compare(k, hi.toPrefix) >= 0 {
-			break
-		}
-		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
-		if err != nil {
-			return err
-		}
-		if v == nil {
-			seek, ok := kv.NextSubtree(k)
-			if !ok {
-				break
-			}
-			if k, _, err = hi.valsCDup.Seek(seek); err != nil {
-				panic(err)
+		// Parse step-prefixed key: [^step][addr]
+		if len(k) < 8 {
+			k, _, err = hi.valsCDup.NextNoDup()
+			if err != nil {
+				return err
 			}
 			continue
 		}
 
-		hi.nextKey = k
-		hi.nextVal = v[8:]
-		return nil
+		keyStep := binary.BigEndian.Uint64(k[:8])
+		if keyStep != ^hi.step {
+			// Moved to different step, stop
+			break
+		}
+
+		addr := k[8:]
+
+		// Check bounds
+		if hi.toPrefix != nil && bytes.Compare(addr, hi.toPrefix) >= 0 {
+			break
+		}
+		if len(hi.from) > 0 && bytes.Compare(addr, hi.from) < 0 {
+			k, _, err = hi.valsCDup.NextNoDup()
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Find best value where txNum <= startTxNum
+		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
+		if err != nil {
+			return err
+		}
+		if v != nil && len(v) >= 8 {
+			txNum := binary.BigEndian.Uint64(v[:8])
+			if txNum <= hi.startTxNum {
+				hi.nextKey = addr
+				hi.nextVal = v[8:]
+				return nil
+			}
+		}
+
+		k, _, err = hi.valsCDup.NextNoDup()
+		if err != nil {
+			return err
+		}
 	}
 	hi.nextKey = nil
 	return nil
@@ -580,8 +651,12 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
-		hi.nextKey = k[:len(k)-8]
+		originalKey := k[:len(k)-8]                                  // Remove txNum suffix first
+		hi.nextKey = extractOriginalKeyFromStepPrefixed(originalKey) // Then extract addr from step-prefixed key
 		hi.nextVal = v
+		hi.nextStep = extractStepFromStepPrefixedKey(originalKey) // Extract step from step-prefixed key
+		txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+		_ = txNum // For debugging if needed
 		return nil
 	}
 	hi.nextKey = nil
@@ -620,9 +695,11 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			continue
 		}
 		foundTxNumVal := v[:8]
-		if hi.endTxNum < 0 || int(binary.BigEndian.Uint64(foundTxNumVal)) < hi.endTxNum {
-			hi.nextKey = k
+		foundTxNum := binary.BigEndian.Uint64(foundTxNumVal)
+		if hi.endTxNum < 0 || int(foundTxNum) < hi.endTxNum {
+			hi.nextKey = extractOriginalKeyFromStepPrefixed(k) // Extract original key from step-prefixed key
 			hi.nextVal = v[8:]
+			hi.nextStep = extractStepFromStepPrefixedKey(k) // Extract step from step-prefixed key
 			return nil
 		}
 		k, _, err = hi.valsCDup.NextNoDup()

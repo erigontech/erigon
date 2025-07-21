@@ -109,3 +109,7 @@ mdbx.dat
 mdbx.lck
 /*/**/LOCK
 /*/**/nodekey
+
+# Alex Sharov
+dev_spec.md
+dev_ctx.md

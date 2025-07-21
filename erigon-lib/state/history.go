@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -32,7 +31,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
@@ -500,40 +498,38 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	//}()
 
 	if w.largeValues {
-		lk := len(k)
+		w.historyKey = stepPrefixedHistoryKey(k, txNum, w.ii.aggregationStep, w.historyKey) // [^step][addr][txNum] -> value
 
-		w.historyKey = append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...)
-		historyKey := w.historyKey[:lk+8]
-
-		if err := w.historyVals.Collect(historyKey, original); err != nil {
+		if err := w.historyVals.Collect(w.historyKey, original); err != nil {
 			return err
 		}
 
 		if !w.ii.discard {
-			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
+			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], k); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	lk := len(k)
-	w.historyKey = append(append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...), original...)
-	historyKey := w.historyKey[:lk+8+len(original)]
-	historyKey1 := historyKey[:lk]
-	historyVal := historyKey[lk:]
-	invIdxVal := historyKey[:lk]
+	// Create step-prefixed key: [^step][addr] -> txNum + value
+	stepKey := stepPrefixedHistoryKeyAddr(k, txNum, w.ii.aggregationStep, nil)
+
+	// Value is txNum + original for non-large values
+	value := make([]byte, 8+len(original))
+	binary.BigEndian.PutUint64(value[:8], txNum)
+	copy(value[8:], original)
 
 	if len(original) > 2048 {
-		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(k))
+		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(k), "len", len(original), "max", 2048)
 		panic("History value is too large while largeValues=false")
 	}
 
-	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
+	if err := w.historyVals.Collect(stepKey, value); err != nil {
 		return err
 	}
 	if !w.ii.discard {
-		if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
+		if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], k); err != nil {
 			return err
 		}
 	}
@@ -627,7 +623,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	var (
 		_histComp *seg.Compressor
 		_efComp   *seg.Compressor
-		txKey     [8]byte
+		stepKey   [8]byte
 		err       error
 
 		historyPath   = h.vFilePath(step, step+1)
@@ -665,27 +661,72 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	}
 	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // coll+build must be fast - no Compression
 
-	keysCursor, err := roTx.CursorDupSort(h.keysTable)
-	if err != nil {
-		return HistoryCollation{}, fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
-	}
-	defer keysCursor.Close()
+	// Create step-prefixed key range for this step
+	invertedStep := ^step
+	binary.BigEndian.PutUint64(stepKey[:], invertedStep)
 
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	collector := etl.NewCollectorWithAllocator(h.filenameBase+".collate.hist", h.dirs.Tmp, etl.SmallSortableBuffers, h.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
 	collector.SortAndFlushInBackground(true)
 
-	for txnmb, k, err := keysCursor.Seek(txKey[:]); txnmb != nil; txnmb, k, err = keysCursor.Next() {
+	// Iterate over step-prefixed valuesTable to collect addr -> txNum mappings
+	var valuesCursor kv.Cursor
+	if h.historyLargeValues {
+		valuesCursor, err = roTx.Cursor(h.valuesTable)
+	} else {
+		valuesCursor, err = roTx.CursorDupSort(h.valuesTable)
+	}
+	if err != nil {
+		return HistoryCollation{}, fmt.Errorf("create %s values cursor: %w", h.filenameBase, err)
+	}
+	defer valuesCursor.Close()
+
+	for k, v, err := valuesCursor.Seek(stepKey[:]); k != nil; k, v, err = valuesCursor.Next() {
 		if err != nil {
-			return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.filenameBase, err)
+			return HistoryCollation{}, fmt.Errorf("iterate over %s values cursor: %w", h.filenameBase, err)
 		}
-		txNum := binary.BigEndian.Uint64(txnmb)
+
+		// Check if key still belongs to our step
+		if len(k) < 8 {
+			continue
+		}
+		keyStep := binary.BigEndian.Uint64(k[:8])
+		if keyStep != invertedStep {
+			break // We've moved past our step
+		}
+
+		// For step-prefixed keys, extract addr and get txNum from value
+		addr := k[8:] // Skip step prefix
+
+		var txNum uint64
+		if h.historyLargeValues {
+			// For large values: key=[^step][addr][txNum], extract txNum from key
+			if len(k) < 16 { // 8 bytes step + at least 8 bytes txNum
+				continue
+			}
+			addrLen := len(k) - 16 // Total - step(8) - txNum(8)
+			addr = k[8 : 8+addrLen]
+			txNum = binary.BigEndian.Uint64(k[8+addrLen:])
+		} else {
+			// For non-large values: key=[^step][addr], value=txNum+data, extract txNum from value
+			if len(v) < 8 {
+				continue
+			}
+			txNum = binary.BigEndian.Uint64(v[:8])
+		}
+
 		if txNum >= txTo { // [txFrom; txTo)
-			break
+			continue
 		}
-		if err := collector.Collect(k, txnmb); err != nil {
-			return HistoryCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", h.filenameBase, k, txNum, txnmb, err)
+		if txNum < txFrom {
+			continue
+		}
+
+		// Collect addr -> txNum for bitmap processing
+		txNumBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(txNumBytes, txNum)
+		if err := collector.Collect(addr, txNumBytes); err != nil {
+			return HistoryCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d: %w", h.filenameBase, addr, txNum, err)
 		}
 
 		select {
@@ -712,8 +753,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	}
 
 	var (
-		keyBuf  = make([]byte, 0, 256)
-		numBuf  = make([]byte, 8)
 		bitmap  = bitmapdb.NewBitmap64()
 		prevEf  []byte
 		prevKey []byte
@@ -748,36 +787,38 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			vTxNum := it.Next()
 			seqBuilder.AddOffset(vTxNum)
 
-			binary.BigEndian.PutUint64(numBuf, vTxNum)
+			var val []byte
 			if !h.historyLargeValues {
-				val, err := cd.SeekBothRange(prevKey, numBuf)
-				if err != nil {
-					return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.filenameBase, prevKey, err)
-				}
-				if val != nil && binary.BigEndian.Uint64(val) == vTxNum {
-					val = val[8:]
-				} else {
-					val = nil
-				}
+				// For non-large values: seek step-prefixed key [^step][addr] -> txNum+value
+				stepKey := stepPrefixedHistoryKeyAddr(prevKey, vTxNum, h.aggregationStep, nil)
 
-				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
-				if err := historyWriter.Add(histKeyBuf, val); err != nil {
-					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
+				// Use SeekBothRange to find all values for this stepKey, then find matching txNum
+				for v, err := cd.SeekBothRange(stepKey, nil); v != nil; _, v, err = cd.NextDup() {
+					if err != nil {
+						return fmt.Errorf("iterate %s step-prefixed values [%x]: %w", h.filenameBase, stepKey, err)
+					}
+					if len(v) >= 8 && binary.BigEndian.Uint64(v[:8]) == vTxNum {
+						val = v[8:] // Skip txNum, get value
+						break
+					}
 				}
-				continue
-			}
-			keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
-			key, val, err := c.SeekExact(keyBuf)
-			if err != nil {
-				return fmt.Errorf("seekExact %s history val [%x]: %w", h.filenameBase, key, err)
-			}
-			if len(val) == 0 {
-				val = nil
+			} else {
+				// For large values: seek step-prefixed key [^step][addr][txNum] -> value
+				stepKey := stepPrefixedHistoryKey(prevKey, vTxNum, h.aggregationStep, nil)
+				_, stepVal, err := c.SeekExact(stepKey)
+				if err != nil {
+					return fmt.Errorf("seekExact %s step-prefixed key [%x]: %w", h.filenameBase, stepKey, err)
+				}
+				if len(stepVal) == 0 {
+					val = nil
+				} else {
+					val = stepVal
+				}
 			}
 
 			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
 			if err := historyWriter.Add(histKeyBuf, val); err != nil {
-				return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, key, err)
+				return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
 			}
 		}
 		bitmap.Clear()
@@ -1127,7 +1168,6 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (
-		seek     = make([]byte, 8, 256)
 		valsCDup kv.RwCursorDupSort
 		valsC    kv.RwCursor
 		err      error
@@ -1147,47 +1187,68 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		defer valsC.Close()
 	}
 
-	var txFromBytes [8]byte
-
 	var pruned int
 	pruneValue := func(key []byte, minTxNum, maxTxNum uint64) error {
-		binary.BigEndian.PutUint64(txFromBytes[:], minTxNum)
 		if ht.h.historyLargeValues {
-			seek = append(bytes.Clone(key), txFromBytes[:]...)
-			for k, _, err := valsC.Seek(seek); k != nil; k, _, err = valsC.Next() {
-				if err != nil {
-					return fmt.Errorf("iterate over %s values cursor: %w", ht.iit.ii.filenameBase, err)
-				}
-				txNum := binary.BigEndian.Uint64(k[len(k)-8:])
-				if txNum > maxTxNum {
-					break
-				}
-				if !bytes.HasPrefix(k, key) {
-					break
-				}
-				if err := valsC.DeleteCurrent(); err != nil {
-					return err
+			// For large values with step-prefixed keys: [^step][addr][txNum] -> value
+			// Create step+addr prefix and iterate through all matching keys
+			minStep := minTxNum / ht.aggStep
+			maxStep := maxTxNum / ht.aggStep
+
+			for step := minStep; step <= maxStep; step++ {
+				invertedStep := ^step
+				stepAddrPrefix := make([]byte, 8+len(key))
+				binary.BigEndian.PutUint64(stepAddrPrefix[:8], invertedStep)
+				copy(stepAddrPrefix[8:], key)
+
+				for k, _, err := valsC.Seek(stepAddrPrefix); k != nil; k, _, err = valsC.Next() {
+					if err != nil {
+						return fmt.Errorf("iterate over %s values cursor: %w", ht.h.filenameBase, err)
+					}
+					if !bytes.HasPrefix(k, stepAddrPrefix) {
+						break
+					}
+					if len(k) >= len(stepAddrPrefix)+8 {
+						txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+						if txNum >= minTxNum && txNum <= maxTxNum {
+							if err := valsC.DeleteCurrent(); err != nil {
+								return err
+							}
+							pruned++
+						}
+					}
 				}
 			}
 		} else {
-			for v, err := valsCDup.SeekBothRange(key, txFromBytes[:]); v != nil; _, v, err = valsCDup.NextDup() {
-				if err != nil {
-					return fmt.Errorf("iterate over %s values cursor: %w", ht.iit.ii.filenameBase, err)
-				}
-				txNum := binary.BigEndian.Uint64(v)
-				if txNum > maxTxNum {
-					break
-				}
-				if err := valsCDup.DeleteCurrent(); err != nil {
-					return err
+			// For non-large values with step-prefixed keys: [^step][addr] -> txNum+value
+			// Create step+addr key and iterate through all values
+			minStep := minTxNum / ht.aggStep
+			maxStep := maxTxNum / ht.aggStep
+
+			for step := minStep; step <= maxStep; step++ {
+				invertedStep := ^step
+				stepKey := make([]byte, 8+len(key))
+				binary.BigEndian.PutUint64(stepKey[:8], invertedStep)
+				copy(stepKey[8:], key)
+
+				for v, err := valsCDup.SeekBothRange(stepKey, nil); v != nil; _, v, err = valsCDup.NextDup() {
+					if err != nil {
+						return fmt.Errorf("iterate over %s values cursor: %w", ht.h.filenameBase, err)
+					}
+					if len(v) >= 8 {
+						txNum := binary.BigEndian.Uint64(v[:8])
+						if txNum >= minTxNum && txNum <= maxTxNum {
+							if err := valsCDup.DeleteCurrent(); err != nil {
+								return err
+							}
+							pruned++
+						}
+					}
 				}
 			}
 		}
-
-		pruned++
 		return nil
 	}
-	mxPruneSizeHistory.AddInt(pruned)
 
 	if !forced && ht.h.snapshotsDisabled {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
@@ -1196,6 +1257,8 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	if err != nil {
 		return nil, err
 	}
+
+	mxPruneSizeHistory.AddInt(pruned)
 	st.PruneCountValues = uint64(pruned)
 	return st, err
 }
@@ -1292,6 +1355,64 @@ func historyKey(txNum uint64, key []byte, buf []byte) []byte {
 	return buf
 }
 
+// stepPrefixedHistoryKey creates step-prefixed key for largeValues: [^step][addr][txNum]
+func stepPrefixedHistoryKey(addr []byte, txNum uint64, aggregationStep uint64, buf []byte) []byte {
+	step := txNum / aggregationStep
+	invertedStep := ^step
+
+	totalLen := 8 + len(addr) + 8
+	if buf == nil || cap(buf) < totalLen {
+		buf = make([]byte, totalLen)
+	}
+	buf = buf[:totalLen]
+
+	binary.BigEndian.PutUint64(buf[:8], invertedStep)    // ^step
+	copy(buf[8:8+len(addr)], addr)                       // addr
+	binary.BigEndian.PutUint64(buf[8+len(addr):], txNum) // txNum
+	return buf
+}
+
+// stepPrefixedHistoryKeyAddr creates step-prefixed key for non-largeValues: [^step][addr]
+func stepPrefixedHistoryKeyAddr(addr []byte, txNum uint64, aggregationStep uint64, buf []byte) []byte {
+	step := txNum / aggregationStep
+	invertedStep := ^step
+
+	totalLen := 8 + len(addr)
+	if buf == nil || cap(buf) < totalLen {
+		buf = make([]byte, totalLen)
+	}
+	buf = buf[:totalLen]
+
+	binary.BigEndian.PutUint64(buf[:8], invertedStep) // ^step
+	copy(buf[8:], addr)                               // addr
+	return buf
+}
+
+// extractStepFromStepPrefixedKey extracts the original step from a step-prefixed key
+func extractStepFromStepPrefixedKey(stepPrefixedKey []byte) uint64 {
+	if len(stepPrefixedKey) < 8 {
+		panic(stepPrefixedKey)
+	}
+	invertedStep := binary.BigEndian.Uint64(stepPrefixedKey[:8])
+	return ^invertedStep
+}
+
+// extractOriginalKeyFromStepPrefixed extracts the original key (addr) from step-prefixed key
+func extractOriginalKeyFromStepPrefixed(stepPrefixedKey []byte) []byte {
+	if len(stepPrefixedKey) <= 8 {
+		panic(stepPrefixedKey)
+	}
+	return stepPrefixedKey[8:]
+}
+
+// extractTxNumFromStepPrefixedHistoryKey extracts txNum from step-prefixed history key format [^step][addr][txNum]
+func extractTxNumFromStepPrefixedHistoryKey(stepPrefixedKey []byte) uint64 {
+	if len(stepPrefixedKey) < 16 { // at least 8 bytes for step + 8 bytes for txNum
+		panic(stepPrefixedKey)
+	}
+	return binary.BigEndian.Uint64(stepPrefixedKey[len(stepPrefixedKey)-8:])
+}
+
 func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 	ht._bufTs = historyKey(txNum, key, ht._bufTs)
 	return ht._bufTs
@@ -1308,11 +1429,24 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 	if err != nil {
 		return nil, false, err
 	}
+
+	// Debug for specific failing case
+	if txNum == 953 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1c}) {
+		fmt.Printf("[DEBUG] HistorySeek files result: ok=%t, value=%x\n", ok, v)
+	}
+
 	if ok {
 		return v, true, nil
 	}
 
-	return ht.historySeekInDB(key, txNum, roTx)
+	dbResult, dbOk, dbErr := ht.historySeekInDB(key, txNum, roTx)
+
+	// Debug for specific failing case
+	if txNum == 953 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1c}) {
+		fmt.Printf("[DEBUG] HistorySeek DB result: ok=%t, value=%x\n", dbOk, dbResult)
+	}
+
+	return dbResult, dbOk, dbErr
 }
 
 func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
@@ -1337,39 +1471,209 @@ func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 }
 
 func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
+	targetStep := txNum / ht.aggStep
+
+	// Debug for specific failing case - scan all entries for this key
+	if txNum == 953 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1c}) {
+		fmt.Printf("[DEBUG] historySeekInDB: key=%x, txNum=%d, targetStep=%d\n", key, txNum, targetStep)
+		fmt.Printf("[DEBUG] Scanning ALL entries for key %x:\n", key)
+
+		if ht.h.historyLargeValues {
+			debugC, _ := ht.valsCursor(tx)
+			for k, v, err := debugC.First(); k != nil; k, v, err = debugC.Next() {
+				if err != nil {
+					break
+				}
+				if len(k) >= 16 {
+					addrLen := len(k) - 16
+					if addrLen > 0 && bytes.Equal(k[8:8+addrLen], key) {
+						step := ^binary.BigEndian.Uint64(k[:8])
+						keyTxNum := binary.BigEndian.Uint64(k[8+addrLen:])
+						fmt.Printf("[DEBUG]   step=%d, txNum=%d, value=%x\n", step, keyTxNum, v)
+					}
+				}
+			}
+		} else {
+			debugC, _ := ht.valsCursorDup(tx)
+			for k, _, err := debugC.First(); k != nil; k, _, err = debugC.NextNoDup() {
+				if err != nil {
+					break
+				}
+				if len(k) >= 8 && bytes.Equal(k[8:], key) {
+					step := ^binary.BigEndian.Uint64(k[:8])
+					fmt.Printf("[DEBUG]   Found key in step=%d\n", step)
+					for v, verr := debugC.SeekBothRange(k, nil); v != nil; _, v, verr = debugC.NextDup() {
+						if verr != nil {
+							break
+						}
+						if len(v) >= 8 {
+							keyTxNum := binary.BigEndian.Uint64(v[:8])
+							fmt.Printf("[DEBUG]     txNum=%d, value=%x\n", keyTxNum, v[8:])
+						}
+					}
+				}
+			}
+		}
+
+		// Debug: specifically check step 59 where the entry should be
+		fmt.Printf("[DEBUG] Specifically checking step 59:\n")
+		c, _ := ht.valsCursorDup(tx)
+		defer c.Close()
+		stepKey := make([]byte, 8+len(key))
+		binary.BigEndian.PutUint64(stepKey[:8], ^uint64(59))
+		copy(stepKey[8:], key)
+		fmt.Printf("[DEBUG] Looking for stepKey=%x\n", stepKey)
+		for v, err := c.SeekBothRange(stepKey, nil); v != nil; _, v, err = c.NextDup() {
+			if err != nil {
+				break
+			}
+			if len(v) >= 8 {
+				keyTxNum := binary.BigEndian.Uint64(v[:8])
+				fmt.Printf("[DEBUG] Step 59 entry: txNum=%d, value=%x\n", keyTxNum, v[8:])
+			}
+		}
+	}
+
 	if ht.h.historyLargeValues {
+		// For large values: search backward through steps for [^step][addr][txNum] -> value
 		c, err := ht.valsCursor(tx)
 		if err != nil {
 			return nil, false, err
 		}
-		seek := make([]byte, len(key)+8)
-		copy(seek, key)
-		binary.BigEndian.PutUint64(seek[len(key):], txNum)
 
-		kAndTxNum, val, err := c.Seek(seek)
-		if err != nil {
-			return nil, false, err
+		// Search from target step forward using stepsRangeInDB to determine range
+		_, maxStep := ht.stepsRangeInDB(tx)
+		for step := targetStep; step <= uint64(maxStep); step++ {
+			invertedStep := ^step
+			stepPrefix := make([]byte, 8+len(key))
+			binary.BigEndian.PutUint64(stepPrefix[:8], invertedStep)
+			copy(stepPrefix[8:], key)
+
+			// Seek to first entry for this step+addr combination
+			k, v, err := c.Seek(stepPrefix)
+			if err != nil {
+				return nil, false, err
+			}
+
+			// Find highest txNum <= targetTxNum in this step
+			var bestVal []byte
+			var found bool
+			for k != nil && bytes.HasPrefix(k, stepPrefix) {
+				addrLen := len(k) - 16
+				if addrLen == len(key) {
+					keyTxNum := binary.BigEndian.Uint64(k[8+addrLen:])
+					if keyTxNum <= txNum {
+						bestVal = v
+						found = true
+					} else {
+						break // txNums are sorted, no more matches
+					}
+				}
+				k, v, err = c.Next()
+				if err != nil {
+					return nil, false, err
+				}
+			}
+
+			if found {
+				return bestVal, true, nil
+			}
+
+			// Continue searching forward through steps
 		}
-		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
-			return nil, false, nil
-		}
-		// val == []byte{}, means key was created in this txNum and doesn't exist before.
-		return val, true, nil
+		return nil, false, nil
 	}
+
+	// For non-large values: search backward through steps for [^step][addr] -> txNum+value
 	c, err := ht.valsCursorDup(tx)
 	if err != nil {
 		return nil, false, err
 	}
-	val, err := c.SeekBothRange(key, ht.encodeTs(txNum, nil))
-	if err != nil {
-		return nil, false, err
+
+	// Search from target step forward using stepsRangeInDB to determine range
+	_, maxStep := ht.stepsRangeInDB(tx)
+	for step := targetStep; step <= uint64(maxStep); step++ {
+		stepKey := stepPrefixedHistoryKeyAddr(key, 0, ht.aggStep, nil) // Use step from loop
+		binary.BigEndian.PutUint64(stepKey[:8], ^step)
+
+		// Use SeekBothRange to find all values for this step+addr key
+		var bestVal []byte
+		var bestTxNum uint64
+		var found bool
+
+		for v, err := c.SeekBothRange(stepKey, nil); v != nil; _, v, err = c.NextDup() {
+			if err != nil {
+				return nil, false, err
+			}
+			keyTxNum := binary.BigEndian.Uint64(v[:8])
+
+			// Debug for specific failing case
+			if txNum == 953 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1c}) {
+				fmt.Printf("[DEBUG] historySeekInDB step=%d: found keyTxNum=%d <= %d? %t, value=%x\n", step, keyTxNum, txNum, keyTxNum <= txNum, v[8:])
+			}
+
+			if keyTxNum <= txNum && keyTxNum >= bestTxNum {
+				bestVal = v[8:] // Skip txNum, get value
+				bestTxNum = keyTxNum
+				found = true
+
+				// Debug for specific failing case
+				if txNum == 953 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1c}) {
+					fmt.Printf("[DEBUG] historySeekInDB step=%d: SELECTED keyTxNum=%d, value=%x\n", step, keyTxNum, bestVal)
+				}
+			}
+		}
+
+		if found {
+			// Debug for specific failing case
+			if txNum == 953 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1c}) {
+				fmt.Printf("[DEBUG] historySeekInDB step=%d returning: bestTxNum=%d, value=%x\n", step, bestTxNum, bestVal)
+			}
+			return bestVal, true, nil
+		}
+
+		// Continue searching forward through steps
 	}
-	if val == nil {
-		return nil, false, nil
+
+	// Debug for specific failing case - no result found
+	if txNum == 953 && bytes.Equal(key, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1c}) {
+		fmt.Printf("[DEBUG] historySeekInDB: NO RESULT FOUND\n")
 	}
-	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
-	v := val[8:]
-	return v, true, nil
+
+	return nil, false, nil
+}
+
+func (ht *HistoryRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	// For step-prefixed keys, get range from valuesTable
+	var fst, lst []byte
+
+	if ht.h.historyLargeValues {
+		fst, _ = kv.FirstKey(tx, ht.h.valuesTable)
+		lst, _ = kv.LastKey(tx, ht.h.valuesTable)
+	} else {
+		c, err := tx.CursorDupSort(ht.h.valuesTable)
+		if err != nil {
+			return 0, 0
+		}
+		defer c.Close()
+		fst, _, _ = c.First()
+		lst, _, _ = c.Last()
+	}
+
+	if len(fst) >= 8 {
+		invertedStep := binary.BigEndian.Uint64(fst[:8])
+		step := ^invertedStep
+		from = float64(step)
+	}
+	if len(lst) >= 8 {
+		invertedStep := binary.BigEndian.Uint64(lst[:8])
+		step := ^invertedStep
+		to = float64(step)
+	}
+	if to == 0 {
+		to = from
+	}
+	return from, to
 }
 
 func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
@@ -1388,23 +1692,18 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 		return nil, err
 	}
 
-	dbit := &HistoryRangeAsOfDB{
-		largeValues: ht.h.historyLargeValues,
-		roTx:        roTx,
-		valsTable:   ht.h.valuesTable,
-		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
-
-		startTxNum: startTxNum,
-
-		ctx: ctx, logger: ht.h.logger,
-	}
-	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
-	if err := dbit.advance(); err != nil {
-		dbit.Close() //it's responsibility of constructor (our) to close resource on error
+	// Get iterators for each relevant step (step-prefixed keys)
+	recentIterators, err := ht.recentRangeBySteps(ctx, startTxNum, from, to, asc, limit, roTx)
+	if err != nil {
 		return nil, err
 	}
 
-	return stream.UnionKV(hi, dbit, limit), nil
+	// Union frozen iterator with all recent step iterators
+	var result stream.KV = hi
+	for _, recentIt := range recentIterators {
+		result = stream.UnionKV(result, recentIt, limit)
+	}
+	return result, nil
 }
 
 func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
@@ -1491,50 +1790,119 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	if ht.h.historyLargeValues {
-		from := make([]byte, len(key)+8)
-		copy(from, key)
-		var fromTxNum uint64
-		if startTxNum >= 0 {
-			fromTxNum = uint64(startTxNum)
-		}
-		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
-		to := common.Copy(from)
-		toTxNum := uint64(math.MaxUint64)
-		if endTxNum >= 0 {
-			toTxNum = uint64(endTxNum)
-		}
-		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
-		it, err := roTx.Range(ht.h.valuesTable, from, to, asc, limit)
+		// For large values: [^step][addr][txNum] -> value
+		// For large values, we scan all and filter precisely
+		// This is inefficient but correct for the new step-prefixed format
+		it, err := roTx.Range(ht.h.valuesTable, nil, nil, asc, limit)
 		if err != nil {
 			return nil, err
 		}
+
 		return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-			if len(k) < 8 {
-				return 0, fmt.Errorf("unexpected large key length %d", len(k))
+			if len(k) < 16 { // Need at least 8 bytes step + 8 bytes txNum
+				return 0, nil
 			}
-			return binary.BigEndian.Uint64(k[len(k)-8:]), nil
+			// Extract addr from: [^step][addr][txNum]
+			addrStart := 8
+			addrEnd := len(k) - 8
+			if addrEnd <= addrStart || addrEnd-addrStart != len(key) {
+				return 0, nil
+			}
+			extractedAddr := k[addrStart:addrEnd]
+			if !bytes.Equal(extractedAddr, key) {
+				return 0, nil // Skip non-matching keys
+			}
+
+			txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+			if startTxNum >= 0 && int(txNum) < startTxNum {
+				return 0, nil
+			}
+			if endTxNum >= 0 && int(txNum) >= endTxNum {
+				return 0, nil
+			}
+			return txNum, nil
 		}), nil
 	}
 
-	var from, to []byte
-	if startTxNum >= 0 {
-		from = make([]byte, 8)
-		binary.BigEndian.PutUint64(from, uint64(startTxNum))
-	}
-	if endTxNum >= 0 {
-		to = make([]byte, 8)
-		binary.BigEndian.PutUint64(to, uint64(endTxNum))
-	}
-	it, err := roTx.RangeDupSort(ht.h.valuesTable, key, from, to, asc, limit)
+	// For small values: [^step][addr] -> txNum + value
+	// Full table scan with precise filtering
+	it, err := roTx.Range(ht.h.valuesTable, nil, nil, asc, limit)
 	if err != nil {
 		return nil, err
 	}
 	return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-		if len(v) < 8 {
-			return 0, fmt.Errorf("unexpected small value length %d", len(v))
+		if len(k) != 8+len(key) || len(v) < 8 {
+			return 0, nil
 		}
-		return binary.BigEndian.Uint64(v), nil
+		// Extract addr from: [^step][addr]
+		extractedAddr := k[8:]
+		if !bytes.Equal(extractedAddr, key) {
+			return 0, nil // Skip non-matching keys
+		}
+
+		txNum := binary.BigEndian.Uint64(v[:8])
+		if startTxNum >= 0 && int(txNum) < startTxNum {
+			return 0, nil
+		}
+		if endTxNum >= 0 && int(txNum) >= endTxNum {
+			return 0, nil
+		}
+		return txNum, nil
 	}), nil
+}
+
+func (ht *HistoryRoTx) recentRangeBySteps(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) ([]stream.KV, error) {
+	if roTx == nil {
+		return []stream.KV{}, nil
+	}
+
+	// Determine step range to scan - we need to scan ALL steps up to maxStep
+	// because data for any txNum <= startTxNum could be in any step
+	fromStep := uint64(0)
+
+	// Find max step in DB
+	_, maxStepFloat := ht.stepsRangeInDB(roTx)
+	toStep := uint64(maxStepFloat)
+
+	var iterators []stream.KV
+
+	if asc {
+		for step := fromStep; step <= toStep; step++ {
+			stepIt, err := ht.recentRangeForStep(ctx, step, startTxNum, from, to, asc, limit, roTx)
+			if err != nil {
+				return nil, err
+			}
+			if stepIt != nil {
+				iterators = append(iterators, stepIt)
+
+			}
+		}
+	} else {
+		panic("desc order not implemented")
+	}
+
+	return iterators, nil
+}
+
+func (ht *HistoryRoTx) recentRangeForStep(ctx context.Context, step, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	dbit := &HistoryRangeAsOfDB{
+		largeValues: ht.h.historyLargeValues,
+		roTx:        roTx,
+		valsTable:   ht.h.valuesTable,
+		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
+
+		startTxNum: startTxNum,
+		step:       step,
+
+		ctx: ctx, logger: ht.h.logger,
+	}
+	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
+	if err := dbit.advance(); err != nil {
+		dbit.Close()
+		return nil, err
+	}
+
+	return dbit, nil
 }
 
 func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
