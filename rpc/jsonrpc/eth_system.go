@@ -24,6 +24,7 @@ import (
 	"hash/crc32"
 	"math"
 	"math/big"
+	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
@@ -280,8 +281,13 @@ type EthConfigResp struct {
 
 // Config returns the HardFork config for current and upcoming forks:
 // assuming linear fork progression and ethereum-like schedule
-func (api *APIImpl) Config(ctx context.Context) (*EthConfigResp, error) {
-	timeNow := uint64(api.timeNow().Unix())
+func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error) {
+	var timeUnix uint64
+	if timeArg != nil {
+		timeUnix = (*timeArg).Uint64()
+	} else {
+		timeUnix = uint64(time.Now().Unix())
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -299,7 +305,7 @@ func (api *APIImpl) Config(ctx context.Context) (*EthConfigResp, error) {
 	forkIdCalculator := newForkIdWithBpoCalculator(genesis.Hash(), hardForkTimes, bpoForkTimes)
 
 	// current fork config
-	currentForkId := forkIdCalculator.Current(timeNow)
+	currentForkId := forkIdCalculator.Current(timeUnix)
 	response.CurrentForkId = currentForkId.Hash[:]
 	response.Current = fillForkConfig(chainConfig, currentForkId.Activation)
 	response.CurrentHash, err = checkSumConfig(response.Current)
