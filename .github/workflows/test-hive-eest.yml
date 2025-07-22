@@ -3,13 +3,20 @@ name: Hive EEST tests
 on:
   push:
     branches:
-        - release/*
-        - main
+        # - release/*
+        # - main
+        - michelemodolo/test_hive_selfhosted
   workflow_dispatch:
+
+concurrency:
+  # A static group is enough for now (dynamically-scoped groups are not needed yet)
+  group: hive-eest-tests
+  cancel-in-progress: false
 
 jobs:
   test-hive-eest:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: hive
     steps:
       - name: Checkout Hive
         uses: actions/checkout@v4
