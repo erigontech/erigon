@@ -25,16 +25,14 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/rlp"
-	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/enode"
-	"github.com/erigontech/erigon-p2p/forkid"
-	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
 // Handles RLP encoding/decoding for p2p.Msg
