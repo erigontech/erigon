@@ -88,9 +88,51 @@ func TestEthConfig(t *testing.T) {
 	}{
 		{
 			name:                 "hoodi prague scheduled but not activated",
-			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_prague_scheduled_but_not_activated_genesis.json"),
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_prague_scheduled_no_osaka_no_bpos_genesis.json"),
 			timeOverride:         time.Unix(1742999830, 0),
-			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_prague_scheduled_but_not_activated_response.json"),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_prague_scheduled_no_osaka_no_bpos_response_prague_not_activated.json"),
+		},
+		{
+			name:                 "hoodi osaka scheduled but not activated with 5 bpos none activated",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_genesis.json"),
+			timeOverride:         time.Unix(1753110000, 0),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_response_osaka_not_activated_bpo_none_activated.json"),
+		},
+		{
+			name:                 "hoodi osaka scheduled and activated with 5 bpos none activated",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_genesis.json"),
+			timeOverride:         time.Unix(1753110150, 0),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_response_osaka_activated_bpo_none_activated.json"),
+		},
+		{
+			name:                 "hoodi osaka scheduled and activated with 5 bpos bpo1 activated",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_genesis.json"),
+			timeOverride:         time.Unix(1753111150, 0),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_response_osaka_activated_bpo_1_activated.json"),
+		},
+		{
+			name:                 "hoodi osaka scheduled and activated with 5 bpos bpo2 activated",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_genesis.json"),
+			timeOverride:         time.Unix(1753112150, 0),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_response_osaka_activated_bpo_2_activated.json"),
+		},
+		{
+			name:                 "hoodi osaka scheduled and activated with 5 bpos bpo3 activated",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_genesis.json"),
+			timeOverride:         time.Unix(1753113150, 0),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_response_osaka_activated_bpo_3_activated.json"),
+		},
+		{
+			name:                 "hoodi osaka scheduled and activated with 5 bpos bpo4 activated",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_genesis.json"),
+			timeOverride:         time.Unix(1753114150, 0),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_response_osaka_activated_bpo_4_activated.json"),
+		},
+		{
+			name:                 "hoodi osaka scheduled and activated with 5 bpos bpo5 activated",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_genesis.json"),
+			timeOverride:         time.Unix(1753115150, 0),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_response_osaka_activated_bpo_5_activated.json"),
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
