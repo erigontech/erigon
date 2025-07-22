@@ -20,8 +20,8 @@ import (
 // ii) existence filter: kvei
 // iii) bt index: btree index; e.g. .bt
 
-// snapshot name schema holder and parser
-// each entity holds one schema.
+// "snapshot files" name schema holder and parser
+// each entity has one schema.
 type SnapNameSchema interface {
 	DataTag() string
 	AccessorList() statecfg.Accessors
@@ -194,7 +194,6 @@ func (s *E2SnapSchema) DataFileCompression() seg.FileCompression {
 }
 
 // E3 Schema
-
 type E3SnapSchema struct {
 	stepSize uint64
 
@@ -421,4 +420,60 @@ func (s *E3SnapSchema) FileExtensions() (extensions []string) {
 	}
 
 	return
+}
+
+// these are kv + kvi or bt/kvei residing in same folder snapshots/forkables.
+func NewForkableSnapSchema(cfg statecfg.ForkableCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize)
+	b.Data(dirs.SnapForkable, cfg.Name, DataExtensionKv, cfg.Compression)
+	if cfg.Accessors&statecfg.AccessorBTree != 0 {
+		b.BtIndex()
+	}
+	if cfg.Accessors&statecfg.AccessorHashMap != 0 {
+		b.Accessor(dirs.SnapForkable)
+	}
+	if cfg.Accessors&statecfg.AccessorExistence != 0 {
+		b.Existence()
+	}
+
+	return b.Build()
+}
+
+func NewDomainSnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.Compression)
+
+	if cfg.Accessors.Has(statecfg.AccessorBTree) {
+		b.BtIndex()
+	}
+	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
+		// kvi in same folder
+		b.Accessor(dirs.SnapDomain)
+	}
+	if cfg.Accessors.Has(statecfg.AccessorExistence) {
+		b.Existence()
+	}
+
+	return b.Build()
+}
+
+func NewHistorySnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapHistory, cfg.Name.String(), DataExtensionV, cfg.Compression)
+
+	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
+		b.Accessor(dirs.SnapAccessors)
+	}
+
+	return b.Build()
+}
+
+func NewIISnapSchema(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapIdx, cfg.Name.String(), DataExtensionEf, cfg.Compression)
+	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
+		b.Accessor(dirs.SnapAccessors)
+	}
+
+	return b.Build()
 }

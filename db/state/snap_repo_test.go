@@ -342,8 +342,8 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	})
 	defer commitmentR.Close()
 
-	accountsR.cfg.Integrity = NewDependencyIntegrityChecker(dirs, log.New())
-	accountsR.cfg.Integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
+	accountsR.integrity = NewDependencyIntegrityChecker(dirs, log.New())
+	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
 		entity: FromDomain(kv.CommitmentDomain),
 		//filesGetter: ,
 		filesGetter: func() *btree.BTreeG[*FilesItem] {

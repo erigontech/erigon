@@ -43,6 +43,7 @@ type SnapshotRepo struct {
 	schema    SnapNameSchema
 	accessors statecfg.Accessors
 	stepSize  uint64
+	integrity *DependencyIntegrityChecker
 
 	logger log.Logger
 }
@@ -81,7 +82,7 @@ func (f *SnapshotRepo) OpenFolder() error {
 }
 
 func (f *SnapshotRepo) SetIntegrityChecker(integrity *DependencyIntegrityChecker) {
-	f.cfg.Integrity = integrity
+	f.integrity = integrity
 }
 
 func (f *SnapshotRepo) Schema() SnapNameSchema {
@@ -241,7 +242,7 @@ func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
 }
 
 func (f *SnapshotRepo) Garbage(vfs visibleFiles, merged *FilesItem) (outs []*FilesItem) {
-	checker := f.cfg.Integrity
+	checker := f.integrity
 	var cchecker func(startTxNum, endTxNum uint64) bool
 	if checker != nil {
 		cchecker = func(startTxNum, endTxNum uint64) bool {
@@ -462,7 +463,7 @@ func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 }
 
 func (f *SnapshotRepo) calcVisibleFiles(to RootNum) (roItems []visibleFile) {
-	checker := f.cfg.Integrity
+	checker := f.integrity
 	var cchecker func(startTxNum, endTxNum uint64) bool
 	if checker != nil {
 		cchecker = func(startTxNum, endTxNum uint64) bool {

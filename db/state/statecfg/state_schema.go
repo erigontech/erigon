@@ -89,6 +89,8 @@ type SchemaGen struct {
 	LogTopicIdx      InvIdxCfg
 	TracesFromIdx    InvIdxCfg
 	TracesToIdx      InvIdxCfg
+
+	RCacheForkable ForkableCfg
 }
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
@@ -311,6 +313,12 @@ var Schema = SchemaGen{
 		Compression: seg.CompressNone,
 		Name:        kv.TracesToIdx,
 		Accessors:   AccessorHashMap,
+	},
+	RCacheForkable: ForkableCfg{
+		Name:        "rcache",
+		valsTbl:     kv.TblRCacheFVAls,
+		Accessors:   AccessorHashMap,
+		Compression: seg.CompressNone,
 	},
 }
 

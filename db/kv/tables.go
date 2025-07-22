@@ -180,6 +180,8 @@ const (
 	TblReceiptHistoryVals = "ReceiptHistoryVals"
 	TblReceiptIdx         = "ReceiptIdx"
 
+	TblRCacheFVAls = "RcacheFVals" // forkable tbl
+
 	TblRCacheVals        = "ReceiptCacheVals"
 	TblRCacheHistoryKeys = "ReceiptCacheHistoryKeys"
 	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
