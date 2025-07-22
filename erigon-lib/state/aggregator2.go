@@ -99,6 +99,8 @@ type SchemaGen struct {
 	LogTopicIdx      iiCfg
 	TracesFromIdx    iiCfg
 	TracesToIdx      iiCfg
+
+	RCacheForkable ForkableCfg
 }
 
 type Versioned interface {
@@ -327,6 +329,12 @@ var Schema = SchemaGen{
 		Compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
 		Accessors:   AccessorHashMap,
+	},
+	RCacheForkable: ForkableCfg{
+		name:        "rcache",
+		valsTbl:     kv.TblRCacheFVAls,
+		accessors:   AccessorHashMap,
+		compression: seg.CompressNone,
 	},
 }
 
