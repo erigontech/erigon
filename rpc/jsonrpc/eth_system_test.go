@@ -85,6 +85,7 @@ func TestEthConfig(t *testing.T) {
 		genesisFilePath      string
 		timeArg              hexutil.Uint64
 		wantResponseFilePath string
+		wantIsError          error
 	}{
 		{
 			name:                 "hoodi prague scheduled but not activated",
@@ -140,6 +141,13 @@ func TestEthConfig(t *testing.T) {
 			timeArg:              hexutil.Uint64(1746612311 + 1000),
 			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_response_prague_activated.json"),
 		},
+		{
+			name:                 "no support for timestamps before cancun",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_genesis.json"),
+			timeArg:              hexutil.Uint64(1710338135 - 1000),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "response_empty.json"),
+			wantIsError:          ErrForkTimeBeforeCancun,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -156,7 +164,7 @@ func TestEthConfig(t *testing.T) {
 
 			timeArg := test.timeArg
 			result, err := eth.Config(t.Context(), &timeArg)
-			require.NoError(t, err)
+			require.ErrorIs(t, err, test.wantIsError)
 			haveResponseBytes, err := json.MarshalIndent(result, "", "    ")
 			require.NoError(t, err)
 			wantResponseBytes, err := os.ReadFile(test.wantResponseFilePath)

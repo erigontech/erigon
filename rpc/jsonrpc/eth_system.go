@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"math"
@@ -298,6 +299,9 @@ func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthCo
 	if err != nil {
 		return nil, err
 	}
+	if !chainConfig.IsCancun(timeUnix) {
+		return &EthConfigResp{}, fmt.Errorf("not supported: %w: time=%v", ErrForkTimeBeforeCancun, timeUnix)
+	}
 
 	response := EthConfigResp{}
 	hardForkBlockNums, hardForkTimes := forkid.GatherForks(chainConfig, genesis.Time())
@@ -344,6 +348,8 @@ func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthCo
 
 	return &response, nil
 }
+
+var ErrForkTimeBeforeCancun = errors.New("fork time before cancun")
 
 func fillForkConfig(chainConfig *chain.Config, activationTime uint64) *EthHardForkConfig {
 	forkConfig := EthHardForkConfig{}
