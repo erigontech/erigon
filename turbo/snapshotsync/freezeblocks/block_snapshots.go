@@ -394,16 +394,26 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	return deleted + deletedBorBlocks, nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinishRetire func() error) {
+func (br *BlockRetire) RetireBlocksInBackground(
+	ctx context.Context,
+	minBlockNum,
+	maxBlockNum uint64,
+	lvl log.Lvl,
+	seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
+	onDeleteSnapshots func(l []string) error,
+	onFinishRetire func() error,
+	onDone func(),
+) bool {
 	if maxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
 
 	if !br.working.CompareAndSwap(false, true) {
-		return
+		return false
 	}
 
 	go func() {
+		defer onDone()
 		defer br.working.Store(false)
 
 		if br.snBuildAllowed != nil {
@@ -424,6 +434,8 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 			return
 		}
 	}()
+
+	return true
 }
 
 func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum uint64, requestedMaxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {

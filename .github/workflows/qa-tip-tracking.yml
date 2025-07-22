@@ -3,9 +3,7 @@ name: QA - Tip tracking
 on:
   push:
     branches:
-      - 'release/3.*'
-  schedule:
-    - cron: '0 20 * * 1-6'  # Run every night at 08:00 PM UTC except Sunday
+      - 'release/3.1'
   workflow_dispatch:     # Run manually
 
 concurrency:
@@ -14,7 +12,7 @@ concurrency:
 
 jobs:
   mainnet-tip-tracking-test:
-    runs-on: [self-hosted, qa, Erigon3]
+    runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     timeout-minutes: 600
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
