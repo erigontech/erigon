@@ -1312,71 +1312,73 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					}
 				}
 
-				result := blockExecutor.results[len(blockExecutor.results)-1]
+				if blockResult.BlockNum > 0 {
+					result := blockExecutor.results[len(blockExecutor.results)-1]
 
-				stateUpdates, err := func() (state.StateUpdates, error) {
-					pe.RLock()
-					defer pe.RUnlock()
+					stateUpdates, err := func() (state.StateUpdates, error) {
+						pe.RLock()
+						defer pe.RUnlock()
 
-					ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))))
-					ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
-					ibs.SetVersion(result.Version().Incarnation)
+						ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))))
+						ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
+						ibs.SetVersion(result.Version().Incarnation)
 
-					txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
+						txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
-					syscall := func(contract common.Address, data []byte) ([]byte, error) {
-						ret, err := core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, pe.hooks, vm.Config{})
-						if err != nil {
-							return nil, err
+						syscall := func(contract common.Address, data []byte) ([]byte, error) {
+							ret, err := core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, pe.hooks, vm.Config{})
+							if err != nil {
+								return nil, err
+							}
+							result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
+							return ret, err
 						}
-						result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
-						return ret, err
-					}
 
-					chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-					if pe.isMining {
-						_, _, err =
-							pe.cfg.engine.FinalizeAndAssemble(
-								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-								txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
-					} else {
-						_, err =
-							pe.cfg.engine.Finalize(
-								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-								txTask.Withdrawals, chainReader, syscall, false, pe.logger)
-					}
+						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
+						if pe.isMining {
+							_, _, err =
+								pe.cfg.engine.FinalizeAndAssemble(
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+									txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
+						} else {
+							_, err =
+								pe.cfg.engine.Finalize(
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+									txTask.Withdrawals, chainReader, syscall, false, pe.logger)
+						}
+
+						if err != nil {
+							return state.StateUpdates{}, fmt.Errorf("can't finalize block: %w", err)
+						}
+
+						stateWriter := state.NewBufferedWriter(pe.rs, nil)
+
+						if err = ibs.MakeWriteSet(pe.cfg.chainConfig.Rules(result.BlockNumber(), result.BlockTime()), stateWriter); err != nil {
+							return state.StateUpdates{}, err
+						}
+
+						return stateWriter.WriteSet(), nil
+					}()
 
 					if err != nil {
-						return state.StateUpdates{}, fmt.Errorf("can't finalize block: %w", err)
+						return err
 					}
 
-					stateWriter := state.NewBufferedWriter(pe.rs, nil)
-
-					if err = ibs.MakeWriteSet(pe.cfg.chainConfig.Rules(result.BlockNumber(), result.BlockTime()), stateWriter); err != nil {
-						return state.StateUpdates{}, err
+					blockResult.ApplyCount += stateUpdates.UpdateCount()
+					if dbg.TraceApply && traceBlock(blockResult.BlockNum) {
+						stateUpdates.TraceBlockUpdates(blockResult.BlockNum, true)
+						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 					}
 
-					return stateWriter.WriteSet(), nil
-				}()
-
-				if err != nil {
-					return err
-				}
-
-				blockResult.ApplyCount += stateUpdates.UpdateCount()
-				if dbg.TraceApply && traceBlock(blockResult.BlockNum) {
-					stateUpdates.TraceBlockUpdates(blockResult.BlockNum, true)
-					fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
-				}
-
-				blockExecutor.applyResults <- &txResult{
-					blockNum:     blockResult.BlockNum,
-					txNum:        blockResult.lastTxNum,
-					blockTime:    blockResult.BlockTime,
-					stateUpdates: stateUpdates,
-					logs:         result.Logs,
-					traceFroms:   result.TraceFroms,
-					traceTos:     result.TraceTos,
+					blockExecutor.applyResults <- &txResult{
+						blockNum:     blockResult.BlockNum,
+						txNum:        blockResult.lastTxNum,
+						blockTime:    blockResult.BlockTime,
+						stateUpdates: stateUpdates,
+						logs:         result.Logs,
+						traceFroms:   result.TraceFroms,
+						traceTos:     result.TraceTos,
+					}
 				}
 
 				if !blockExecutor.execStarted.IsZero() {
