@@ -1187,6 +1187,17 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, row int, hashedK
 	if storageIsSet {
 		account.Root = common.Hash(storageRootHash)
 		accountNode.Storage = trie.NewHashNode(storageRootHash)
+		// if hph.depths[row] < 64 && c.hashedExtLen+hph.depths[row] > 64 {
+		if c.hashedExtLen > 64 {
+			singleton := &trie.ShortNode{
+				Key: c.hashedExtension[65-hph.depths[row] : c.hashedExtLen],
+				// Val: accountNode.Storage,
+				Val: trie.ValueNode(c.Storage[:c.StorageLen]),
+			}
+			fmt.Printf("adjustment from %d to %d for account %x\n", c.hashedExtLen, 65-hph.depths[row], c.accountAddr[:c.accountAddrLen])
+			fmt.Printf("witnessCreateAccountNode: singleton storageRootHash %x for account %x\n", c.hashedExtension[65-hph.depths[row]:c.hashedExtLen], c.accountAddr[:c.accountAddrLen])
+			accountNode.Storage = singleton
+		}
 		fmt.Printf("witnessCreateAccountNode: storageRootHash %x for account %x\n", storageRootHash, c.accountAddr[:c.accountAddrLen])
 	}
 	return accountNode, nil
@@ -1274,10 +1285,13 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 					if err != nil {
 						return nil, err
 					}
-					// if cellToExpand.storageAddrLen > 0 {
-					// 	accNode.Storage = nextNode // attach storage node to the account node
-					// 	accNode.RootCorrect = false
+					// if depthAdjusted {
+					// 	accNode.Storage = &trie.ShortNode{Key: cellToExpand.hashedExtension[adjustedPos:cellToExpand.hashedExtLen], Val: &trie.FullNode{}}}
 					// }
+					if cellToExpand.storageAddrLen > 0 {
+						accNode.Storage = nextNode // attach storage node to the account node
+						accNode.RootCorrect = false
+					}
 
 					nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
 					extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
