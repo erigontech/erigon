@@ -80,8 +80,9 @@ type ConsensusHandlers struct {
 
 const (
 	SuccessfulResponsePrefix  = 0x00
-	RateLimitedPrefix         = 0x01
-	ResourceUnavailablePrefix = 0x02
+	InvalidRequestPrefix      = 0x01
+	ServerErrorPrefix         = 0x02
+	ResourceUnavailablePrefix = 0x03
 )
 
 func NewConsensusHandlers(
