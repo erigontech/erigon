@@ -177,10 +177,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 
-	committeesPerSlot := uint64(len(activeIdxs)) / a.beaconChainCfg.SlotsPerEpoch / a.beaconChainCfg.TargetCommitteeSize
-	if a.beaconChainCfg.MaxCommitteesPerSlot < committeesPerSlot {
-		committeesPerSlot = a.beaconChainCfg.MaxCommitteesPerSlot
-	}
+	committeesPerSlot := min(a.beaconChainCfg.MaxCommitteesPerSlot, uint64(len(activeIdxs))/a.beaconChainCfg.SlotsPerEpoch/a.beaconChainCfg.TargetCommitteeSize)
 	if committeesPerSlot < 1 {
 		committeesPerSlot = 1
 	}
