@@ -5,6 +5,7 @@ import * as github from '@actions/github';
 const acceptedWorkflows = [
     'QA - RPC Integration Tests',
     'QA - RPC Integration Tests (Polygon)',
+    'QA - RPC Integration Tests (Gnosis)',
     'QA - RPC Performance Tests',
     'QA - Snapshot Download',
     'QA - Sync from scratch',
@@ -16,6 +17,9 @@ const acceptedWorkflows = [
     'QA - Constrained Tip tracking',
     'QA - TxPool performance test',
     'QA - Clean exit (block downloading)',
+    'Kurtosis Assertoor GitHub Action',
+    'Hive EEST tests',
+    'Consensus spec',
 ];
 
 type SummaryRow = (string | { data: string; header?: true })[];
@@ -60,8 +64,8 @@ function mapConclusionToIcon(conclusion: string | null, status: string | null): 
     switch (conclusion) {
         case 'success': return '✅';
         case 'failure': return '❌';
-        case 'cancelled': return '🚫';  // The run was cancelled before it completed.
-        case 'skipped': return '⏭️';  // The run was skipped.
+        case 'cancelled': return '🗑️️';  // The run was cancelled before it completed.
+        case 'skipped': return '⏩';  // The run was skipped.
         case 'timed_out': return '⏰️';
         case 'neutral': return '⚪️';
         case 'stale': return '🕸️';  // The run was marked stale by GitHub because it took too long.
@@ -102,8 +106,8 @@ function mapChain(chain: string | null): string {
     return chain;
 }
 
-// Removes QA and chain information from a job name
-function removeQAAndChainInfo(jobName: string): string {
+// Removes 'QA' and chain information from a job name
+function cleanJobName(jobName: string): string {
     return jobName
         .replace(/^QA - /, '')
         .replace(/\s*\(Polygon\)/i, '')
@@ -118,15 +122,17 @@ function removeQAAndChainInfo(jobName: string): string {
 }
 
 // This script generates a summary of GitHub Actions workflow runs and jobs
-async function run() {
+export async function run() {
     try {
         // Input
         const token = process.env.GITHUB_TOKEN as string;  // The GitHub token for authentication
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
-        const branch= process.env.BRANCH_NAME ?? github.context.ref.replace(/^refs\/\w+\//, '');   // The branch name, defaults to the current branch
-        const { owner, repo } = github.context.repo;
-        //const {owner, repo} = {owner: 'erigontech', repo: 'erigon'};  // For testing purposes, you can hardcode the owner and repo
+        // The branch name, defaults to the current branch or 'main' if not in GitHub Actions
+        const branch= process.env.BRANCH_NAME ?? (github.context.ref ? github.context.ref.replace(/^refs\/\w+\//, '') : 'main');
+        // Use github.context.repo if available, otherwise use default values
+        const repoArray = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/') : ['erigontech', 'erigon'];
+        const { owner, repo } = github.context.action ? github.context.repo : { owner: repoArray[0], repo: repoArray[1] };
 
         endDate.setUTCHours(23, 59, 59, 999);
 
@@ -217,7 +223,7 @@ async function run() {
         const days = getDateStringsBetween(start, end);
 
         // Prepare the summary table header
-        const table: SummaryRow[] = [
+        const table: SummaryRow[] = [  // format: [Test, Job, Date1, Date2, ...]
             [ // header row
                 {data: 'Test', header: true},
                 {data: 'Job', header: true},
@@ -236,20 +242,37 @@ async function run() {
         for (const workflowSummary of summaries) {
             for (const jobSummary of workflowSummary.jobs) {
 
+                // Map the job name to a more readable format
                 let jobName = mapChain(workflowSummary.name)
-
                 if (jobName == workflowSummary.name) {
                     jobName = mapChain(jobSummary.name);
                 }
 
-                let row = [removeQAAndChainInfo(workflowSummary.name), jobName]
+                // order the results by date
+                if (jobSummary.results.length > 0) {
+                    jobSummary.results.sort(
+                        (a, b) => {
+                            const dateA = Date.parse(a.date);
+                            const dateB = Date.parse(b.date);
+                            if (isNaN(dateA) && isNaN(dateB)) return 0;
+                            if (isNaN(dateA)) return 1;
+                            if (isNaN(dateB)) return -1;
+                            if (dateA === dateB) return a.runId - b.runId;  // If dates are equal, sort by runId
+                            return dateA - dateB;
+                        })
+                }
+
+                // Create a row for the job
+                let testName = cleanJobName(workflowSummary.name)
+                let row = [testName, jobName]
                 let jobConclusions = [];
 
+                // Fill the row with conclusions for each day
                 for (const day of days) {
                     let dayConclusions = '';
 
+                    // find results for the current day
                     for (const result of jobSummary.results) {
-
                         if (result.date === day) {
                             if (dayConclusions !== '') {
                                 dayConclusions += ' ';
@@ -267,6 +290,22 @@ async function run() {
             }
         }
 
+        // Order the table by the first column (Test name) except for the header row
+        const isHeaderRow = (row: SummaryRow): boolean => {
+            return typeof row[0] === 'object' && 'header' in row[0] && row[0].header === true;
+        };
+
+        table.sort((a, b) => {
+            // If row 'a' is the header row, it should always come before any other row
+            if (isHeaderRow(a)) return -1;
+            // If row 'b' is the header row, it should always come after any other row
+            if (isHeaderRow(b)) return 1;
+            // Otherwise, sort normally
+            if (a[0] < b[0]) return -1;
+            if (a[0] > b[0]) return 1;
+            return 0;
+        });
+
         // Write the summary table to the GitHub Actions summary
         await core.summary
             .addHeading('Test Report - Branch ' + branch)
@@ -279,6 +318,9 @@ async function run() {
     }
 }
 
-run();
+// If this script is run directly, execute the run function
+if (import.meta.url === `file://${process.argv[1]}`) {
+    run();
+}
 
 // see https://github.blog/news-insights/product-news/supercharging-github-actions-with-job-summaries/
