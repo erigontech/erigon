@@ -238,9 +238,9 @@ var (
 
 // See EIP-7840: Add blob schedule to EL config files
 type BlobConfig struct {
-	Target                uint64 `json:"target"`
-	Max                   uint64 `json:"max"`
 	BaseFeeUpdateFraction uint64 `json:"baseFeeUpdateFraction"`
+	Max                   uint64 `json:"max"`
+	Target                uint64 `json:"target"`
 }
 
 var DefaultCancunBlobConfig = BlobConfig{

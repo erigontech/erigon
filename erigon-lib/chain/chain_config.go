@@ -410,6 +410,26 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	return ConfigValueLookup(c.parsedBlobSchedule, time)
 }
 
+func (c *Config) GetBpoTimes() []uint64 {
+	bpos := make([]uint64, 0, 5)
+	if c.Bpo1Time != nil {
+		bpos = append(bpos, c.Bpo1Time.Uint64())
+	}
+	if c.Bpo2Time != nil {
+		bpos = append(bpos, c.Bpo2Time.Uint64())
+	}
+	if c.Bpo3Time != nil {
+		bpos = append(bpos, c.Bpo3Time.Uint64())
+	}
+	if c.Bpo4Time != nil {
+		bpos = append(bpos, c.Bpo4Time.Uint64())
+	}
+	if c.Bpo5Time != nil {
+		bpos = append(bpos, c.Bpo5Time.Uint64())
+	}
+	return bpos
+}
+
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
 	return c.GetBlobConfig(time).Max
 }
@@ -441,6 +461,20 @@ func (c *Config) SecondsPerSlot() uint64 {
 		return 5 // Gnosis
 	}
 	return 12 // Ethereum
+}
+
+func (c *Config) SystemContracts(time uint64) map[string]common.Address {
+	contracts := map[string]common.Address{}
+	if c.IsCancun(time) {
+		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
+	}
+	if c.IsPrague(time) {
+		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
+		contracts["DEPOSIT_CONTRACT_ADDRESS"] = c.DepositContract
+		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
+		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
+	}
+	return contracts
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
