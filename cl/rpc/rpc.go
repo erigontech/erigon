@@ -335,8 +335,20 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinel.ResponseData) ([]resp
 			version: version,
 			raw:     raw,
 		})
-		// TODO(issues/5884): figure out why there is this extra byte.
-		r.ReadByte()
+
+		// read next result byte
+		byt, err := r.ReadByte()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Debug("failed to read byte", "err", err)
+			return nil, message.Peer.Pid, err
+		}
+		if byt != 0 {
+			log.Debug("received unexpected response prefix", "prefix", byt)
+			return nil, message.Peer.Pid, fmt.Errorf("received unexpected response prefix: %d", byt)
+		}
 	}
 	return responsePacket, message.Peer.Pid, nil
 }
