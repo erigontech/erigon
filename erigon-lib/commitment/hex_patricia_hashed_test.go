@@ -1868,6 +1868,9 @@ func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefix []byte, keyL
 		if len(plainKeys) == 0 {
 			plainKeys = append(plainKeys, key)
 			hashedKeys = append(hashedKeys, hashed)
+			if keyCount == 1 {
+				return plainKeys, hashedKeys
+			}
 			continue
 		}
 		constPrefixOffset := len(constPrefix)
@@ -1936,8 +1939,30 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
 	}
 
+	// t.Run("JustRoot", func(t *testing.T) {
+	// 	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)
+
+	// 	addrWithSingleton := common.Copy(plainKeysList[0])
+	// 	builder := NewUpdateBuilder()
+	// 	for i := 0; i < len(plainKeysList); i++ {
+	// 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+	// 	}
+
+	// 	buildTrieAndWitness(t, builder, addrWithSingleton)
+	// })
 	t.Run("RandomAccountsOnly", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 5)
+
+		addrWithSingleton := common.Copy(plainKeysList[0])
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+
+		buildTrieAndWitness(t, builder, addrWithSingleton)
+	})
+	t.Run("RandomAccountsOnlyWithCPrefix", func(t *testing.T) {
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 4, 5)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
 		builder := NewUpdateBuilder()
