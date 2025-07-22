@@ -57,15 +57,17 @@ var databaseTablesCfg = kv.TableCfg{
 }
 
 type MdbxStore struct {
-	db *polygoncommon.Database
+	db     *polygoncommon.Database
+	logger log.Logger
 }
 
 type txStore struct {
-	tx kv.Tx
+	tx     kv.Tx
+	logger log.Logger
 }
 
 func NewMdbxStore(dataDir string, logger log.Logger, accede bool, roTxLimit int64) *MdbxStore {
-	return &MdbxStore{db: polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
+	return &MdbxStore{db: polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit), logger: logger}
 }
 
 func NewDbStore(db kv.RoDB) *MdbxStore {
@@ -104,7 +106,7 @@ func (s *MdbxStore) LastEventId(ctx context.Context) (uint64, error) {
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.LastEventId(ctx)
+	return txStore{tx, s.logger}.LastEventId(ctx)
 }
 
 // LastProcessedEventId gets the last seen event Id in the BorEventNums table
@@ -115,7 +117,7 @@ func (s *MdbxStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.LastProcessedEventId(ctx)
+	return txStore{tx, s.logger}.LastProcessedEventId(ctx)
 }
 
 func (s *MdbxStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo, bool, error) {
@@ -125,7 +127,7 @@ func (s *MdbxStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockI
 	}
 
 	defer tx.Rollback()
-	return txStore{tx}.LastProcessedBlockInfo(ctx)
+	return txStore{tx, s.logger}.LastProcessedBlockInfo(ctx)
 }
 
 func (s *MdbxStore) PutProcessedBlockInfo(ctx context.Context, info []ProcessedBlockInfo) error {
@@ -136,7 +138,7 @@ func (s *MdbxStore) PutProcessedBlockInfo(ctx context.Context, info []ProcessedB
 
 	defer tx.Rollback()
 
-	if err = (txStore{tx}).PutProcessedBlockInfo(ctx, info); err != nil {
+	if err = (txStore{tx, s.logger}).PutProcessedBlockInfo(ctx, info); err != nil {
 		return err
 	}
 
@@ -167,7 +169,7 @@ func (s *MdbxStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNu
 	}
 	defer tx.Rollback()
 
-	if err := (txStore{tx}).PutEventTxnToBlockNum(ctx, eventTxnToBlockNum); err != nil {
+	if err := (txStore{tx, s.logger}).PutEventTxnToBlockNum(ctx, eventTxnToBlockNum); err != nil {
 		return err
 	}
 
@@ -181,7 +183,7 @@ func (s *MdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.EventTxnToBlockNum(ctx, borTxHash)
+	return txStore{tx, s.logger}.EventTxnToBlockNum(ctx, borTxHash)
 }
 
 // LastEventIdWithinWindow gets the last event id where event.Id >= fromId and event.Time < toTime.
@@ -192,7 +194,7 @@ func (s *MdbxStore) LastEventIdWithinWindow(ctx context.Context, fromId uint64, 
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.LastEventIdWithinWindow(ctx, fromId, toTime)
+	return txStore{tx, s.logger}.LastEventIdWithinWindow(ctx, fromId, toTime)
 }
 
 func lastEventIdWithinWindow(tx kv.Tx, fromId uint64, toTime time.Time) (uint64, error) {
@@ -242,7 +244,7 @@ func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecor
 	}
 	defer tx.Rollback()
 
-	if err = (txStore{tx}).PutEvents(ctx, events); err != nil {
+	if err = (txStore{tx, s.logger}).PutEvents(ctx, events); err != nil {
 		return err
 	}
 
@@ -256,7 +258,7 @@ func (s *MdbxStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.EventsByTimeframe(ctx, timeFrom, timeTo)
+	return txStore{tx, s.logger}.EventsByTimeframe(ctx, timeFrom, timeTo)
 }
 
 func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
@@ -270,7 +272,7 @@ func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId 
 	}
 	defer tx.Rollback()
 
-	if err = (txStore{tx}).PutBlockNumToEventId(ctx, blockNumToEventId); err != nil {
+	if err = (txStore{tx, s.logger}).PutBlockNumToEventId(ctx, blockNumToEventId); err != nil {
 		return err
 	}
 
@@ -292,7 +294,7 @@ func (s *MdbxStore) blockEventIdsRange(ctx context.Context, blockHash libcommon.
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.blockEventIdsRange(ctx, blockHash, blockNum, lastFrozenId)
+	return txStore{tx, s.logger}.blockEventIdsRange(ctx, blockHash, blockNum, lastFrozenId)
 }
 
 func (s *MdbxStore) Unwind(ctx context.Context, blockNum uint64) error {
@@ -302,7 +304,7 @@ func (s *MdbxStore) Unwind(ctx context.Context, blockNum uint64) error {
 	}
 	defer tx.Rollback()
 
-	err = txStore{tx}.Unwind(ctx, blockNum)
+	err = txStore{tx, s.logger}.Unwind(ctx, blockNum)
 
 	if err != nil {
 		return err
@@ -318,7 +320,7 @@ func (s *MdbxStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, bl
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.BorStartEventId(ctx, hash, blockHeight)
+	return txStore{tx, s.logger}.BorStartEventId(ctx, hash, blockHeight)
 }
 
 func (s *MdbxStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
@@ -328,7 +330,7 @@ func (s *MdbxStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, bloc
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.EventsByBlock(ctx, hash, blockHeight)
+	return txStore{tx, s.logger}.EventsByBlock(ctx, hash, blockHeight)
 }
 
 func (s *MdbxStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
@@ -342,7 +344,7 @@ func (s *MdbxStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDele
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
+	return txStore{tx, s.logger}.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
 }
 
 func NewTxStore(tx kv.Tx) txStore {
@@ -564,6 +566,8 @@ func (s txStore) events(ctx context.Context, start, end uint64) ([][]byte, error
 			return nil, err
 		}
 
+		s.logger.Debug("LAL events", "event", v)
+
 		events = append(events, bytes.Clone(v))
 	}
 
@@ -625,6 +629,8 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockHash libcommon.Has
 
 	end = binary.BigEndian.Uint64(v)
 
+	s.logger.Debug("LAL blockEventIdsRange", "end", end)
+
 	_, v, err = cursor.Prev()
 	if err != nil {
 		return start, end, false, err
@@ -637,6 +643,8 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockHash libcommon.Has
 	} else {
 		start = binary.BigEndian.Uint64(v) + 1
 	}
+
+	s.logger.Debug("LAL blockEventIdsRange", "start", start)
 
 	return start, end, true, nil
 }
@@ -657,6 +665,9 @@ func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHe
 	if !ok {
 		return []rlp.RawValue{}, nil
 	}
+
+	s.logger.Debug("EventsByBlock range:", "startEventId", startEventId, "endEventId", endEventId, "blockHeight", blockHeight)
+
 	bytevals, err := s.events(ctx, startEventId, endEventId+1)
 	if err != nil {
 		return nil, err
@@ -665,6 +676,9 @@ func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHe
 	for i, byteval := range bytevals {
 		result[i] = byteval
 	}
+
+	fmt.Println("LAL EventsByBlock RESULT:", "len", len(result))
+
 	return result, nil
 }
 

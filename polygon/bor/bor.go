@@ -1686,8 +1686,6 @@ func (c *Bor) CommitStates(
 		}
 	}
 
-	logger.Info("LAL commit state len:", "len", len(events))
-
 	for _, event := range events {
 		if err := c.stateReceiver.CommitState(event, syscall); err != nil {
 			return err
