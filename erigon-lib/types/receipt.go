@@ -29,6 +29,7 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -240,13 +241,9 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	if r.CumulativeGasUsed, err = s.Uint(); err != nil {
 		return fmt.Errorf("read CumulativeGasUsed: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(r.Bloom[:]); err != nil {
 		return fmt.Errorf("read Bloom: %w", err)
 	}
-	if len(b) != 256 {
-		return fmt.Errorf("wrong size for Bloom: %d", len(b))
-	}
-	copy(r.Bloom[:], b)
 	// decode logs
 	if _, err = s.List(); err != nil {
 		return fmt.Errorf("open Logs: %w", err)
@@ -257,13 +254,9 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		r.Logs = append(r.Logs, &Log{})
 		log := r.Logs[len(r.Logs)-1]
-		if b, err = s.Bytes(); err != nil {
+		if err = s.ReadBytes(log.Address[:]); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if len(b) != 20 {
-			return fmt.Errorf("wrong size for Log address: %d", len(b))
-		}
-		copy(log.Address[:], b)
 		if _, err = s.List(); err != nil {
 			return fmt.Errorf("open Topics: %w", err)
 		}
@@ -377,12 +370,12 @@ func (r *Receipt) Copy() *Receipt {
 		PostState:         slices.Clone(r.PostState),
 		Status:            r.Status,
 		CumulativeGasUsed: r.CumulativeGasUsed,
-		Bloom:             BytesToBloom(r.Bloom.Bytes()),
+		Bloom:             r.Bloom,
 		Logs:              r.Logs.Copy(),
-		TxHash:            common.BytesToHash(r.TxHash.Bytes()),
-		ContractAddress:   common.BytesToAddress(r.ContractAddress.Bytes()),
+		TxHash:            r.TxHash,
+		ContractAddress:   r.ContractAddress,
 		GasUsed:           r.GasUsed,
-		BlockHash:         common.BytesToHash(r.BlockHash.Bytes()),
+		BlockHash:         r.BlockHash,
 		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,
 
@@ -399,10 +392,10 @@ type ReceiptForStorage Receipt
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
 // into an RLP stream.
 func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
-	var firstLogIndex uint32
-	if len(r.Logs) > 0 {
-		firstLogIndex = uint32(r.Logs[0].Index)
+	if r.FirstLogIndexWithinBlock == 0 && len(r.Logs) > 0 {
+		r.FirstLogIndexWithinBlock = uint32(r.Logs[0].Index)
 	}
+
 	logsForStorage := make([]*LogForStorage, len(r.Logs))
 	for i, l := range r.Logs {
 		logsForStorage[i] = (*LogForStorage)(l)
@@ -411,7 +404,7 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
-		FirstLogIndex:     firstLogIndex,
+		FirstLogIndex:     r.FirstLogIndexWithinBlock,
 
 		Logs:             logsForStorage,
 		GasUsed:          r.GasUsed,
@@ -498,6 +491,33 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		// For unsupported types, write nothing. Since this is for
 		// DeriveSha, the error will be caught matching the derived hash
 		// to the block.
+	}
+}
+
+func (rs Receipts) AssertLogIndex(blockNum uint64) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	logIndex := 0
+	seen := make(map[uint]struct{}, 16)
+	for _, r := range rs {
+		// ensure valid field
+		if logIndex != int(r.FirstLogIndexWithinBlock) {
+			panic(fmt.Sprintf("assert: bn=%d, len(t.BlockReceipts)=%d, lastReceipt.FirstLogIndexWithinBlock=%d, logs=%d", blockNum, len(rs), r.FirstLogIndexWithinBlock, logIndex))
+		}
+		logIndex += len(r.Logs)
+
+		//no duplicates
+		if len(r.Logs) <= 1 {
+			continue
+		}
+
+		for i := 0; i < len(r.Logs); i++ {
+			if _, ok := seen[r.Logs[i].Index]; ok {
+				panic(fmt.Sprintf("assert: duplicated log_index %d,  bn=%d", r.Logs[i].Index, blockNum))
+			}
+			seen[r.Logs[i].Index] = struct{}{}
+		}
 	}
 }
 
@@ -607,7 +627,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 
 // DeriveFieldsV4ForCachedReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum uint64, txnHash common.Hash) {
+func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum uint64, txnHash common.Hash, calcBloom bool) {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	r.BlockHash = blockHash
@@ -622,6 +642,9 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum
 		r.Logs[j].TxIndex = r.TransactionIndex
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
+	}
+	if calcBloom {
+		r.Bloom = CreateBloom(Receipts{r})
 	}
 }
 

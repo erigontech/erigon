@@ -60,6 +60,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	salt := uint32(1)
 	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.salt.Store(&salt)
+	cfg.Accessors = AccessorHashMap
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -723,7 +724,7 @@ func TestCtxFiles(t *testing.T) {
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
-	ii.dirtyFiles.Scan(func(item *filesItem) bool {
+	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 		item.decompressor = &seg.Decompressor{}
 		return true
 	})
@@ -756,28 +757,28 @@ func TestIsSubset(t *testing.T) {
 	t.Parallel()
 
 	assert := assert.New(t)
-	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.True((&filesItem{startTxNum: 1, endTxNum: 2}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 3}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 2, endTxNum: 3}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 1}).isProperSubsetOf(&filesItem{startTxNum: 1, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isProperSubsetOf(&filesItem{startTxNum: 1, endTxNum: 2}))
+	assert.True((&FilesItem{startTxNum: 0, endTxNum: 1}).isProperSubsetOf(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.True((&FilesItem{startTxNum: 1, endTxNum: 2}).isProperSubsetOf(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 0, endTxNum: 2}).isProperSubsetOf(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 0, endTxNum: 3}).isProperSubsetOf(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 2, endTxNum: 3}).isProperSubsetOf(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 0, endTxNum: 1}).isProperSubsetOf(&FilesItem{startTxNum: 1, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 0, endTxNum: 2}).isProperSubsetOf(&FilesItem{startTxNum: 1, endTxNum: 2}))
 }
 
 func TestIsBefore(t *testing.T) {
 	t.Parallel()
 
 	assert := assert.New(t)
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 1, endTxNum: 2}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 3}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 2, endTxNum: 3}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 1, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 1, endTxNum: 2}))
-	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 2, endTxNum: 4}))
-	assert.True((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 2, endTxNum: 4}))
+	assert.False((&FilesItem{startTxNum: 0, endTxNum: 1}).isBefore(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 1, endTxNum: 2}).isBefore(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 0, endTxNum: 2}).isBefore(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 0, endTxNum: 3}).isBefore(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 2, endTxNum: 3}).isBefore(&FilesItem{startTxNum: 0, endTxNum: 2}))
+	assert.True((&FilesItem{startTxNum: 0, endTxNum: 1}).isBefore(&FilesItem{startTxNum: 1, endTxNum: 2}))
+	assert.False((&FilesItem{startTxNum: 0, endTxNum: 2}).isBefore(&FilesItem{startTxNum: 1, endTxNum: 2}))
+	assert.True((&FilesItem{startTxNum: 0, endTxNum: 1}).isBefore(&FilesItem{startTxNum: 2, endTxNum: 4}))
+	assert.True((&FilesItem{startTxNum: 0, endTxNum: 2}).isBefore(&FilesItem{startTxNum: 2, endTxNum: 4}))
 }
 
 func TestInvIndex_OpenFolder(t *testing.T) {

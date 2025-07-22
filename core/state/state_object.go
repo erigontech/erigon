@@ -24,11 +24,13 @@ import (
 	"io"
 	"maps"
 	"math/big"
+	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
@@ -92,6 +94,22 @@ func (so *stateObject) empty() bool {
 	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == empty.CodeHash)
 }
 
+func (s *stateObject) deepCopy(db *IntraBlockState) *stateObject {
+	stateObject := &stateObject{db: db, address: s.address}
+	stateObject.data.Copy(&s.data)
+	stateObject.original.Copy(&s.original)
+	stateObject.code = s.code
+	stateObject.dirtyStorage = s.dirtyStorage.Copy()
+	stateObject.originStorage = s.originStorage.Copy()
+	stateObject.blockOriginStorage = s.blockOriginStorage.Copy()
+	stateObject.selfdestructed = s.selfdestructed
+	stateObject.dirtyCode = s.dirtyCode
+	stateObject.deleted = s.deleted
+	stateObject.newlyCreated = s.newlyCreated
+	stateObject.createdContract = s.createdContract
+	return stateObject
+}
+
 // newObject creates a state object.
 func newObject(db *IntraBlockState, address common.Address, data, original *accounts.Account) *stateObject {
 	var so = stateObject{
@@ -121,13 +139,6 @@ func (so *stateObject) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, so.data)
 }
 
-// setError remembers the first non-nil error it is called with.
-func (so *stateObject) setError(err error) {
-	if so.db.savedErr == nil {
-		so.db.savedErr = err
-	}
-}
-
 func (so *stateObject) markSelfdestructed() {
 	so.selfdestructed = true
 }
@@ -144,46 +155,50 @@ func (so *stateObject) touch() {
 }
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key common.Hash, out *uint256.Int) {
+func (so *stateObject) GetState(key common.Hash, out *uint256.Int) bool {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if so.fakeStorage != nil {
 		*out = so.fakeStorage[key]
-		return
+		return false
 	}
 	value, dirty := so.dirtyStorage[key]
 	if dirty {
 		*out = value
-		return
+		return false
 	}
 	// Otherwise return the entry's original value
 	so.GetCommittedState(key, out)
+	return true
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
-func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) {
+func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) error {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if so.fakeStorage != nil {
 		*out = so.fakeStorage[key]
-		return
+		return nil
 	}
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[key]
 		if cached {
 			*out = value
-			return
+			return nil
 		}
 	}
 	if so.createdContract {
 		out.Clear()
-		return
+		return nil
 	}
 	// Load from DB in case it is missing.
+	readStart := time.Now()
 	res, ok, err := so.db.stateReader.ReadAccountStorage(so.address, key)
+	so.db.storageReadDuration += time.Since(readStart)
+	so.db.storageReadCount++
+
 	if err != nil {
-		so.setError(err)
 		out.Clear()
-		return
+		return err
 	}
 	if ok {
 		*out = res
@@ -193,36 +208,57 @@ func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) {
 
 	so.originStorage[key] = *out
 	so.blockOriginStorage[key] = *out
+
+	return err
 }
 
 // SetState updates a value in account storage.
-func (so *stateObject) SetState(key common.Hash, value uint256.Int) {
+func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) bool {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
-			account:  so.address,
+			account:  &so.address,
 			key:      key,
 			prevalue: so.fakeStorage[key],
 		})
 		so.fakeStorage[key] = value
-		return
+		return true
 	}
 	// If the new value is the same as old, don't set
 	var prev uint256.Int
-	so.GetState(key, &prev)
-	if prev == value {
-		return
+	var commited bool
+
+	// we need to use versioned read here otherwise we will miss versionmap entries
+	prev, _, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
+		func(v uint256.Int) uint256.Int {
+			return v
+		},
+		func(s *stateObject) (uint256.Int, error) {
+			var value uint256.Int
+			if s != nil && !s.deleted {
+				commited = s.GetState(key, &value)
+			}
+			return value, nil
+		})
+
+	if !force && prev == value {
+		return false
 	}
+
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
-		account:  so.address,
-		key:      key,
-		prevalue: prev,
+		account:     &so.address,
+		key:         key,
+		prevalue:    prev,
+		wasCommited: commited,
 	})
+
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
 		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
 	}
 	so.setState(key, value)
+
+	return true
 }
 
 // SetStorage replaces the entire state storage with the given one.
@@ -247,8 +283,8 @@ func (so *stateObject) setState(key common.Hash, value uint256.Int) {
 	so.dirtyStorage[key] = value
 }
 
-// updateTrie writes cached storage modifications into the object's storage trie.
-func (so *stateObject) updateTrie(stateWriter StateWriter) error {
+// updateStotage writes cached storage modifications into the object's storage trie.
+func (so *stateObject) updateStotage(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
 		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, so.blockOriginStorage[key], value); err != nil {
 			return err
@@ -263,37 +299,9 @@ func (so *stateObject) printTrie() {
 	}
 }
 
-// AddBalance adds amount to so's balance.
-// It is used to add funds to the destination account of a transfer.
-func (so *stateObject) AddBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
-	// EIP161: We must check emptiness for the objects such that the account
-	// clearing (0,0,0 objects) can take effect.
-	if amount.IsZero() {
-		if so.empty() {
-			so.touch()
-		}
-
-		return
-	}
-	var newBalance uint256.Int
-	newBalance.Add(so.Balance(), amount)
-	so.SetBalance(newBalance, reason)
-}
-
-// SubBalance removes amount from so's balance.
-// It is used to remove funds from the origin account of a transfer.
-func (so *stateObject) SubBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
-	if amount.IsZero() {
-		return
-	}
-	var newBalance uint256.Int
-	newBalance.Sub(so.Balance(), amount)
-	so.SetBalance(newBalance, reason)
-}
-
 func (so *stateObject) SetBalance(amount uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
-		account: so.address,
+		account: &so.address,
 		prev:    so.data.Balance,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
@@ -324,25 +332,33 @@ func (so *stateObject) Address() common.Address {
 }
 
 // Code returns the contract code associated with this object, if any.
-func (so *stateObject) Code() []byte {
+func (so *stateObject) Code() ([]byte, error) {
 	if so.code != nil {
-		return so.code
+		return so.code, nil
 	}
 	if so.data.CodeHash == empty.CodeHash {
-		return nil
+		return nil, nil
 	}
+
+	readStart := time.Now()
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
+	so.db.storageReadDuration += time.Since(readStart)
+	so.db.storageReadCount++
+
 	if err != nil {
-		so.setError(fmt.Errorf("can't load code hash %x: %w", so.data.CodeHash, err))
+		return nil, fmt.Errorf("can't code for %x: %w", so.Address(), err)
 	}
 	so.code = code
-	return code
+	return code, nil
 }
 
-func (so *stateObject) SetCode(codeHash common.Hash, code []byte) {
-	prevcode := so.Code()
+func (so *stateObject) SetCode(codeHash common.Hash, code []byte) error {
+	prevcode, err := so.Code()
+	if err != nil {
+		return err
+	}
 	so.db.journal.append(codeChange{
-		account:  so.address,
+		account:  &so.address,
 		prevhash: so.data.CodeHash,
 		prevcode: prevcode,
 	})
@@ -350,6 +366,7 @@ func (so *stateObject) SetCode(codeHash common.Hash, code []byte) {
 		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
 	}
 	so.setCode(codeHash, code)
+	return nil
 }
 
 func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
@@ -360,7 +377,7 @@ func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
 
 func (so *stateObject) SetNonce(nonce uint64) {
 	so.db.journal.append(nonceChange{
-		account: so.address,
+		account: &so.address,
 		prev:    so.data.Nonce,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
@@ -373,12 +390,16 @@ func (so *stateObject) setNonce(nonce uint64) {
 	so.data.Nonce = nonce
 }
 
-func (so *stateObject) Balance() *uint256.Int {
-	return &so.data.Balance
+func (so *stateObject) Balance() uint256.Int {
+	return so.data.Balance
 }
 
 func (so *stateObject) Nonce() uint64 {
 	return so.data.Nonce
+}
+
+func (so *stateObject) IsDirty() bool {
+	return so.dirtyCode || len(so.dirtyStorage) > 0 || so.data != so.original
 }
 
 // Never called, but must be present to allow stateObject to be used

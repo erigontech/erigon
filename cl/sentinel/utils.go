@@ -33,9 +33,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/enode"
-	"github.com/erigontech/erigon-p2p/enr"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
@@ -177,6 +177,10 @@ func (s *Sentinel) updateENROnSubscription(topicName string, subscribe bool) {
 		return
 	}
 	part := parts[3]
+	if !strings.Contains(part, "beacon_attestation") &&
+		!strings.Contains(part, "sync_committee") {
+		return
+	}
 	for i := 0; i < int(s.cfg.NetworkConfig.AttestationSubnetCount); i++ {
 		if part == gossip.TopicNameBeaconAttestation(uint64(i)) {
 			log.Info("[Sentinel] Update ENR on subscription", "subnet", i, "subscribe", subscribe, "type", "attestation")

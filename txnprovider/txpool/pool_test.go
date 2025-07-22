@@ -23,6 +23,7 @@ import (
 	"math"
 	"testing"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
@@ -1526,12 +1527,22 @@ func TestGetBlobsV1(t *testing.T) {
 	}
 	blobHashes = append(blobHashes, blobTxn.BlobHashes...)
 
-	blobs, proofs := pool.GetBlobs(blobHashes)
-	require.Equal(len(blobs), len(blobHashes))
+	blobBundles := pool.GetBlobs(blobHashes)
+	require.Equal(len(blobBundles), len(blobHashes))
+	blobs := make([][]byte, 0, len(blobBundles))
+	proofs := make([]gokzg4844.KZGProof, 0, len(blobBundles))
+	for _, bb := range blobBundles {
+		blobs = append(blobs, bb.Blob)
+		for _, p := range bb.Proofs {
+			proofs = append(proofs, p)
+		}
+
+	}
 	require.Equal(len(proofs), len(blobHashes))
-	assert.Equal(blobTxn.Blobs, blobs)
-	assert.Equal(blobTxn.Proofs[0][:], proofs[0])
-	assert.Equal(blobTxn.Proofs[1][:], proofs[1])
+	assert.Equal(blobTxn.BlobBundles[0].Blob, blobs[0])
+	assert.Equal(blobTxn.BlobBundles[1].Blob, blobs[1])
+	assert.Equal(blobTxn.BlobBundles[0].Proofs[0], proofs[0])
+	assert.Equal(blobTxn.BlobBundles[1].Proofs[0], proofs[1])
 }
 
 func TestGasLimitChanged(t *testing.T) {

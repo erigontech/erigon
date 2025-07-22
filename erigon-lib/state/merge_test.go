@@ -29,8 +29,8 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
@@ -53,7 +53,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		return visibleFile{
 			startTxNum: startTxNum,
 			endTxNum:   endTxNum,
-			src:        &filesItem{startTxNum: startTxNum, endTxNum: endTxNum},
+			src:        &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum},
 		}
 	}
 
@@ -146,7 +146,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.ef",
 			"v1.0-accounts.3-4.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -172,7 +172,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.ef",
 			"v1.0-accounts.3-4.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -184,7 +184,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.v",
 			"v1.0-accounts.3-4.v",
 		})
-		h.dirtyFiles.Scan(func(item *filesItem) bool {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -205,7 +205,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.ef",
 			"v1.0-accounts.3-4.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -215,7 +215,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.0-1.v",
 			"v1.0-accounts.1-2.v",
 		})
-		h.dirtyFiles.Scan(func(item *filesItem) bool {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -238,7 +238,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.ef",
 			"v1.0-accounts.3-4.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -248,7 +248,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.0-1.v",
 			"v1.0-accounts.1-2.v",
 		})
-		h.dirtyFiles.Scan(func(item *filesItem) bool {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -272,7 +272,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.3-4.ef",
 			"v1.0-accounts.0-4.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -284,7 +284,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.v",
 			"v1.0-accounts.3-4.v",
 		})
-		h.dirtyFiles.Scan(func(item *filesItem) bool {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -307,7 +307,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-4.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -319,7 +319,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.v",
 			"v1.0-accounts.3-4.v",
 		})
-		h.dirtyFiles.Scan(func(item *filesItem) bool {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -342,7 +342,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.0-1.ef",
 			"v1.0-accounts.1-2.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -354,7 +354,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.1-2.v",
 			"v1.0-accounts.0-2.v",
 		})
-		h.dirtyFiles.Scan(func(item *filesItem) bool {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -381,7 +381,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.ef",
 			"v1.0-accounts.3-4.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -394,7 +394,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.v",
 			"v1.0-accounts.3-4.v",
 		})
-		h.dirtyFiles.Scan(func(item *filesItem) bool {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -420,7 +420,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.0-2.ef",
 			"v1.0-accounts.2-3.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -431,7 +431,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.1-2.v",
 			"v1.0-accounts.2-3.v",
 		})
-		h.dirtyFiles.Scan(func(item *filesItem) bool {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -456,7 +456,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.1-2.ef",
 			"v1.0-accounts.0-2.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -468,7 +468,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.0-2.v",
 			"v1.0-accounts.2-3.v",
 		})
-		h.dirtyFiles.Scan(func(item *filesItem) bool {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -489,7 +489,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.ef",
 			"v1.0-accounts.3-4.ef",
 		})
-		ii.dirtyFiles.Scan(func(item *filesItem) bool {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -626,7 +626,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 		}
 		cfg.hist.iiCfg.salt.Store(&salt)
-		cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
+		cfg.hist.iiCfg.dirs = datadir.New(os.TempDir())
 		cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 		cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 
@@ -645,16 +645,16 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		account, storage, commitment = newTestDomain(0), newTestDomain(1), newTestDomain(3)
 		checker := NewDependencyIntegrityChecker(account.hist.iiCfg.dirs, log.New())
 		info := &DependentInfo{
-			domain: commitment.name,
-			filesGetter: func() *btree2.BTreeG[*filesItem] {
+			entity: FromDomain(commitment.name),
+			filesGetter: func() *btree2.BTreeG[*FilesItem] {
 				return commitment.dirtyFiles
 			},
 			accessors: commitment.Accessors,
 		}
-		checker.AddDependency(account.name, info)
-		checker.AddDependency(storage.name, info)
-		account.SetDependency(checker)
-		storage.SetDependency(checker)
+		checker.AddDependency(FromDomain(account.name), info)
+		checker.AddDependency(FromDomain(storage.name), info)
+		account.SetChecker(checker)
+		storage.SetChecker(checker)
 		return
 	}
 
@@ -665,7 +665,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			files = append(files, fmt.Sprintf(kvf, 0, 2))
 		}
 		d.scanDirtyFiles(files)
-		d.dirtyFiles.Scan(func(item *filesItem) bool {
+		d.dirtyFiles.Scan(func(item *FilesItem) bool {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
@@ -736,7 +736,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
 
 		checkFn := func(dtx *DomainRoTx, garbageCount int) {
-			var mergedF *filesItem
+			var mergedF *FilesItem
 			items := dtx.d.dirtyFiles.Items()
 
 			if len(items) == 3 {
@@ -755,8 +755,8 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		checkFn(cc, 2)
 
 		// delete the smaller files
-		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 0, endTxNum: 1})
-		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 1, endTxNum: 2})
+		commitment.dirtyFiles.Delete(&FilesItem{startTxNum: 0, endTxNum: 1})
+		commitment.dirtyFiles.Delete(&FilesItem{startTxNum: 1, endTxNum: 2})
 
 		// refresh visible files
 		ac.Close()
@@ -797,8 +797,8 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		checkFn(cc, 2)
 
 		// delete the smaller files
-		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 0, endTxNum: 1})
-		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 1, endTxNum: 2})
+		commitment.dirtyFiles.Delete(&FilesItem{startTxNum: 0, endTxNum: 1})
+		commitment.dirtyFiles.Delete(&FilesItem{startTxNum: 1, endTxNum: 2})
 
 		// refresh visible files
 		ac.Close()
@@ -826,7 +826,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
 
 		checkFn := func(dtx *DomainRoTx) {
-			var mergedF *filesItem
+			var mergedF *FilesItem
 			items := dtx.d.dirtyFiles.Items()
 
 			if len(items) == 3 {
@@ -868,4 +868,70 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		checkFn(sc)
 		checkFn(cc)
 	})
+}
+
+func TestHistoryAndIIAlignment(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	t.Cleanup(db.Close)
+
+	agg, _ := newAggregatorOld(context.Background(), dirs, 1, db, logger)
+	setup := func() (account *Domain) {
+		agg.registerDomain(kv.AccountsDomain, nil, dirs, logger)
+		domain := agg.d[kv.AccountsDomain]
+		domain.History.InvertedIndex.Accessors = 0
+		domain.History.Accessors = 0
+		domain.Accessors = 0
+		return domain
+	}
+
+	account := setup()
+	require.NotNil(t, account.InvertedIndex.checker)
+
+	h := account.History
+	ii := h.InvertedIndex
+
+	h.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.v",
+		"v1.0-accounts.1-2.v",
+		"v1.0-accounts.2-3.v",
+		"v1.0-accounts.3-4.v",
+	})
+
+	h.dirtyFiles.Scan(func(item *FilesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+
+	ii.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.0-4.ef",
+	})
+	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+
+	roTx := h.BeginFilesRo()
+	defer roTx.Close()
+
+	for i, f := range roTx.files {
+		require.Equal(t, uint64(i), f.startTxNum)
+		require.Equal(t, uint64(i+1), f.endTxNum)
+	}
+
+	for i, f := range roTx.iit.files {
+		require.Equal(t, uint64(i), f.startTxNum)
+		require.Equal(t, uint64(i+1), f.endTxNum)
+	}
+
+	require.Len(t, roTx.garbage(&FilesItem{startTxNum: 0, endTxNum: 4}), 4)
+
+	// no garbage with iit, since history is not merged
+	require.Len(t, roTx.iit.garbage(&FilesItem{startTxNum: 0, endTxNum: 4}), 0)
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/holiman/uint256"
@@ -56,10 +57,11 @@ func (hr *HistoryReaderV3) SetTrace(trace bool)    { hr.trace = trace }
 // For non-archive node old history files get deleted, so this number will vary
 // but the goal is to know where the historical data begins.
 func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
+	dbg := hr.ttx.Debug()
 	return min(
-		hr.ttx.HistoryStartFrom(kv.AccountsDomain),
-		hr.ttx.HistoryStartFrom(kv.StorageDomain),
-		hr.ttx.HistoryStartFrom(kv.CodeDomain),
+		dbg.HistoryStartFrom(kv.AccountsDomain),
+		dbg.HistoryStartFrom(kv.StorageDomain),
+		dbg.HistoryStartFrom(kv.CodeDomain),
 	)
 }
 
@@ -102,6 +104,36 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, key common
 		(&res).SetBytes(enc)
 	}
 	return res, ok, err
+}
+
+func (hr *HistoryReaderV3) HasStorage(address common.Address) (bool, error) {
+	to, ok := kv.NextSubtree(address.Bytes())
+	if !ok {
+		to = nil
+	}
+
+	it, err := hr.ttx.RangeAsOf(kv.StorageDomain, address.Bytes(), to, hr.txNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return false, err
+	}
+
+	defer it.Close()
+	// Note: if a storage for an address gets deleted, the historical RangeAsOf will return its slots as empty values.
+	// If the address doesn't have any storage slots, then we return "no storage" immediately
+	// If the address has storage slots, but they are all empty, then we return "no storage"
+	// If we see a non-empty slot for then address, then we return "has storage" immediately
+	for it.HasNext() {
+		_, v, err := it.Next()
+		if err != nil {
+			return false, err
+		}
+
+		if len(v) != 0 {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (hr *HistoryReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {

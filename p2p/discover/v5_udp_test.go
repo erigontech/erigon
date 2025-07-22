@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon-p2p/discover/v5wire"
-	"github.com/erigontech/erigon-p2p/enode"
-	"github.com/erigontech/erigon-p2p/enr"
+	"github.com/erigontech/erigon/p2p/discover/v5wire"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {
@@ -54,10 +54,7 @@ func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {
 	lprefix := fmt.Sprintf("(%s)", ln.ID().TerminalString())
 	lfmt := log.TerminalFormat()
 	cfg.Log = testlog.Logger(t, log.LvlError)
-	cfg.Log.SetHandler(log.FuncHandler(func(r *log.Record) error {
-		t.Logf("%s %s", lprefix, lfmt.Format(r))
-		return nil
-	}))
+	cfg.Log.SetHandler(testLogHandler{lprefix: lprefix, lfmt: lfmt, t: t})
 
 	// Listen.
 	socket, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP{127, 0, 0, 1}})

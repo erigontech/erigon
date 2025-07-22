@@ -27,6 +27,8 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
+
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -113,6 +115,9 @@ func (b *Big) UnmarshalText(input []byte) error {
 func (b *Big) ToInt() *big.Int {
 	return (*big.Int)(b)
 }
+
+// ToUint256 converts b to a uint256.Int.
+func (b *Big) ToUint256() *uint256.Int { return uint256.MustFromBig(b.ToInt()) }
 
 // String returns the hex encoding of b.
 func (b *Big) String() string {
@@ -231,7 +236,7 @@ func checkNumberText(input []byte) (raw []byte, err error) {
 }
 
 func wrapTypeError(err error, typ reflect.Type) error {
-	// keeping compatiblity with go ethereum tests
+	// keeping compatibility with go ethereum tests
 	// nolint:errorlint
 	//if _, ok := err.(*decError); ok {
 	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}

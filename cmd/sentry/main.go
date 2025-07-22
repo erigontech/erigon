@@ -20,13 +20,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/paths"
-	"github.com/erigontech/erigon-p2p/sentry"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	node2 "github.com/erigontech/erigon/turbo/node"
@@ -89,7 +89,7 @@ var rootCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
-		nodeConfig := node2.NewNodeConfig()
+		nodeConfig := node2.NewNodeConfig(nil)
 		p2pConfig, err := utils.NewP2PConfig(
 			nodiscover,
 			dirs,

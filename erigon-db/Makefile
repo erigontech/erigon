@@ -6,8 +6,11 @@ endif
 
 GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath
 
-test:
+test-short:
 	$(GOTEST) -short -coverprofile=coverage-test.out ./...
 
 test-all:
+	$(GOTEST) -coverprofile=coverage-test-all.out ./...
+
+test-all-race:
 	$(GOTEST) -coverprofile=coverage-test-all.out -race ./...

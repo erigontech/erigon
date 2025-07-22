@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -15,7 +17,6 @@ import (
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
-	"github.com/holiman/uint256"
 )
 
 // Buffer is a structure holding updates, deletes, and reads registered within one change period
@@ -696,6 +697,18 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key common.Ha
 	var res uint256.Int
 	(&res).SetBytes(enc)
 	return res, true, nil
+}
+
+func (tds *TrieDbState) HasStorage(address common.Address) (bool, error) {
+	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
+	// check if we know about any storage updates with non-empty values
+	for _, v := range tds.currentBuffer.storageUpdates[addrHash] {
+		if len(v) > 0 {
+			return true, nil
+		}
+	}
+	// fallback to underlying state reader if we don't know of non-empty storage slots yet
+	return tds.StateReader.HasStorage(address)
 }
 
 func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) {

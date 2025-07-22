@@ -21,7 +21,11 @@ import (
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/forkid"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -642,8 +646,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		gspecNoFork  = &types.Genesis{Config: configNoFork}
 		gspecProFork = &types.Genesis{Config: configProFork}
 
-		genesisNoFork  = rawdb.MustCommitGenesisWithoutState(gspecNoFork, dbNoFork)
-		genesisProFork = rawdb.MustCommitGenesisWithoutState(gspecProFork, dbProFork)
+		genesisNoFork  = core.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
+		genesisProFork = core.MustCommitGenesis(gspecProFork, dbProFork, datadir.New(t.TempDir()), log.Root())
 	)
 
 	var s1, s2 *GrpcServer
@@ -721,15 +725,6 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	}
 }
 
-func emptyBootnodeURL(genesis common.Hash) []string {
-	return []string{}
-
-}
-
-func mainnetDNSNetwork(genesis common.Hash, protocol string) string {
-	return "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@" + protocol + ".mainnet.ethdisco.net"
-}
-
 func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -740,8 +735,8 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
-	genesisNoFork := rawdb.MustCommitGenesisWithoutState(gspecNoFork, dbNoFork)
-	ss := &GrpcServer{p2p: &p2p.Config{LookupBootnodeURLs: emptyBootnodeURL, LookupDNSNetwork: mainnetDNSNetwork}}
+	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
+	ss := &GrpcServer{p2p: &p2p.Config{}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{
 		ForkData: &proto_sentry.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},

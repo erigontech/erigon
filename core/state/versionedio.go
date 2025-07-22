@@ -289,6 +289,22 @@ func (vr versionedStateReader) ReadAccountStorage(address common.Address, key co
 	return uint256.Int{}, false, nil
 }
 
+func (vr versionedStateReader) HasStorage(address common.Address) (bool, error) {
+	if r, ok := vr.reads[address]; ok {
+		for k := range r {
+			if k.Path == StatePath {
+				return true, nil
+			}
+		}
+	}
+
+	if vr.stateReader != nil {
+		return vr.stateReader.HasStorage(address)
+	}
+
+	return false, nil
+}
+
 func (vr versionedStateReader) ReadAccountCode(address common.Address) ([]byte, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
@@ -367,9 +383,14 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		if err != nil || readStorage == nil {
 			return defaultV, StorageRead, err
 		}
-
 		val, err := readStorage(so)
 		return val, StorageRead, err
+	}
+
+	if so, ok := s.stateObjects[addr]; ok && so.deleted {
+		return defaultV, StorageRead, nil
+	} else if dres := s.versionMap.Read(addr, SelfDestructPath, common.Hash{}, s.txIndex); dres.Status() == MVReadResultDone {
+		return defaultV, MapRead, nil
 	}
 
 	if !commited {
@@ -398,7 +419,6 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 	switch res.Status() {
 	case MVReadResultDone:
-
 		vr.Source = MapRead
 
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {

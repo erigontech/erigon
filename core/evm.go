@@ -105,13 +105,6 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	}
 }
 
-var hashLookupCache = func() *lru.Cache[uint64, common.Hash] {
-	// lru.New only returns err on -ve size
-	cache, _ := lru.New[uint64, common.Hash](8192)
-	return cache
-}()
-var hashLookupCacheLock sync.Mutex
-
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
 func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
 	refNumber := ref.Number.Uint64() - 1
@@ -119,12 +112,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 	lastKnownNumber := refNumber
 	lastKnownHash := refHash
 
-	hashLookupCacheLock.Lock()
-	defer hashLookupCacheLock.Unlock()
-
-	if _, ok := hashLookupCache.Get(refNumber); !ok {
-		hashLookupCache.Add(refNumber, refHash)
-	}
+	// lru.New only returns err on -ve size
+	hashLookupCache, _ := lru.New[uint64, common.Hash](8192)
+	hashLookupCacheLock := sync.Mutex{}
+	hashLookupCache.Add(refNumber, refHash)
 
 	return func(n uint64) (common.Hash, error) {
 		hashLookupCacheLock.Lock()
@@ -191,6 +182,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				return lastKnownHash, nil
 			}
 		}
+
 		return common.Hash{}, nil
 	}
 }

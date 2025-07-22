@@ -35,7 +35,7 @@ Param(
         "rpctest",
         "sentry",
         "state",
-        "test",
+        "test-short",
         "test-all",
         "txpool",
         "all"
@@ -519,7 +519,7 @@ if ($BuildTarget -eq "db-tools") {
     # Clear go cache
     go.exe clean -cache
 
-} elseif ($BuildTarget -eq "test") {
+} elseif ($BuildTarget -eq "test-short") {
     Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
     $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./..."
@@ -547,7 +547,7 @@ if ($BuildTarget -eq "db-tools") {
 
 } else {
 
-    # This has a naive assumption every target has a compilation unit wih same name
+    # This has a naive assumption every target has a compilation unit with the same name
 
     Write-Host "`n Building $BuildTarget"
     $outExecutable = [string](Join-Path $Erigon.BinPath "$BuildTarget.exe")

@@ -67,7 +67,7 @@ type ChainHeaderReader interface {
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
-	FrozenBorBlocks() uint64
+	FrozenBorBlocks(align bool) uint64
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -128,6 +128,11 @@ type EngineReader interface {
 	// engine is based on signatures.
 	Author(header *types.Header) (common.Address, error)
 
+	// Dependencies retrives the dependencies between transactions
+	// included in the block accosiated with this header a nil return
+	// implies no dependencies are known
+	TxDependencies(header *types.Header) [][]int
+
 	// Service transactions are free and don't pay baseFee after EIP-1559
 	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
 
@@ -167,7 +172,7 @@ type EngineWriter interface {
 	// but does not assemble the block.
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, skipReceiptsEval bool, logger log.Logger,
-	) (types.Transactions, types.Receipts, types.FlatRequests, error)
+	) (types.FlatRequests, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.
@@ -176,7 +181,7 @@ type EngineWriter interface {
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, call Call, logger log.Logger,
-	) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error)
+	) (*types.Block, types.FlatRequests, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
@@ -208,10 +213,10 @@ type PoW interface {
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
 func Transfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) error {
 	if !bailout {
-		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
 		if err != nil {
 			return err
 		}
 	}
-	return db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	return db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
 }

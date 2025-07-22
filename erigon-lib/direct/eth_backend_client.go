@@ -257,6 +257,10 @@ func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remote.AA
 	return s.server.AAValidation(ctx, in)
 }
 
+func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remote.BlockForTxNumRequest, opts ...grpc.CallOption) (*remote.BlockForTxNumResponse, error) {
+	return s.server.BlockForTxNum(ctx, in)
+}
+
 func (s *EthBackendClientDirect) MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.EarliestBlockAvailableReply, error) {
 	return s.server.MinimumBlockAvailable(ctx, in)
 }

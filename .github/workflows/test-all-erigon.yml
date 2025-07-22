@@ -43,6 +43,17 @@ jobs:
 
   tests-mac-linux:
     needs: source-of-changes
+    concurrency:
+      # concurrency group: there can be at most one running and one pending job in a 
+      # concurrency group at any time. So for commits on main/release, we use different 
+      # concurrency group per commit; for other branches, we use a branch-level CG.
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
+        }}
+      cancel-in-progress: true
     strategy:
       matrix:
         os:
@@ -79,7 +90,7 @@ jobs:
         
       - name: Run all tests on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-all
+        run: GOGC=80 make test-all-race
 
       - name: SonarCloud
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
@@ -96,6 +107,14 @@ jobs:
 
   tests-windows:
     needs: source-of-changes
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
+        }}
+      cancel-in-progress: true
     strategy:
       matrix:
         os: [ windows-2025 ]

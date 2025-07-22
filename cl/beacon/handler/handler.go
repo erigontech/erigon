@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -54,10 +55,11 @@ import (
 
 const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
 
+// Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
 type BlobBundle struct {
 	Commitment common.Bytes48
 	Blob       *cltypes.Blob
-	KzgProof   common.Bytes48
+	KzgProofs  []common.Bytes48
 }
 
 type ApiHandler struct {
@@ -78,6 +80,7 @@ type ApiHandler struct {
 	caplinSnapshots      *freezeblocks.CaplinSnapshots
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
+	peerdas das.PeerDas
 	version string // Node's version
 
 	// pools
@@ -150,6 +153,7 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
 		panic(err)

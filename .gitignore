@@ -5,6 +5,7 @@
 #   git config --global core.excludesfile ~/.gitignore_global
 
 /tmp
+**/temp/
 */**/*un~
 */**/*.test
 *un~
@@ -100,4 +101,11 @@ node_modules
 /config.yaml
 /config.yml
 
-vendor
+vendor/
+
+!/cmd/snapshots
+**/snapshots/
+mdbx.dat
+mdbx.lck
+/*/**/LOCK
+/*/**/nodekey

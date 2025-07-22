@@ -30,15 +30,16 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/types"
-	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/services"
@@ -119,9 +120,11 @@ func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 	return back.blockReader.Ready(ctx)
 }
 
-func (back *RemoteBackend) AllTypes() []snaptype.Type    { panic("not implemented") }
-func (back *RemoteBackend) FrozenBlocks() uint64         { return back.blockReader.FrozenBlocks() }
-func (back *RemoteBackend) FrozenBorBlocks() uint64      { return back.blockReader.FrozenBorBlocks() }
+func (back *RemoteBackend) AllTypes() []snaptype.Type { panic("not implemented") }
+func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.FrozenBlocks() }
+func (back *RemoteBackend) FrozenBorBlocks(align bool) uint64 {
+	return back.blockReader.FrozenBorBlocks(align)
+}
 func (back *RemoteBackend) FrozenFiles() (list []string) { return back.blockReader.FrozenFiles() }
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
@@ -464,6 +467,14 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	}
 
 	return peers, nil
+}
+
+func (back *RemoteBackend) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+	return back.blockReader.TxnumReader(ctx)
+}
+
+func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
+	return back.blockReader.BlockForTxNum(ctx, tx, txNum)
 }
 
 func (back *RemoteBackend) EarliestBlockNum(ctx context.Context) (uint64, error) {
