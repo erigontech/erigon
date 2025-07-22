@@ -49,14 +49,16 @@ var (
 
 // ID is a fork identifier as defined by EIP-2124.
 type ID struct {
-	Hash [4]byte // CRC32 checksum of the genesis block and passed fork block numbers
-	Next uint64  // Block number of the next upcoming fork, or 0 if no forks are known
+	Hash       [4]byte // CRC32 checksum of the genesis block and passed fork block numbers
+	Activation uint64  // Block number/time activation for current fork
+	Next       uint64  // Block number/time of the next upcoming fork, or 0 if no forks are known
 }
 
 // Filter is a fork id filter to validate a remotely advertised ID.
 type Filter func(id ID) error
 
 func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) ID {
+	var activation uint64
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
@@ -65,21 +67,23 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHe
 		if headHeight >= fork {
 			// Fork already passed, checksum the previous hash and the fork number
 			hash = checksumUpdate(hash, fork)
+			activation = fork
 			continue
 		}
-		return ID{Hash: ChecksumToBytes(hash), Next: fork}
+		return ID{Hash: ChecksumToBytes(hash), Activation: activation, Next: fork}
 	}
 	var next uint64
 	for _, fork := range timeForks {
 		if headTime >= fork {
 			// Fork passed, checksum the previous hash and the fork time
 			hash = checksumUpdate(hash, fork)
+			activation = fork
 			continue
 		}
 		next = fork
 		break
 	}
-	return ID{Hash: ChecksumToBytes(hash), Next: next}
+	return ID{Hash: ChecksumToBytes(hash), Activation: activation, Next: next}
 }
 
 func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) [4]byte {

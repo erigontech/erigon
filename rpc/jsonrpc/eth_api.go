@@ -146,6 +146,7 @@ type BaseAPI struct {
 	dirs                datadir.Dirs
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
+	timeNow             func() time.Time
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
@@ -175,6 +176,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		dirs:                dirs,
 		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
 		bridgeReader:        bridgeReader,
+		timeNow:             time.Now,
 	}
 }
 

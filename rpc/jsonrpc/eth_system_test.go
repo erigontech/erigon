@@ -18,9 +18,13 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"math/big"
+	"os"
+	"path"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -32,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stages/mock"
 )
 
@@ -76,19 +79,45 @@ func TestGasPrice(t *testing.T) {
 }
 
 func TestEthConfig(t *testing.T) {
-	// Currently only testing current fork (as returned by time.Now in the API)
-	t.Run("eth_config mainnet", func(t *testing.T) {
-		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		m := mock.MockWithGenesis(t, chainspec.MainnetGenesisBlock(), key, false)
-		defer m.DB.Close()
-		eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000, ethconfig.Defaults.RPCTxFeeCap, 10_000, false, 10_000, 128, log.New())
+	t.Parallel()
+	for _, test := range []struct {
+		name                 string
+		genesisFilePath      string
+		timeOverride         time.Time
+		wantResponseFilePath string
+	}{
+		{
+			name:                 "hoodi prague scheduled but not activated",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "hoodi_prague_scheduled_but_not_activated_genesis.json"),
+			timeOverride:         time.Unix(1742999830, 0),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_prague_scheduled_but_not_activated_response.json"),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+			require.NoError(t, err)
+			genesisBytes, err := os.ReadFile(test.genesisFilePath)
+			require.NoError(t, err)
+			var genesis types.Genesis
+			err = json.Unmarshal(genesisBytes, &genesis)
+			require.NoError(t, err)
+			m := mock.MockWithGenesis(t, &genesis, key, false)
+			defer m.Close()
+			baseApi := newBaseApiForTest(m)
+			baseApi.timeNow = func() time.Time { return test.timeOverride }
+			eth := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000, ethconfig.Defaults.RPCTxFeeCap, 10_000, false, 10_000, 128, log.New())
 
-		ctx := context.Background()
-		result, err := eth.Config(ctx)
-		require.NoError(t, err)
-		require.Equal(t, result.CurrentHash, "8ea4635f")
-	})
-
+			result, err := eth.Config(t.Context())
+			require.NoError(t, err)
+			haveResponseBytes, err := json.MarshalIndent(result, "", "    ")
+			require.NoError(t, err)
+			wantResponseBytes, err := os.ReadFile(test.wantResponseFilePath)
+			require.NoError(t, err)
+			want, have := string(wantResponseBytes), string(haveResponseBytes)
+			require.Equal(t, want, have)
+		})
+	}
 }
 
 func createGasPriceTestKV(t *testing.T, chainSize int) *mock.MockSentry {
