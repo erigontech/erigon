@@ -418,6 +418,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 			}
 			return v, 0, nil
 		}
+		return nil, 0, nil // no history found, so no branch
 	}
 
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
