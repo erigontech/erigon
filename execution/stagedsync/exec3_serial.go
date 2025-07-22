@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
@@ -278,6 +280,15 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			}
 		}
 
+		if traceBlock(txTask.BlockNumber()) {
+			var receipts []map[string]interface{}
+			for i, receipt := range blockReceipts {
+				txn := txTask.Txs[i]
+				receipts = append(receipts, ethutils.MarshalReceipt(receipt, txn, se.cfg.chainConfig, txTask.Header, txn.Hash(), true))
+			}
+			marshalled, _ := json.Marshal(receipts)
+			fmt.Println(txTask.BlockNumber(), "receipts", string(marshalled))
+		}
 		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
 			txTask.BalanceIncreaseSet, blockReceipts, result.Logs, result.TraceFroms, result.TraceTos,
 			se.cfg.chainConfig, se.cfg.chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime()), txTask.HistoryExecution); err != nil {
