@@ -308,13 +308,13 @@ jobs:
               
               # Format percentages from decimal to percentage format
               if [ "$missed_p2p_event_rate" != "null" ] && [ -n "$missed_p2p_event_rate" ] && [[ "$missed_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                missed_p2p_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $missed_p2p_event_rate * 100" | bc -l))
+                missed_p2p_event_count_percentage=$(printf "%.2f% %" $(echo "scale=6; $missed_p2p_event_rate * 100" | bc -l))
               else
                 missed_p2p_event_count_percentage="N/A"
               fi
               
               if [ "$coordinated_omission_event_rate" != "null" ] && [ -n "$coordinated_omission_event_rate" ] && [[ "$coordinated_omission_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                coordinated_omission_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $coordinated_omission_event_rate * 100" | bc -l))
+                coordinated_omission_event_count_percentage=$(printf "%.2f% %" $(echo "scale=6; $coordinated_omission_event_rate * 100" | bc -l))
               else
                 coordinated_omission_event_count_percentage="N/A"
               fi
@@ -350,13 +350,13 @@ jobs:
               
               # Format percentages from decimal to percentage format
               if [ "$missed_p2p_event_rate" != "null" ] && [ -n "$missed_p2p_event_rate" ] && [[ "$missed_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                missed_p2p_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $missed_p2p_event_rate * 100" | bc -l))
+                missed_p2p_event_count_percentage=$(printf "%.2f% %" $(echo "scale=6; $missed_p2p_event_rate * 100" | bc -l))
               else
                 missed_p2p_event_count_percentage="N/A"
               fi
               
               if [ "$duplicated_p2p_event_rate" != "null" ] && [ -n "$duplicated_p2p_event_rate" ] && [[ "$duplicated_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                duplicated_p2p_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $duplicated_p2p_event_rate * 100" | bc -l))
+                duplicated_p2p_event_count_percentage=$(printf "%.2f% %" $(echo "scale=6; $duplicated_p2p_event_rate * 100" | bc -l))
               else
                 duplicated_p2p_event_count_percentage="N/A"
               fi
