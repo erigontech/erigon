@@ -19,8 +19,8 @@ import (
 // ii) existence filter: kvei
 // iii) bt index: btree index; e.g. .bt
 
-// snapshot name schema holder and parser
-// each entity holds one schema.
+// "snapshot files" name schema holder and parser
+// each entity has one schema.
 type SnapNameSchema interface {
 	DataTag() string
 	AccessorList() Accessors
@@ -193,7 +193,6 @@ func (s *E2SnapSchema) DataFileCompression() seg.FileCompression {
 }
 
 // E3 Schema
-
 type E3SnapSchema struct {
 	stepSize uint64
 
@@ -420,4 +419,60 @@ func (s *E3SnapSchema) FileExtensions() (extensions []string) {
 	}
 
 	return
+}
+
+// these are kv + kvi or bt/kvei residing in same folder snapshots/forkables.
+func NewForkableSnapSchema(cfg ForkableCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.accessors, stepSize)
+	b.Data(dirs.SnapForkable, cfg.name, DataExtensionKv, cfg.compression)
+	if cfg.accessors&AccessorBTree != 0 {
+		b.BtIndex()
+	}
+	if cfg.accessors&AccessorHashMap != 0 {
+		b.Accessor(dirs.SnapForkable)
+	}
+	if cfg.accessors&AccessorExistence != 0 {
+		b.Existence()
+	}
+
+	return b.Build()
+}
+
+func NewDomainSnapSchema(cfg domainCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapDomain, cfg.name.String(), DataExtensionKv, cfg.Compression)
+
+	if cfg.Accessors.Has(AccessorBTree) {
+		b.BtIndex()
+	}
+	if cfg.Accessors.Has(AccessorHashMap) {
+		// kvi in same folder
+		b.Accessor(dirs.SnapDomain)
+	}
+	if cfg.Accessors.Has(AccessorExistence) {
+		b.Existence()
+	}
+
+	return b.Build()
+}
+
+func NewHistorySnapSchema(cfg domainCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapHistory, cfg.name.String(), DataExtensionV, cfg.Compression)
+
+	if cfg.Accessors.Has(AccessorHashMap) {
+		b.Accessor(dirs.SnapAccessors)
+	}
+
+	return b.Build()
+}
+
+func NewIISnapSchema(cfg iiCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapIdx, cfg.name.String(), DataExtensionEf, cfg.Compression)
+	if cfg.Accessors.Has(AccessorHashMap) {
+		b.Accessor(dirs.SnapAccessors)
+	}
+
+	return b.Build()
 }

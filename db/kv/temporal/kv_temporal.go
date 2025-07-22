@@ -74,7 +74,7 @@ type DB struct {
 	kv.RwDB
 	agg             *state.Aggregator
 	forkaggs        []*state.ForkableAgg
-	forkaggsEnabled bool
+	forkableEnabled bool
 }
 
 func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
@@ -87,10 +87,10 @@ func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB
 			}
 			tdb.forkaggs[i] = forkagg
 		}
+		tdb.forkableEnabled = true
 	}
 	return tdb, nil
 }
-func (db *DB) EnableForkable()           { db.forkaggsEnabled = true }
 func (db *DB) Agg() any                  { return db.agg }
 func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
@@ -104,7 +104,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 
 	tx.aggtx = db.agg.BeginFilesRo()
 
-	if db.forkaggsEnabled {
+	if db.forkableEnabled {
 		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
 		for i, forkagg := range db.forkaggs {
 			tx.forkaggs[i] = forkagg.BeginTemporalTx()

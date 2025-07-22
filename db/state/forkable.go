@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 const MaxUint64 = ^uint64(0)
@@ -64,6 +65,17 @@ func App_WithUpdateCanonical() AppOpts {
 	return func(a ForkableConfig) {
 		a.UpdateCanonicalTbl()
 	}
+}
+
+type ForkableCfg struct {
+	name string
+
+	canonicalTbl    string // for marked structures
+	valsTbl         string
+	updateCanonical bool
+	pruneFrom       Num
+	accessors       Accessors
+	compression     seg.FileCompression
 }
 
 // func App
