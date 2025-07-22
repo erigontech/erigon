@@ -100,7 +100,7 @@ type ForkableCfg struct {
 	Name string
 
 	canonicalTbl    string // for marked structures
-	valsTbl         string
+	ValsTbl         string
 	updateCanonical bool
 	pruneFrom       kv.Num
 	Accessors       Accessors
