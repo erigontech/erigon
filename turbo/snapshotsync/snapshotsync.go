@@ -332,15 +332,15 @@ func SyncSnapshots(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
+	snapshots := blockReader.Snapshots()
 	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
 	if snapCfg.Local {
 		if !headerchain {
 			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified", logPrefix))
 		}
-		return nil
+		return firstNonGenesisCheck(tx, snapshots, logPrefix, dirs)
 	}
 	log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
-	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
@@ -489,6 +489,14 @@ func SyncSnapshots(
 		return err
 	}
 
+	if err := firstNonGenesisCheck(tx, snapshots, logPrefix, dirs); err != nil {
+		return err
+	}
+	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
+	return nil
+}
+
+func firstNonGenesisCheck(tx kv.RwTx, snapshots BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
@@ -500,6 +508,5 @@ func SyncSnapshots(
 			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
 		}
 	}
-	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
 	return nil
 }
