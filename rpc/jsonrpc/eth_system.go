@@ -294,41 +294,48 @@ func (api *APIImpl) Config(ctx context.Context) (*EthConfigResp, error) {
 	}
 
 	response := EthConfigResp{}
-	_, timeForks := forkid.GatherForks(chainConfig, genesis.Time())
+	_, hardForkTimes := forkid.GatherForks(chainConfig, genesis.Time())
+	bpoForkTimes := chainConfig.GetBpoTimes()
+	forkIdCalculator := newForkIdWithBpoCalculator(genesis.Hash(), hardForkTimes, bpoForkTimes)
+
 	// current fork config
-	currentForkId := forkid.NewIDFromForks(nil, timeForks, genesis.Hash(), math.MaxUint64, timeNow)
+	currentForkId := forkIdCalculator.Current(timeNow)
 	response.CurrentForkId = currentForkId.Hash[:]
 	response.Current = fillForkConfig(chainConfig, currentForkId.Activation)
 	response.CurrentHash, err = checkSumConfig(response.Current)
 	if err != nil {
 		return nil, err
 	}
-	if currentForkId.Next == 0 {
-		// means there are no subsequent forks setup to be activated after the current one
+
+	// next fork config
+	nextForkId, ok := forkIdCalculator.Next(currentForkId)
+	if !ok {
+		// means there are no later forks setup to be activated after the current one
 		return &response, nil
 	}
 
-	// next fork config
-	nextForkId := forkid.NewIDFromForks(nil, timeForks, genesis.Hash(), math.MaxUint64, currentForkId.Next)
-	nextForkIdBytes := hexutil.Bytes(nextForkId.Hash[:])
-	response.NextForkId = &nextForkIdBytes
 	response.Next = fillForkConfig(chainConfig, nextForkId.Activation)
 	nextForkHash, err := checkSumConfig(response.Next)
 	if err != nil {
 		return nil, err
 	}
+
+	nextForkIdBytes := hexutil.Bytes(nextForkId.Hash[:])
+	response.NextForkId = &nextForkIdBytes
 	response.NextHash = &nextForkHash
 
 	// last fork config
-	lastForkId := forkid.NewIDFromForks(nil, timeForks, genesis.Hash(), math.MaxUint64, math.MaxUint64)
-	lastForkIdBytes := hexutil.Bytes(lastForkId.Hash[:])
-	response.LastForkId = &lastForkIdBytes
+	lastForkId := forkIdCalculator.Last()
 	response.Last = fillForkConfig(chainConfig, lastForkId.Activation)
 	lastForkHash, err := checkSumConfig(response.Last)
 	if err != nil {
 		return nil, err
 	}
+
+	lastForkIdBytes := hexutil.Bytes(lastForkId.Hash[:])
+	response.LastForkId = &lastForkIdBytes
 	response.LastHash = &lastForkHash
+
 	return &response, nil
 }
 
@@ -354,6 +361,85 @@ func checkSumConfig(ehfc *EthHardForkConfig) (hexutil.Bytes, error) {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, crc32.ChecksumIEEE(ms))
 	return b, nil
+}
+
+type forkIdWithBpo struct {
+	forkid.ID
+	nextBpoActivation uint64
+	isBpo             bool
+}
+
+func newForkIdWithBpoCalculator(genesis common.Hash, hardForkTimes, bpoForkTimes []uint64) forkIdWithBpoCalculator {
+	return forkIdWithBpoCalculator{
+		genesis:             genesis,
+		hardForkActivations: hardForkTimes,
+		bpoForkActivations:  bpoForkTimes,
+		hardForkBpoChildren: assignBposToHardForks(hardForkTimes, bpoForkTimes),
+	}
+}
+
+type forkIdWithBpoCalculator struct {
+	genesis             common.Hash
+	hardForkActivations []uint64
+	bpoForkActivations  []uint64
+	hardForkBpoChildren map[uint64][]uint64
+}
+
+func (c forkIdWithBpoCalculator) Current(time uint64) forkIdWithBpo {
+	currentHardForkId := forkid.NewIDFromForks(nil, c.hardForkActivations, c.genesis, math.MaxUint64, time)
+	if len(c.hardForkBpoChildren[currentHardForkId.Activation]) == 0 {
+		return forkIdWithBpo{ID: currentHardForkId, nextBpoActivation: 0, isBpo: false}
+	}
+
+	hashNum := binary.BigEndian.Uint32(currentHardForkId.Hash[:])
+	nextBpoActivation := uint64(0)
+	for _, bpoActivation := range c.hardForkBpoChildren[currentHardForkId.Activation] {
+		if time < bpoActivation {
+			nextBpoActivation = bpoActivation
+			break
+		}
+		hashNum = forkid.ChecksumUpdate(hashNum, bpoActivation)
+	}
+
+	result := forkIdWithBpo{ID: currentHardForkId, nextBpoActivation: nextBpoActivation, isBpo: true}
+	result.Hash = forkid.ChecksumToBytes(hashNum)
+	return result
+}
+
+func (c forkIdWithBpoCalculator) Next(current forkIdWithBpo) (forkIdWithBpo, bool) {
+	if current.nextBpoActivation > 0 {
+		return c.Current(current.nextBpoActivation), true
+	}
+	if current.Next > 0 {
+		return c.Current(current.Next), true
+	}
+	return forkIdWithBpo{}, false
+}
+
+func (c forkIdWithBpoCalculator) Last() forkIdWithBpo {
+	return c.Current(math.MaxUint64)
+}
+
+func assignBposToHardForks(hardForkTimes []uint64, bpoForkTimes []uint64) map[uint64][]uint64 {
+	// assumes both hardForkActivations and bpoForkActivations are sorted in asc order
+	// start backwards and assign a bpo time to hard fork time if that bpo tim is >=
+	assignments := make(map[uint64][]uint64, len(hardForkTimes))
+	for _, hardForkTime := range hardForkTimes {
+		assignments[hardForkTime] = nil
+	}
+	i := len(hardForkTimes) - 1
+	j := len(bpoForkTimes) - 1
+	for j >= 0 && i >= 0 {
+		hardForkTime := hardForkTimes[i]
+		bpoTime := bpoForkTimes[j]
+		if bpoTime >= hardForkTime {
+			assignments[hardForkTime] = append(assignments[hardForkTime], bpoTime)
+			j--
+		} else {
+			i--
+		}
+	}
+	return assignments
 }
 
 type GasPriceOracleBackend struct {

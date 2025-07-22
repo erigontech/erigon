@@ -410,6 +410,26 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	return ConfigValueLookup(c.parsedBlobSchedule, time)
 }
 
+func (c *Config) GetBpoTimes() []uint64 {
+	bpos := make([]uint64, 0, 5)
+	if c.Bpo1Time != nil {
+		bpos = append(bpos, c.Bpo1Time.Uint64())
+	}
+	if c.Bpo2Time != nil {
+		bpos = append(bpos, c.Bpo2Time.Uint64())
+	}
+	if c.Bpo3Time != nil {
+		bpos = append(bpos, c.Bpo3Time.Uint64())
+	}
+	if c.Bpo4Time != nil {
+		bpos = append(bpos, c.Bpo4Time.Uint64())
+	}
+	if c.Bpo5Time != nil {
+		bpos = append(bpos, c.Bpo5Time.Uint64())
+	}
+	return bpos
+}
+
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
 	return c.GetBlobConfig(time).Max
 }
