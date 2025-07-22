@@ -60,7 +60,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --client erigon --sim.parallelism 8 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eest/consume-engine' --client erigon --sim.parallelism 2 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -97,6 +97,11 @@ jobs:
         with:
           name: hive-workspace-log
           path: hive/workspace/logs
+      - name: Upload output log
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-spec-tests-logs
+          path: /execution-spec-tests/src/logs
       - name: Check for failures
         run: |
           if grep -q "failed" hive/failed.log; then
