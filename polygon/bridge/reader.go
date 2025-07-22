@@ -129,7 +129,7 @@ func (r *Reader) Events(ctx context.Context, blockHash libcommon.Hash, blockNum 
 		eventsRaw = append(eventsRaw, msg)
 	}
 
-	r.logger.Debug("LAL read events by block:", blockNum, "len events:", len(events))
+	r.logger.Debug("LAL read events by block:", "blockNum", blockNum, "len events:", len(events))
 
 	return eventsRaw, nil
 }
