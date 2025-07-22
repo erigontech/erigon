@@ -3,7 +3,9 @@ package das
 import (
 	"context"
 	"math"
+	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -40,8 +42,9 @@ type PeerDas interface {
 }
 
 const (
-	numOfBlobRecoveryWorkers   = 8
-	maxNumberOfCellsPerRequest = 128 // 512*2KB = 1MB
+	numOfBlobRecoveryWorkers      = 8
+	maxNumberOfCellsPerRequest    = 1024 // 1024*2KB = 2MB
+	maxConcurrentDownloadRequests = 16
 )
 
 type peerdas struct {
@@ -448,21 +451,21 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	}
 
 	// split the request into multiple requests to avoid overwhelming the peer
-	semaphore := semaphore.NewWeighted(12)
+	semConcurrentDownload := semaphore.NewWeighted(maxConcurrentDownloadRequests)
 	wg := sync.WaitGroup{}
 	requests := req.splitRequest(maxNumberOfCellsPerRequest)
-	for _, req := range requests {
-		semaphore.Acquire(ctx, 1)
+	for _, request := range requests {
 		wg.Add(1)
+		semConcurrentDownload.Acquire(context.Background(), 1)
 		go func(req *downloadRequest) {
 			defer func() {
-				semaphore.Release(1)
+				semConcurrentDownload.Release(1)
 				wg.Done()
 			}()
 			if err := d.runDownload(ctx, req, true); err != nil {
 				log.Warn("failed to download columns", "err", err)
 			}
-		}(req)
+		}(request)
 	}
 	wg.Wait()
 	return nil
@@ -490,8 +493,14 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		wg := sync.WaitGroup{}
+		takeBreak := atomic.Bool{}
 	loop:
 		for {
+			if takeBreak.Load() {
+				// sleep a while 5 ~ 10 seconds
+				sleep := time.Second*5 + time.Duration(rand.Intn(5000))*time.Millisecond
+				time.Sleep(sleep)
+			}
 			select {
 			case <-stopChan:
 				break loop
@@ -524,6 +533,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 					default:
 						// just drop it if the channel is full
 					}
+					takeBreak.Store(err == rpc.ErrNoGoodPeer)
 				}()
 			}
 		}

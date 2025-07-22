@@ -193,6 +193,12 @@ func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic s
 	return nil
 }
 
+func (c *columnDataPeers) availablePeerCount() int {
+	c.peersMutex.RLock()
+	defer c.peersMutex.RUnlock()
+	return len(c.peersQueue)
+}
+
 func (c *columnDataPeers) pickPeerRoundRobin(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
