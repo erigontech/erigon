@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"os"
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -170,6 +171,8 @@ func TestEthConfig(t *testing.T) {
 			wantResponseBytes, err := os.ReadFile(test.wantResponseFilePath)
 			require.NoError(t, err)
 			want, have := string(wantResponseBytes), string(haveResponseBytes)
+			// replace \r\n with \n is necessary for CI on windows
+			want, have = strings.ReplaceAll(want, "\r\n", "\n"), strings.ReplaceAll(have, "\r\n", "\n")
 			require.Equal(t, want, have)
 		})
 	}
