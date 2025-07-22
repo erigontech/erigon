@@ -93,15 +93,34 @@ jobs:
           # run_suite engine auth
           # run_suite rpc compat
         continue-on-error: true
+
       - name: Upload output log
         uses: actions/upload-artifact@v4
         with:
           name: hive-workspace-log
           path: hive/workspace/logs
         continue-on-error: true
+
       - name: Check for failures
         run: |
           if grep -q "failed" hive/failed.log; then
             echo "One or more tests failed."
             exit 1
           fi
+          echo "All tests passed successfully."
+
+      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
+      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
+      - name: Remove Hive directory
+        run: |
+          echo "Removing the Hive directory..."
+          rm -rf hive
+        if: always()
+
+      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
+      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
+      - name: Prune docker
+        run: |
+          echo "Pruning docker..."
+          docker system prune -af --volumes
+        if: always()
