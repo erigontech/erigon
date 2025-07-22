@@ -492,7 +492,12 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingConsolidations(w http.ResponseWr
 	isSlotAvailableInMemory := a.forkchoiceStore.LowestAvailableSlot() < *slot
 
 	if isSlotAvailableInMemory {
-		panic("not implemented yet")
+		var ok bool
+		pendingConsolidations, ok = a.forkchoiceStore.GetPendingConsolidations(blockRoot)
+		if !ok {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending	 consolidations found for block root: %x", blockRoot))
+		}
+		// If we have the pending consolidations in memory, we can return them directly.
 	} else {
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
@@ -546,7 +551,11 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingDeposits(w http.ResponseWriter, 
 	isSlotAvailableInMemory := a.forkchoiceStore.LowestAvailableSlot() < *slot
 
 	if isSlotAvailableInMemory {
-		panic("not implemented yet")
+		var ok bool
+		pendingDeposits, ok = a.forkchoiceStore.GetPendingDeposits(blockRoot)
+		if !ok {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending	 deposits found for block root: %x", blockRoot))
+		}
 	} else {
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
@@ -600,7 +609,11 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingPartialWithdrawals(w http.Respon
 	isSlotAvailableInMemory := a.forkchoiceStore.LowestAvailableSlot() < *slot
 
 	if isSlotAvailableInMemory {
-		panic("not implemented yet")
+		var ok bool
+		pendingWithdrawals, ok = a.forkchoiceStore.GetPendingPartialWithdrawals(blockRoot)
+		if !ok {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending partial withdrawals found for block root: %x", blockRoot))
+		}
 	} else {
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
