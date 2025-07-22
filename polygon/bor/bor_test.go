@@ -184,8 +184,8 @@ func (r headerReader) Config() *chain.Config {
 	return r.validator.ChainConfig
 }
 
-func (r headerReader) FrozenBlocks() uint64    { return 0 }
-func (r headerReader) FrozenBorBlocks() uint64 { return 0 }
+func (r headerReader) FrozenBlocks() uint64              { return 0 }
+func (r headerReader) FrozenBorBlocks(align bool) uint64 { return 0 }
 
 func (r headerReader) CurrentHeader() *types.Header {
 	return nil

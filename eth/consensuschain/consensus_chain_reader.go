@@ -90,8 +90,8 @@ func (cr Reader) GetTd(hash common.Hash, number uint64) *big.Int {
 	}
 	return td
 }
-func (cr Reader) FrozenBlocks() uint64    { return cr.blockReader.FrozenBlocks() }
-func (cr Reader) FrozenBorBlocks() uint64 { return cr.blockReader.FrozenBorBlocks() }
+func (cr Reader) FrozenBlocks() uint64              { return cr.blockReader.FrozenBlocks() }
+func (cr Reader) FrozenBorBlocks(align bool) uint64 { return cr.blockReader.FrozenBorBlocks(align) }
 func (cr Reader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
 	return b
