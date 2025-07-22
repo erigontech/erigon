@@ -638,10 +638,13 @@ func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
 // Supposed that txAmount includes 2 system txns.
 func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
 
+// BodyOnlyTxn txn-related part of BodyForStorage
+// 50% of BodyForStorage spent on withdrawal
+// this structure does rlp decode only for
+// "tx related" data
+//
+// must use `rlp.DecodeBytesPartial` to decode
 type BodyOnlyTxn struct {
-	// 50% of BodyForStorage spent on withdrawal
-	// this structure does rlp decode only for
-	// "tx related" data
 	BaseTxnID BaseTxnID
 	TxCount   uint32
 }
