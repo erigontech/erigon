@@ -284,7 +284,7 @@ type EthConfigResp struct {
 func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error) {
 	var timeUnix uint64
 	if timeArg != nil {
-		timeUnix = (*timeArg).Uint64()
+		timeUnix = timeArg.Uint64()
 	} else {
 		timeUnix = uint64(time.Now().Unix())
 	}
