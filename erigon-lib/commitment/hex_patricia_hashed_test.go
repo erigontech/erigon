@@ -1853,19 +1853,18 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms)
 	hph.SetTrace(false)
+	hph.memoizationOff = true
 
 	// generate list of updates diverging from first nibble (good case for parallelization))
 	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, length.Addr, 2, 4)
 
-	// addrWithSingleton := []byte{}
 	builder := NewUpdateBuilder()
 	for i := range plainKeysList {
 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 	}
-	// addrWithSingleton = common.Copy(plainKeysList[1])
-	// _ = addrWithSingleton
-	// TODO: test storage slots later
-	// builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+	addrWithSingleton := common.Copy(plainKeysList[0])
+	builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+	// builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed471", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed471")
 
 	plainKeys, updates := builder.Build()
 	err := ms.applyPlainUpdates(plainKeys, updates)
@@ -1879,9 +1878,10 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 	toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 	defer toWitness.Close()
-	for i := range plainKeysList {
-		toWitness.TouchPlainKey(string(plainKeysList[i]), nil, toProcess.TouchAccount)
-	}
+	// for i := range plainKeysList {
+	// 	toWitness.TouchPlainKey(string(plainKeysList[i]), nil, toProcess.TouchAccount)
+	// }
+	toWitness.TouchPlainKey(string(addrWithSingleton), nil, toProcess.TouchAccount)
 
 	witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, root, "")
 	require.NoError(t, err)
