@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"os"
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -85,6 +86,7 @@ func TestEthConfig(t *testing.T) {
 		genesisFilePath      string
 		timeArg              hexutil.Uint64
 		wantResponseFilePath string
+		wantIsError          error
 	}{
 		{
 			name:                 "hoodi prague scheduled but not activated",
@@ -134,6 +136,19 @@ func TestEthConfig(t *testing.T) {
 			timeArg:              hexutil.Uint64(1753115150),
 			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_response_osaka_activated_bpo_5_activated.json"),
 		},
+		{
+			name:                 "mainnet prague scheduled and activated no osaka no bpos",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_genesis.json"),
+			timeArg:              hexutil.Uint64(1746612311 + 1000),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_response_prague_activated.json"),
+		},
+		{
+			name:                 "no support for timestamps before cancun",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_genesis.json"),
+			timeArg:              hexutil.Uint64(1710338135 - 1000),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "response_empty.json"),
+			wantIsError:          ErrForkTimeBeforeCancun,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -150,12 +165,14 @@ func TestEthConfig(t *testing.T) {
 
 			timeArg := test.timeArg
 			result, err := eth.Config(t.Context(), &timeArg)
-			require.NoError(t, err)
+			require.ErrorIs(t, err, test.wantIsError)
 			haveResponseBytes, err := json.MarshalIndent(result, "", "    ")
 			require.NoError(t, err)
 			wantResponseBytes, err := os.ReadFile(test.wantResponseFilePath)
 			require.NoError(t, err)
 			want, have := string(wantResponseBytes), string(haveResponseBytes)
+			// replace \r\n with \n is necessary for CI on windows
+			want, have = strings.ReplaceAll(want, "\r\n", "\n"), strings.ReplaceAll(have, "\r\n", "\n")
 			require.Equal(t, want, have)
 		})
 	}

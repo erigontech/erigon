@@ -1,12 +1,12 @@
 {
     "current": {
-        "activationTime": 1753115150,
+        "activationTime": 1746612311,
         "blobSchedule": {
-            "baseFeeUpdateFraction": 6507716,
-            "max": 15,
-            "target": 12
+            "baseFeeUpdateFraction": 5007716,
+            "max": 9,
+            "target": 6
         },
-        "chainId": "0x88bb0",
+        "chainId": "0x1",
         "precompiles": {
             "0x0000000000000000000000000000000000000001": "ECREC",
             "0x0000000000000000000000000000000000000002": "SHA256",
@@ -24,8 +24,7 @@
             "0x000000000000000000000000000000000000000e": "BLS12_G2MSM",
             "0x000000000000000000000000000000000000000f": "BLS12_PAIRING_CHECK",
             "0x0000000000000000000000000000000000000010": "BLS12_MAP_FP_TO_G1",
-            "0x0000000000000000000000000000000000000011": "BLS12_MAP_FP2_TO_G2",
-            "0x0000000000000000000000000000000000000100": "P256VERIFY"
+            "0x0000000000000000000000000000000000000011": "BLS12_MAP_FP2_TO_G2"
         },
         "systemContracts": {
             "BEACON_ROOTS_ADDRESS": "0x000f3df6d732807ef1319fb7b8bb8522d0beac02",
@@ -35,8 +34,8 @@
             "WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS": "0x00000961ef480eb55e80d19ad83579a64c007002"
         }
     },
-    "currentHash": "0x06072f80",
-    "currentForkId": "0xfa432b44",
+    "currentHash": "0xea790817",
+    "currentForkId": "0xc376cf8b",
     "next": null,
     "nextHash": null,
     "nextForkId": null,

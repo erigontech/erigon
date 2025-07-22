@@ -410,36 +410,6 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	return ConfigValueLookup(c.parsedBlobSchedule, time)
 }
 
-func (c *Config) GetBpoTimes() []uint64 {
-	bpos := make([]uint64, 0, 5)
-	if c.Bpo1Time != nil {
-		bpos = append(bpos, c.Bpo1Time.Uint64())
-	}
-	if c.Bpo2Time != nil {
-		mustLen(bpos, 1, "bpo2Time provided but bpo1Time missing")
-		bpos = append(bpos, c.Bpo2Time.Uint64())
-	}
-	if c.Bpo3Time != nil {
-		mustLen(bpos, 2, "bpo3Time provided but bpo2Time missing")
-		bpos = append(bpos, c.Bpo3Time.Uint64())
-	}
-	if c.Bpo4Time != nil {
-		mustLen(bpos, 3, "bpo4Time provided but bpo3Time missing")
-		bpos = append(bpos, c.Bpo4Time.Uint64())
-	}
-	if c.Bpo5Time != nil {
-		mustLen(bpos, 4, "bpo5Time provided but bpo4Time missing")
-		bpos = append(bpos, c.Bpo5Time.Uint64())
-	}
-	return bpos
-}
-
-func mustLen(a []uint64, length int, errMsg string) {
-	if len(a) != length {
-		panic(fmt.Sprintf("%s: %v != %v", errMsg, len(a), length))
-	}
-}
-
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
 	return c.GetBlobConfig(time).Max
 }

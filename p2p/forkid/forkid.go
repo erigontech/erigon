@@ -50,7 +50,7 @@ var (
 // ID is a fork identifier as defined by EIP-2124.
 type ID struct {
 	Hash       [4]byte // CRC32 checksum of the genesis block and passed fork block numbers
-	Activation uint64  // Block number/time activation for current fork
+	Activation uint64  `rlp:"-"` // Block number/time activation for current fork
 	Next       uint64  // Block number/time of the next upcoming fork, or 0 if no forks are known
 }
 

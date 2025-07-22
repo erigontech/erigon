@@ -74,7 +74,7 @@
         }
     },
     "nextHash": "0xd840c9b2",
-    "nextForkId": "0xb164c120",
+    "nextForkId": "0xcb334d43",
     "last": {
         "activationTime": 1753115150,
         "blobSchedule": {
@@ -112,5 +112,5 @@
         }
     },
     "lastHash": "0x06072f80",
-    "lastForkId": "0x56507aba"
+    "lastForkId": "0xfa432b44"
 }
