@@ -128,10 +128,6 @@ func (r *registry) Name(a ForkableId) string {
 	return r.entityRegistry[a].name
 }
 
-func (r *registry) SnapshotTag(a ForkableId) string {
-	return r.entityRegistry[a].snapshotDataFileTag
-}
-
 func (r *registry) IndexFileTag(a ForkableId) []string {
 	return r.entityRegistry[a].indexFileTag
 }

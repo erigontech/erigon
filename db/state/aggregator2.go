@@ -337,7 +337,7 @@ var Schema = SchemaGen{
 	},
 	RCacheForkable: ForkableCfg{
 		name:        "rcache",
-		valsTbl:     kv.TblRCacheFVAls,
+		ValsTbl:     kv.TblRCacheFVAls,
 		accessors:   AccessorHashMap,
 		compression: seg.CompressNone,
 	},
