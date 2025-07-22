@@ -380,6 +380,8 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 				return err
 			}
 
+			// LAL
+
 			endId, err = s.store.LastEventIdWithinWindow(ctx, startId, time.Unix(int64(toTime), 0))
 			if err != nil {
 				return err

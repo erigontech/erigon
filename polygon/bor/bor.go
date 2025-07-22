@@ -1659,6 +1659,8 @@ func (c *Bor) CommitStates(
 			}
 		}
 
+		fmt.Println("LAL commit state events len:", len(events), "header:", header.Number.Uint64())
+
 		for _, event := range events {
 			_, err := syscall(*event.To(), event.Data())
 			if err != nil {
@@ -1683,6 +1685,8 @@ func (c *Bor) CommitStates(
 			return err
 		}
 	}
+
+	fmt.Println("LAL commit state len:", len(events))
 
 	for _, event := range events {
 		if err := c.stateReceiver.CommitState(event, syscall); err != nil {

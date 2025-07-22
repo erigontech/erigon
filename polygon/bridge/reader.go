@@ -129,6 +129,8 @@ func (r *Reader) Events(ctx context.Context, blockHash libcommon.Hash, blockNum 
 		eventsRaw = append(eventsRaw, msg)
 	}
 
+	fmt.Println("LAL read events by block:", blockNum, "len events:", len(events))
+
 	return eventsRaw, nil
 }
 
