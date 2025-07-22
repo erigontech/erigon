@@ -402,10 +402,20 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 		//	log.Info("[dbg] out", "chanLen", out.ChanLen(), "chanCapacity", out.ChanCapacity(), "heapLen", out.Len(), "heapCapacity", out.Capacity())
 		//default:
 		//}
-
-		_, err = out.DrainNonBlocking(ctx)
-		if err != nil {
-			return err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case nextResult, ok := <-out.ResultCh():
+			if !ok {
+				return nil
+			}
+			closed, err := out.Drain(ctx, nextResult)
+			if err != nil {
+				return err
+			}
+			if closed {
+				return nil
+			}
 		}
 
 		processedTxNum, _, err := resultProcessor.processResults(consumer, cfg, out, outputTxNum.Load(), tx, true, logger)
@@ -415,7 +425,6 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 		if processedTxNum > 0 {
 			outputTxNum.Store(processedTxNum)
 		}
-
 	}
 	//if outputTxNum.Load() != toTxNum {
 	//	return fmt.Errorf("not all txnums proceeded: toTxNum=%d, outputTxNum=%d", toTxNum, outputTxNum.Load())

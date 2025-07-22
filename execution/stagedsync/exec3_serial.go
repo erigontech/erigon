@@ -280,15 +280,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			}
 		}
 
-		if traceBlock(txTask.BlockNumber()) {
-			var receipts []map[string]interface{}
-			for i, receipt := range blockReceipts {
-				txn := txTask.Txs[i]
-				receipts = append(receipts, ethutils.MarshalReceipt(receipt, txn, se.cfg.chainConfig, txTask.Header, txn.Hash(), true))
-			}
-			marshalled, _ := json.Marshal(receipts)
-			fmt.Println(txTask.BlockNumber(), "receipts", string(marshalled))
-		}
 		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
 			txTask.BalanceIncreaseSet, blockReceipts, result.Logs, result.TraceFroms, result.TraceTos,
 			se.cfg.chainConfig, se.cfg.chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime()), txTask.HistoryExecution); err != nil {
@@ -305,6 +296,15 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 
 		if task.IsBlockEnd() {
+			if traceBlock(txTask.BlockNumber()) {
+				var receipts []map[string]interface{}
+				for i, receipt := range blockReceipts {
+					txn := txTask.Txs[i]
+					receipts = append(receipts, ethutils.MarshalReceipt(receipt, txn, se.cfg.chainConfig, txTask.Header, txn.Hash(), true))
+				}
+				marshalled, _ := json.Marshal(receipts)
+				fmt.Println(txTask.BlockNumber(), "receipts", string(marshalled))
+			}
 			se.executedGas.Add(int64(se.gasUsed))
 			se.gasUsed = 0
 			se.blobGasUsed = 0
