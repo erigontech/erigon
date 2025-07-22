@@ -134,6 +134,12 @@ func TestEthConfig(t *testing.T) {
 			timeArg:              hexutil.Uint64(1753115150),
 			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "hoodi_osaka_scheduled_with_5_bpos_response_osaka_activated_bpo_5_activated.json"),
 		},
+		{
+			name:                 "mainnet prague scheduled and activated no osaka no bpos",
+			genesisFilePath:      path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_genesis.json"),
+			timeArg:              hexutil.Uint64(1746612311 + 1000),
+			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_response_prague_activated.json"),
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

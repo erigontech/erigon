@@ -300,9 +300,9 @@ func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthCo
 	}
 
 	response := EthConfigResp{}
-	_, hardForkTimes := forkid.GatherForks(chainConfig, genesis.Time())
+	hardForkBlockNums, hardForkTimes := forkid.GatherForks(chainConfig, genesis.Time())
 	bpoForkTimes := chainConfig.GetBpoTimes()
-	forkIdCalculator := newForkIdWithBpoCalculator(genesis.Hash(), hardForkTimes, bpoForkTimes)
+	forkIdCalculator := newForkIdWithBpoCalculator(genesis.Hash(), hardForkBlockNums, hardForkTimes, bpoForkTimes)
 
 	// current fork config
 	currentForkId := forkIdCalculator.Current(timeUnix)
@@ -375,24 +375,26 @@ type forkIdWithBpo struct {
 	isBpo             bool
 }
 
-func newForkIdWithBpoCalculator(genesis common.Hash, hardForkTimes, bpoForkTimes []uint64) forkIdWithBpoCalculator {
+func newForkIdWithBpoCalculator(genesis common.Hash, hardForkBlockNums, hardForkTimes, bpoForkTimes []uint64) forkIdWithBpoCalculator {
 	return forkIdWithBpoCalculator{
 		genesis:             genesis,
-		hardForkActivations: hardForkTimes,
-		bpoForkActivations:  bpoForkTimes,
+		hardForkBlockNums:   hardForkBlockNums,
+		hardForkTimes:       hardForkTimes,
+		bpoForkTimes:        bpoForkTimes,
 		hardForkBpoChildren: assignBposToHardForks(hardForkTimes, bpoForkTimes),
 	}
 }
 
 type forkIdWithBpoCalculator struct {
 	genesis             common.Hash
-	hardForkActivations []uint64
-	bpoForkActivations  []uint64
+	hardForkBlockNums   []uint64
+	hardForkTimes       []uint64
+	bpoForkTimes        []uint64
 	hardForkBpoChildren map[uint64][]uint64
 }
 
 func (c forkIdWithBpoCalculator) Current(time uint64) forkIdWithBpo {
-	currentHardForkId := forkid.NewIDFromForks(nil, c.hardForkActivations, c.genesis, math.MaxUint64, time)
+	currentHardForkId := forkid.NewIDFromForks(c.hardForkBlockNums, c.hardForkTimes, c.genesis, math.MaxUint64, time)
 	if len(c.hardForkBpoChildren[currentHardForkId.Activation]) == 0 {
 		return forkIdWithBpo{ID: currentHardForkId, nextBpoActivation: 0, isBpo: false}
 	}
@@ -427,7 +429,7 @@ func (c forkIdWithBpoCalculator) Last() forkIdWithBpo {
 }
 
 func assignBposToHardForks(hardForkTimes []uint64, bpoForkTimes []uint64) map[uint64][]uint64 {
-	// assumes both hardForkActivations and bpoForkActivations are sorted in asc order
+	// assumes both hardForkTimes and bpoForkTimes are sorted in asc order
 	// start backwards and assign a bpo time to hard fork time if that bpo tim is >=
 	assignments := make(map[uint64][]uint64, len(hardForkTimes))
 	for _, hardForkTime := range hardForkTimes {
