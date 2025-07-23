@@ -409,9 +409,6 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		fmt.Printf("[dbg] HistoryChangesIterFiles.Next: key=%x\n", key)
-
-		// File iterator logic
 		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
@@ -431,6 +428,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if !ok {
 			continue
 		}
+
 		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
 			g.Reset(offset)
@@ -478,7 +476,6 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
-	fmt.Printf("[dbg] HistoryChangesIterFiles.Next: hi.kBackup=%x", hi.kBackup)
 	return hi.kBackup, hi.vBackup, nil
 }
 
@@ -542,12 +539,11 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 
 		seek = append(next, hi.startTxKey[:]...)
 	}
+	fmt.Printf("[dbg] HistoryChangesIterDB.advanceLargeVals: seek=%x\n", seek)
 	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
 		if err != nil {
 			return err
 		}
-
-		//TODO: first 8 bytes is step - skip it
 		if hi.endTxNum >= 0 && int(binary.BigEndian.Uint64(k[len(k)-8:])) >= hi.endTxNum {
 			next, ok := kv.NextSubtree(k[:len(k)-8])
 			if !ok {
@@ -603,6 +599,7 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			return err
 		}
 	}
+	fmt.Printf("[dbg] HistoryChangesIterDB.advanceSmallVals: k=%x, %d\n", k, len(k))
 	for k != nil {
 		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
 		if err != nil {
@@ -659,10 +656,13 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	}
 	order.Asc.Assert(hi.k, hi.nextKey)
 
+	// For step-prefixed keys, strip the step prefix (first 8 bytes)
+	// Format: [^step][addr] for non-large values, [^step][addr][txNum] for large values
+	// We want to return just the addr part
 	keyWithoutStep := hi.k
 	if len(hi.k) > 8 {
 		keyWithoutStep = hi.k[8:]
 	}
-	fmt.Printf("[dbg] HistoryChangesIterDB.Next: keyWithoutStep=%x\n", keyWithoutStep)
+	fmt.Printf("[dbg] HistoryChangesIterDB.Next: keyWithoutStep=%x, hi.k=%x\n", keyWithoutStep, hi.k)
 	return keyWithoutStep, hi.v, nil
 }

@@ -1707,6 +1707,11 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
+	firstKey, _ := kv.FirstKey(roTx, ht.h.valuesTable)
+	if len(firstKey) <= 8 {
+		panic(fmt.Sprintf("first key is too short? %x", firstKey))
+	}
+
 	stepDbIters, err := ht.iterateChangedRecentBySteps(fromTxNum, toTxNum, asc, limit, roTx)
 	if err != nil {
 		return nil, err
