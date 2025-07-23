@@ -1623,7 +1623,7 @@ func (ht *HistoryRoTx) iterateChangedRecentBySteps(fromTxNum, toTxNum int, asc o
 			if _fromTxNum >= _toTxNum {
 				continue
 			}
-			stepIt, err := ht.iterateChangedRecentForStep(_fromTxNum, _toTxNum, asc, limit, roTx)
+			stepIt, err := ht.iterateChangedRecentForStep(_fromTxNum, _toTxNum, asc, limit, roTx, step)
 			if err != nil {
 				return nil, err
 			}
@@ -1655,7 +1655,7 @@ func (ht *HistoryRoTx) iterateChangedRecentBySteps(fromTxNum, toTxNum int, asc o
 				}
 				continue
 			}
-			stepIt, err := ht.iterateChangedRecentForStep(_fromTxNum, _toTxNum, asc, limit, roTx)
+			stepIt, err := ht.iterateChangedRecentForStep(_fromTxNum, _toTxNum, asc, limit, roTx, step)
 			if err != nil {
 				return nil, err
 			}
@@ -1671,13 +1671,15 @@ func (ht *HistoryRoTx) iterateChangedRecentBySteps(fromTxNum, toTxNum int, asc o
 	return stepDbIters, nil
 }
 
-func (ht *HistoryRoTx) iterateChangedRecentForStep(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+func (ht *HistoryRoTx) iterateChangedRecentForStep(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx, step uint64) (stream.KV, error) {
 	s := &HistoryChangesIterDB{
-		endTxNum:    toTxNum,
-		roTx:        roTx,
-		largeValues: ht.h.historyLargeValues,
-		valsTable:   ht.h.valuesTable,
-		limit:       limit,
+		endTxNum:        toTxNum,
+		roTx:            roTx,
+		largeValues:     ht.h.historyLargeValues,
+		valsTable:       ht.h.valuesTable,
+		limit:           limit,
+		step:            step,
+		aggregationStep: ht.aggStep,
 	}
 	if fromTxNum >= 0 {
 		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
@@ -1686,7 +1688,7 @@ func (ht *HistoryRoTx) iterateChangedRecentForStep(fromTxNum, toTxNum int, asc o
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	return s, nil
+	return NewHistoryChangesIterDBWrapper(s), nil
 }
 
 func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
@@ -1703,7 +1705,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 		if it.iter == nil {
 			continue // no changes in this step
 		}
-		r = stream.IntersectKV(r, it.iter, limit)
+		r = stream.UnionKV(r, it.iter, limit)
 	}
 
 	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit)
@@ -1713,7 +1715,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	// Merge all DB iterators with files iterator
 	// Since we pass DB iterators to the heap in iterateChangedFrozen,
 	// the files iterator already contains the merged result
-	return stream.IntersectKV(r, itOnFiles, limit), nil
+	return stream.UnionKV(r, itOnFiles, limit), nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {

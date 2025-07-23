@@ -483,17 +483,56 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 }
 
 type HistoryChangesIterDB struct {
-	largeValues     bool
-	roTx            kv.Tx
-	valsC           kv.Cursor
-	valsCDup        kv.CursorDupSort
-	valsTable       string
-	limit, endTxNum int
-	startTxKey      [8]byte
-
+	largeValues      bool
+	roTx             kv.Tx
+	valsC            kv.Cursor
+	valsCDup         kv.CursorDupSort
+	valsTable        string
+	limit, endTxNum  int
+	startTxKey       [8]byte
+	step             uint64
+	aggregationStep  uint64
 	nextKey, nextVal []byte
 	k, v             []byte
 	err              error
+}
+
+// HistoryChangesIterDBWrapper wraps HistoryChangesIterDB to strip step prefix from keys
+type HistoryChangesIterDBWrapper struct {
+	inner *HistoryChangesIterDB
+}
+
+func NewHistoryChangesIterDBWrapper(inner *HistoryChangesIterDB) *HistoryChangesIterDBWrapper {
+	return &HistoryChangesIterDBWrapper{inner: inner}
+}
+
+func (w *HistoryChangesIterDBWrapper) Close() {
+	w.inner.Close()
+}
+
+func (w *HistoryChangesIterDBWrapper) HasNext() bool {
+	return w.inner.HasNext()
+}
+
+func (w *HistoryChangesIterDBWrapper) Next() ([]byte, []byte, error) {
+	k, v, err := w.inner.Next()
+	if err != nil {
+		return nil, nil, err
+	}
+	if k == nil {
+		return nil, nil, nil
+	}
+
+	// Strip step prefix (first 8 bytes) from key to get the address
+	// For step-prefixed keys, we always strip the first 8 bytes
+	if len(k) >= 8 {
+		strippedKey := k[8:]
+		return strippedKey, v, nil
+	}
+
+	// If key is shorter than 8 bytes, this shouldn't happen with proper step-prefixed keys
+	// but return as-is for safety
+	return k, v, nil
 }
 
 func (hi *HistoryChangesIterDB) Close() {
@@ -504,13 +543,7 @@ func (hi *HistoryChangesIterDB) Close() {
 		hi.valsCDup.Close()
 	}
 }
-func (hi *HistoryChangesIterDB) advance() (err error) {
-	// not large:
-	//   keys: txNum -> key1+key2
-	//   vals: key1+key2 -> txNum + value (DupSort)
-	// large:
-	//   keys: txNum -> key1+key2
-	//   vals: key1+key2+txNum -> value (not DupSort)
+func (hi *HistoryChangesIterDB) advance() error {
 	if hi.largeValues {
 		return hi.advanceLargeVals()
 	}
@@ -518,37 +551,50 @@ func (hi *HistoryChangesIterDB) advance() (err error) {
 }
 
 func (hi *HistoryChangesIterDB) advanceLargeVals() error {
+	// Create step prefix for this specific step
+	invertedStep := ^hi.step
+	stepPrefix := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepPrefix, invertedStep)
+
 	var seek []byte
-	var err error
 	if hi.valsC == nil {
+		var err error
 		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
 			return err
 		}
-		firstKey, _, err := hi.valsC.First()
-		if err != nil {
-			return err
-		}
-		if firstKey == nil {
-			hi.nextKey = nil
-			return nil
-		}
-		seek = append(common.Copy(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
+		// Start seeking from the beginning of our step
+		seek = stepPrefix
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
 			hi.nextKey = nil
 			return nil
 		}
-
-		seek = append(next, hi.startTxKey[:]...)
+		seek = next
 	}
-	fmt.Printf("[dbg] HistoryChangesIterDB.advanceLargeVals: seek=%x\n", seek)
-	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
+	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Next() {
 		if err != nil {
 			return err
 		}
-		if hi.endTxNum >= 0 && int(binary.BigEndian.Uint64(k[len(k)-8:])) >= hi.endTxNum {
-			next, ok := kv.NextSubtree(k[:len(k)-8])
+
+		// Check if key still has our step prefix
+		if len(k) < 8 || !bytes.Equal(k[:8], stepPrefix) {
+			// Moved past our step, we're done
+			hi.nextKey = nil
+			return nil
+		}
+
+		// For large values: [^step][addr][txNum] -> value
+		// Minimum key length should be 16 bytes (8 for step + 8 for txNum)
+		if len(k) < 16 {
+			continue
+		}
+
+		keyPart := k[:len(k)-8] // [^step][addr]
+		txNum := int(binary.BigEndian.Uint64(k[len(k)-8:]))
+
+		if hi.endTxNum >= 0 && txNum >= hi.endTxNum {
+			next, ok := kv.NextSubtree(keyPart)
 			if !ok {
 				hi.nextKey = nil
 				return nil
@@ -556,45 +602,38 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			seek = append(next, hi.startTxKey[:]...)
 			continue
 		}
-		if hi.nextKey != nil && bytes.Equal(k[:len(k)-8], hi.nextKey) && bytes.Equal(v, hi.nextVal) {
-			// stuck on the same key, move to first key larger than seek
-			for {
-				k, v, err = hi.valsC.Next()
-				if err != nil {
-					return err
-				}
-				if k == nil {
-					hi.nextKey = nil
-					return nil
-				}
-				if bytes.Compare(seek[:len(seek)-8], k[:len(k)-8]) < 0 {
-					break
-				}
-			}
-		}
-		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
+
+		if !bytes.Equal(seek[:len(seek)-8], keyPart) {
 			if len(seek) != len(k) {
-				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
-				continue
+				seek = append(append(seek[:0], keyPart...), hi.startTxKey[:]...)
+			} else {
+				copy(seek[:len(k)-8], keyPart)
 			}
-			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
-		hi.nextKey = k[:len(k)-8]
+
+		hi.nextKey = keyPart
 		hi.nextVal = v
 		return nil
 	}
 	hi.nextKey = nil
 	return nil
 }
-func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
+func (hi *HistoryChangesIterDB) advanceSmallVals() error {
+	// Create step prefix for this specific step
+	invertedStep := ^hi.step
+	stepPrefix := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepPrefix, invertedStep)
+
 	var k []byte
+	var err error
 	if hi.valsCDup == nil {
 		if hi.valsCDup, err = hi.roTx.CursorDupSort(hi.valsTable); err != nil {
 			return err
 		}
 
-		if k, _, err = hi.valsCDup.First(); err != nil {
+		// Seek to the beginning of our step
+		if k, _, err = hi.valsCDup.Seek(stepPrefix); err != nil {
 			return err
 		}
 	} else {
@@ -602,14 +641,17 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			return err
 		}
 	}
-
 	for k != nil {
+		// Check if key still has our step prefix
+		if len(k) < 8 || !bytes.Equal(k[:8], stepPrefix) {
+			// Moved past our step, we're done
+			hi.nextKey = nil
+			return nil
+		}
+
 		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
 		if err != nil {
 			return err
-		}
-		if len(v) < 16 && v != nil {
-			fmt.Printf("[dbg] HistoryChangesIterDB.advanceSmallVals: k=%x, v=%x\n", k, v)
 		}
 		if v == nil {
 			next, ok := kv.NextSubtree(k)
@@ -623,8 +665,8 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			}
 			continue
 		}
-		foundTxNumVal := v[:8]
-		if hi.endTxNum < 0 || int(binary.BigEndian.Uint64(foundTxNumVal)) < hi.endTxNum {
+		txNum := int(binary.BigEndian.Uint64(v[:8]))
+		if hi.endTxNum < 0 || txNum < hi.endTxNum {
 			hi.nextKey = k
 			hi.nextVal = v[8:]
 			return nil
@@ -661,14 +703,5 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	order.Asc.Assert(hi.k, hi.nextKey)
-
-	// For step-prefixed keys, strip the step prefix (first 8 bytes)
-	// Format: [^step][addr] for non-large values, [^step][addr][txNum] for large values
-	// We want to return just the addr part
-	keyWithoutStep := hi.k
-	if len(hi.k) >= 8 {
-		keyWithoutStep = hi.k[8:]
-	}
-
-	return keyWithoutStep, hi.v, nil
+	return hi.k, hi.v, nil
 }
