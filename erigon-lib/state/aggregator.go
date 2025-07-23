@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type Aggregator struct {
@@ -870,6 +871,9 @@ func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles)
 		files = append(files, at.d[domain].Files()...)
 	}
 	return files
+}
+func (at *AggregatorRoTx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return at.d[domain].d.version.DataKV.Current
 }
 func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {

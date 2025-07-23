@@ -3,9 +3,7 @@ name: QA - Tip tracking (Gnosis)
 on:
   push:
     branches:
-      - 'release/3.*'
-  schedule:
-    - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
+      - 'release/3.1'
   workflow_dispatch:     # Run manually
 
 concurrency:
@@ -14,11 +12,11 @@ concurrency:
 
 jobs:
   gnosis-tip-tracking-test:
-    runs-on: [self-hosted, qa, Gnosis]
+    runs-on: [self-hosted, qa, Gnosis, tip-tracking]
     timeout-minutes: 600
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version/datadir
-      ERIGON_TESTBED_AREA: /opt/erigon-testbed
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version-3.0/datadir
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 14400 # 4 hours
       TOTAL_TIME_SECONDS: 28800 # 8 hours
@@ -41,10 +39,15 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Save Erigon Chaindata Directory
+    - name: Restore Erigon Testbed Data Directory
       id: save_chaindata_step
       run: |
-        mv $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+
+    - name: Run the datadir upgrade procedure
+      working-directory: ${{ github.workspace }}
+      run: |
+        ./build/bin/erigon seg reset --datadir $ERIGON_TESTBED_DATA_DIR --chain $CHAIN
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step
@@ -55,7 +58,7 @@ jobs:
         # 2. Allow time for the Erigon to achieve synchronization
         # 3. Begin timing the duration that Erigon maintains synchronization
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ github.workspace }}/build/bin $ERIGON_REFERENCE_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
   
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -119,7 +122,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: erigon-log
-        path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/erigon.log
+        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'
@@ -128,12 +131,11 @@ jobs:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
-    - name: Restore Erigon Chaindata Directory
+    - name: Delete Erigon Testbed Data Directory
       if: ${{ always() }}
       run: |
-        if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ]; then
-          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
-          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+        if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
+          rm -rf $ERIGON_TESTBED_DATA_DIR
         fi
 
     - name: Resume the Erigon instance dedicated to db maintenance

@@ -248,7 +248,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 	}
 
-	firstLogIndex = logIdxAfterTx - uint32(len(receipt.Logs))
+	if rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
+		firstLogIndex = logIdxAfterTx
+	} else {
+		firstLogIndex = logIdxAfterTx - uint32(len(receipt.Logs))
+	}
 	receipt.BlockHash = blockHash
 	receipt.CumulativeGasUsed = cumGasUsed
 	receipt.TransactionIndex = uint(index)
