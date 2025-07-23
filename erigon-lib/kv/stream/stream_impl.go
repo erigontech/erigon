@@ -23,14 +23,12 @@ import (
 // often used shortcuts
 type (
 	U64 Uno[uint64]
-	KV  Duo[[]byte, []byte]          // key,  value
-	KVS Trio[[]byte, []byte, uint64] // key, value, step
+	KV  Duo[[]byte, []byte] // key,  value
 )
 
 var (
 	EmptyU64 = &Empty[uint64]{}
 	EmptyKV  = &EmptyDuo[[]byte, []byte]{}
-	EmptyKVS = &EmptyTrio[[]byte, []byte, uint64]{}
 )
 
 var (
@@ -196,97 +194,52 @@ func (m *UnionKVIter) Close() {
 	}
 }
 
-type WrapKVSIter struct {
-	y KV
+type Closer interface {
+	Close()
 }
 
-func WrapKVS(y KV) KVS {
-	if y == nil {
-		return EmptyKVS
-	}
-	return &WrapKVSIter{y: y}
-}
-
-func (m *WrapKVSIter) HasNext() bool {
-	return m.y.HasNext()
-}
-
-func (m *WrapKVSIter) Next() ([]byte, []byte, uint64, error) {
-	k, v, err := m.y.Next()
-	return k, v, 0, err
-}
-
-func (m *WrapKVSIter) Close() {
-	m.y.Close()
-}
-
-type WrapKVIter struct {
-	x KVS
-}
-
-func WrapKV(x KVS) KV {
-	if x == nil {
-		return EmptyKV
-	}
-	return &WrapKVIter{x: x}
-}
-
-func (m *WrapKVIter) HasNext() bool {
-	return m.x.HasNext()
-}
-
-func (m *WrapKVIter) Next() ([]byte, []byte, error) {
-	k, v, _, err := m.x.Next()
-	return k, v, err
-}
-
-func (m *WrapKVIter) Close() {
-	m.x.Close()
-}
-
-// MergedKV - merge 2 kv.Pairs streams (without replacements, or "shadowing",
-// meaning that all input pairs will appear in the output stream - this is
-// difference to UnionKVIter), to 1 in lexicographically order
-// 1-st stream has higher priority - when 2 streams return same key
-type MergedKV struct {
-	x                  KVS
+// IntersectKVPair merges two KV streams
+type IntersectKVPair struct {
+	x                  KV
 	y                  KV
 	xHasNext, yHasNext bool
 	xNextK, xNextV     []byte
 	yNextK, yNextV     []byte
-	xStep              uint64
 	limit              int
 	err                error
 }
 
-func MergeKVS(x KVS, y KV, limit int) KVS {
+func IntersectKV(x KV, y KV, limit int) KV {
 	if x == nil && y == nil {
-		return EmptyKVS
+		return EmptyKV
 	}
 	if x == nil {
-		return WrapKVS(y)
+		return y
 	}
 	if y == nil {
 		return x
 	}
-	m := &MergedKV{x: x, y: y, limit: limit}
+	m := &IntersectKVPair{x: x, y: y, limit: limit}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
-func (m *MergedKV) HasNext() bool {
+
+func (m *IntersectKVPair) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
 }
-func (m *MergedKV) advanceX() {
+
+func (m *IntersectKVPair) advanceX() {
 	if m.err != nil {
 		return
 	}
 	m.xHasNext = m.x.HasNext()
 	if m.xHasNext {
-		m.xNextK, m.xNextV, m.xStep, m.err = m.x.Next()
+		m.xNextK, m.xNextV, m.err = m.x.Next()
 	}
 }
-func (m *MergedKV) advanceY() {
+
+func (m *IntersectKVPair) advanceY() {
 	if m.err != nil {
 		return
 	}
@@ -295,42 +248,39 @@ func (m *MergedKV) advanceY() {
 		m.yNextK, m.yNextV, m.err = m.y.Next()
 	}
 }
-func (m *MergedKV) Next() ([]byte, []byte, uint64, error) {
+
+func (m *IntersectKVPair) Next() ([]byte, []byte, error) {
 	if m.err != nil {
-		return nil, nil, 0, m.err
+		return nil, nil, m.err
 	}
 	m.limit--
 	if m.xHasNext && m.yHasNext {
 		cmp := bytes.Compare(m.xNextK, m.yNextK)
 		if cmp <= 0 {
-			k, v, step, err := m.xNextK, m.xNextV, m.xStep, m.err
+			k, v, err := m.xNextK, m.xNextV, m.err
 			m.advanceX()
-			return k, v, step, err
+			return k, v, err
+		} else {
+			k, v, err := m.yNextK, m.yNextV, m.err
+			m.advanceY()
+			return k, v, err
 		}
-		k, v, err := m.yNextK, m.yNextV, m.err
-		m.advanceY()
-		return k, v, 0, err
 	}
 	if m.xHasNext {
-		k, v, step, err := m.xNextK, m.xNextV, m.xStep, m.err
+		k, v, err := m.xNextK, m.xNextV, m.err
 		m.advanceX()
-		return k, v, step, err
+		return k, v, err
 	}
 	k, v, err := m.yNextK, m.yNextV, m.err
 	m.advanceY()
-	return k, v, 0, err
+	return k, v, err
 }
 
-// func (m *MergedKV) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
-func (m *MergedKV) Close() {
+func (m *IntersectKVPair) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
 	}
 	if y, ok := m.y.(Closer); ok {
 		y.Close()
 	}
-}
-
-type Closer interface {
-	Close()
 }
