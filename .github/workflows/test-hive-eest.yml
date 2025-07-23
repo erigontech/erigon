@@ -3,9 +3,8 @@ name: Hive EEST tests
 on:
   push:
     branches:
-        # - release/*
-        # - main
-        - michelemodolo/test_hive_selfhosted
+        - release/*
+        - main
   workflow_dispatch:
 
 concurrency:
