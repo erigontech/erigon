@@ -67,7 +67,6 @@ type PeriodicFlusher struct {
 	ticker     *time.Ticker  // set ticker
 	syncPeriod time.Duration // how often to flush
 	closed     atomic.Bool
-	quitChan   chan struct{} // channel to signal closing
 	doneWg     sync.WaitGroup
 }
 
@@ -77,7 +76,6 @@ func newPeriodicFlusher(env *mdbx.Env, opts MdbxOpts, syncPeriod time.Duration) 
 		opts:       opts,
 		ticker:     time.NewTicker(syncPeriod),
 		syncPeriod: syncPeriod,
-		quitChan:   make(chan struct{}, 1),
 		doneWg:     sync.WaitGroup{},
 	}
 }
@@ -92,7 +90,6 @@ func (flusher *PeriodicFlusher) shutdown() {
 	if flusher.ticker != nil {
 		flusher.ticker.Stop() // Stop the ticker
 	}
-	flusher.quitChan <- struct{}{} // non-blocking send due to buffered chan
 }
 
 func (flusher *PeriodicFlusher) Close() {
@@ -104,19 +101,18 @@ func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
 	flusher.doneWg.Add(1)
 	go func(ctx context.Context) {
 		defer flusher.doneWg.Done()
-		for {
+		for !flusher.closed.Load() {
 			select {
 			case <-flusher.ticker.C:
 				if err := flusher.env.Sync(true, false); err != nil {
 					flusher.opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", flusher.opts.label)
 				}
-			case <-flusher.quitChan:
-				return
 			case <-ctx.Done():
 				// here the flusher is not closed explicitly from outside,
 				// so we must close it from within
 				flusher.shutdown()
 				return
+			default:
 			}
 		}
 	}(ctx)
