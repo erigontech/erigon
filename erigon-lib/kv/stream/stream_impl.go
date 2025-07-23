@@ -196,147 +196,12 @@ func (m *UnionKVIter) Close() {
 	}
 }
 
-type WrapKVSIter struct {
-	y KV
-}
-
-func WrapKVS(y KV) KVS {
-	if y == nil {
-		return EmptyKVS
-	}
-	return &WrapKVSIter{y: y}
-}
-
-func (m *WrapKVSIter) HasNext() bool {
-	return m.y.HasNext()
-}
-
-func (m *WrapKVSIter) Next() ([]byte, []byte, uint64, error) {
-	k, v, err := m.y.Next()
-	return k, v, 0, err
-}
-
-func (m *WrapKVSIter) Close() {
-	m.y.Close()
-}
-
-type WrapKVIter struct {
-	x KVS
-}
-
-func WrapKV(x KVS) KV {
-	if x == nil {
-		return EmptyKV
-	}
-	return &WrapKVIter{x: x}
-}
-
-func (m *WrapKVIter) HasNext() bool {
-	return m.x.HasNext()
-}
-
-func (m *WrapKVIter) Next() ([]byte, []byte, error) {
-	k, v, _, err := m.x.Next()
-	return k, v, err
-}
-
-func (m *WrapKVIter) Close() {
-	m.x.Close()
-}
-
-// MergedKV - merge 2 kv.Pairs streams (without replacements, or "shadowing",
-// meaning that all input pairs will appear in the output stream - this is
-// difference to UnionKVIter), to 1 in lexicographically order
-// 1-st stream has higher priority - when 2 streams return same key
-type MergedKV struct {
-	x                  KVS
-	y                  KV
-	xHasNext, yHasNext bool
-	xNextK, xNextV     []byte
-	yNextK, yNextV     []byte
-	xStep              uint64
-	limit              int
-	err                error
-}
-
-func MergeKVS(x KVS, y KV, limit int) KVS {
-	if x == nil && y == nil {
-		return EmptyKVS
-	}
-	if x == nil {
-		return WrapKVS(y)
-	}
-	if y == nil {
-		return x
-	}
-	m := &MergedKV{x: x, y: y, limit: limit}
-	m.advanceX()
-	m.advanceY()
-	return m
-}
-func (m *MergedKV) HasNext() bool {
-	return m.err != nil || (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
-}
-func (m *MergedKV) advanceX() {
-	if m.err != nil {
-		return
-	}
-	m.xHasNext = m.x.HasNext()
-	if m.xHasNext {
-		m.xNextK, m.xNextV, m.xStep, m.err = m.x.Next()
-	}
-}
-func (m *MergedKV) advanceY() {
-	if m.err != nil {
-		return
-	}
-	m.yHasNext = m.y.HasNext()
-	if m.yHasNext {
-		m.yNextK, m.yNextV, m.err = m.y.Next()
-	}
-}
-func (m *MergedKV) Next() ([]byte, []byte, uint64, error) {
-	if m.err != nil {
-		return nil, nil, 0, m.err
-	}
-	m.limit--
-	if m.xHasNext && m.yHasNext {
-		cmp := bytes.Compare(m.xNextK, m.yNextK)
-		if cmp <= 0 {
-			k, v, step, err := m.xNextK, m.xNextV, m.xStep, m.err
-			m.advanceX()
-			return k, v, step, err
-		}
-		k, v, err := m.yNextK, m.yNextV, m.err
-		m.advanceY()
-		return k, v, 0, err
-	}
-	if m.xHasNext {
-		k, v, step, err := m.xNextK, m.xNextV, m.xStep, m.err
-		m.advanceX()
-		return k, v, step, err
-	}
-	k, v, err := m.yNextK, m.yNextV, m.err
-	m.advanceY()
-	return k, v, 0, err
-}
-
-// func (m *MergedKV) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
-func (m *MergedKV) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
-	}
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
-	}
-}
-
 type Closer interface {
 	Close()
 }
 
-// MergedKVPair merges two KV streams
-type MergedKVPair struct {
+// IntersectKVPair merges two KV streams
+type IntersectKVPair struct {
 	x                  KV
 	y                  KV
 	xHasNext, yHasNext bool
@@ -346,7 +211,7 @@ type MergedKVPair struct {
 	err                error
 }
 
-func MergeKV(x KV, y KV, limit int) KV {
+func IntersectKV(x KV, y KV, limit int) KV {
 	if x == nil && y == nil {
 		return EmptyKV
 	}
@@ -356,17 +221,17 @@ func MergeKV(x KV, y KV, limit int) KV {
 	if y == nil {
 		return x
 	}
-	m := &MergedKVPair{x: x, y: y, limit: limit}
+	m := &IntersectKVPair{x: x, y: y, limit: limit}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
 
-func (m *MergedKVPair) HasNext() bool {
+func (m *IntersectKVPair) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
 }
 
-func (m *MergedKVPair) advanceX() {
+func (m *IntersectKVPair) advanceX() {
 	if m.err != nil {
 		return
 	}
@@ -376,7 +241,7 @@ func (m *MergedKVPair) advanceX() {
 	}
 }
 
-func (m *MergedKVPair) advanceY() {
+func (m *IntersectKVPair) advanceY() {
 	if m.err != nil {
 		return
 	}
@@ -386,7 +251,7 @@ func (m *MergedKVPair) advanceY() {
 	}
 }
 
-func (m *MergedKVPair) Next() ([]byte, []byte, error) {
+func (m *IntersectKVPair) Next() ([]byte, []byte, error) {
 	if m.err != nil {
 		return nil, nil, m.err
 	}
@@ -413,7 +278,7 @@ func (m *MergedKVPair) Next() ([]byte, []byte, error) {
 	return k, v, err
 }
 
-func (m *MergedKVPair) Close() {
+func (m *IntersectKVPair) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
 	}
