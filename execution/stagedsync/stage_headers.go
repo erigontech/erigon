@@ -70,6 +70,7 @@ type HeadersCfg struct {
 	blockReader   services.FullBlockReader
 	blockWriter   *blockio.BlockWriter
 	notifications *shards.Notifications
+	blockRetire   services.BlockRetire
 
 	syncConfig ethconfig.Sync
 
@@ -92,6 +93,7 @@ func StageHeadersCfg(
 	tmpdir string,
 	notifications *shards.Notifications,
 	L2RPCAddr string, // L2 RPC address for Arbitrum
+	blockRetire services.BlockRetire,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -109,6 +111,7 @@ func StageHeadersCfg(
 		blockWriter:       blockWriter,
 		notifications:     notifications,
 		L2RPCAddr:         L2RPCAddr,
+		blockRetire:       blockRetire,
 	}
 }
 
@@ -126,6 +129,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
+	}
+	if !cfg.chainConfig.IsArbitrum() {
+		return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
 	}
 
 	jsonRpcAddr := cfg.L2RPCAddr
@@ -208,7 +214,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			}
 
 			blkSec := float64(blockNum-prev) / 40.0
-			log.Info(fmt.Sprintf("[%s] Header and Block processed", s.LogPrefix()), "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec))
+			log.Info(fmt.Sprintf("[%s] Header and Block processed", s.LogPrefix()), "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec), "extTx", useExternalTx)
 
 			if !useExternalTx {
 				err := tx.Commit()
@@ -223,9 +229,12 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 				defer tx.Rollback()
 				cfg.hd.ReadProgressFromDb(tx)
 
-				if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), prev, blockNum+1, ctx, logger); err != nil {
-					return err
-				}
+			}
+			if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), prev, blockNum+1, ctx, logger); err != nil {
+				return err
+			}
+			if cfg.blockRetire != nil {
+				cfg.blockRetire.RetireBlocksInBackground(ctx, prev, blockNum, log.LvlInfo, nil, nil, nil)
 			}
 
 			prev = blockNum
@@ -265,7 +274,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 	}
 	return nil
-	// return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
