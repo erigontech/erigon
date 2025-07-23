@@ -424,3 +424,183 @@ func TestFiler(t *testing.T) {
 		require.Nil(t, res)
 	})
 }
+
+func TestIntersectKV(t *testing.T) {
+	t.Run("intersect ascending", func(t *testing.T) {
+		// First iterator: keys [1,3,4,5,6,7], values [10,30,40,50,60,70]
+		s1 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{1}, {3}, {4}, {5}, {6}, {7}},
+			[][]byte{{10}, {30}, {40}, {50}, {60}, {70}},
+		)
+		// Second iterator: keys [2,3,7], values [20,300,700]
+		s2 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{2}, {3}, {7}},
+			[][]byte{{20}, {200}, {100}},
+		)
+		s3 := stream.IntersectKV(s1, s2, order.Asc, -1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		// Should return intersecting keys [{3},{7}] with values from first iterator [{30},{70}]
+		require.Equal(t, [][]byte{{3}, {7}}, keys)
+		require.Equal(t, [][]byte{{30}, {70}}, values)
+	})
+
+	t.Run("intersect ascending with limit", func(t *testing.T) {
+		s1 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{1}, {3}, {4}, {5}, {6}, {7}},
+			[][]byte{{10}, {30}, {40}, {50}, {60}, {70}},
+		)
+		s2 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{2}, {3}, {7}},
+			[][]byte{{20}, {200}, {100}},
+		)
+		s3 := stream.IntersectKV(s1, s2, order.Asc, 1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		// Should return only first intersecting key [{3}] with value [{30}]
+		require.Equal(t, [][]byte{{3}}, keys)
+		require.Equal(t, [][]byte{{30}}, values)
+	})
+
+	t.Run("intersect descending", func(t *testing.T) {
+		// First iterator: keys [7,6,5,4,3,1], values [70,60,50,40,30,10]
+		s1 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{7}, {6}, {5}, {4}, {3}, {1}},
+			[][]byte{{70}, {60}, {50}, {40}, {30}, {10}},
+		)
+		// Second iterator: keys [7,3,2], values [100,50,20]
+		s2 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{7}, {3}, {2}},
+			[][]byte{{100}, {50}, {20}},
+		)
+		s3 := stream.IntersectKV(s1, s2, order.Desc, -1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		// Should return intersecting keys [{7},{3}] with values from first iterator [{70},{30}]
+		require.Equal(t, [][]byte{{7}, {3}}, keys)
+		require.Equal(t, [][]byte{{70}, {30}}, values)
+	})
+
+	t.Run("no intersection", func(t *testing.T) {
+		s1 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{1}, {2}, {3}},
+			[][]byte{{10}, {20}, {30}},
+		)
+		s2 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{4}, {5}, {6}},
+			[][]byte{{40}, {50}, {60}},
+		)
+		s3 := stream.IntersectKV(s1, s2, order.Asc, -1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		require.Nil(t, keys)
+		require.Nil(t, values)
+	})
+
+	t.Run("empty left", func(t *testing.T) {
+		s1 := stream.EmptyKV
+		s2 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{2}, {3}, {7}, {8}},
+			[][]byte{{20}, {30}, {70}, {80}},
+		)
+		s3 := stream.IntersectKV(s1, s2, order.Asc, -1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		require.Nil(t, keys)
+		require.Nil(t, values)
+
+		// Test with nil
+		s3 = stream.IntersectKV(nil, s2, order.Asc, -1)
+		keys, values, err = stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		require.Nil(t, keys)
+		require.Nil(t, values)
+	})
+
+	t.Run("empty right", func(t *testing.T) {
+		s1 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{1}, {3}, {4}, {5}, {6}, {7}},
+			[][]byte{{10}, {30}, {40}, {50}, {60}, {70}},
+		)
+		s2 := stream.EmptyKV
+		s3 := stream.IntersectKV(s1, s2, order.Asc, -1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		require.Nil(t, keys)
+		require.Nil(t, values)
+
+		// Test with nil
+		s3 = stream.IntersectKV(s1, nil, order.Asc, -1)
+		keys, values, err = stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		require.Nil(t, keys)
+		require.Nil(t, values)
+	})
+
+	t.Run("empty both", func(t *testing.T) {
+		s1 := stream.EmptyKV
+		s2 := stream.EmptyKV
+		s3 := stream.IntersectKV(s1, s2, order.Asc, -1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		require.Nil(t, keys)
+		require.Nil(t, values)
+
+		// Test with nil
+		s3 = stream.IntersectKV(nil, nil, order.Asc, -1)
+		keys, values, err = stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		require.Nil(t, keys)
+		require.Nil(t, values)
+	})
+
+	t.Run("string keys", func(t *testing.T) {
+		s1 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{[]byte("apple"), []byte("banana"), []byte("cherry"), []byte("date")},
+			[][]byte{{1}, {2}, {3}, {4}},
+		)
+		s2 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{[]byte("banana"), []byte("cherry"), []byte("elderberry")},
+			[][]byte{{20}, {30}, {50}},
+		)
+		s3 := stream.IntersectKV(s1, s2, order.Asc, -1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		// Should return intersecting keys ["banana","cherry"] with values from first iterator [{2},{3}]
+		require.Equal(t, [][]byte{[]byte("banana"), []byte("cherry")}, keys)
+		require.Equal(t, [][]byte{{2}, {3}}, values)
+	})
+
+	t.Run("identical iterators", func(t *testing.T) {
+		s1 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{1}, {2}, {3}},
+			[][]byte{{10}, {20}, {30}},
+		)
+		s2 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{1}, {2}, {3}},
+			[][]byte{{100}, {200}, {255}},
+		)
+		s3 := stream.IntersectKV(s1, s2, order.Asc, -1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		// Should return all keys with values from first iterator
+		require.Equal(t, [][]byte{{1}, {2}, {3}}, keys)
+		require.Equal(t, [][]byte{{10}, {20}, {30}}, values)
+	})
+
+	t.Run("single element intersection", func(t *testing.T) {
+		s1 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{5}},
+			[][]byte{{50}},
+		)
+		s2 := stream.ArrayDuo[[]byte, []byte](
+			[][]byte{{5}},
+			[][]byte{{255}},
+		)
+		s3 := stream.IntersectKV(s1, s2, order.Asc, -1)
+		keys, values, err := stream.ToArrayKV(s3)
+		require.NoError(t, err)
+		require.Equal(t, [][]byte{{5}}, keys)
+		require.Equal(t, [][]byte{{50}}, values) // Value from first iterator
+	})
+}

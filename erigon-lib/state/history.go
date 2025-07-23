@@ -1705,16 +1705,21 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 		if r == nil {
 			r = it.iter
 		} else {
-			r = stream.IntersectKV(r, it.iter, limit)
+			r = stream.MergeKVS(r, it.iter, limit)
 		}
 	}
+
+	//[dbg] HistoryRange: from db 75, [ 00 00 01 01 7374617465 7374617465 8240a92799b51e7d99d3ef53c67bca7d068bd8d64e895dd56442c4ac01c9a27d 8240a92799b51e7d99d3ef53c67bca7d068bd8d64e895dd56442c4ac01c9a27d a4dba136b5541817a78b160dd140190d9676d0f0 a4dba136b5541817a78b160dd140190d9676d0f0 cedce3c4eb5e0eedd505c33fd0f8c06d1ead96e63d6b3a27b5186e4901dce59e cedce3c4eb5e0eedd505c33fd0f8c06d1ead96e63d6b3a27b5186e4901dce59e]
+	//[dbg] HistoryRange: from db 7, [ 00 01 7374617465 8240a92799b51e7d99d3ef53c67bca7d068bd8d64e895dd56442c4ac01c9a27d a4dba136b5541817a78b160dd140190d9676d0f0 cedce3c4eb5e0eedd505c33fd0f8c06d1ead96e63d6b3a27b5186e4901dce59e]
+	keys, _, _ := stream.ToArrayKV(r)
+	fmt.Printf("[dbg] HistoryRange: from db %d, %x\n", len(keys), keys)
 
 	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit)
 	if err != nil {
 		return nil, err
 	}
 	if itOnFiles != nil {
-		r = stream.IntersectKV(r, itOnFiles, limit)
+		r = stream.MergeKVS(r, itOnFiles, limit)
 	}
 	return r, nil
 }

@@ -17,6 +17,7 @@
 package stream
 
 import (
+	"bytes"
 	"cmp"
 	"fmt"
 	"slices"
@@ -66,6 +67,23 @@ func (it *ArrStream[V]) NextBatch() ([]V, error) {
 	v := it.arr[it.i:]
 	it.i = len(it.arr)
 	return v, nil
+}
+
+type ArrStreamDuo[K, V any] struct {
+	keys   []K
+	values []V
+	i      int
+}
+
+func ArrayDuo[K, V any](keys []K, values []V) *ArrStreamDuo[K, V] {
+	return &ArrStreamDuo[K, V]{keys: keys, values: values}
+}
+func (it *ArrStreamDuo[K, V]) HasNext() bool { return it.i < len(it.keys) }
+func (it *ArrStreamDuo[K, V]) Close()        {}
+func (it *ArrStreamDuo[K, V]) Next() (K, V, error) {
+	k, v := it.keys[it.i], it.values[it.i]
+	it.i++
+	return k, v, nil
 }
 
 func Range[T constraints.Integer](from, to T) *RangeIter[T] {
@@ -277,6 +295,96 @@ func (m *Intersected[T]) Next() (T, error) {
 	return k, err
 }
 func (m *Intersected[T]) Close() {
+	if x, ok := m.x.(Closer); ok {
+		x.Close()
+	}
+	if y, ok := m.y.(Closer); ok {
+		y.Close()
+	}
+}
+
+// IntersectedKV
+type IntersectedKV struct {
+	x, y               KV
+	xHasNext, yHasNext bool
+	xNextK, yNextK     []byte
+	xNextV, yNextV     []byte
+	asc                order.By
+	limit              int
+	err                error
+}
+
+func IntersectKV(x, y KV, asc order.By, limit int) KV {
+	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
+		return EmptyKV
+	}
+	m := &IntersectedKV{x: x, y: y, asc: asc, limit: limit}
+	m.advance()
+	return m
+}
+func (m *IntersectedKV) HasNext() bool {
+	return m.err != nil || (m.limit != 0 && m.xHasNext && m.yHasNext)
+}
+func (m *IntersectedKV) advance() {
+	m.advanceX()
+	m.advanceY()
+	for m.xHasNext && m.yHasNext {
+		if m.err != nil {
+			break
+		}
+		cmp := bytes.Compare(m.xNextK, m.yNextK)
+		if cmp == 0 {
+			return
+		}
+		if m.asc {
+			if cmp < 0 {
+				m.advanceX()
+				continue
+			} else {
+				m.advanceY()
+				continue
+			}
+		} else {
+			if cmp < 0 {
+				m.advanceY()
+				continue
+			} else {
+				m.advanceX()
+				continue
+			}
+		}
+	}
+	m.xHasNext = false
+}
+
+func (m *IntersectedKV) advanceX() {
+	if m.err != nil {
+		return
+	}
+	m.xHasNext = m.x.HasNext()
+	if m.xHasNext {
+		m.xNextK, m.xNextV, m.err = m.x.Next()
+	}
+}
+func (m *IntersectedKV) advanceY() {
+	if m.err != nil {
+		return
+	}
+	m.yHasNext = m.y.HasNext()
+	if m.yHasNext {
+		m.yNextK, m.yNextV, m.err = m.y.Next()
+	}
+}
+func (m *IntersectedKV) Next() ([]byte, []byte, error) {
+	if m.err != nil {
+		return m.xNextK, m.xNextV, m.err
+	}
+	m.limit--
+	k, v, err := m.xNextK, m.xNextV, m.err
+	m.advance()
+	return k, v, err
+}
+func (m *IntersectedKV) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
 	}

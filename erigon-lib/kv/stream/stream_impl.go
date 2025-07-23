@@ -23,12 +23,14 @@ import (
 // often used shortcuts
 type (
 	U64 Uno[uint64]
-	KV  Duo[[]byte, []byte] // key,  value
+	KV  Duo[[]byte, []byte]          // key,  value
+	KVS Trio[[]byte, []byte, uint64] // key, value, step
 )
 
 var (
 	EmptyU64 = &Empty[uint64]{}
 	EmptyKV  = &EmptyDuo[[]byte, []byte]{}
+	EmptyKVS = &EmptyTrio[[]byte, []byte, uint64]{}
 )
 
 var (
@@ -209,7 +211,7 @@ type IntersectKVPair struct {
 	err                error
 }
 
-func IntersectKV(x KV, y KV, limit int) KV {
+func IntersectKV2(x KV, y KV, limit int) KV {
 	if x == nil && y == nil {
 		return EmptyKV
 	}
@@ -277,6 +279,112 @@ func (m *IntersectKVPair) Next() ([]byte, []byte, error) {
 }
 
 func (m *IntersectKVPair) Close() {
+	if x, ok := m.x.(Closer); ok {
+		x.Close()
+	}
+	if y, ok := m.y.(Closer); ok {
+		y.Close()
+	}
+}
+
+type WrapKVSIter struct {
+	y KV
+}
+
+func WrapKVS(y KV) KVS {
+	if y == nil {
+		return EmptyKVS
+	}
+	return &WrapKVSIter{y: y}
+}
+
+func (m *WrapKVSIter) HasNext() bool {
+	return m.y.HasNext()
+}
+
+func (m *WrapKVSIter) Next() ([]byte, []byte, uint64, error) {
+	k, v, err := m.y.Next()
+	return k, v, 0, err
+}
+
+func (m *WrapKVSIter) Close() {
+	m.y.Close()
+}
+
+type MergedKV struct {
+	x                  KV
+	y                  KV
+	xHasNext, yHasNext bool
+	xNextK, xNextV     []byte
+	yNextK, yNextV     []byte
+	limit              int
+	err                error
+}
+
+func MergeKVS(x KV, y KV, limit int) KV {
+	if x == nil && y == nil {
+		return EmptyKV
+	}
+	if x == nil {
+		return y
+	}
+	if y == nil {
+		return x
+	}
+	m := &MergedKV{x: x, y: y, limit: limit}
+	m.advanceX()
+	m.advanceY()
+	return m
+}
+func (m *MergedKV) HasNext() bool {
+	return m.err != nil || (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
+}
+func (m *MergedKV) advanceX() {
+	if m.err != nil {
+		return
+	}
+	m.xHasNext = m.x.HasNext()
+	if m.xHasNext {
+		m.xNextK, m.xNextV, m.err = m.x.Next()
+	}
+}
+func (m *MergedKV) advanceY() {
+	if m.err != nil {
+		return
+	}
+	m.yHasNext = m.y.HasNext()
+	if m.yHasNext {
+		m.yNextK, m.yNextV, m.err = m.y.Next()
+	}
+}
+func (m *MergedKV) Next() ([]byte, []byte, error) {
+	if m.err != nil {
+		return nil, nil, m.err
+	}
+	m.limit--
+	if m.xHasNext && m.yHasNext {
+		cmp := bytes.Compare(m.xNextK, m.yNextK)
+		if cmp <= 0 {
+			k, v, err := m.xNextK, m.xNextV, m.err
+			m.advanceX()
+			return k, v, err
+		}
+		k, v, err := m.yNextK, m.yNextV, m.err
+		m.advanceY()
+		return k, v, err
+	}
+	if m.xHasNext {
+		k, v, err := m.xNextK, m.xNextV, m.err
+		m.advanceX()
+		return k, v, err
+	}
+	k, v, err := m.yNextK, m.yNextV, m.err
+	m.advanceY()
+	return k, v, err
+}
+
+// func (m *MergedKV) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
+func (m *MergedKV) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
 	}
