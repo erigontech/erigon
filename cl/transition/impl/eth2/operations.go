@@ -965,7 +965,6 @@ func (I *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex ui
 
 func (I *impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error {
 	epoch := state.Epoch(s)
-	fmt.Println(s.GetPendingConsolidations().Len(), s.GetPendingPartialWithdrawals().Len(), s.GetPendingDeposits().Len())
 	randaoMixes := s.GetRandaoMixes(epoch)
 	randaoHash := utils.Sha256(randao[:])
 	mix := [32]byte{}
