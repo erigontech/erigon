@@ -2003,22 +2003,22 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	//	buildTrieAndWitness(t, builder, addrWithSingleton)
 	//})
 
-	//t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
-	//	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
-	//
-	//	addrWithSingleton := common.Copy(plainKeysList[0])
-	//	// generate 2 storage slots HAVING common prefix of len >=4
-	//	storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
-	//
-	//	builder := NewUpdateBuilder()
-	//	for i := 0; i < len(plainKeysList); i++ {
-	//		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
-	//	}
-	//
-	//	for sl := 0; sl < len(storageKeysList); sl++ {
-	//		builder.Storage(common.Bytes2Hex(addrWithSingleton), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
-	//	}
-	//
-	//	buildTrieAndWitness(t, builder, addrWithSingleton)
-	//})
+	t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrWithSingleton := common.Copy(plainKeysList[0])
+		// generate 2 storage slots HAVING common prefix of len >=4
+		storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+
+		for sl := 0; sl < len(storageKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrWithSingleton), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
+		}
+
+		buildTrieAndWitness(t, builder, addrWithSingleton)
+	})
 }
