@@ -19,14 +19,15 @@ package state
 import (
 	"bytes"
 
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g           seg.ReaderI
-	key         []byte
+	g           stream.KV
+	key, val    []byte
 	txNum       uint64
 	startTxNum  uint64
 	endTxNum    uint64
@@ -87,3 +88,29 @@ func (rh ReconHeapOlderFirst) Less(i, j int) bool {
 	}
 	return c < 0
 }
+
+// SegReaderWrapper wraps seg.ReaderI to satisfy stream.KV interface
+type SegReaderWrapper struct {
+	reader seg.ReaderI
+}
+
+// NewSegReaderWrapper creates a new wrapper for seg.ReaderI to satisfy stream.KV interface
+func NewSegReaderWrapper(reader seg.ReaderI) stream.KV {
+	return &SegReaderWrapper{reader: reader}
+}
+
+// Next returns key and value by calling the underlying getter twice
+func (w *SegReaderWrapper) Next() ([]byte, []byte, error) {
+	if !w.reader.HasNext() {
+		return nil, nil, stream.ErrIteratorExhausted
+	}
+	key, _ := w.reader.Next(nil)
+	if w.reader.HasNext() {
+		panic("assert: no value in key-value fail")
+	}
+	value, _ := w.reader.Next(nil)
+	return key, value, nil
+}
+
+func (w *SegReaderWrapper) HasNext() bool { return w.reader.HasNext() }
+func (w *SegReaderWrapper) Close()        {}
