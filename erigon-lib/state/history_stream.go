@@ -660,7 +660,7 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	// Format: [^step][addr] for non-large values, [^step][addr][txNum] for large values
 	// We want to return just the addr part
 	keyWithoutStep := hi.k
-	if len(hi.k) > 8 {
+	if len(hi.k) >= 8 {
 		keyWithoutStep = hi.k[8:]
 	}
 	fmt.Printf("[dbg] HistoryChangesIterDB.Next: keyWithoutStep=%x, hi.k=%x\n", keyWithoutStep, hi.k)
