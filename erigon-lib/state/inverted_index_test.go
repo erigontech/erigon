@@ -21,12 +21,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/race"
 	"math"
 	"os"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/race"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
@@ -812,7 +813,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 }
 
 func TestInvIndexPruningPerf(t *testing.T) {
-	//t.Skip("for manual benchmarks ")
+	t.Skip("for manual benchmarks ")
 	dirs := datadir.New(t.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
