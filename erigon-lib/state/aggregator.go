@@ -1644,11 +1644,7 @@ func (at *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, t
 }
 
 func (at *AggregatorRoTx) HistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
-	hr, err := at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
-	if err != nil {
-		return nil, err
-	}
-	return stream.WrapKV(hr), nil
+	return at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
 }
 
 func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (totalKeys uint64) {

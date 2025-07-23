@@ -333,10 +333,13 @@ func (it *InvertedIterator1) Close() {
 func (it *InvertedIterator1) advanceInFiles() {
 	for it.h.Len() > 0 {
 		top := heap.Pop(&it.h).(*ReconItem)
-		key := top.key
-		val, _ := top.g.Next(nil)
+		key, val := top.key, top.val
 		if top.g.HasNext() {
-			top.key, _ = top.g.Next(nil)
+			var err error
+			top.key, top.val, err = top.g.Next()
+			if err != nil {
+				panic(err)
+			}
 			heap.Push(&it.h, top)
 		}
 		if !bytes.Equal(key, it.key) {

@@ -60,68 +60,6 @@ func WithChaindataTables(defaultBuckets kv.TableCfg) kv.TableCfg {
 	return defaultBuckets
 }
 
-// handles background process of periodically flushing commits to disk
-type PeriodicFlusher struct {
-	env        *mdbx.Env // mdbx environment to flush to
-	opts       MdbxOpts
-	ticker     *time.Ticker  // set ticker
-	syncPeriod time.Duration // how often to flush
-	closed     atomic.Bool
-	quitChan   chan struct{} // channel to signal closing
-	doneWg     sync.WaitGroup
-}
-
-func newPeriodicFlusher(env *mdbx.Env, opts MdbxOpts, syncPeriod time.Duration) *PeriodicFlusher {
-	return &PeriodicFlusher{
-		env:        env,
-		opts:       opts,
-		ticker:     time.NewTicker(syncPeriod),
-		syncPeriod: syncPeriod,
-		quitChan:   make(chan struct{}, 1),
-		doneWg:     sync.WaitGroup{},
-	}
-}
-
-func (flusher *PeriodicFlusher) shutdown() {
-	// flusher.lock.Lock()
-	// defer flusher.lock.Unlock()
-	swapped := flusher.closed.CompareAndSwap(false, true)
-	if !swapped {
-		return
-	}
-	if flusher.ticker != nil {
-		flusher.ticker.Stop() // Stop the ticker
-	}
-	flusher.quitChan <- struct{}{} // non-blocking send due to buffered chan
-}
-
-func (flusher *PeriodicFlusher) Close() {
-	flusher.shutdown()
-	flusher.doneWg.Wait()
-}
-
-func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
-	flusher.doneWg.Add(1)
-	go func(ctx context.Context) {
-		defer flusher.doneWg.Done()
-		for {
-			select {
-			case <-flusher.ticker.C:
-				if err := flusher.env.Sync(true, false); err != nil {
-					flusher.opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", flusher.opts.label)
-				}
-			case <-flusher.quitChan:
-				return
-			case <-ctx.Done():
-				// here the flusher is not closed explicitly from outside,
-				// so we must close it from within
-				flusher.shutdown()
-				return
-			}
-		}
-	}(ctx)
-}
-
 type MdbxOpts struct {
 	// must be in the range from 12.5% (almost empty) to 50% (half empty)
 	// which corresponds to the range from 8192 and to 32768 in units respectively
@@ -404,6 +342,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 
+	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
+		if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
+			env.Close()
+			return nil, err
+		}
+	}
+
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
 		if err = env.SetSyncBytes(*opts.syncBytes); err != nil {
 			env.Close()
@@ -433,12 +378,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
-	}
-
-	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		db.periodicFlusher = newPeriodicFlusher(env, opts, opts.syncPeriod)
-		db.periodicFlusher.FlushInBackground(ctx) // start flushing in background
-
 	}
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
@@ -538,9 +477,6 @@ type MdbxKV struct {
 
 	batchMu sync.Mutex
 	batch   *batch
-
-	periodicFlusher *PeriodicFlusher // only used when opts.syncPeriod is set, to periodically flush to disk committed changes
-
 }
 
 func (db *MdbxKV) Path() string                { return db.opts.path }
@@ -629,9 +565,7 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
-	if db.periodicFlusher != nil {
-		db.periodicFlusher.Close()
-	}
+
 	db.env.Close()
 	db.env = nil
 

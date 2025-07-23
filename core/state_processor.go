@@ -126,3 +126,22 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 
 	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, vmenv, cfg)
 }
+
+func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine consensus.EngineReader, author *common.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
+	// Create a new context to be used in the EVM environment
+
+	// Add addresses to access list if applicable
+	// about the transaction and calling mechanisms.
+	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
+
+	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
+	return vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
+}
+
+func ApplyTransactionWithEVM(config *chain.Config, engine consensus.EngineReader, gp *GasPool,
+	ibs *state.IntraBlockState,
+	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
+	cfg vm.Config, vmenv *vm.EVM,
+) (*types.Receipt, []byte, error) {
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
+}
