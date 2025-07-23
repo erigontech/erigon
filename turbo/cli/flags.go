@@ -268,6 +268,9 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 	_ = chainId
 
+	cfg.L2RPCAddr = ctx.String(L2RPCAddrFlag.Name)
+	fmt.Printf("Using L2 RPC address: %s\n", cfg.L2RPCAddr)
+
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 	distance := ctx.Uint64(PruneDistanceFlag.Name)
 
