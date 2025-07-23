@@ -395,7 +395,7 @@ func (hi *HistoryChangesIterFiles) Close() {
 func (hi *HistoryChangesIterFiles) advance() error {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
-		key, idxVal := top.key, top.val
+		key, idxVal := bytes.Clone(top.key), bytes.Clone(top.val)
 
 		if top.g.HasNext() {
 			var err error
