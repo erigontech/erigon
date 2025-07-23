@@ -451,6 +451,7 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 	}
 	defer func() {
 		mapGroup.Wait()
+		in.Close()
 		for _, w := range workers {
 			w.ResetTx(nil)
 		}
