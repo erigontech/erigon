@@ -334,3 +334,90 @@ func (m *MergedKV) Close() {
 type Closer interface {
 	Close()
 }
+
+// MergedKVPair merges two KV streams
+type MergedKVPair struct {
+	x                  KV
+	y                  KV
+	xHasNext, yHasNext bool
+	xNextK, xNextV     []byte
+	yNextK, yNextV     []byte
+	limit              int
+	err                error
+}
+
+func MergeKV(x KV, y KV, limit int) KV {
+	if x == nil && y == nil {
+		return EmptyKV
+	}
+	if x == nil {
+		return y
+	}
+	if y == nil {
+		return x
+	}
+	m := &MergedKVPair{x: x, y: y, limit: limit}
+	m.advanceX()
+	m.advanceY()
+	return m
+}
+
+func (m *MergedKVPair) HasNext() bool {
+	return m.err != nil || (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
+}
+
+func (m *MergedKVPair) advanceX() {
+	if m.err != nil {
+		return
+	}
+	m.xHasNext = m.x.HasNext()
+	if m.xHasNext {
+		m.xNextK, m.xNextV, m.err = m.x.Next()
+	}
+}
+
+func (m *MergedKVPair) advanceY() {
+	if m.err != nil {
+		return
+	}
+	m.yHasNext = m.y.HasNext()
+	if m.yHasNext {
+		m.yNextK, m.yNextV, m.err = m.y.Next()
+	}
+}
+
+func (m *MergedKVPair) Next() ([]byte, []byte, error) {
+	if m.err != nil {
+		return nil, nil, m.err
+	}
+	m.limit--
+	if m.xHasNext && m.yHasNext {
+		cmp := bytes.Compare(m.xNextK, m.yNextK)
+		if cmp <= 0 {
+			k, v, err := m.xNextK, m.xNextV, m.err
+			m.advanceX()
+			return k, v, err
+		} else {
+			k, v, err := m.yNextK, m.yNextV, m.err
+			m.advanceY()
+			return k, v, err
+		}
+	}
+	if m.xHasNext {
+		k, v, err := m.xNextK, m.xNextV, m.err
+		m.advanceX()
+		return k, v, err
+	}
+	k, v, err := m.yNextK, m.yNextV, m.err
+	m.advanceY()
+	return k, v, err
+}
+
+func (m *MergedKVPair) Close() {
+	if x, ok := m.x.(Closer); ok {
+		x.Close()
+	}
+	if y, ok := m.y.(Closer); ok {
+		y.Close()
+	}
+}

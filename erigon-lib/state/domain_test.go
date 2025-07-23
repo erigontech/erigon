@@ -2237,7 +2237,7 @@ func TestDomain_Unwind(t *testing.T) {
 			ut, err := uc.ht.HistoryRange(int(unwindTo)-1, -1, order.Asc, -1, utx)
 			require.NoError(t, err)
 
-			compareIteratorsS(t, et, ut)
+			compareIterators(t, et, ut)
 		})
 	}
 
@@ -2380,7 +2380,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 
 		for hit.HasNext() {
-			k, v, _, err := hit.Next()
+			k, v, err := hit.Next()
 			require.NoError(t, err)
 
 			require.Equal(t, pruningKey, k)
