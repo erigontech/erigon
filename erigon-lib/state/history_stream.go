@@ -663,6 +663,6 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	if len(hi.k) >= 8 {
 		keyWithoutStep = hi.k[8:]
 	}
-	fmt.Printf("[dbg] HistoryChangesIterDB.Next: keyWithoutStep=%x, hi.k=%x\n", keyWithoutStep, hi.k)
+	fmt.Printf("[dbg] HistoryChangesIterDB.Next: keyWithoutStep=%x\n", keyWithoutStep)
 	return keyWithoutStep, hi.v, nil
 }
