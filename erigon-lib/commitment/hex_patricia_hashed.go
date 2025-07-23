@@ -722,6 +722,9 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 	var err error
 	var storageRootHash [length.Hash]byte
 	var storageRootHashIsSet bool
+	if hph.memoizationOff {
+		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
+	}
 	if cell.storageAddrLen > 0 {
 		var hashedKeyOffset int
 		if depth >= 64 {
@@ -894,6 +897,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 	var err error
 	var storageRootHash [length.Hash]byte
 	var storageRootHashIsSet bool
+	if hph.memoizationOff {
+		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
+	}
 	if cell.storageAddrLen > 0 {
 		var hashedKeyOffset int
 		if depth >= 64 {
@@ -2009,7 +2015,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		updatesCount = updates.Size()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
-	//hph.memoizationOff, hph.trace = false, true
+	hph.memoizationOff, hph.trace = true, true
 	//defer func() {
 	//	hph.memoizationOff, hph.trace = false, false
 	//}()
