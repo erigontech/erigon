@@ -78,6 +78,18 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 	return ok
 }
 
+func ComputeCells(blobs *cltypes.Blob) ([]cltypes.Cell, error) {
+	cells, err := ckzg.ComputeCells((*ckzg.Blob)(blobs))
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]cltypes.Cell, len(cells))
+	for i, cell := range &cells {
+		ret[i] = cltypes.Cell(cell)
+	}
+	return ret, nil
+}
+
 // ComputeSubnetForDataColumnSidecar computes the subnet ID for a given data column sidecar index.
 // This function is re-entrant and thread-safe.
 func ComputeSubnetForDataColumnSidecar(columnIndex cltypes.ColumnIndex) uint64 {

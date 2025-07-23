@@ -230,8 +230,8 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 		http.StatusGatewayTimeout:
 
 		if debugWebseed {
-			// An error that's not handled by the torrent lib?
-			panic(resp.StatusCode)
+			// An interesting error that the torrent lib should probably handle.
+			fmt.Printf("got webseed response status %v\n", resp.Status)
 		}
 
 		WebseedServerFails.Add(1)

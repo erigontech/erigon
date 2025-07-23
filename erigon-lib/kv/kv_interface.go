@@ -217,7 +217,6 @@ type DBVerbosityLvl int8
 type Label string
 
 const (
-	Unknown         = "unknown"
 	ChainDB         = "chaindata"
 	TxPoolDB        = "txpool"
 	SentryDB        = "sentry"
