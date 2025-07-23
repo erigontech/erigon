@@ -1531,11 +1531,11 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 	return stream.UnionKV(hi, dbit, limit), nil
 }
 
-func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int, stepDbIters []ReconDBIterOfStep) (stream.KV, error) {
+func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
-	if len(ht.iit.files) == 0 && len(stepDbIters) == 0 {
+	if len(ht.iit.files) == 0 {
 		return stream.EmptyKV, nil
 	}
 
@@ -1551,20 +1551,6 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 	}
 	if fromTxNum >= 0 {
 		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
-	}
-
-	// Add DB iterators to heap with their step information
-	for _, stepDbIter := range stepDbIters {
-		if stepDbIter.iter != nil && stepDbIter.iter.HasNext() {
-			key, val, err := stepDbIter.iter.Next()
-			if err != nil {
-				s.Close()
-				return nil, err
-			}
-			stepStartTxNum := stepDbIter.step * ht.aggStep
-			stepEndTxNum := (stepDbIter.step + 1) * ht.aggStep
-			heap.Push(&s.h, &ReconItem{g: stepDbIter.iter, key: key, val: val, startTxNum: stepStartTxNum, endTxNum: stepEndTxNum, txNum: stepEndTxNum})
-		}
 	}
 
 	// Add file iterators to heap
@@ -1720,7 +1706,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 		r = stream.IntersectKV(r, it.iter, limit)
 	}
 
-	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit, nil)
+	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit)
 	if err != nil {
 		return nil, err
 	}
