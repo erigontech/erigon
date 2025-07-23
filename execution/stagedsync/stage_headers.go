@@ -260,6 +260,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return fmt.Errorf("saving Headers progress: %w", err)
 	}
 	if !useExternalTx {
+		cfg.hd.SetSynced()
 		err = tx.Commit()
 		if err != nil {
 			return err
