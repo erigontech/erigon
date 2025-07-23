@@ -185,7 +185,8 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 
 func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req BackwardDownloadRequest) error {
 	e.logger.Info("[EngineBlockDownloader] processing backward download request", req.LogArgs()...)
-	opts := []bbd.Option{bbd.WithBlocksBatchSize(500)}
+	blockBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
+	opts := []bbd.Option{bbd.WithBlocksBatchSize(blockBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
 		opts = append(opts, bbd.WithChainLengthLimit(uint64(dbg.MaxReorgDepth)))
 		currentHeader := e.chainRW.CurrentHeader(ctx)
