@@ -488,9 +488,7 @@ type HistoryChangesIterDB struct {
 	startTxKey      [8]byte
 
 	nextKey, nextVal []byte
-	nextStep         uint64
 	k, v             []byte
-	step             uint64
 	err              error
 }
 
@@ -645,15 +643,15 @@ func (hi *HistoryChangesIterDB) HasNext() bool {
 	return true
 }
 
-func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, uint64, error) {
+func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	if hi.err != nil {
-		return nil, nil, 0, hi.err
+		return nil, nil, hi.err
 	}
 	hi.limit--
-	hi.k, hi.v, hi.step = hi.nextKey, hi.nextVal, hi.nextStep
+	hi.k, hi.v = hi.nextKey, hi.nextVal
 	if err := hi.advance(); err != nil {
-		return nil, nil, 0, err
+		return nil, nil, err
 	}
 	order.Asc.Assert(hi.k, hi.nextKey)
-	return hi.k, hi.v, hi.step, nil
+	return hi.k, hi.v, nil
 }
