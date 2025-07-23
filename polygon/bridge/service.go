@@ -209,7 +209,7 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 
 		orderedAndNoGaps := true
-		knownEventID := lastProcessedEventId
+		knownEventID := lastFetchedEventId
 
 		for i := 0; i < len(events); i++ {
 			if events[i].ID == knownEventID+1 {
@@ -227,7 +227,7 @@ func (s *Service) Run(ctx context.Context) error {
 				"lastKnownEventId", lastFetchedEventId,
 			)
 
-			if err := libcommon.Sleep(ctx, time.Second); err != nil {
+			if err := common.Sleep(ctx, time.Second); err != nil {
 				return err
 			}
 
