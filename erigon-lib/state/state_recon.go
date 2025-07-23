@@ -104,25 +104,13 @@ func (w *SegReaderWrapper) Next() ([]byte, []byte, error) {
 	if !w.reader.HasNext() {
 		return nil, nil, stream.ErrIteratorExhausted
 	}
-
-	// First call: get the key
 	key, _ := w.reader.Next(nil)
-
-	// Second call: get the value
-	var value []byte
 	if w.reader.HasNext() {
-		value, _ = w.reader.Next(nil)
+		panic("assert: no value in key-value fail")
 	}
-
+	value, _ := w.reader.Next(nil)
 	return key, value, nil
 }
 
-// HasNext delegates to the underlying reader
-func (w *SegReaderWrapper) HasNext() bool {
-	return w.reader.HasNext()
-}
-
-// Close is a no-op as seg.ReaderI doesn't have Close method
-func (w *SegReaderWrapper) Close() {
-	// No-op
-}
+func (w *SegReaderWrapper) HasNext() bool { return w.reader.HasNext() }
+func (w *SegReaderWrapper) Close()        {}
