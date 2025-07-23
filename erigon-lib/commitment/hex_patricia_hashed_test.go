@@ -1908,6 +1908,8 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	//t.Parallel()
 
 	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, addrToWitness []byte) {
+		t.Helper()
+
 		ctx := context.Background()
 		ms := NewMockState(t)
 		hph := NewHexPatriciaHashed(length.Addr, ms)
