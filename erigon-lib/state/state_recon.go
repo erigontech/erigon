@@ -111,7 +111,7 @@ func (w *SegReaderWrapper) Next() ([]byte, []byte, error) {
 		return nil, nil, stream.ErrIteratorExhausted
 	}
 	key, _ := w.reader.Next(nil)
-	if w.reader.HasNext() {
+	if !w.reader.HasNext() {
 		panic("assert: no value in key-value fail")
 	}
 	value, _ := w.reader.Next(nil)
