@@ -1343,31 +1343,6 @@ func stepPrefixedHistoryKeyAddr(addr []byte, txNum uint64, aggregationStep uint6
 	return buf
 }
 
-// extractStepFromStepPrefixedKey extracts the original step from a step-prefixed key
-func extractStepFromStepPrefixedKey(stepPrefixedKey []byte) uint64 {
-	if len(stepPrefixedKey) < 8 {
-		panic(stepPrefixedKey)
-	}
-	invertedStep := binary.BigEndian.Uint64(stepPrefixedKey[:8])
-	return ^invertedStep
-}
-
-// extractOriginalKeyFromStepPrefixed extracts the original key (addr) from step-prefixed key
-func extractOriginalKeyFromStepPrefixed(stepPrefixedKey []byte) []byte {
-	if len(stepPrefixedKey) <= 8 {
-		panic(stepPrefixedKey)
-	}
-	return stepPrefixedKey[8:]
-}
-
-// extractTxNumFromStepPrefixedHistoryKey extracts txNum from step-prefixed history key format [^step][addr][txNum]
-func extractTxNumFromStepPrefixedHistoryKey(stepPrefixedKey []byte) uint64 {
-	if len(stepPrefixedKey) < 16 { // at least 8 bytes for step + 8 bytes for txNum
-		panic(stepPrefixedKey)
-	}
-	return binary.BigEndian.Uint64(stepPrefixedKey[len(stepPrefixedKey)-8:])
-}
-
 func historyKey(txNum uint64, key []byte, buf []byte) []byte {
 	if buf == nil || cap(buf) < 8+len(key) {
 		buf = make([]byte, 8+len(key))
@@ -1556,7 +1531,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 	return stream.UnionKV(hi, dbit, limit), nil
 }
 
-func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
+func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int, stepDbIters []ReconDBIterOfStep) (stream.KV, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
@@ -1611,118 +1586,36 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	if rangeIsInFiles {
 		return stream.EmptyKVS, nil
 	}
-	// Use the new step-prefixed iterator
-	return ht.iterateChangedRecentStepPrefixed(fromTxNum, toTxNum, asc, limit, roTx)
+	s := &HistoryChangesIterDB{
+		endTxNum:    toTxNum,
+		roTx:        roTx,
+		largeValues: ht.h.historyLargeValues,
+		valsTable:   ht.h.valuesTable,
+		limit:       limit,
+	}
+	if fromTxNum >= 0 {
+		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
+	}
+	if err := s.advance(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
 }
 
 func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KVS, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
-	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit)
+	itOnDB, err := ht.iterateChangedRecent(fromTxNum, toTxNum, asc, limit, roTx)
 	if err != nil {
 		return nil, err
 	}
-	itOnDB, err := ht.iterateChangedRecentStepPrefixed(fromTxNum, toTxNum, asc, limit, roTx)
+	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit, itOnDB)
 	if err != nil {
 		return nil, err
 	}
 	return stream.MergeKVS(itOnDB, itOnFiles, limit), nil
-}
-
-// iterateChangedRecentStepPrefixed creates multiple iterators (1 per step) and merges them
-func (ht *HistoryRoTx) iterateChangedRecentStepPrefixed(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KVS, error) {
-	if asc == order.Desc {
-		panic("not supported yet")
-	}
-
-	// Check if range is in files - if so, no DB iteration needed
-	rangeIsInFiles := toTxNum >= 0 && len(ht.iit.files) > 0 && ht.iit.files.EndTxNum() >= uint64(toTxNum)
-	if rangeIsInFiles {
-		return stream.EmptyKVS, nil
-	}
-
-	// Get step range for the txNum range
-	minStep, maxStep := ht.stepsRangeInDB(roTx)
-	if minStep > maxStep {
-		return stream.EmptyKVS, nil
-	}
-
-	// Calculate which steps contain data in our txNum range
-	startStep := uint64(fromTxNum) / ht.aggStep
-	endStep := uint64(toTxNum) / ht.aggStep
-	if startStep < uint64(minStep) {
-		startStep = uint64(minStep)
-	}
-	if endStep > uint64(maxStep) {
-		endStep = uint64(maxStep)
-	}
-
-	// Create iterator for each step and collect them
-	var iterators []stream.KV
-	for step := startStep; step <= endStep; step++ {
-		iter, err := ht.createStepIterator(step, fromTxNum, toTxNum, -1, roTx)
-		if err != nil {
-			// Close any iterators we've already created
-			for _, it := range iterators {
-				it.Close()
-			}
-			return nil, err
-		}
-		if iter != nil {
-			iterators = append(iterators, iter)
-		}
-	}
-
-	if len(iterators) == 0 {
-		return stream.EmptyKVS, nil
-	}
-	if len(iterators) == 1 {
-		return stream.WrapKVS(iterators[0]), nil
-	}
-
-	// Merge all step iterators sequentially
-	result := stream.WrapKVS(iterators[0])
-	for i := 1; i < len(iterators); i++ {
-		result = stream.MergeKVS(result, iterators[i], limit)
-	}
-	return result, nil
-}
-
-// createStepIterator creates an iterator for a single step
-func (ht *HistoryRoTx) createStepIterator(step uint64, fromTxNum, toTxNum int, limit int, roTx kv.Tx) (stream.KV, error) {
-	// Calculate txNum range for this step
-	stepStartTxNum := step * ht.aggStep
-	stepEndTxNum := (step + 1) * ht.aggStep
-
-	// Intersect with requested range
-	actualFromTxNum := max(int(stepStartTxNum), fromTxNum)
-	actualToTxNum := min(int(stepEndTxNum), toTxNum)
-
-	if actualFromTxNum >= actualToTxNum {
-		return nil, nil
-	}
-
-	s := &HistoryChangesIterDB{
-		largeValues: ht.h.historyLargeValues,
-		roTx:        roTx,
-		valsTable:   ht.h.valuesTable,
-		limit:       limit,
-		targetStep:  step,
-		aggStep:     ht.aggStep,
-		fromTxNum:   actualFromTxNum,
-		toTxNum:     actualToTxNum,
-	}
-
-	if err := s.advance(); err != nil {
-		s.Close()
-		return nil, err
-	}
-	if !s.HasNext() {
-		s.Close()
-		return nil, nil
-	}
-	return stream.WrapKV(s), nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {

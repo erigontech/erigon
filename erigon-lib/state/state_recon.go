@@ -25,8 +25,8 @@ import (
 
 // Algorithms for reconstituting the state from state history
 
-// StepDbIterator holds a DB iterator and its associated step
-type StepDbIterator struct {
+// ReconDBIterOfStep holds a DB iterator and its associated step
+type ReconDBIterOfStep struct {
 	iter stream.KV
 	step uint64
 }
