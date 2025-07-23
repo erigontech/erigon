@@ -449,11 +449,15 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	// Run the forkchoice
 	initialCycle := limitedBigJump
 	firstCycle := false
-	if _, err := e.executionPipeline.Run(e.db, wrap.NewTxContainer(tx, nil), initialCycle, firstCycle); err != nil {
-		err = fmt.Errorf("updateForkChoice: %w", err)
-		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-		return
+	hasMore := true
+	for hasMore {
+		hasMore, err = e.executionPipeline.Run(e.db, wrap.NewTxContainer(tx, nil), initialCycle, firstCycle)
+		if err != nil {
+			err = fmt.Errorf("updateForkChoice: %w", err)
+			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return
+		}
 	}
 
 	// if head hash was set then success otherwise no
