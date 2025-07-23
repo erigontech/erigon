@@ -1936,17 +1936,17 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
 	}
 
-	// t.Run("JustRoot", func(t *testing.T) {
-	// 	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)
-
-	// 	addrWithSingleton := common.Copy(plainKeysList[0])
-	// 	builder := NewUpdateBuilder()
-	// 	for i := 0; i < len(plainKeysList); i++ {
-	// 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
-	// 	}
-
-	// 	buildTrieAndWitness(t, builder, addrWithSingleton)
-	// })
+	//t.Run("JustRoot", func(t *testing.T) {
+	//	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)
+	//
+	//	addrWithSingleton := common.Copy(plainKeysList[0])
+	//	builder := NewUpdateBuilder()
+	//	for i := 0; i < len(plainKeysList); i++ {
+	//		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+	//	}
+	//
+	//	buildTrieAndWitness(t, builder, addrWithSingleton)
+	//})
 	t.Run("RandomAccountsOnly", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 5)
 
@@ -1981,27 +1981,27 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 		buildTrieAndWitness(t, builder, addrWithSingleton)
 	})
-	//t.Run("StorageSingleton", func(t *testing.T) {
-	//	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
-	//
-	//	addrWithSingleton := common.Copy(plainKeysList[0])
-	//	//storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
-	//
-	//	builder := NewUpdateBuilder()
-	//	for i := 0; i < len(plainKeysList); i++ {
-	//		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
-	//	}
-	//	// add just a single storage slot to address
-	//	builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
-	//
-	//	//for sl := 0; sl < len(storageKeysList); sl++ {
-	//	//	builder.Storage(common.Bytes2Hex(addrWithSingleton), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
-	//	//}
-	//	// fmt.Printf("addrWithSingleton %x\n", addrWithSingleton)
-	//	// builder.Storage(common.Bytes2Hex(addrWithSingleton), "01044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
-	//
-	//	buildTrieAndWitness(t, builder, addrWithSingleton)
-	//})
+	t.Run("StorageSingleton", func(t *testing.T) {
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrWithSingleton := common.Copy(plainKeysList[0])
+		//storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+		// add just a single storage slot to address
+		builder.Storage(common.Bytes2Hex(addrWithSingleton), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+
+		//for sl := 0; sl < len(storageKeysList); sl++ {
+		//	builder.Storage(common.Bytes2Hex(addrWithSingleton), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
+		//}
+		// fmt.Printf("addrWithSingleton %x\n", addrWithSingleton)
+		// builder.Storage(common.Bytes2Hex(addrWithSingleton), "01044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+
+		buildTrieAndWitness(t, builder, addrWithSingleton)
+	})
 
 	t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)

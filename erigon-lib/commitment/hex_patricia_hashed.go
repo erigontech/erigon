@@ -1232,16 +1232,18 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			continue
 
 		} else if cellToExpand.hashedExtLen > 0 { // extension cell
+			depthAdjusted := false
+			extKeyLength := cellToExpand.hashedExtLen
+			if hph.depths[row] < 64 && extKeyLength+hph.depths[row] > 64 { //&& cellToExpand.accountAddrLen > 0 {
+				extKeyLength = 64 - hph.depths[row] // adjust depth to stop before storage trie
+				depthAdjusted = true
+				if hph.trace {
+					fmt.Printf("[witness] adjusted hashExtLen=%d <- %d\n", extKeyLength, cellToExpand.hashedExtLen)
+				}
+			}
 
-			//if !hph.root.IsEmpty() && currentNode == rootNode {
-			//	rootNode = &trie.ShortNode{Key: hph.root.hashedExtension[:hph.root.hashedExtLen], Val: &trie.FullNode{}}
-			//	currentNode = rootNode // set currentNode to the root node
-			//
-			//	fmt.Printf("[witness] root node %s\n", hph.root.FullString())
-			//}
-			keyPos += cellToExpand.hashedExtLen // jump ahead
-			hashedExtKey := cellToExpand.hashedExtension[:cellToExpand.hashedExtLen]
-			extKeyLength := len(hashedExtKey)
+			keyPos += extKeyLength // jump ahead
+			hashedExtKey := cellToExpand.hashedExtension[:extKeyLength]
 			if keyPos+1 == len(hashedKey) || keyPos+1 == 64 {
 				extKeyLength++ //  +1 for the terminator 0x10 ([16])  byte when on a terminal extension node
 			}
@@ -1252,7 +1254,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			}
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
 			if keyPos+1 == len(hashedKey) {
-				if cellToExpand.storageAddrLen > 0 {
+				if cellToExpand.storageAddrLen > 0 && !depthAdjusted {
 					storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 					if err != nil {
 						return nil, err
