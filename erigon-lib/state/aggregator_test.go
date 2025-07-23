@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -588,9 +587,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		accountsRange    map[string][]byte
 		storageRange     map[string][]byte
 		codeRange        map[string][]byte
-		accountHistRange map[string]vs
-		storageHistRange map[string]vs
-		codeHistRange    map[string]vs
+		accountHistRange map[string][]byte
+		storageHistRange map[string][]byte
+		codeHistRange    map[string][]byte
 	)
 	maxInt := math.MaxInt
 	{
@@ -608,13 +607,13 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 
 		its, err := AggTx(tx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
 		require.NoError(t, err)
-		accountHistRange = extractKVSErrIterator(t, its)
+		accountHistRange = extractKVErrIterator(t, its)
 		its, err = AggTx(tx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
 		require.NoError(t, err)
-		codeHistRange = extractKVSErrIterator(t, its)
+		codeHistRange = extractKVErrIterator(t, its)
 		its, err = AggTx(tx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
 		require.NoError(t, err)
-		storageHistRange = extractKVSErrIterator(t, its)
+		storageHistRange = extractKVErrIterator(t, its)
 	}
 
 	err = tx.Commit()
@@ -643,9 +642,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		accountsRangeAfter    map[string][]byte
 		storageRangeAfter     map[string][]byte
 		codeRangeAfter        map[string][]byte
-		accountHistRangeAfter map[string]vs
-		storageHistRangeAfter map[string]vs
-		codeHistRangeAfter    map[string]vs
+		accountHistRangeAfter map[string][]byte
+		storageHistRangeAfter map[string][]byte
+		codeHistRangeAfter    map[string][]byte
 	)
 
 	{
@@ -663,13 +662,13 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 
 		its, err := AggTx(afterTx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
-		accountHistRangeAfter = extractKVSErrIterator(t, its)
+		accountHistRangeAfter = extractKVErrIterator(t, its)
 		its, err = AggTx(afterTx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
-		codeHistRangeAfter = extractKVSErrIterator(t, its)
+		codeHistRangeAfter = extractKVErrIterator(t, its)
 		its, err = AggTx(afterTx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
-		storageHistRangeAfter = extractKVSErrIterator(t, its)
+		storageHistRangeAfter = extractKVErrIterator(t, its)
 	}
 
 	{
@@ -677,52 +676,24 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		compareMapsBytes(t, accountsRange, accountsRangeAfter)
 		compareMapsBytes(t, storageRange, storageRangeAfter)
 		compareMapsBytes(t, codeRange, codeRangeAfter)
-		compareMapsBytes2(t, accountHistRange, accountHistRangeAfter)
-		compareMapsBytes2(t, storageHistRange, storageHistRangeAfter)
-		compareMapsBytes2(t, codeHistRange, codeHistRangeAfter)
+		compareMapsBytes(t, accountHistRange, accountHistRangeAfter)
+		compareMapsBytes(t, storageHistRange, storageHistRangeAfter)
+		compareMapsBytes(t, codeHistRange, codeHistRangeAfter)
 	}
 
-}
-
-func compareMapsBytes2(t *testing.T, m1, m2 map[string]vs) {
-	t.Helper()
-	for k, v := range m1 {
-		v2, ok := m2[k]
-		require.Truef(t, ok, "key %x not found", k)
-		require.Equal(t, v.s, v2.s)
-		if !bytes.Equal(v.v, v2.v) { // empty value==nil
-			t.Logf("key %x expected '%x' but got '%x'\n", k, v, m2[k])
-		}
-		delete(m2, k)
-	}
-	require.Emptyf(t, m2, "m2 should be empty got %d: %v", len(m2), m2)
 }
 
 func compareMapsBytes(t *testing.T, m1, m2 map[string][]byte) {
 	t.Helper()
 	for k, v := range m1 {
-		require.Equal(t, v, m2[k])
+		if len(v) == 0 {
+			require.Equal(t, []byte{}, v)
+		} else {
+			require.Equal(t, m2[k], v)
+		}
 		delete(m2, k)
 	}
 	require.Emptyf(t, m2, "m2 should be empty got %d: %v", len(m2), m2)
-}
-
-type vs struct {
-	v []byte
-	s uint64
-}
-
-func extractKVSErrIterator(t *testing.T, it stream.KVS) map[string]vs {
-	t.Helper()
-
-	accounts := make(map[string]vs)
-	for it.HasNext() {
-		k, v, s, err := it.Next()
-		require.NoError(t, err)
-		accounts[hex.EncodeToString(k)] = vs{v: common.Copy(v), s: s}
-	}
-
-	return accounts
 }
 
 func extractKVErrIterator(t *testing.T, it stream.KV) map[string][]byte {
