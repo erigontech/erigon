@@ -182,7 +182,7 @@ func (c *BorConfig) IsVeBlop(number uint64) bool {
 	return isForked(c.VeBlopBlock, number)
 }
 
-func (c *BorConfig) GetVeblopBlock() *big.Int {
+func (c *BorConfig) GetVeBlopBlock() *big.Int {
 	return c.VeBlopBlock
 }
 

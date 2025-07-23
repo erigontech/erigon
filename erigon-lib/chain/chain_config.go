@@ -178,6 +178,8 @@ type BorConfig interface {
 	GetAhmedabadBlock() *big.Int
 	IsBhilai(num uint64) bool
 	GetBhilaiBlock() *big.Int
+	IsVeBlop(num uint64) bool
+	GetVeBlopBlock() *big.Int
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
@@ -201,6 +203,7 @@ func (c *Config) String() string {
 			c.Bor.GetNapoliBlock(),
 			c.Bor.GetAhmedabadBlock(),
 			c.Bor.GetBhilaiBlock(),
+			c.Bor.GetVeBlopBlock(),
 			engine,
 		)
 	}
