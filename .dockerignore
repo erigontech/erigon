@@ -8,6 +8,3 @@ build
 tests/testdata
 cmd/prometheus
 vendor
-
-Dockerfile
-.github
