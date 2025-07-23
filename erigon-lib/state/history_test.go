@@ -823,18 +823,17 @@ func checkHistoryHistory(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 	hc := h.BeginFilesRo()
 	defer hc.Close()
 
-	// Check stepsRangeInDB
-	tx, err := db.BeginRo(context.Background())
+	err := db.View(context.Background(), func(tx kv.Tx) error {
+		from, to := hc.stepsRangeInDB(tx)
+		expectedSteps := txs / h.aggregationStep
+		if expectedSteps > 1 {
+			// Should have steps from recent data in DB (last 2 steps remain uncollated)
+			require.Greater(t, to, 0.0, "Should have steps in DB")
+			require.GreaterOrEqual(t, to, from, "To step should be >= from step")
+		}
+		return nil
+	})
 	require.NoError(t, err)
-	defer tx.Rollback()
-
-	from, to := hc.stepsRangeInDB(tx)
-	expectedSteps := txs / h.aggregationStep
-	if expectedSteps > 1 {
-		// Should have steps from recent data in DB (last 2 steps remain uncollated)
-		require.Greater(t, to, 0.0, "Should have steps in DB")
-		require.GreaterOrEqual(t, to, from, "To step should be >= from step")
-	}
 
 	for txNum := uint64(0); txNum <= txs; txNum++ {
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
