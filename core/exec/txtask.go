@@ -699,10 +699,12 @@ func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + len(q.newTasks)
 // Add "new task" (which was never executed yet). May block internal channel is full.
 // Expecting already-ordered tasks.
 func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
-	select {
-	case <-ctx.Done():
-		return
-	case q.newTasks <- t:
+	if !q.closed {
+		select {
+		case <-ctx.Done():
+			return
+		case q.newTasks <- t:
+		}
 	}
 }
 
@@ -710,12 +712,12 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 // All failed tasks have higher priority than new one.
 // No limit on amount of txs added by this method.
 func (q *QueueWithRetry) ReTry(t Task) {
-	q.retiresLock.Lock()
-	heap.Push(&q.retires, t)
-	q.retiresLock.Unlock()
 	if q.closed {
 		return
 	}
+	q.retiresLock.Lock()
+	heap.Push(&q.retires, t)
+	q.retiresLock.Unlock()
 	select {
 	case q.newTasks <- nil:
 	default:
@@ -732,9 +734,19 @@ func (q *QueueWithRetry) Next(ctx context.Context) (Task, bool) {
 }
 
 func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
+	if q.newTasks == nil {
+		return q.popNoWait()
+	}
+
 	for {
 		select {
 		case inTask, ok := <-q.newTasks:
+
+			if q.closed && q.newTasks != nil && len(q.newTasks) == 0 {
+				close(q.newTasks)
+				q.newTasks = nil
+			}
+
 			if !ok {
 				q.retiresLock.Lock()
 				if q.retires.Len() > 0 {
@@ -777,7 +789,6 @@ func (q *QueueWithRetry) popNoWait() (task Task, ok bool) {
 		select {
 		case task, ok = <-q.newTasks:
 			if !ok {
-
 				return nil, false
 			}
 		default:
@@ -793,7 +804,10 @@ func (q *QueueWithRetry) Close() {
 		return
 	}
 	q.closed = true
-	close(q.newTasks)
+	if len(q.newTasks) == 0 {
+		close(q.newTasks)
+		q.newTasks = nil
+	}
 }
 
 // ResultsQueue thread-safe priority-queue of execution results
@@ -828,9 +842,6 @@ type PriorityQueue[T queueable[T]] struct {
 
 	resultCh   chan T
 	addWaiters chan any
-	//tick
-	ticker *time.Ticker
-
 	sync.RWMutex
 	results *Queue[T]
 }
@@ -840,7 +851,6 @@ func NewPriorityQueue[T queueable[T]](channelLimit, heapLimit int) *PriorityQueu
 		results:  &Queue[T]{},
 		limit:    heapLimit,
 		resultCh: make(chan T, channelLimit),
-		ticker:   time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
 	return r
@@ -848,7 +858,6 @@ func NewPriorityQueue[T queueable[T]](channelLimit, heapLimit int) *PriorityQueu
 
 // Add result of execution. May block when internal channel is full
 func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
-
 	q.Lock()
 	resultCh := q.resultCh
 	addWaiters := q.addWaiters
@@ -874,12 +883,42 @@ func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 	return nil
 }
 
+func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duration) (bool, error) {
+	q.Lock()
+	resultCh := q.resultCh
+	q.Unlock()
+
+	if resultCh == nil {
+		var none T
+		return q.Drain(ctx, none)
+	}
+
+	var waitTimer *time.Timer
+	var waitChan <-chan time.Time
+
+	if waitTime > 0 {
+		waitTimer = time.NewTimer(waitTime)
+		waitChan = waitTimer.C
+		defer waitTimer.Stop()
+	}
+
+	select {
+	case <-ctx.Done():
+		return q.results.Len() == 0, ctx.Err()
+	case next, _ := <-q.resultCh:
+		return q.Drain(ctx, next)
+	case <-waitChan:
+		var none T
+		return q.Drain(ctx, none)
+	}
+}
+
 func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 	q.Lock()
 	defer q.Unlock()
 
 	if q.resultCh == nil {
-		return true, nil
+		return q.results.Len() == 0, nil
 	}
 
 	if !item.isNil() {
@@ -890,19 +929,19 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 		select {
 		case <-ctx.Done():
 			return q.resultCh == nil, ctx.Err()
-		case txTask, ok := <-q.resultCh:
+		case next, ok := <-q.resultCh:
 			if !ok {
-				return true, nil
+				return q.results.Len() == 0, nil
 			}
-			if txTask.isNil() {
+			if next.isNil() {
 				continue
 			}
-			heap.Push(q.results, txTask)
+			heap.Push(q.results, next)
 			if q.results.Len() > q.limit {
-				return q.resultCh == nil, nil
+				return false, nil
 			}
 		default: // we are inside mutex section, can't block here
-			return q.resultCh == nil, nil
+			return q.resultCh == nil && q.results.Len() == 0, nil
 		}
 	}
 }
@@ -929,11 +968,6 @@ func (q *PriorityQueueIter[T]) PopNext() T {
 
 func (q *PriorityQueue[T]) ResultCh() chan T {
 	return q.resultCh
-}
-
-func (q *PriorityQueue[T]) DrainNonBlocking(ctx context.Context) (bool, error) {
-	var none T
-	return q.Drain(ctx, none)
 }
 
 func (q *PriorityQueue[T]) Drop(ctx context.Context, f func(t T)) {
@@ -970,9 +1004,8 @@ func (q *PriorityQueue[T]) Close() {
 	close(q.resultCh)
 	q.resultCh = nil
 	q.Unlock()
-
-	q.ticker.Stop()
 }
+
 func (q *PriorityQueue[T]) ResultChLen() int { return len(q.resultCh) }
 func (q *PriorityQueue[T]) ResultChCap() int { return cap(q.resultCh) }
 func (q *PriorityQueue[T]) Limit() int       { return q.limit }

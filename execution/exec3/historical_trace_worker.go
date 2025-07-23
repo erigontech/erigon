@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -361,7 +362,6 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
-		defer out.Close()
 		return doHistoryMap(ctx, consumer, cfg, in, workerCount, out, logger)
 	})
 	g.Go(func() (err error) {
@@ -370,22 +370,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
+		defer out.Close()
 		return doHistoryReduce(ctx, consumer, cfg, toTxNum, outputTxNum, out, logger)
 	})
-	// deadlock - need move logging inside `map` goroutine
-	//g.Go(func() (err error) {
-	//	logEvery := time.NewTicker(20 * time.Second)
-	//	defer logEvery.Stop()
-	//	for outputTxNum.Load() <= toTxNum {
-	//		select {
-	//		case <-ctx.Done():
-	//			return ctx.Err()
-	//		case <-logEvery.C:
-	//			log.Debug("[map_reduce] ", "in.len", in.Len(), "in.cap", in.Capacity(), "out.len", out.Len(), "out.cap", out.Capacity(), "out.chanLen", out.ChanLen(), "out.chanCap", out.ChanCapacity())
-	//		}
-	//	}
-	//	return nil
-	//})
 	return g
 }
 
@@ -407,20 +394,15 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 		//	log.Info("[dbg] out", "chanLen", out.ChanLen(), "chanCapacity", out.ChanCapacity(), "heapLen", out.Len(), "heapCapacity", out.Capacity())
 		//default:
 		//}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case nextResult, ok := <-out.ResultCh():
-			if !ok {
-				return nil
-			}
-			closed, err := out.Drain(ctx, nextResult)
-			if err != nil {
-				return err
-			}
-			if closed {
-				return nil
-			}
+
+		closed, err := out.AwaitDrain(ctx, 100*time.Millisecond)
+
+		if err != nil {
+			return err
+		}
+
+		if closed {
+			return nil
 		}
 
 		processedTxNum, _, err := resultProcessor.processResults(consumer, cfg, out, outputTxNum.Load(), tx, true, logger)
@@ -451,7 +433,6 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 	}
 	defer func() {
 		mapGroup.Wait()
-		in.Close()
 		for _, w := range workers {
 			w.ResetTx(nil)
 		}
