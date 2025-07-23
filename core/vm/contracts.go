@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/blake2b"
-	libBn254 "github.com/erigontech/erigon-lib/crypto/bn254"
+	libbn254 "github.com/erigontech/erigon-lib/crypto/bn254"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/crypto/secp256r1"
 	"github.com/erigontech/erigon/core/tracing"
@@ -623,8 +623,8 @@ func (c *bigModExp) Name() string {
 
 // newCurvePoint unmarshals a binary blob into a bn254 elliptic curve point,
 // returning it, or an error if the point is invalid.
-func newCurvePoint(blob []byte) (*libBn254.G1, error) {
-	p := new(libBn254.G1)
+func newCurvePoint(blob []byte) (*libbn254.G1, error) {
+	p := new(libbn254.G1)
 	if _, err := p.Unmarshal(blob); err != nil {
 		return nil, err
 	}
@@ -633,8 +633,8 @@ func newCurvePoint(blob []byte) (*libBn254.G1, error) {
 
 // newTwistPoint unmarshals a binary blob into a bn254 elliptic curve point,
 // returning it, or an error if the point is invalid.
-func newTwistPoint(blob []byte) (*libBn254.G2, error) {
-	p := new(libBn254.G2)
+func newTwistPoint(blob []byte) (*libbn254.G2, error) {
+	p := new(libbn254.G2)
 	if _, err := p.Unmarshal(blob); err != nil {
 		return nil, err
 	}
@@ -645,17 +645,17 @@ func newTwistPoint(blob []byte) (*libBn254.G2, error) {
 // Byzantium and Istanbul operations.
 func runBn254Add(input []byte) ([]byte, error) {
 	x := bn254.G1Affine{}
-	err := libBn254.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
+	err := libbn254.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
 
 	y := bn254.G1Affine{}
-	err = libBn254.UnmarshalCurvePointG1(getData(input, 64, 64), &y)
+	err = libbn254.UnmarshalCurvePointG1(getData(input, 64, 64), &y)
 	if err != nil {
 		return nil, err
 	}
-	return libBn254.MarshalCurvePointG1(x.Add(&x, &y)), nil
+	return libbn254.MarshalCurvePointG1(x.Add(&x, &y)), nil
 }
 
 // bn254Add implements a native elliptic curve point addition conforming to
@@ -696,11 +696,11 @@ func (c *bn254AddByzantium) Name() string {
 // both Byzantium and Istanbul operations.
 func runBn254ScalarMul(input []byte) ([]byte, error) {
 	x := bn254.G1Affine{}
-	err := libBn254.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
+	err := libbn254.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
 	}
-	return libBn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
+	return libbn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
 }
 
 // bn254ScalarMulIstanbul implements a native elliptic curve scalar
@@ -764,13 +764,13 @@ func runBn254Pairing(input []byte) ([]byte, error) {
 	bs := make([]bn254.G2Affine, 0, len(input)/192)
 	for i := 0; i < len(input); i += 192 {
 		ai := bn254.G1Affine{}
-		err := libBn254.UnmarshalCurvePointG1(input[i:i+64], &ai)
+		err := libbn254.UnmarshalCurvePointG1(input[i:i+64], &ai)
 		if err != nil {
 			return nil, err
 		}
 
 		bi := bn254.G2Affine{}
-		err = libBn254.UnmarshalCurvePointG2(input[i+64:i+192], &bi)
+		err = libbn254.UnmarshalCurvePointG2(input[i+64:i+192], &bi)
 		if err != nil {
 			return nil, err
 		}
