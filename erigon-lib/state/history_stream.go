@@ -82,7 +82,7 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 				if err != nil {
 					return err
 				}
-				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, isDBIterator: false})
+				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
 			}
 		}
 	}
@@ -409,17 +409,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-
-		// Use explicit flag to distinguish DB vs file iterators
-		if top.isDBIterator {
-			// This is a DB iterator, extract address from step+addr key
-			if len(key) > 8 {
-				addr := key[8:] // Skip step prefix, return just address
-				hi.nextKey = addr
-				hi.nextVal = idxVal
-				return nil
-			}
-		}
+		fmt.Printf("[dbg] HistoryChangesIterFiles.Next: key=%x\n", key)
 
 		// File iterator logic
 		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
@@ -488,6 +478,7 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
+	fmt.Printf("[dbg] HistoryChangesIterFiles.Next: hi.kBackup=%x", hi.kBackup)
 	return hi.kBackup, hi.vBackup, nil
 }
 
@@ -667,5 +658,11 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	order.Asc.Assert(hi.k, hi.nextKey)
-	return hi.k, hi.v, nil
+
+	keyWithoutStep := hi.k
+	if len(hi.k) > 8 {
+		keyWithoutStep = hi.k[8:]
+	}
+	fmt.Printf("[dbg] HistoryChangesIterDB.Next: keyWithoutStep=%x\n", keyWithoutStep)
+	return keyWithoutStep, hi.v, nil
 }

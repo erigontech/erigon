@@ -32,12 +32,11 @@ type ReconDBIterOfStep struct {
 }
 
 type ReconItem struct {
-	g            stream.KV
-	key, val     []byte
-	txNum        uint64
-	startTxNum   uint64
-	endTxNum     uint64
-	isDBIterator bool
+	g          stream.KV
+	key, val   []byte
+	txNum      uint64
+	startTxNum uint64
+	endTxNum   uint64
 }
 
 type ReconHeap []*ReconItem
