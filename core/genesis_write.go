@@ -511,7 +511,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 	}
 
 	if g.Config != nil && g.Config.Bor != nil {
-		if g.Config.IsAgra(0) {
+		if g.Config.IsBhilai(0) {
 			withdrawals = []*types.Withdrawal{}
 		}
 		head.BlobGasUsed = new(uint64)
