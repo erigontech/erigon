@@ -1,0 +1,47 @@
+participants_matrix:
+  el:
+    - el_type: besu
+      el_image: ethpandaops/besu:fusaka-devnet-3
+    - el_type: reth
+      el_image: ethpandaops/reth:fusaka-devnet-3
+    - el_type: nimbus
+      el_image: ethpandaops/nimbus-eth1:fusaka-devnet-3
+    - el_type: erigon
+      el_image: test/erigon:current
+    - el_type: geth
+      el_image: ethpandaops/geth:fusaka-devnet-3
+    - el_type: nethermind
+      el_image: ethpandaops/nethermind:fusaka-devnet-3
+  cl:
+    - cl_type: lighthouse
+      cl_image: ethpandaops/lighthouse:fusaka-devnet-3
+      supernode: true
+      validator_count: 64
+    - cl_type: lighthouse
+      cl_image: ethpandaops/lighthouse:fusaka-devnet-3
+      validator_count: 12
+
+
+network_params:
+  fulu_fork_epoch: 4
+  bpo_1_epoch: 5
+  withdrawal_type: "0x02"
+  preset: minimal
+
+additional_services:
+  - dora
+  - spamoor
+
+spamoor_params:
+  image: ethpandaops/spamoor:master
+  max_mem: 4000
+  spammers:
+    - scenario: eoatx
+      config:
+        throughput: 200
+    - scenario: blobs
+      config:
+        throughput: 20
+
+global_log_level: debug
+#persistant: true
