@@ -23,14 +23,12 @@ import (
 // often used shortcuts
 type (
 	U64 Uno[uint64]
-	KV  Duo[[]byte, []byte]          // key,  value
-	KVS Trio[[]byte, []byte, uint64] // key, value, step
+	KV  Duo[[]byte, []byte] // key,  value
 )
 
 var (
 	EmptyU64 = &Empty[uint64]{}
 	EmptyKV  = &EmptyDuo[[]byte, []byte]{}
-	EmptyKVS = &EmptyTrio[[]byte, []byte, uint64]{}
 )
 
 var (
