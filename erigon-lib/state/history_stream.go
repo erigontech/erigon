@@ -397,7 +397,9 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		top := heap.Pop(&hi.h).(*ReconItem)
 		key, idxVal := top.key, top.val
 
-		fmt.Printf("[dbg] HistoryChangesIterFiles.advance: key=%x, %T, idxVal=%x, startTxNum=%d, endTxNum=%d\n", key, top.g, idxVal, top.startTxNum, top.endTxNum)
+		if len(idxVal) < 16 && idxVal != nil {
+			fmt.Printf("[dbg] HistoryChangesIterFiles.advance: key=%x, %T, idxVal=%x, startTxNum=%d, endTxNum=%d\n", key, top.g, idxVal, top.startTxNum, top.endTxNum)
+		}
 		if top.g.HasNext() {
 			var err error
 			top.key, top.val, err = top.g.Next()
