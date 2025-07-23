@@ -397,6 +397,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		top := heap.Pop(&hi.h).(*ReconItem)
 		key, idxVal := top.key, top.val
 
+		fmt.Printf("[dbg] HistoryChangesIterFiles.advance: key=%x, %T, idxVal=%x, startTxNum=%d, endTxNum=%d\n", key, top.g, idxVal, top.startTxNum, top.endTxNum)
 		if top.g.HasNext() {
 			var err error
 			top.key, top.val, err = top.g.Next()
@@ -599,11 +600,14 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			return err
 		}
 	}
-	fmt.Printf("[dbg] HistoryChangesIterDB.advanceSmallVals: k=%x, %d\n", k, len(k))
+
 	for k != nil {
 		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
 		if err != nil {
 			return err
+		}
+		if len(v) < 10 && v != nil {
+			fmt.Printf("[dbg] HistoryChangesIterDB.advanceSmallVals: k=%x, v=%x\n", k, v)
 		}
 		if v == nil {
 			next, ok := kv.NextSubtree(k)
@@ -663,6 +667,6 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	if len(hi.k) >= 8 {
 		keyWithoutStep = hi.k[8:]
 	}
-	fmt.Printf("[dbg] HistoryChangesIterDB.Next: keyWithoutStep=%x\n", keyWithoutStep)
+
 	return keyWithoutStep, hi.v, nil
 }
