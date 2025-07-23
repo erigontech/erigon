@@ -530,12 +530,18 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialC
 				"from", errLoopBlockLimitExhausted.FromBlock,
 				"to", errLoopBlockLimitExhausted.ToBlock,
 			)
+			s.logRunStageDone(stageState, start)
 		} else {
 			s.logger.Debug(fmt.Sprintf("[%s] error while executing stage", s.LogPrefix()), "err", err)
 		}
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
+	s.logRunStageDone(stageState, start)
+	return nil
+}
+
+func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {
 	took := time.Since(start)
 	logPrefix := s.LogPrefix()
 	if took > 60*time.Second {
@@ -543,9 +549,8 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialC
 	} else {
 		s.logger.Debug(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
 	}
-	s.timings = append(s.timings, Timing{stage: stage.ID, took: took})
-	s.metricsCache.stageRunDurationSummary(stage.ID).Observe(took.Seconds())
-	return nil
+	s.timings = append(s.timings, Timing{stage: stageState.ID, took: took})
+	s.metricsCache.stageRunDurationSummary(stageState.ID).Observe(took.Seconds())
 }
 
 func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap.TxContainer) error {
