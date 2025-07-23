@@ -32,8 +32,8 @@ ADD erigon-lib/go.mod erigon-lib/go.mod
 ADD erigon-lib/go.sum erigon-lib/go.sum
 ADD erigon-db/go.mod erigon-db/go.mod
 ADD erigon-db/go.sum erigon-db/go.sum
-ADD p2p/go.mod p2p/go.mod
-ADD p2p/go.sum p2p/go.sum
+#ADD p2p/go.mod p2p/go.mod
+#ADD p2p/go.sum p2p/go.sum
 
 RUN mkdir -p /app/build/bin
 
@@ -83,7 +83,7 @@ COPY --from=builder /app/build/bin/sentinel /usr/local/bin/sentinel
 COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
 COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
-COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
+#COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
 COPY --from=builder /app/build/bin/caplin /usr/local/bin/caplin
 
 
