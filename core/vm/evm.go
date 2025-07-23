@@ -41,27 +41,7 @@ import (
 var emptyHash = common.Hash{}
 
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
-	var precompiles map[common.Address]PrecompiledContract
-	switch {
-	case evm.chainRules.IsOsaka:
-		precompiles = PrecompiledContractsOsaka
-	case evm.chainRules.IsBhilai:
-		precompiles = PrecompiledContractsBhilai
-	case evm.chainRules.IsPrague:
-		precompiles = PrecompiledContractsPrague
-	case evm.chainRules.IsNapoli:
-		precompiles = PrecompiledContractsNapoli
-	case evm.chainRules.IsCancun:
-		precompiles = PrecompiledContractsCancun
-	case evm.chainRules.IsBerlin:
-		precompiles = PrecompiledContractsBerlin
-	case evm.chainRules.IsIstanbul:
-		precompiles = PrecompiledContractsIstanbul
-	case evm.chainRules.IsByzantium:
-		precompiles = PrecompiledContractsByzantium
-	default:
-		precompiles = PrecompiledContractsHomestead
-	}
+	precompiles := Precompiles(evm.chainRules)
 	p, ok := precompiles[addr]
 	return p, ok
 }
