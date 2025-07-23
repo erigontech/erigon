@@ -64,6 +64,10 @@ type peerData struct {
 
 func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 	run := func() {
+		currentVersion := c.ethClock.StateVersionByEpoch(c.ethClock.GetCurrentEpoch())
+		if currentVersion < clparams.FuluVersion {
+			return
+		}
 		begin := time.Now()
 		state := "connected"
 		peers, err := c.sentinel.PeersInfo(ctx, &sentinel.PeersInfoRequest{

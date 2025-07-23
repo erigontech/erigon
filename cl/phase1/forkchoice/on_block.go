@@ -239,6 +239,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		previousJustifiedCheckpoint: lastProcessedState.PreviousJustifiedCheckpoint(),
 	})
 
+	f.addPendingConsolidations(blockRoot, lastProcessedState.PendingConsolidations())
+	f.addPendingDeposits(blockRoot, lastProcessedState.PendingDeposits())
+	f.addPendingPartialWithdrawals(blockRoot, lastProcessedState.PendingPartialWithdrawals())
+
 	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
 	// Update checkpoints
 	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
