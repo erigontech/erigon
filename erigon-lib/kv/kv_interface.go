@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 //Variables Naming:
@@ -217,7 +218,6 @@ type DBVerbosityLvl int8
 type Label string
 
 const (
-	Unknown         = "unknown"
 	ChainDB         = "chaindata"
 	TxPoolDB        = "txpool"
 	SentryDB        = "sentry"
@@ -586,6 +586,7 @@ type TemporalDebugTx interface {
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
 	DomainFiles(domain ...Domain) VisibleFiles
+	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 
 	// return the earliest known txnum in history of a given domain

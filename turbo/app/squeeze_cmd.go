@@ -52,7 +52,11 @@ var (
 )
 
 func doSqueeze(cliCtx *cli.Context) error {
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err

@@ -31,7 +31,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,9 +38,11 @@ import (
 
 	"github.com/anacrolix/chansync"
 	"github.com/anacrolix/torrent/types/infohash"
+	"github.com/anacrolix/torrent/webseed"
 	"github.com/c2h5oh/datasize"
 	"github.com/puzpuzpuz/xsync/v4"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	// Make Go expvars available to Prometheus for diagnostics.
 	_ "github.com/anacrolix/missinggo/v2/expvar-prometheus"
@@ -66,9 +67,17 @@ import (
 	"github.com/erigontech/erigon-lib/snaptype"
 )
 
+var debugWebseed = false
+
+func init() {
+	_, debugWebseed = os.LookupEnv("DOWNLOADER_DEBUG_WEBSEED")
+	webseed.PrintDebug = debugWebseed
+}
+
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
 type Downloader struct {
-	torrentClient *torrent.Client
+	addWebSeedOpts []torrent.AddWebSeedsOpt
+	torrentClient  *torrent.Client
 
 	cfg *downloadercfg.Cfg
 
@@ -89,6 +98,8 @@ type Downloader struct {
 	torrentFS *AtomicTorrentFS
 
 	logPrefix string
+	// Set when the downloader discovers something isn't complete. Probably doesn't belong in the
+	// Downloader.
 	startTime time.Time
 
 	lock sync.RWMutex
@@ -102,7 +113,7 @@ type Downloader struct {
 	requiredTorrents map[*torrent.Torrent]struct{}
 	// The "name" or file path of a torrent is used throughout as a unique identifier for the
 	// torrent. Make it explicit rather than fold it into DisplayName or guess at the name at
-	// various points. This might change if multifile torrents are used.
+	// various points. This might change if multi-file torrents are used.
 	torrentsByName map[string]*torrent.Torrent
 	stats          AggStats
 }
@@ -164,35 +175,10 @@ func insertCloudflareHeaders(req *http.Request) {
 	}
 }
 
-// retryBackoff performs exponential backoff based on the attempt number and limited
-// by the provided minimum and maximum durations.
-//
-// It also tries to parse Retry-After response header when a http.StatusTooManyRequests
-// (HTTP Code 429) is found in the resp parameter. Hence it will return the number of
-// seconds the server states it may be ready to process more requests from this client.
-func calcBackoff(_min, _max time.Duration, attemptNum int, resp *http.Response) time.Duration {
-	if resp != nil {
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
-			if s, ok := resp.Header["Retry-After"]; ok {
-				if sleep, err := strconv.ParseInt(s[0], 10, 64); err == nil {
-					return time.Second * time.Duration(sleep)
-				}
-			}
-		}
-	}
-
-	mult := math.Pow(2, float64(attemptNum)) * float64(_min)
-	sleep := time.Duration(mult)
-	if float64(sleep) != mult || sleep > _max {
-		sleep = _max
-	}
-
-	return sleep
-}
-
 // TODO(anacrolix): Upstream any logic that works reliably.
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	r.downloader.lock.RLock()
+	// Peak
 	webseedMaxActiveTrips := r.downloader.stats.WebseedMaxActiveTrips
 	webseedActiveTrips := r.downloader.stats.WebseedActiveTrips
 	webseedTripCount := r.downloader.stats.WebseedTripCount
@@ -207,83 +193,50 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 	}
 
 	defer func() {
-		if r := recover(); r != nil {
-			if resp != nil && resp.Body != nil {
-				resp.Body.Close()
-				resp.Body = nil
-			}
-
-			err = fmt.Errorf("http client panic: %s", r)
-		}
-
 		webseedActiveTrips.Add(-1)
 	}()
 
 	insertCloudflareHeaders(req)
 
+	webseedTripCount.Add(1)
 	resp, err = r.Transport.RoundTrip(req)
+	if err != nil {
+		return
+	}
 
-	attempts := 1
-	retry := true
-
-	const minDelay = 500 * time.Millisecond
-	const maxDelay = 5 * time.Second
-	const maxAttempts = 10
-
-	for err == nil && retry {
-		webseedTripCount.Add(1)
-
-		switch resp.StatusCode {
-		case http.StatusOK:
-			if req.Header.Get("Range") != "" {
-				// the torrent lib is expecting http.StatusPartialContent so it will discard this
-				// if this count is higher than 0, it's likely there is a server side config issue
-				// as it implies that the server is not handling range requests correctly and is just
-				// returning the whole file - which the torrent lib can't handle
-				//
-				// TODO: We could count the bytes - probably need to take this from the req though
-				// as its not clear the amount of the content which will be read.  This needs
-				// further investigation - if required.
-				webseedDiscardCount.Add(1)
-			}
-
-			webseedBytesDownload.Add(resp.ContentLength)
-			retry = false
-
-		// the first two statuses here have been observed from cloudflare
-		// during testing.  The remainder are generally understood to be
-		// retry-able http responses, calcBackoff will use the Retry-After
-		// header if it's available
-		case http.StatusInternalServerError, http.StatusBadGateway,
-			http.StatusRequestTimeout, http.StatusTooEarly,
-			http.StatusTooManyRequests, http.StatusServiceUnavailable,
-			http.StatusGatewayTimeout:
-
-			WebseedServerFails.Add(1)
-
-			if resp.Body != nil {
-				resp.Body.Close()
-				resp.Body = nil
-			}
-
-			attempts++
-			delayTimer := time.NewTimer(calcBackoff(minDelay, maxDelay, attempts, resp))
-
-			select {
-			case <-delayTimer.C:
-				// Note this assumes the req.Body is nil
-				resp, err = r.Transport.RoundTrip(req)
-				webseedTripCount.Add(1)
-
-			case <-req.Context().Done():
-				err = req.Context().Err()
-			}
-			retry = attempts < maxAttempts
-
-		default:
-			webseedBytesDownload.Add(resp.ContentLength)
-			retry = false
+	switch resp.StatusCode {
+	case http.StatusOK:
+		if req.Header.Get("Range") != "" {
+			// the torrent lib is expecting http.StatusPartialContent so it will discard this
+			// if this count is higher than 0, it's likely there is a server side config issue
+			// as it implies that the server is not handling range requests correctly and is just
+			// returning the whole file - which the torrent lib can't handle
+			//
+			// TODO: We could count the bytes - probably need to take this from the req though
+			// as its not clear the amount of the content which will be read.  This needs
+			// further investigation - if required.
+			webseedDiscardCount.Add(1)
 		}
+
+		webseedBytesDownload.Add(resp.ContentLength)
+
+	// the first two statuses here have been observed from cloudflare
+	// during testing.  The remainder are generally understood to be
+	// retry-able http responses, calcBackoff will use the Retry-After
+	// header if it's available
+	case http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusRequestTimeout, http.StatusTooEarly,
+		http.StatusTooManyRequests, http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+
+		if debugWebseed {
+			// An interesting error that the torrent lib should probably handle.
+			fmt.Printf("got webseed response status %v\n", resp.Status)
+		}
+
+		WebseedServerFails.Add(1)
+	default:
+		webseedBytesDownload.Add(resp.ContentLength)
 	}
 
 	return resp, err
@@ -298,16 +251,16 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		Transport: http.Transport{
 			ReadBufferSize: 64 << 10,
 			// Note this does nothing in go1.24.
-			HTTP2: &http.HTTP2Config{
-				MaxConcurrentStreams: 1,
-			},
+			//HTTP2: &http.HTTP2Config{
+			//	MaxConcurrentStreams: 1,
+			//},
 			// Big hammer to achieve one request per connection.
 			//DisableKeepAlives: true,
 		},
 	}
 
 	// Disable HTTP2. See above.
-	g.MakeMap(&requestHandler.Transport.TLSNextProto)
+	//g.MakeMap(&requestHandler.Transport.TLSNextProto)
 
 	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
 	cfg.ClientConfig.WebTransport = &requestHandler
@@ -318,6 +271,18 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		return nil, err
 	}
 	defer db.Close()
+
+	var addWebSeedOpts []torrent.AddWebSeedsOpt
+
+	for value := range cfg.SeparateWebseedDownloadRateLimit.Iter() {
+		addWebSeedOpts = append(
+			addWebSeedOpts,
+			torrent.WebSeedResponseBodyRateLimiter(rate.NewLimiter(value, 0)),
+		)
+		if value == 0 {
+			cfg.ClientConfig.DisableWebseeds = true
+		}
+	}
 
 	m, torrentClient, err := newTorrentClient(ctx, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
@@ -348,12 +313,15 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		cfg:                cfg,
 		torrentStorage:     m,
 		torrentClient:      torrentClient,
+		addWebSeedOpts:     addWebSeedOpts,
 		stats:              stats,
 		logger:             logger,
 		verbosity:          verbosity,
 		torrentFS:          &AtomicTorrentFS{dir: cfg.Dirs.Snap},
 		filesBeingVerified: xsync.NewMap[*torrent.File, struct{}](),
 	}
+
+	d.logTorrentClientParams()
 
 	if len(cfg.WebSeedUrls) == 0 {
 		logger.Warn("downloader has no webseed urls configured")
@@ -789,8 +757,9 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 	return rates, peers
 }
 
-// This is too coupled to the Downloader. Check all loaded torrents by forcing a new verification
-// then checking if the client considers them complete.
+// Check all loaded torrents by forcing a new verification then checking if the client considers
+// them complete. If whitelist is not empty, torrents are verified if their name contains any
+// whitelist entry as a prefix, suffix, or total match. TODO: This is too coupled to cmd/Downloader.
 func (d *Downloader) VerifyData(
 	ctx context.Context,
 	whiteList []string,
@@ -1212,7 +1181,7 @@ func openMdbx(
 	return dbCfg.Open(ctx)
 }
 
-// This used to return the MDBX database. Instead that's opened separately now and should be passed
+// This used to return the MDBX database. Instead, that's opened separately now and should be passed
 // in if it's revived.
 func newTorrentClient(
 	ctx context.Context,
@@ -1258,6 +1227,34 @@ func newTorrentClient(
 	return
 }
 
+// Moved from EthConfig to be as close to torrent client init as possible. Logs important torrent
+// parameters.
+func (d *Downloader) logTorrentClientParams() {
+	cfg := d.cfg.ClientConfig
+	d.logger.Info(
+		"[Downloader] Running with",
+		"ipv6-enabled", !cfg.DisableIPv6,
+		"ipv4-enabled", !cfg.DisableIPv4,
+		"download.rate", rateLimitString(cfg.DownloadRateLimiter.Limit()),
+		"webseed-download-rate", func() string {
+			opt := d.cfg.SeparateWebseedDownloadRateLimit
+			if opt.Ok {
+				return rateLimitString(opt.Value)
+			}
+			return "shared with p2p"
+		}(),
+		"upload.rate", rateLimitString(cfg.UploadRateLimiter.Limit()),
+	)
+}
+
+func rateLimitString(rateLimit rate.Limit) string {
+	if rateLimit == rate.Inf {
+		return "∞"
+	}
+	// Use the same type for human-readable bytes as elsewhere.
+	return datasize.ByteSize(rateLimit).String()
+}
+
 func (d *Downloader) SetLogPrefix(prefix string) {
 	// Data race?
 	d.logPrefix = prefix
@@ -1285,6 +1282,8 @@ func (d *Downloader) logProgress() {
 	haveAllMetadata := d.stats.MetadataReady == d.stats.NumTorrents
 
 	if !d.stats.AllTorrentsComplete() {
+		// We have work to do so start timing.
+		d.setStartTime()
 		// TODO: Include what we're syncing.
 		log.Info(fmt.Sprintf("[%s] Syncing", prefix),
 			"file-metadata", fmt.Sprintf("%d/%d", d.stats.MetadataReady, d.stats.NumTorrents),
@@ -1333,7 +1332,7 @@ func (d *Downloader) logProgress() {
 
 func calculateTime(amountLeft, rate uint64) string {
 	if rate == 0 {
-		return "inf"
+		return "∞"
 	}
 	return time.Duration(float64(amountLeft) / float64(rate) * float64(time.Second)).Truncate(time.Second).String()
 }
@@ -1351,8 +1350,10 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 		d.torrentClient.WriteStatus(w)
 	})
 	p := "/downloader/torrentClientStatus"
-	http.Handle(p, h)
-	if debugMux != nil {
+	// This is for gopprof.
+	defaultMux := http.DefaultServeMux
+	defaultMux.Handle(p, h)
+	if debugMux != nil && debugMux != defaultMux {
 		debugMux.Handle(p, h)
 	}
 }
@@ -1369,7 +1370,7 @@ func (d *Downloader) updateVerificationOccurring() {
 	d.verificationOccurring.SetBool(d.filesBeingVerified.Size() != 0)
 }
 
-// Delete - stop seeding, remove file, remove .torrent
+// Delete - stop seeding, remove file, remove .torrent.
 func (s *Downloader) Delete(name string) (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -1398,4 +1399,11 @@ func (s *Downloader) Delete(name string) (err error) {
 
 func (d *Downloader) filePathForName(name string) string {
 	return filepath.Join(d.SnapDir(), filepath.FromSlash(name))
+}
+
+// Set the start time for the progress logging. Only set when we determine we're actually starting work.
+func (d *Downloader) setStartTime() {
+	if d.startTime.IsZero() {
+		d.startTime = time.Now()
+	}
 }

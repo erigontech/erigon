@@ -29,7 +29,7 @@ const (
 	GasLimitBoundDivisor uint64 = 1024               // The bound divisor of the gas limit, used in update calculations.
 	MinBlockGasLimit     uint64 = 5000               // Minimum the block gas limit may ever be.
 	MaxBlockGasLimit     uint64 = 0x7fffffffffffffff // Maximum the block gas limit may ever be.
-	MaxTxnGasLimit       uint64 = 30_000_000         // See EIP-7825: Transaction Gas Limit Cap.
+	MaxTxnGasLimit       uint64 = 16_777_216         // See EIP-7825: Transaction Gas Limit Cap.
 	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
@@ -139,12 +139,6 @@ const (
 	MaxCodeSizePostAhmedabad = 32768           // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
 	MaxInitCodeSize          = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
 
-	// EIP-7907: Meter Contract Code Size And Increase Limit
-	MaxCodeSizeEip7907             = 262144                 // Maximum bytecode to permit for a contract post EIP-7907
-	MaxInitCodeSizeEip7907         = 2 * MaxCodeSizeEip7907 // Maximum initcode to permit in a creation transaction and create instructions post EIP 7907
-	LargeCodeThresholdEip7907      = 24576                  // We charge extra gas if the code size exceeds this threshold
-	LargeCodeAccessWordCostEip7907 = 2                      // How much extra we charge per word above large code threshold
-
 	// Precompiled contract gas prices
 
 	TendermintHeaderValidateGas uint64 = 3000 // Gas for validate tendermiint consensus state
@@ -186,7 +180,7 @@ const (
 	FieldElementsPerBlob        = 4096 // each field element is 32 bytes
 	BlobSize                    = FieldElementsPerBlob * 32
 	GasPerBlob           uint64 = 1 << 17
-	BlobBaseCost         uint64 = 1 << 14 // EIP-7918: Blob base fee bounded by execution cost
+	BlobBaseCost         uint64 = 1 << 13 // EIP-7918: Blob base fee bounded by execution cost
 
 	// EIP-7594: PeerDAS - Peer Data Availability Sampling
 	// See https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/polynomial-commitments-sampling.md
@@ -196,7 +190,8 @@ const (
 	CellsPerExtBlob                = FieldElementsPerExtBlob / FieldElementsPerCell // The number of cells in an extended blob
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
-	P256VerifyGas uint64 = 3450
+	P256VerifyGas        uint64 = 3450
+	P256VerifyGasEIP7951 uint64 = 6900
 
 	// EIP-2935: Historical block hashes in state
 	BlockHashHistoryServeWindow uint64 = 8191
@@ -243,9 +238,9 @@ var (
 
 // See EIP-7840: Add blob schedule to EL config files
 type BlobConfig struct {
-	Target                uint64 `json:"target"`
-	Max                   uint64 `json:"max"`
 	BaseFeeUpdateFraction uint64 `json:"baseFeeUpdateFraction"`
+	Max                   uint64 `json:"max"`
+	Target                uint64 `json:"target"`
 }
 
 var DefaultCancunBlobConfig = BlobConfig{

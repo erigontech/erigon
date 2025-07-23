@@ -60,15 +60,7 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer s.d.resetLogInterval.Broadcast()
-
-	//for _, item := range request.Items {
-	//	fmt.Printf("%v: %v\n", Proto2InfoHash(item.TorrentHash), item.Path)
-	//}
-
-	if len(s.d.torrentClient.Torrents()) == 0 || s.d.startTime.IsZero() {
-		s.d.startTime = time.Now()
-	}
+	defer s.d.ResetLogInterval()
 
 	var progress atomic.Int32
 

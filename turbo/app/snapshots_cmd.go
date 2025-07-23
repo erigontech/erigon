@@ -19,6 +19,7 @@ package app
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -35,9 +36,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
-
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -239,7 +239,11 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
-				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -248,7 +252,11 @@ var snapshotCommand = cli.Command{
 			Name:  "reset-to-old-ver-format",
 			Usage: "change all the snapshots to 3.0 file format",
 			Action: func(cliCtx *cli.Context) error {
-				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				return dirs.RenameNewVersions()
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -257,10 +265,28 @@ var snapshotCommand = cli.Command{
 			Name:  "update-to-new-ver-format",
 			Usage: "change all the snapshots to 3.1 file ver format",
 			Action: func(cliCtx *cli.Context) error {
-				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				return dirs.RenameOldVersions()
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
+			Name:        "reset",
+			Description: "Reset state to resumable initial sync.",
+			Action:      resetCliAction,
+			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
+			Flags: append(
+				slices.Clone(logging.Flags),
+				&utils.DataDirFlag,
+				&utils.ChainFlag,
+				&dryRunFlag,
+				&removeUnknownFlag,
+				&chaindataFlag,
+			),
 		},
 		{
 			Name:    "rm-state-snapshots",
@@ -297,7 +323,7 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "sqeeze",
+			Name:   "squeeze",
 			Action: doSqueeze,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -307,6 +333,11 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "integrity",
 			Action: func(cliCtx *cli.Context) error {
+				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				if err := doIntegrity(cliCtx); err != nil {
 					log.Error("[integrity]", "err", err)
 					return err
@@ -325,6 +356,11 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
+				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
 				if err := doPublishable(cliCtx); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
@@ -360,7 +396,11 @@ var (
 )
 
 func doRmStateSnapshots(cliCtx *cli.Context) error {
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 
 	removeLatest := cliCtx.Bool("latest")
 
@@ -579,6 +619,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
+	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
@@ -716,10 +761,12 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	blockReader, _ := blockRetire.IO()
+	found := false
 	for _, chk := range checks {
 		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
+		found = true
 		switch chk {
 		case integrity.BlocksTxnID:
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -784,6 +831,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
+	}
+
+	if !found {
+		return fmt.Errorf("not a valid check: %s", requestedCheck)
 	}
 
 	return nil
@@ -1187,7 +1238,11 @@ func doPublishable(cliCtx *cli.Context) error {
 }
 
 func doClearIndexing(cliCtx *cli.Context) error {
-	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dat, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 	accessorsDir := dat.SnapAccessors
 	domainDir := dat.SnapDomain
 	snapDir := dat.Snap
@@ -1475,15 +1530,9 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	var bridgeStore bridge.Store
 	var heimdallStore heimdall.Store
 	if chainConfig.Bor != nil {
-		const PolygonSync = true
-		if PolygonSync {
-			borSnaps.DownloadComplete() // mark as ready
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
-		} else {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(chainDB), borSnaps, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(chainDB), borSnaps)
-		}
+		borSnaps.DownloadComplete() // mark as ready
+		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
+		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
 	}
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, heimdallStore, bridgeStore)
@@ -1522,8 +1571,12 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 }
 
 func doUncompress(cliCtx *cli.Context) error {
+	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 	var logger log.Logger
-	var err error
 	if logger, _, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
@@ -1582,7 +1635,12 @@ func doCompress(cliCtx *cli.Context) error {
 		log.Info("done", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	}()
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dirs, lck, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer lck.Unlock()
+
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -1667,8 +1725,8 @@ func doCompress(cliCtx *cli.Context) error {
 			concatBuf = concatBuf[:0]
 		}
 
-		snappyBuf, word = compress.EncodeZstdIfNeed(snappyBuf, word, doSnappyEachWord)
-		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf, word, doUnSnappyEachWord)
+		snappyBuf, word = compress.EncodeZstdIfNeed(snappyBuf[:0], word, doSnappyEachWord)
+		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf[:0], word, doUnSnappyEachWord)
 		if err != nil {
 			return err
 		}
@@ -1899,7 +1957,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	blocksInSnapshots := blockReader.FrozenBlocks()
 
 	if chainConfig.Bor != nil {
-		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks())
+		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
 
 	from2, to2, ok := freezeblocks.CanRetire(to, blocksInSnapshots, coresnaptype.Enums.Headers, nil)
@@ -1919,7 +1977,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
 		err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if deletedBlocks, err = br.PruneAncientBlocks(tx, 100); err != nil {
+			if deletedBlocks, err = br.PruneAncientBlocks(tx, 100, time.Hour); err != nil {
 				return err
 			}
 			return nil
@@ -1988,9 +2046,13 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doUploaderCommand(cliCtx *cli.Context) error {
+	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
 	var logger log.Logger
 	var tracer *tracers.Tracer
-	var err error
 	var metricsMux *http.ServeMux
 	var pprofMux *http.ServeMux
 
@@ -1998,13 +2060,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	debugMux := metricsMux
-
-	if debugMux == nil {
-		debugMux = pprofMux
-	} else {
-		debugMux = http.DefaultServeMux
-	}
+	debugMux := cmp.Or(metricsMux, pprofMux)
 
 	// initializing the node and providing the current git commit there
 

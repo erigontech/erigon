@@ -129,7 +129,7 @@ func (r *RemoteBlockReader) Snapshots() snapshotsync.BlockSnapshots    { panic("
 func (r *RemoteBlockReader) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
 func (r *RemoteBlockReader) AllTypes() []snaptype.Type                 { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                      { panic("not supported") }
-func (r *RemoteBlockReader) FrozenBorBlocks() uint64                   { panic("not supported") }
+func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64         { panic("not supported") }
 func (r *RemoteBlockReader) FrozenFiles() (list []string)              { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing     { panic("not supported") }
 
@@ -190,6 +190,12 @@ func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash
 	if reply == nil {
 		return 0, 0, false, nil
 	}
+
+	// Not a perfect solution, assumes there are no transactions in block 0 (same check on server side)
+	if reply.BlockNumber == 0 && reply.TxNumber == 0 {
+		return reply.BlockNumber, reply.TxNumber, false, nil
+	}
+
 	return reply.BlockNumber, reply.TxNumber, true, nil
 }
 
@@ -225,6 +231,10 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	reply, err := r.client.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
 		return nil, nil, err
+	}
+	if len(reply.BlockRlp) == 0 {
+		// block not found
+		return nil, nil, nil
 	}
 
 	block = &types.Block{}
@@ -476,11 +486,27 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
-func (r *BlockReader) FrozenBorBlocks() uint64 {
-	if r.borSn != nil {
-		return r.borSn.BlocksAvailable()
+func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
+	if r.borSn == nil {
+		return 0
 	}
-	return 0
+
+	frozen := r.borSn.BlocksAvailable()
+
+	if !align {
+		return frozen
+	}
+
+	for _, t := range r.borSn.Types() {
+
+		available := r.borSn.VisibleBlocksAvailable(t.Enum())
+
+		if available < frozen {
+			frozen = available
+		}
+	}
+
+	return frozen
 }
 func (r *BlockReader) FrozenFiles() []string {
 	files := r.sn.Files()
@@ -1290,10 +1316,10 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 		var buf []byte
 		g := sn.Src().MakeGetter()
 		blockNum := sn.From()
-		var b types.BodyForStorage
+		var b types.BodyOnlyTxn
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
-			if err := rlp.DecodeBytes(buf, &b); err != nil {
+			if err := rlp.DecodeBytesPartial(buf, &b); err != nil {
 				return err
 			}
 			if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {

@@ -754,11 +754,16 @@ Loop:
 				timeStart := time.Now()
 
 				// allow greedy prune on non-chain-tip
-				if err = executor.tx().(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-					return err
+				pruneTimeout := 250 * time.Millisecond
+				if initialCycle {
+					pruneTimeout = 10 * time.Hour
+
+					if err = executor.tx().(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+						return err
+					}
 				}
 
-				if _, err := executor.tx().(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+				if _, err := aggregatorRo.PruneSmallBatches(ctx, pruneTimeout, executor.tx()); err != nil {
 					return err
 				}
 				pruneDuration = time.Since(timeStart)
@@ -769,7 +774,7 @@ Loop:
 				}
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
-				if !execStage.CurrentSyncCycle.IsInitialCycle {
+				if !initialCycle {
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
