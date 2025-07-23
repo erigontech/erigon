@@ -82,7 +82,7 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 				if err != nil {
 					return err
 				}
-				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
 			}
 		}
 	}
