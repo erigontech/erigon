@@ -1316,10 +1316,10 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 		var buf []byte
 		g := sn.Src().MakeGetter()
 		blockNum := sn.From()
-		var b types.BodyForStorage
+		var b types.BodyOnlyTxn
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
-			if err := rlp.DecodeBytes(buf, &b); err != nil {
+			if err := rlp.DecodeBytesPartial(buf, &b); err != nil {
 				return err
 			}
 			if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
