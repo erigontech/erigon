@@ -1700,22 +1700,23 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if err != nil {
 		return nil, err
 	}
-	r := stream.KV(stream.EmptyKV)
+	var r stream.KV
 	for _, it := range stepDbIters {
-		if it.iter == nil {
-			continue // no changes in this step
+		if r == nil {
+			r = it.iter
+		} else {
+			r = stream.IntersectKV(r, it.iter, limit)
 		}
-		r = stream.UnionKV(r, it.iter, limit)
 	}
 
 	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit)
 	if err != nil {
 		return nil, err
 	}
-	// Merge all DB iterators with files iterator
-	// Since we pass DB iterators to the heap in iterateChangedFrozen,
-	// the files iterator already contains the merged result
-	return stream.UnionKV(r, itOnFiles, limit), nil
+	if itOnFiles != nil {
+		r = stream.IntersectKV(r, itOnFiles, limit)
+	}
+	return r, nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
