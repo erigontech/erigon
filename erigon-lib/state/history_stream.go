@@ -82,7 +82,7 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 				if err != nil {
 					return err
 				}
-				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, isDBIterator: false})
 			}
 		}
 	}
@@ -410,9 +410,8 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			continue
 		}
 
-		// DB iterator logic - DB iterators have txNum set to step*aggStep
-		// File iterators have txNum set to endTxNum
-		if top.txNum < top.endTxNum {
+		// Use explicit flag to distinguish DB vs file iterators
+		if top.isDBIterator {
 			// This is a DB iterator, extract address from step+addr key
 			if len(key) > 8 {
 				addr := key[8:] // Skip step prefix, return just address

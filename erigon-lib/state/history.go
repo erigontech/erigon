@@ -1563,7 +1563,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 			}
 			stepStartTxNum := stepDbIter.step * ht.aggStep
 			stepEndTxNum := (stepDbIter.step + 1) * ht.aggStep
-			heap.Push(&s.h, &ReconItem{g: stepDbIter.iter, key: key, val: val, startTxNum: stepStartTxNum, endTxNum: stepEndTxNum, txNum: stepEndTxNum, startOffset: 0, lastOffset: 0})
+			heap.Push(&s.h, &ReconItem{g: stepDbIter.iter, key: key, val: val, startTxNum: stepStartTxNum, endTxNum: stepEndTxNum, txNum: stepDbIter.step * ht.aggStep, isDBIterator: true})
 		}
 	}
 
@@ -1584,7 +1584,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 				s.Close()
 				return nil, err
 			}
-			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: 0, lastOffset: 0})
+			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, isDBIterator: false})
 		}
 	}
 	if err := s.advance(); err != nil {
