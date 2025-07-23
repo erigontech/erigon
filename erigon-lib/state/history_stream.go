@@ -423,11 +423,16 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
-		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		// Use step-prefixed key for lookup: ^step+addr+txNum
+		step := txNum / hi.hc.aggStep
+		invertedStep := ^step
+		stepPrefix := make([]byte, 8)
+		binary.BigEndian.PutUint64(stepPrefix, invertedStep)
+		addrTxNum := append(append([]byte(nil), hi.nextKey...), hi.txnKey[:]...)
+		offset, ok := reader.Lookup2(stepPrefix, addrTxNum)
 		if !ok {
 			continue
 		}
-
 		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
 			g.Reset(offset)
@@ -435,9 +440,10 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		} else {
 			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historyValuesOnCompressedPage, true)
 			g.Reset(offset)
+			hi.nextVal = nil // Reset to detect if we find a match
+			histKey := stepPrefixedHistoryKey(hi.nextKey, txNum, hi.hc.aggStep, nil)
 			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
 				if bytes.Equal(histKey, k) {
 					hi.nextVal = v
 					break
@@ -486,6 +492,8 @@ type HistoryChangesIterDB struct {
 	valsTable       string
 	limit, endTxNum int
 	startTxKey      [8]byte
+	step            uint64
+	aggregationStep uint64
 
 	nextKey, nextVal []byte
 	k, v             []byte
@@ -542,7 +550,22 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 		if err != nil {
 			return err
 		}
-		if hi.endTxNum >= 0 && int(binary.BigEndian.Uint64(k[len(k)-8:])) >= hi.endTxNum {
+
+		// Filter by step - check if txNum belongs to our step
+		txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+		actualStep := txNum / hi.aggregationStep
+		if actualStep != hi.step {
+			// Skip to next key
+			next, ok := kv.NextSubtree(k[:len(k)-8])
+			if !ok {
+				hi.nextKey = nil
+				return nil
+			}
+			seek = append(next, hi.startTxKey[:]...)
+			continue
+		}
+
+		if hi.endTxNum >= 0 && int(txNum) >= hi.endTxNum {
 			next, ok := kv.NextSubtree(k[:len(k)-8])
 			if !ok {
 				hi.nextKey = nil
@@ -567,8 +590,7 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 				}
 			}
 		}
-		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
-		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) /*|| int(binary.BigEndian.Uint64(k[len(k)-8:])) > hi.endTxNum */ {
+		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
 			if len(seek) != len(k) {
 				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
 				continue
@@ -616,7 +638,19 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			continue
 		}
 		foundTxNumVal := v[:8]
-		if hi.endTxNum < 0 || int(binary.BigEndian.Uint64(foundTxNumVal)) < hi.endTxNum {
+		txNum := binary.BigEndian.Uint64(foundTxNumVal)
+
+		// Filter by step - check if txNum belongs to our step
+		actualStep := txNum / hi.aggregationStep
+		if actualStep != hi.step {
+			k, _, err = hi.valsCDup.NextNoDup()
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		if hi.endTxNum < 0 || int(txNum) < hi.endTxNum {
 			hi.nextKey = k
 			hi.nextVal = v[8:]
 			return nil

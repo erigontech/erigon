@@ -1552,6 +1552,22 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 	if fromTxNum >= 0 {
 		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
 	}
+
+	// Add DB iterators to heap with their step information
+	for _, stepDbIter := range stepDbIters {
+		if stepDbIter.iter != nil && stepDbIter.iter.HasNext() {
+			key, val, err := stepDbIter.iter.Next()
+			if err != nil {
+				s.Close()
+				return nil, err
+			}
+			stepStartTxNum := stepDbIter.step * ht.aggStep
+			stepEndTxNum := (stepDbIter.step + 1) * ht.aggStep
+			heap.Push(&s.h, &ReconItem{g: stepDbIter.iter, key: key, val: val, startTxNum: stepStartTxNum, endTxNum: stepEndTxNum, txNum: stepEndTxNum, startOffset: 0, lastOffset: 0})
+		}
+	}
+
+	// Add file iterators to heap
 	for _, item := range ht.iit.files {
 		if fromTxNum >= 0 && item.endTxNum <= uint64(fromTxNum) {
 			continue
@@ -1578,20 +1594,79 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 	return s, nil
 }
 
-func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+func (ht *HistoryRoTx) iterateChangedRecentBySteps(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) ([]ReconDBIterOfStep, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
+	if roTx == nil {
+		return []ReconDBIterOfStep{}, nil
+	}
+
 	rangeIsInFiles := toTxNum >= 0 && len(ht.iit.files) > 0 && ht.iit.files.EndTxNum() >= uint64(toTxNum)
 	if rangeIsInFiles {
-		return stream.EmptyKV, nil
+		return []ReconDBIterOfStep{}, nil
 	}
+
+	var fromStep, toStep uint64
+	if fromTxNum >= 0 {
+		fromStep = uint64(fromTxNum) / ht.aggStep
+	} else {
+		fromStep = 0
+	}
+	if toTxNum >= 0 {
+		toStep = uint64(toTxNum) / ht.aggStep
+	} else {
+		// endTxNum is -1 (unbounded), find max step in DB
+		_, maxStepFloat := ht.stepsRangeInDB(roTx)
+		toStep = uint64(maxStepFloat) + 1
+	}
+
+	var stepDbIters []ReconDBIterOfStep
+
+	if asc {
+		for step := fromStep; step <= toStep; step++ {
+			stepIt, err := ht.iterateChangedRecentForStep(step, fromTxNum, toTxNum, asc, limit, roTx)
+			if err != nil {
+				return nil, err
+			}
+			if stepIt != nil {
+				stepDbIters = append(stepDbIters, ReconDBIterOfStep{iter: stepIt, step: step})
+			}
+		}
+	} else {
+		// For descending order, iterate from max step to min step
+		maxStep := toStep
+		minStep := fromStep
+		if fromStep > toStep {
+			maxStep = fromStep
+			minStep = toStep
+		}
+		for step := maxStep; step >= minStep; step-- {
+			stepIt, err := ht.iterateChangedRecentForStep(step, fromTxNum, toTxNum, asc, limit, roTx)
+			if err != nil {
+				return nil, err
+			}
+			if stepIt != nil {
+				stepDbIters = append(stepDbIters, ReconDBIterOfStep{iter: stepIt, step: step})
+			}
+			if step == 0 {
+				break
+			}
+		}
+	}
+
+	return stepDbIters, nil
+}
+
+func (ht *HistoryRoTx) iterateChangedRecentForStep(step uint64, fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	s := &HistoryChangesIterDB{
-		endTxNum:    toTxNum,
-		roTx:        roTx,
-		largeValues: ht.h.historyLargeValues,
-		valsTable:   ht.h.valuesTable,
-		limit:       limit,
+		endTxNum:        toTxNum,
+		roTx:            roTx,
+		largeValues:     ht.h.historyLargeValues,
+		valsTable:       ht.h.valuesTable,
+		limit:           limit,
+		step:            step,
+		aggregationStep: ht.aggStep,
 	}
 	if fromTxNum >= 0 {
 		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
@@ -1607,15 +1682,18 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
-	itOnDB, err := ht.iterateChangedRecent(fromTxNum, toTxNum, asc, limit, roTx)
+	stepDbIters, err := ht.iterateChangedRecentBySteps(fromTxNum, toTxNum, asc, limit, roTx)
 	if err != nil {
 		return nil, err
 	}
-	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit, itOnDB)
+	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit, stepDbIters)
 	if err != nil {
 		return nil, err
 	}
-	return stream.IntersectKV(itOnDB, itOnFiles, limit), nil
+	// Merge all DB iterators with files iterator
+	// Since we pass DB iterators to the heap in iterateChangedFrozen,
+	// the files iterator already contains the merged result
+	return itOnFiles, nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
