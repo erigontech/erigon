@@ -2006,6 +2006,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	})
 
 	t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
+		t.Logf("StorageSubtrieWithCommonPrefix")
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
@@ -2015,10 +2016,12 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		builder := NewUpdateBuilder()
 		for i := 0; i < len(plainKeysList); i++ {
 			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
 		}
 
 		for sl := 0; sl < len(storageKeysList); sl++ {
 			builder.Storage(common.Bytes2Hex(addrWithSingleton), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storageKeysList[sl], storageKeysList[sl])
 		}
 
 		buildTrieAndWitness(t, builder, addrWithSingleton)
