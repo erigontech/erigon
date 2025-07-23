@@ -646,7 +646,8 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 
 		// more detailed statistic: download rate of each peer (for each file)
 		if !torrentComplete && progress != 0 {
-			logger.Log(verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
+			logger.Log(verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress),
+				"peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile), "size", common.ByteCount(uint64(t.Info().TotalLength())))
 			logger.Log(verbosity, "[snapshots] webseed peers", webseedRates...)
 			logger.Log(verbosity, "[snapshots] bittorrent peers", rates...)
 		}
