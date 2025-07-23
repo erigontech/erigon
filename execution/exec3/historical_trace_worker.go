@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -162,8 +163,12 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 
 	rules := rw.execArgs.ChainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime())
 	header := txTask.Header
-	hooks := txTask.Tracer.Tracer().Hooks
-	ibs.SetHooks(hooks)
+
+	var hooks *tracing.Hooks
+	if tracer := txTask.Tracer; tracer != nil {
+		hooks = tracer.Tracer().Hooks
+		ibs.SetHooks(hooks)
+	}
 
 	var err error
 
@@ -454,7 +459,7 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 }
 
 type historicalResultProcessor struct {
-	blockResult *exec.BlockResult
+	blockResult exec.BlockResult
 }
 
 func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *ExecArgs, rws *exec.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool, logger log.Logger) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
@@ -514,12 +519,12 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 			p.blockResult.Complete = true
 		}
 
-		if err := consumer.Reduce(p.blockResult, result, tx); err != nil {
+		if err := consumer.Reduce(&p.blockResult, result, tx); err != nil {
 			return outputTxNum, false, err
 		}
 
 		if result.IsBlockEnd() {
-			p.blockResult = &exec.BlockResult{}
+			p.blockResult = exec.BlockResult{}
 			stopedAtBlockEnd = true
 			if forceStopAtBlockEnd {
 				break
@@ -651,7 +656,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				SkipAnalysis:    skipAnalysis,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
-
+				Config:          cfg.ChainConfig,
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 			}
