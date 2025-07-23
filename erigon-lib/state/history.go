@@ -1535,11 +1535,11 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
-	if len(ht.iit.files) == 0 {
+	if len(ht.iit.files) == 0 && len(stepDbIters) == 0 {
 		return stream.EmptyKV, nil
 	}
 
-	if fromTxNum >= 0 && ht.iit.files.EndTxNum() <= uint64(fromTxNum) {
+	if len(ht.iit.files) > 0 && fromTxNum >= 0 && ht.iit.files.EndTxNum() <= uint64(fromTxNum) {
 		return stream.EmptyKV, nil
 	}
 
@@ -1625,8 +1625,18 @@ func (ht *HistoryRoTx) iterateChangedRecentBySteps(fromTxNum, toTxNum int, asc o
 
 	if asc {
 		for step := fromStep; step <= toStep; step++ {
-			_fromTxNum := max(fromTxNum, int(fromStep*ht.aggStep))
-			_toTxNum := min(toTxNum, int(toStep*ht.aggStep))
+			stepStartTxNum := int(step * ht.aggStep)
+			stepEndTxNum := int((step + 1) * ht.aggStep)
+			_fromTxNum := max(fromTxNum, stepStartTxNum)
+			_toTxNum := toTxNum
+			if toTxNum >= 0 {
+				_toTxNum = min(toTxNum, stepEndTxNum)
+			} else {
+				_toTxNum = stepEndTxNum
+			}
+			if _fromTxNum >= _toTxNum {
+				continue
+			}
 			stepIt, err := ht.iterateChangedRecentForStep(_fromTxNum, _toTxNum, asc, limit, roTx)
 			if err != nil {
 				return nil, err
@@ -1644,7 +1654,22 @@ func (ht *HistoryRoTx) iterateChangedRecentBySteps(fromTxNum, toTxNum int, asc o
 			minStep = toStep
 		}
 		for step := maxStep; step >= minStep; step-- {
-			stepIt, err := ht.iterateChangedRecentForStep(fromTxNum, toTxNum, asc, limit, roTx)
+			stepStartTxNum := int(step * ht.aggStep)
+			stepEndTxNum := int((step + 1) * ht.aggStep)
+			_fromTxNum := max(fromTxNum, stepStartTxNum)
+			_toTxNum := toTxNum
+			if toTxNum >= 0 {
+				_toTxNum = min(toTxNum, stepEndTxNum)
+			} else {
+				_toTxNum = stepEndTxNum
+			}
+			if _fromTxNum >= _toTxNum {
+				if step == 0 {
+					break
+				}
+				continue
+			}
+			stepIt, err := ht.iterateChangedRecentForStep(_fromTxNum, _toTxNum, asc, limit, roTx)
 			if err != nil {
 				return nil, err
 			}

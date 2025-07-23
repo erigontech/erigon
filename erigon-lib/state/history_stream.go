@@ -396,6 +396,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
 		key, idxVal := top.key, top.val
+
 		if top.g.HasNext() {
 			var err error
 			top.key, top.val, err = top.g.Next()
@@ -408,6 +409,20 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
+
+		// DB iterator logic - DB iterators have txNum set to step*aggStep
+		// File iterators have txNum set to endTxNum
+		if top.txNum < top.endTxNum {
+			// This is a DB iterator, extract address from step+addr key
+			if len(key) > 8 {
+				addr := key[8:] // Skip step prefix, return just address
+				hi.nextKey = addr
+				hi.nextVal = idxVal
+				return nil
+			}
+		}
+
+		// File iterator logic
 		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
