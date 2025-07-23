@@ -227,8 +227,8 @@ func (h *History) openDirtyFiles() error {
 					if !fileVer.Less(h.version.DataV.MinSupported) {
 						h.version.DataV.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm v history snapshots")
-						//return false
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, h.version.DataV)
 					}
 				}
 
@@ -272,8 +272,8 @@ func (h *History) openDirtyFiles() error {
 						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
 							h.version.AccessorVI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm vi history snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, h.version.AccessorVI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
@@ -1424,9 +1424,14 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		}
 		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
-		if g.HasNext() {
-			key, offset := g.Next(nil)
-			heap.Push(&s.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+		wrapper := NewSegReaderWrapper(g)
+		if wrapper.HasNext() {
+			key, val, err := wrapper.Next()
+			if err != nil {
+				s.Close()
+				return nil, err
+			}
+			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
 		}
 	}
 	if err := s.advance(); err != nil {
@@ -1436,13 +1441,13 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 	return s, nil
 }
 
-func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KVS, error) {
+func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
 	rangeIsInFiles := toTxNum >= 0 && len(ht.iit.files) > 0 && ht.iit.files.EndTxNum() >= uint64(toTxNum)
 	if rangeIsInFiles {
-		return stream.EmptyKVS, nil
+		return stream.EmptyKV, nil
 	}
 	s := &HistoryChangesIterDB{
 		endTxNum:    toTxNum,
@@ -1461,7 +1466,7 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	return s, nil
 }
 
-func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KVS, error) {
+func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
@@ -1473,7 +1478,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if err != nil {
 		return nil, err
 	}
-	return stream.MergeKVS(itOnDB, itOnFiles, limit), nil
+	return stream.IntersectKV(itOnDB, itOnFiles, limit), nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {

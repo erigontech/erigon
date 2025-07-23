@@ -393,7 +393,7 @@ type TrieContext struct {
 
 	limitReadAsOfTxNum uint64
 	stepSize           uint64
-	domainsOnly        bool // if true, do not use history reader and limit to domain files only
+	withHistory        bool // if true, do not use history reader and limit to domain files only
 	trace              bool
 }
 
@@ -404,10 +404,10 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 	//}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
 	// Keep dereferenced version inside sd commitmentDomain map ready to read again
-	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
+	if sdc.withHistory && sdc.limitReadAsOfTxNum > 0 {
 		v, hOk, err := sdc.roTtx.HistorySeek(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
 		if err != nil {
-			return nil, 0, fmt.Errorf("branch history read failed: %w", err)
+			return nil, 0, fmt.Errorf("branch failed: %w", err)
 		}
 		if hOk {
 			if len(v) == 0 { // if history successfuly found marker of key creation
@@ -418,14 +418,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 			}
 			return v, 0, nil
 		}
-		branch, step, err := sdc.getter.GetLatest(kv.CommitmentDomain, pref)
-		if err != nil {
-			return nil, 0, fmt.Errorf("branch failed: %w", err)
-		}
-		if sdc.trace {
-			fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, branch, commitment.BranchData(branch).String())
-		}
-		return branch, step, nil
+		return nil, 0, nil // no history found, so no branch
 	}
 
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
@@ -444,7 +437,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
-	if sdc.limitReadAsOfTxNum > 0 && !sdc.domainsOnly { // do not store branches if explicitly operate on history
+	if sdc.limitReadAsOfTxNum > 0 && sdc.withHistory { // do not store branches if explicitly operate on history
 		return nil
 	}
 	if sdc.trace {
@@ -465,7 +458,7 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, er
 	//}
 
 	if sdc.limitReadAsOfTxNum > 0 {
-		if sdc.domainsOnly {
+		if sdc.withHistory {
 			var ok bool
 			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 			if !ok {
@@ -550,5 +543,5 @@ func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err erro
 // If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
 func (sdc *TrieContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
 	sdc.limitReadAsOfTxNum = txNum
-	sdc.domainsOnly = domainOnly
+	sdc.withHistory = !domainOnly
 }

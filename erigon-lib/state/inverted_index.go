@@ -336,8 +336,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					if !fileVer.Less(ii.version.DataEF.MinSupported) {
 						ii.version.DataEF.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm ef snapshots")
-						//return false
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, ii.version.DataEF)
 					}
 				}
 
@@ -369,8 +369,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
 							ii.version.AccessorEFI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm efi snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, ii.version.AccessorEFI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
@@ -1057,9 +1057,14 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 			ii1.hasNextInDb = false
 		}
 		g := iit.dataReader(item.src.decompressor)
-		if g.HasNext() {
-			key, _ := g.Next(nil)
-			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key})
+		g.Reset(0)
+		wrapper := NewSegReaderWrapper(g)
+		if wrapper.HasNext() {
+			key, val, err := wrapper.Next()
+			if err != nil {
+				return ii1
+			}
+			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: wrapper, key: key, val: val, txNum: ^item.endTxNum})
 			ii1.hasNextInFiles = true
 		}
 	}

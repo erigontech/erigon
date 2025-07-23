@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
@@ -216,47 +217,68 @@ func (s *SnapshotStore) EventTxnToBlockNum(ctx context.Context, txnHash common.H
 	return blockNum, true, nil
 }
 
-func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, bool, error) {
+func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash common.Hash, blockNum uint64) (uint64, uint64, bool, error) {
 	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(heimdall.Events.Enum())
 	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		return s.Store.(interface {
-			blockEventIdsRange(context.Context, uint64, uint64) (uint64, uint64, bool, error)
-		}).blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
+			blockEventIdsRange(context.Context, common.Hash, uint64, uint64) (uint64, uint64, bool, error)
+		}).blockEventIdsRange(ctx, blockHash, blockNum, s.LastFrozenEventId())
 	}
 
-	sn, ok, close := s.snapshots.ViewSingleFile(heimdall.Events, blockNum)
-	defer close()
-	if !ok {
-		return 0, 0, false, nil
-	}
+	tx := s.snapshots.ViewType(heimdall.Events)
+	defer tx.Close()
+	segments := tx.Segments
 
-	gg := sn.Src().MakeGetter()
-	var buf []byte
-	for gg.HasNext() {
-		buf, _ = gg.Next(buf[:0])
-		if blockNum == binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
-			start := binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
-			end := start
-			for gg.HasNext() {
-				buf, _ = gg.Next(buf[:0])
-				if blockNum != binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
-					break
-				}
-				end = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		if sn.From() > blockNum {
+			continue
+		}
+		if sn.To() <= blockNum {
+			break
+		}
+
+		idxBorTxnHash := sn.Src().Index()
+		if idxBorTxnHash == nil || idxBorTxnHash.KeyCount() == 0 {
+			continue
+		}
+
+		reader := recsplit.NewIndexReader(idxBorTxnHash)
+		txnHash := types.ComputeBorTxHash(blockNum, blockHash)
+		blockEventId, exists := reader.Lookup(txnHash[:])
+		var offset uint64
+
+		gg := sn.Src().MakeGetter()
+		if exists {
+			offset = idxBorTxnHash.OrdinalLookup(blockEventId)
+			gg.Reset(offset)
+			if !gg.MatchPrefix(txnHash[:]) {
+				continue
 			}
-			return start, end, true, nil
+		}
+
+		var buf []byte
+		for gg.HasNext() {
+			buf, _ = gg.Next(buf[:0])
+			if blockNum == binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
+				start := binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+				end := start
+				for gg.HasNext() {
+					buf, _ = gg.Next(buf[:0])
+					if blockNum != binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
+						break
+					}
+					end = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+				}
+				return start, end, true, nil
+			}
 		}
 	}
 
 	return 0, 0, false, nil
 }
 
-func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
-	lastFrozenEventId := s.LastFrozenEventId()
-	if start > lastFrozenEventId || lastFrozenEventId == 0 {
-		return s.Store.Events(ctx, start, end)
-	}
-
+func (s *SnapshotStore) events(ctx context.Context, start, end, blockNumber uint64) ([][]byte, error) {
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
 	segments := tx.Segments
@@ -265,6 +287,13 @@ func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	var result [][]byte
 
 	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].From() > blockNumber {
+			continue
+		}
+		if segments[i].To() <= blockNumber {
+			break
+		}
+
 		gg0 := segments[i].Src().MakeGetter()
 
 		if !gg0.HasNext() {
@@ -328,7 +357,7 @@ func (s *SnapshotStore) borBlockByEventHash(txnHash common.Hash, segments []*sna
 }
 
 func (s *SnapshotStore) BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error) {
-	startEventId, _, ok, err := s.BlockEventIdsRange(ctx, blockHeight)
+	startEventId, _, ok, err := s.BlockEventIdsRange(ctx, hash, blockHeight)
 	if !ok || err != nil {
 		return 0, err
 	}
@@ -336,14 +365,20 @@ func (s *SnapshotStore) BorStartEventId(ctx context.Context, hash common.Hash, b
 }
 
 func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	startEventId, endEventId, ok, err := s.BlockEventIdsRange(ctx, blockHeight)
+	startEventId, endEventId, ok, err := s.BlockEventIdsRange(ctx, hash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return []rlp.RawValue{}, nil
 	}
-	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
+
+	lastFrozenEventId := s.LastFrozenEventId()
+	if startEventId > lastFrozenEventId || lastFrozenEventId == 0 {
+		return s.Store.EventsByBlock(ctx, hash, blockHeight)
+	}
+
+	bytevals, err := s.events(ctx, startEventId, endEventId+1, blockHeight)
 	if err != nil {
 		return nil, err
 	}
