@@ -19,14 +19,14 @@ package state
 import (
 	"bytes"
 
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g           seg.ReaderI
-	key         []byte
+	g           stream.KV
+	key, val    []byte
 	txNum       uint64
 	startTxNum  uint64
 	endTxNum    uint64
