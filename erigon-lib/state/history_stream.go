@@ -606,7 +606,7 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 		if err != nil {
 			return err
 		}
-		if len(v) < 10 && v != nil {
+		if len(v) < 16 && v != nil {
 			fmt.Printf("[dbg] HistoryChangesIterDB.advanceSmallVals: k=%x, v=%x\n", k, v)
 		}
 		if v == nil {
