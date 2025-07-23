@@ -152,11 +152,6 @@ func (y *PoolTransactionYielder) AddMined(hash common.Hash) {
 	if foundIdx != -1 {
 		y.readyTransactions = y.readyTransactions[foundIdx+1:]
 		delete(y.readyTransactionBytes, hash)
-	} else {
-		log.Warn("Tried to remove mined transaction that was not found in readyTransactions",
-			"hash", hash.String(),
-			"lastYieldIndex", y.lastYieldIndex,
-			"readyTransactionsCount", len(y.readyTransactions))
 	}
 }
 
