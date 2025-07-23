@@ -450,6 +450,8 @@ func ExecV3(ctx context.Context,
 
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+	startBlockNum := blockNum
+	var loopBlockLimitExhausted bool
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -775,6 +777,7 @@ Loop:
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
 				if !initialCycle {
+					loopBlockLimitExhausted = true
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
@@ -783,6 +786,11 @@ Loop:
 					"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
 			default:
 			}
+		}
+
+		if blockNum-startBlockNum+1 >= uint64(cfg.syncCfg.LoopBlockLimit) {
+			loopBlockLimitExhausted = true
+			break
 		}
 
 		select {
@@ -817,6 +825,11 @@ Loop:
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
+
+	if loopBlockLimitExhausted {
+		// special err allows the loop to continue, caller will call us again to continue from where we left off
+		return &ErrLoopBlockLimitExhausted{FromBlock: startBlockNum, ToBlock: blockNum}
+	}
 
 	return nil
 }

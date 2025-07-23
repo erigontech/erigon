@@ -362,6 +362,22 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 	return nil
 }
 
+// ErrLoopBlockLimitExhausted is used to allow the sync loop to continue when one of the stages has
+// reached the loop block limit and has thrown it.
+type ErrLoopBlockLimitExhausted struct {
+	FromBlock uint64
+	ToBlock   uint64
+}
+
+func (e *ErrLoopBlockLimitExhausted) Error() string {
+	return fmt.Sprintf("loop block limit exhausted: from=%d,to=%d", e.FromBlock, e.ToBlock)
+}
+
+func (e *ErrLoopBlockLimitExhausted) Is(err error) bool {
+	var errLoopBlockLimitExhausted *ErrLoopBlockLimitExhausted
+	return errors.As(err, &errLoopBlockLimitExhausted)
+}
+
 func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool) (bool, error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
@@ -410,7 +426,20 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 			continue
 		}
 		if err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind); err != nil {
-			return false, err
+			var errLoopBlockLimitExhausted *ErrLoopBlockLimitExhausted
+			if errors.As(err, &errLoopBlockLimitExhausted) {
+				s.logger.Debug(
+					"sync loop block limit exhausted",
+					"stage", stage.ID,
+					"from", errLoopBlockLimitExhausted.FromBlock,
+					"to", errLoopBlockLimitExhausted.ToBlock,
+				)
+				// we allow the loop to continue with the current progress and inform the caller
+				// there is more work to be done so that Run is called again
+				hasMore = true
+			} else {
+				return false, err
+			}
 		}
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
