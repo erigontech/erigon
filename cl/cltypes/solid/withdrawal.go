@@ -53,9 +53,9 @@ func (p *WithdrawalRequest) Static() bool {
 }
 
 type PendingPartialWithdrawal struct {
-	Index             uint64 // validator index
-	Amount            uint64 // Gwei
-	WithdrawableEpoch uint64
+	Index             uint64 `json:"index"`              // validator index
+	Amount            uint64 `json:"amount"`             // Gwei
+	WithdrawableEpoch uint64 `json:"withdrawable_epoch"` // epoch when the withdrawal can be processed
 }
 
 func (p *PendingPartialWithdrawal) EncodingSizeSSZ() int {

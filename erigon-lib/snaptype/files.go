@@ -192,7 +192,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		if err != nil {
 			return res, false, false
 		}
-		res.From, res.To, res.TypeString = uint64(from)*1_000, uint64(to)*1_000, typeString
+		res.From, res.To, res.TypeString, res.CaplinTypeString = uint64(from)*1_000, uint64(to)*1_000, typeString, typeString
 		res.Type, ok = ParseFileType(typeString)
 		if ok {
 			res.CaplinTypeString = res.Type.Name()
