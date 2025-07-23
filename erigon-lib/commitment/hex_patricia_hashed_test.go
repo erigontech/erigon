@@ -1920,6 +1920,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer toProcess.Close()
 
+		hph.trace = true
 		root, err := hph.Process(ctx, toProcess, "")
 		require.NoError(t, err)
 

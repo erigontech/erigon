@@ -1211,6 +1211,14 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 	var currentNode trie.Node = rootNode
 	keyPos := 0 // current position in hashedKey (usually same as row, but could be different due to extension nodes)
 
+	if hph.root.hashedExtLen > 0 {
+		currentNode = &trie.ShortNode{Key: common.Copy(hph.root.hashedExtension[:hph.root.hashedExtLen]), Val: &trie.FullNode{}}
+		// currentNode = &trie.ShortNode{Val: &trie.FullNode{}}
+		rootNode = currentNode             // use root node as the current node
+		keyPos = hph.root.hashedExtLen - 1 // start from the end of the root extension
+		fmt.Printf("[witness] root node %s, pos %d\n", hph.root.FullString(), keyPos)
+	}
+
 	for row := 0; row < hph.activeRows && keyPos < len(hashedKey); row++ {
 		currentNibble := hashedKey[keyPos]
 		// determine the type of the next node to expand (in the next iteration)
@@ -1218,7 +1226,12 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		// need to check node type along the key path
 		cellToExpand := &hph.grid[row][currentNibble]
 		// determine the next node
-		if cellToExpand.hashedExtLen > 0 { // extension cell
+		if hph.root.hashedExtLen > 0 && currentNode == rootNode {
+			currentNode = currentNode.(*trie.ShortNode).Val
+			keyPos++
+			continue
+
+		} else if cellToExpand.hashedExtLen > 0 { // extension cell
 
 			//if !hph.root.IsEmpty() && currentNode == rootNode {
 			//	rootNode = &trie.ShortNode{Key: hph.root.hashedExtension[:hph.root.hashedExtLen], Val: &trie.FullNode{}}
@@ -2072,7 +2085,9 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		}
 
 		var tr *trie.Trie
-		// fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		//if hph.trace {
+		fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		//}
 
 		var update *Update
 		if len(plainKey) == hph.accountKeyLen { // account
