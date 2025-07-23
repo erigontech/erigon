@@ -1201,9 +1201,21 @@ func (hph *HexPatriciaHashed) nCellsInRow(row int) int { //nolint:unused
 
 // Traverse the grid following `hashedKey` and produce the witness `triedeprecated.Trie` for that key
 func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
-	rootNode := &trie.FullNode{}
-	var currentNode trie.Node = rootNode
-	keyPos := 0 // current position in hashedKey (usually same as row, but could be different due to extension nodes)
+	var rootNode, currentNode trie.Node
+	initialKeyPos := 0
+	if hph.root.hashedExtLen > 0 { // root node is a short node
+		hashedExtKey := hph.root.hashedExtension[:hph.root.hashedExtLen]
+		extKeyLength := len(hashedExtKey)
+		extensionKey := make([]byte, extKeyLength)
+		copy(extensionKey, hashedExtKey)
+		rootNode = &trie.ShortNode{Key: extensionKey}
+		initialKeyPos += extKeyLength - 1 // this is different from consuming a short node at other levels
+	} else {
+		rootNode = &trie.FullNode{}
+	}
+	currentNode = rootNode
+	keyPos := initialKeyPos // current position in hashedKey (usually same as row, but could be different due to extension nodes)
+	var specialCase = false
 	for row := 0; row < hph.activeRows && keyPos < len(hashedKey); row++ {
 		currentNibble := hashedKey[keyPos]
 		// determine the type of the next node to expand (in the next iteration)
@@ -1212,41 +1224,82 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		cellToExpand := &hph.grid[row][currentNibble]
 		// determine the next node
 		if cellToExpand.hashedExtLen > 0 { // extension cell
-			keyPos += cellToExpand.hashedExtLen // jump ahead
 			hashedExtKey := cellToExpand.hashedExtension[:cellToExpand.hashedExtLen]
 			extKeyLength := len(hashedExtKey)
-			if keyPos+1 == len(hashedKey) || keyPos+1 == 64 {
-				extKeyLength++ //  +1 for the terminator 0x10 ([16])  byte when on a terminal extension node
-			}
-			extensionKey := make([]byte, extKeyLength)
-			copy(extensionKey, hashedExtKey)
-			if keyPos+1 == len(hashedKey) || keyPos+1 == 64 {
-				extensionKey[len(extensionKey)-1] = terminatorHexByte // append terminator byte
-			}
-			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
-			if keyPos+1 == len(hashedKey) {
-				if cellToExpand.storageAddrLen > 0 {
+			var extensionKey []byte
+			if len(hashedExtKey) > 64 { // special case, extension key is longer than 64, we need to splice the extension key
+				var remainingKey []byte
+				specialCase = true
+				_ = specialCase
+				extKeyLength = len(hashedKey) - keyPos
+				extensionKey = make([]byte, extKeyLength)
+				copy(extensionKey, cellToExpand.hashedExtension[:extKeyLength])
+				// assert that the terminator byte is the last byte of the account extension key
+				if extensionKey[len(extensionKey)-1] != terminatorHexByte {
+					return nil, fmt.Errorf("terminator byte not found at last position of extension key %s", extensionKey)
+				}
+				// extensionKey[len(extensionKey)-1] = terminatorHexByte
+				remainingKeyBytes := cellToExpand.hashedExtension[extKeyLength : 127-keyPos]
+				remainingKey = make([]byte, len(remainingKeyBytes)+1)
+				copy(remainingKey, remainingKeyBytes)
+				remainingKey[len(remainingKey)-1] = terminatorHexByte
+				accNode, err := hph.witnessCreateAccountNode(cellToExpand, row, hashedKey, codeReads)
+				if err != nil {
+					return nil, err
+				}
+				if true || len(hashedKey) > 64 { // we also need to add the singleton storage
 					storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 					if err != nil {
 						return nil, err
 					}
 					storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
-					nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
-				} else if cellToExpand.accountAddrLen > 0 {
-					accNode, err := hph.witnessCreateAccountNode(cellToExpand, row, hashedKey, codeReads)
-					if err != nil {
-						return nil, err
+					accNode.Storage = &trie.ShortNode{Key: remainingKey, Val: storageValueNode}
+				}
+				nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
+				extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
+				subTrieRoot := extNodeSubTrie.Root()
+				cellHash, _, _, _ := hph.witnessComputeCellHashWithStorage(cellToExpand, hph.depths[row], nil)
+				if !bytes.Equal(subTrieRoot, cellHash[1:]) {
+					return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
+				}
+				// DEBUG patch with cell hash which we know to be correct
+				// nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
+				keyPos = 128 // end the consumption of hashed key
+			} else { // normal case
+				keyPos += cellToExpand.hashedExtLen // jump ahead
+				if keyPos+1 == len(hashedKey) || keyPos+1 == 64 {
+					extKeyLength += 1 // for the terminator byte
+				}
+				extensionKey = make([]byte, extKeyLength)
+				copy(extensionKey, hashedExtKey)
+				if keyPos+1 == len(hashedKey) || keyPos+1 == 64 {
+					extensionKey[len(extensionKey)-1] = terminatorHexByte // append terminator byte
+				}
+				nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
+				if keyPos+1 == len(hashedKey) {
+					if cellToExpand.storageAddrLen > 0 {
+						storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
+						if err != nil {
+							return nil, err
+						}
+						storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
+						nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
+					} else if cellToExpand.accountAddrLen > 0 {
+						accNode, err := hph.witnessCreateAccountNode(cellToExpand, row, hashedKey, codeReads)
+						if err != nil {
+							return nil, err
+						}
+						nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
+						extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
+						subTrieRoot := extNodeSubTrie.Root()
+						cellHash, _, _, _ := hph.witnessComputeCellHashWithStorage(cellToExpand, hph.depths[row], nil)
+						if !bytes.Equal(subTrieRoot, cellHash[1:]) {
+							return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
+						}
+						// // DEBUG patch with cell hash which we know to be correct
+						//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
+						//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 					}
-					nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
-					extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
-					subTrieRoot := extNodeSubTrie.Root()
-					cellHash, _, _, _ := hph.witnessComputeCellHashWithStorage(cellToExpand, hph.depths[row], nil)
-					if !bytes.Equal(subTrieRoot, cellHash[1:]) {
-						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
-					}
-					// // DEBUG patch with cell hash which we know to be correct
-					//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
-					//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 				}
 			}
 		} else if cellToExpand.storageAddrLen > 0 { // storage cell
@@ -2062,21 +2115,20 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
-		//hph.PrintGrid()
-		//hph.updateCell(plainKey, hashedKey, update)
+		hph.PrintGrid()
 
 		// convert grid to trie.Trie
 		tr, err = hph.toWitnessTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
 		}
-		//computedRootHash := tr.Root()
-		//// fmt.Printf("computedRootHash = %x\n", computedRootHash)
-		//
-		//if !bytes.Equal(computedRootHash, expectedRootHash) {
-		//	err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
-		//	return err
-		//}
+		computedRootHash := tr.Root()
+		// fmt.Printf("computedRootHash = %x\n", computedRootHash)
+
+		if !bytes.Equal(computedRootHash, expectedRootHash) {
+			err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
+			return err
+		}
 
 		tries = append(tries, tr)
 		ki++
