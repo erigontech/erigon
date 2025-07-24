@@ -42,19 +42,19 @@ func TestBatchLimit_WebSocket_Exceeded(t *testing.T) {
 
 	// Send batch request
 	err = client.BatchCall(batch)
-	
+
 	// With the current implementation, conn.close is called on batch limit exceeded
 	// This should result in a connection error (websocket close)
 	if err == nil {
 		t.Fatal("expected connection error due to batch limit exceeded, got nil")
 	}
-	
+
 	// The error should be a websocket close error or EOF
 	// The specific batch limit error message is not propagated through the websocket close
 	if !strings.Contains(err.Error(), "websocket:") && !strings.Contains(err.Error(), "EOF") {
 		t.Fatalf("expected websocket close error, got: %v", err)
 	}
-	
+
 	// Verify the connection is closed by trying another request
 	err2 := client.Call(nil, "test_echo", "test")
 	if err2 == nil {
