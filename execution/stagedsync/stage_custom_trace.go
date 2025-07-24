@@ -318,7 +318,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 	prevTxNumLog := fromTxNum
 
 	var m runtime.MemStats
-	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumerFunc(
+	if err := exec3.CustomTraceMapReduce(ctx, fromBlock, toBlock, exec3.TraceConsumerFunc(
 		func(blockResult *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
 			if result.Err != nil {
 				return result.Err
@@ -422,7 +422,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			default:
 			}
 			return nil
-		}), ctx, tx, cfg, logger); err != nil {
+		}), tx, cfg, logger); err != nil {
 		return err
 	}
 

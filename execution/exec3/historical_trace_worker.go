@@ -160,7 +160,9 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 
 	rw.ibs.Reset()
 	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
-	//ibs.SetTrace(true)
+
+	ibs.SetTrace(txTask.Trace)
+	rw.stateReader.SetTrace(txTask.Trace)
 
 	rules := rw.execArgs.ChainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime())
 	header := txTask.Header
@@ -395,7 +397,7 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 		//default:
 		//}
 
-		closed, err := out.AwaitDrain(ctx, 100*time.Millisecond)
+		closed, err := out.AwaitDrain(ctx, 10*time.Millisecond)
 
 		if err != nil {
 			return err
@@ -516,7 +518,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 	return
 }
 
-func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
+func CustomTraceMapReduce(ctx context.Context,fromBlock, toBlock uint64, consumer TraceConsumer,  tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("'CustomTraceMapReduce' paniced: %s, %s", rec, dbg.Stack())
@@ -641,6 +643,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				Config:          cfg.ChainConfig,
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
+				Trace:            true,
 			}
 
 			in.Add(ctx, txTask)
