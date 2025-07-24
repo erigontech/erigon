@@ -18,6 +18,7 @@ package eth_clock
 
 import (
 	"encoding/binary"
+	"math"
 	"slices"
 	"sort"
 	"time"
@@ -194,6 +195,9 @@ func (t *ethereumClockImpl) NextForkEpochIncludeBPO() uint64 {
 			nextForkEpoch = forkEpoch
 			break
 		}
+	}
+	if nextForkEpoch == math.MaxUint64 {
+		nextForkEpoch = t.beaconCfg.FarFutureEpoch
 	}
 	return nextForkEpoch
 }

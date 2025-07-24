@@ -189,8 +189,9 @@ func (s *Sentinel) updateENR(node *enode.LocalNode) {
 			break
 		}
 		// sleep until next fork epoch
-		log.Info("[Sentinel] Sleeping until next fork epoch", "nextForkEpoch", nextForkEpoch)
-		time.Sleep(time.Until(s.ethClock.GetSlotTime(nextForkEpoch).Add(time.Second))) // add 1 second for safety
+		wakeupTime := s.ethClock.GetSlotTime(nextForkEpoch * s.cfg.BeaconConfig.SlotsPerEpoch).Add(time.Second)
+		log.Info("[Sentinel] Sleeping until next fork epoch", "nextForkEpoch", nextForkEpoch, "wakeupTime", wakeupTime)
+		time.Sleep(time.Until(wakeupTime)) // add 1 second for safety
 		nfd, err := s.ethClock.NextForkDigest()
 		if err != nil {
 			log.Warn("[Sentinel] Could not get next fork digest", "err", err)
