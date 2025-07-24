@@ -271,9 +271,10 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return err
 		}
 	}
-	if cfg.blockRetire != nil {
-		cfg.blockRetire.RetireBlocksInBackground(ctx, firstBlock, latestBlock.Uint64(), log.LvlInfo, nil, nil, nil)
-	}
+	log.Info("Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "extTx", useExternalTx)
+	//if cfg.blockRetire != nil {
+	//	cfg.blockRetire.RetireBlocksInBackground(ctx, firstBlock, latestBlock.Uint64(), log.LvlInfo, nil, nil, nil)
+	//}
 	return nil
 }
 
