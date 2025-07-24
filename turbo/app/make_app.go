@@ -167,7 +167,7 @@ func doMigrateFlags(ctx *cli.Context) {
 }
 
 func NewNodeConfig(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, error) {
-	nodeConfig, err := enode.NewNodConfigUrfave(ctx, logger)
+	nodeConfig, err := enode.NewNodConfigUrfave(ctx, nil, logger)
 	if err != nil {
 		return nil, err
 	}

@@ -259,17 +259,6 @@ func (s *MdbxStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint
 	return txStore{tx}.EventsByTimeframe(ctx, timeFrom, timeTo)
 }
 
-// Events gets raw events, start inclusive, end exclusive
-func (s *MdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	return txStore{tx}.Events(ctx, start, end)
-}
-
 func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	if len(blockNumToEventId) == 0 {
 		return nil
@@ -290,11 +279,11 @@ func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId 
 
 // BlockEventIdsRange returns the [start, end] event Id for the given block number
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
-func (s *MdbxStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, bool, error) {
-	return s.blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
+func (s *MdbxStore) BlockEventIdsRange(ctx context.Context, blockHash common.Hash, blockNum uint64) (uint64, uint64, bool, error) {
+	return s.blockEventIdsRange(ctx, blockHash, blockNum, s.LastFrozenEventId())
 }
 
-func (s *MdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, bool, error) {
+func (s *MdbxStore) blockEventIdsRange(ctx context.Context, blockHash common.Hash, blockNum uint64, lastFrozenId uint64) (uint64, uint64, bool, error) {
 	var start, end uint64
 
 	tx, err := s.db.BeginRo(ctx)
@@ -303,7 +292,7 @@ func (s *MdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, las
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.blockEventIdsRange(ctx, blockNum, lastFrozenId)
+	return txStore{tx}.blockEventIdsRange(ctx, blockHash, blockNum, lastFrozenId)
 }
 
 func (s *MdbxStore) Unwind(ctx context.Context, blockNum uint64) error {
@@ -557,7 +546,7 @@ func (s txStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64)
 }
 
 // Events gets raw events, start inclusive, end exclusive
-func (s txStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+func (s txStore) events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	var events [][]byte
 
 	kStart := make([]byte, 8)
@@ -610,13 +599,13 @@ func (s txStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map
 	return nil
 }
 
-func (s txStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, bool, error) {
-	return s.blockEventIdsRange(ctx, blockNum, 0)
+func (s txStore) BlockEventIdsRange(ctx context.Context, blockHash common.Hash, blockNum uint64) (uint64, uint64, bool, error) {
+	return s.blockEventIdsRange(ctx, blockHash, blockNum, 0)
 }
 
 // BlockEventIdsRange returns the [start, end] event Id for the given block number
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
-func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, bool, error) {
+func (s txStore) blockEventIdsRange(ctx context.Context, blockHash common.Hash, blockNum uint64, lastFrozenId uint64) (uint64, uint64, bool, error) {
 	var start, end uint64
 
 	kByte := make([]byte, 8)
@@ -655,7 +644,7 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFr
 }
 
 func (s txStore) BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error) {
-	startEventId, _, ok, err := s.blockEventIdsRange(ctx, blockHeight, 0)
+	startEventId, _, ok, err := s.blockEventIdsRange(ctx, hash, blockHeight, 0)
 	if !ok || err != nil {
 		return 0, err
 	}
@@ -663,14 +652,14 @@ func (s txStore) BorStartEventId(ctx context.Context, hash common.Hash, blockHei
 }
 
 func (s txStore) EventsByBlock(ctx context.Context, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	startEventId, endEventId, ok, err := s.blockEventIdsRange(ctx, blockHeight, 0)
+	startEventId, endEventId, ok, err := s.blockEventIdsRange(ctx, hash, blockHeight, 0)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return []rlp.RawValue{}, nil
 	}
-	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
+	bytevals, err := s.events(ctx, startEventId, endEventId+1)
 	if err != nil {
 		return nil, err
 	}

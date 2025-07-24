@@ -274,8 +274,9 @@ func makeCompactableIndexDB(ctx context.Context, db kv.RwDB, files []string, dir
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	fileInfos := []downloadertype.FileInfo{}
-	for _, file := range files {
-		res, ok, _ := downloadertype.ParseFileName("", file)
+	for _, f := range files {
+		dirPart, fileName := filepath.Split(f)
+		res, ok, _ := downloadertype.ParseFileName(dirPart, fileName)
 		if !ok {
 			panic("invalid file name")
 		}
@@ -365,8 +366,9 @@ func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs da
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	fileInfos := []downloadertype.FileInfo{}
-	for _, file := range files {
-		res, ok, _ := downloadertype.ParseFileName("", file)
+	for _, f := range files {
+		dirPart, fileName := filepath.Split(f)
+		res, ok, _ := downloadertype.ParseFileName(dirPart, fileName)
 		if !ok {
 			panic("invalid file name")
 		}

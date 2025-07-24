@@ -3,9 +3,7 @@ name: QA - Tip tracking (Gnosis)
 on:
   push:
     branches:
-      - 'release/3.*'
-  schedule:
-    - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
+      - 'release/3.1'
   workflow_dispatch:     # Run manually
 
 concurrency:
@@ -14,10 +12,10 @@ concurrency:
 
 jobs:
   gnosis-tip-tracking-test:
-    runs-on: [self-hosted, qa, Gnosis]
+    runs-on: [self-hosted, qa, Gnosis, tip-tracking]
     timeout-minutes: 600
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 14400 # 4 hours

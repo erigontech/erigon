@@ -29,8 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/version"
-
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -47,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (
@@ -366,8 +365,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 					if !fileVer.Less(d.version.DataKV.MinSupported) {
 						d.version.DataKV.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm kv domain snapshots")
-						//return false
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.version.DataKV)
 					}
 				}
 
@@ -398,8 +397,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 						if !fileVer.Less(d.version.AccessorKVI.MinSupported) {
 							d.version.AccessorKVI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm kvi domain snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, d.version.AccessorKVI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
@@ -421,8 +420,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 						if !fileVer.Less(d.version.AccessorBT.MinSupported) {
 							d.version.AccessorBT.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm bt domain snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, d.version.AccessorBT)
 						}
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
@@ -444,11 +443,11 @@ func (d *Domain) openDirtyFiles() (err error) {
 						if !fileVer.Less(d.version.AccessorKVEI.MinSupported) {
 							d.version.AccessorKVEI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm kvei domain snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, d.version.AccessorKVEI)
 						}
 					}
-					if item.existence, err = existence.OpenFilter(fPath); err != nil {
+					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -1137,7 +1136,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			existenceFilter, err = existence.OpenFilter(fPath)
+			existenceFilter, err = existence.OpenFilter(fPath, false)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1239,7 +1238,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath, false)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1258,7 +1257,8 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums:              true,
+		Version:            1,
+		Enums:              false,
 		LessFalsePositives: true,
 
 		BucketSize: recsplit.DefaultBucketSize,
@@ -1295,6 +1295,14 @@ func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		return []string{d.kviAccessorFilePath(fromStep, toStep)}
 	})
+	//return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep, toStep uint64) []string {
+	//	var files []string
+	//	if d.Accessors.Has(AccessorHashMap) {
+	//		files = append(files, d.kviAccessorFilePath(fromStep, toStep))
+	//		files = append(files, d.kvExistenceIdxFilePath(fromStep, toStep))
+	//	}
+	//	return files
+	//})
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -1405,6 +1413,10 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	if d.disable {
 		return
 	}
+	if txNumFrom == txNumTo {
+		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
+	}
+
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
@@ -2112,3 +2124,7 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 
 func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
+
+func versionTooLowPanic(filename string, version version.Versions) {
+	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon seg reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
+}

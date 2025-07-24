@@ -362,7 +362,6 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	isEIP7907 := rules.IsOsaka
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	// set code tx
@@ -373,14 +372,8 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP7907 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
-		}
-	} else if isEIP3860 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSize {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
-		}
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
 	// Execute the preparatory steps for state transition which includes:
@@ -425,22 +418,24 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			// Recover from dependency panic and retry the execution.
-			if r != state.ErrDependency {
-				log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
+	if st.evm.IntraBlockState().IsVersioned() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Recover from dependency panic and retry the execution.
+				if r != state.ErrDependency {
+					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
+				}
+				st.gp.AddGas(st.gasUsed())
+				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
+				if depTxIndex < 0 {
+					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
+				}
+				err = ErrExecAbortError{
+					DependencyTxIndex: depTxIndex,
+					OriginError:       err}
 			}
-			st.gp.AddGas(st.gasUsed())
-			depTxIndex := st.evm.IntraBlockState().DepTxIndex()
-			if depTxIndex < 0 {
-				err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
-			}
-			err = ErrExecAbortError{
-				DependencyTxIndex: depTxIndex,
-				OriginError:       err}
-		}
-	}()
+		}()
+	}
 
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
@@ -476,7 +471,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	isEIP7907 := rules.IsOsaka
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
@@ -523,14 +517,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP7907 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
-		}
-	} else if isEIP3860 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSize {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
-		}
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
 	// Execute the preparatory steps for state transition which includes:
@@ -609,7 +597,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	if st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
-		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, burnAmount, st.gasPrice, st.gasUsed())
+		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
 
 	result = &evmtypes.ExecutionResult{

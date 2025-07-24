@@ -67,7 +67,7 @@ process_file() {
         # Symlink all other files
         if [ "$(readlink "$destination$rel_path" 2>/dev/null)" != "$file" ]; then
             echo "Linking: $file"
-            ln -sf "$file" "$destination$rel_path"
+            ln -f "$file" "$destination$rel_path"
         fi
     fi
 }
