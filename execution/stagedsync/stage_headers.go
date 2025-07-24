@@ -223,6 +223,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 					log.Warn("Error committing transaction", "err", err)
 					return err
 				}
+				log.Info("Committed transaction", "block", blockNum, "hash", blk.Hash(), "extTx", useExternalTx)
 				tx, err = cfg.db.BeginRw(ctx)
 				if err != nil {
 					return err
@@ -270,6 +271,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err != nil {
 			return err
 		}
+		log.Info("Committed transaction", "block", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
 	log.Info("Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "extTx", useExternalTx)
 	//if cfg.blockRetire != nil {
