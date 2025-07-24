@@ -312,7 +312,7 @@ jobs:
                 coordinated_omission_event_count_percentage="N/A"
               fi
               
-              echo "| $max_tps_formatted | $missed_p2p_event_count_percentage | $coordinated_omission_event_count_percentage | $starting_tps | $ending_tps | $increment_tps | $duration_s |" >> $GITHUB_STEP_SUMMARY
+              echo "| $max_tps | $missed_p2p_event_count_percentage | $coordinated_omission_event_count_percentage | $starting_tps | $ending_tps | $increment_tps | $duration_s |" >> $GITHUB_STEP_SUMMARY
             done
           else
             echo "⚠️ No throughput analysis data available" >> $GITHUB_STEP_SUMMARY
