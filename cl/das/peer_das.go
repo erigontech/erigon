@@ -2,6 +2,7 @@ package das
 
 import (
 	"context"
+	"errors"
 	"math"
 	"math/rand"
 	"sync"
@@ -332,6 +333,20 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				}
 			}
 		}
+		// add custody data column if it doesn't exist
+		for columnIndex := range custodyColumns {
+			if exist, err := d.columnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex)); err != nil {
+				log.Warn("[blobsRecover] failed to check if column sidecar exists", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+			} else if !exist {
+				columnSidecar := d.generateColumnSidecar(columnIndex, anyColumnSidecar, blobMatrix)
+				if columnSidecar == nil {
+					continue
+				}
+				if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnSidecar); err != nil {
+					log.Warn("[blobsRecover] failed to write column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+				}
+			}
+		}
 		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin))
 	}
 
@@ -349,6 +364,38 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			d.queue.Done(toRecover)
 		}
 	}
+}
+
+func (d *peerdas) generateColumnSidecar(
+	columnIndex cltypes.CustodyIndex,
+	anyColumnSidecar *cltypes.DataColumnSidecar,
+	blobMatrix [][]cltypes.MatrixEntry,
+) *cltypes.DataColumnSidecar {
+	blobSize := anyColumnSidecar.Column.Len()
+	sidecar := cltypes.NewDataColumnSidecar()
+	sidecar.Index = columnIndex
+	sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
+	sidecar.KzgCommitmentsInclusionProof = anyColumnSidecar.KzgCommitmentsInclusionProof
+	sidecar.KzgCommitments = anyColumnSidecar.KzgCommitments
+	for i := range blobSize {
+		// cell
+		sidecar.Column.Append(&blobMatrix[i][columnIndex].Cell)
+		// kzg proof
+		sidecar.KzgProofs.Append(&blobMatrix[i][columnIndex].KzgProof)
+	}
+	if !VerifyDataColumnSidecar(sidecar) {
+		log.Debug("[blobsRecover] invalid column sidecar", "slot", sidecar.SignedBlockHeader.Header.Slot, "column", columnIndex)
+		return nil
+	}
+	if !VerifyDataColumnSidecarKZGProofs(sidecar) {
+		log.Debug("[blobsRecover] invalid kzg proofs for column sidecar", "slot", sidecar.SignedBlockHeader.Header.Slot, "column", columnIndex)
+		return nil
+	}
+	if !VerifyDataColumnSidecarInclusionProof(sidecar) {
+		log.Debug("[blobsRecover] invalid inclusion proof for column sidecar", "slot", sidecar.SignedBlockHeader.Header.Slot, "column", columnIndex)
+		return nil
+	}
+	return sidecar
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
@@ -621,7 +668,9 @@ mainloop:
 					}
 					// save the sidecar to the column storage
 					if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnData); err != nil {
-						log.Debug("failed to write column sidecar", "err", err)
+						if !errors.Is(err, context.Canceled) {
+							log.Debug("failed to write column sidecar", "err", err)
+						}
 						return
 					}
 					// done. remove the column from the download table
