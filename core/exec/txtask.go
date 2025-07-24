@@ -738,15 +738,25 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 		return q.popNoWait()
 	}
 
+	var checkEmpty = func() bool {
+		if q.closed && q.newTasks != nil && len(q.newTasks) == 0 {
+			newTasks := q.newTasks
+			q.newTasks = nil
+			close(newTasks)
+		}
+
+		return q.newTasks == nil
+	}
+
+	if checkEmpty() {
+		return nil, false
+	}
+
+	defer checkEmpty()
+
 	for {
 		select {
 		case inTask, ok := <-q.newTasks:
-
-			if q.closed && q.newTasks != nil && len(q.newTasks) == 0 {
-				close(q.newTasks)
-				q.newTasks = nil
-			}
-
 			if !ok {
 				q.retiresLock.Lock()
 				if q.retires.Len() > 0 {
@@ -785,7 +795,7 @@ func (q *QueueWithRetry) popNoWait() (task Task, ok bool) {
 	}
 
 	// otherwise get some new task. non-blocking way. without adding to queue.
-	for task == nil {
+	for task == nil && len(q.newTasks) > 0 {
 		select {
 		case task, ok = <-q.newTasks:
 			if !ok {
@@ -805,8 +815,9 @@ func (q *QueueWithRetry) Close() {
 	}
 	q.closed = true
 	if len(q.newTasks) == 0 {
-		close(q.newTasks)
+		newTasks := q.newTasks
 		q.newTasks = nil
+		close(newTasks)
 	}
 }
 

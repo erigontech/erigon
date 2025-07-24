@@ -349,18 +349,25 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 							cumGasUsed = lastReceipt.CumulativeGasUsed
 						}
 					}
+				} else {
+					{
+						if txTask.TxIndex >= 0 {
+							receipt := blockResult.Receipts[txTask.TxIndex]
+							if receipt != nil {
+								logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(result.Logs))
+								cumGasUsed = receipt.CumulativeGasUsed
+							}
+						}
+					}
 				}
 
 				if err := rawtemporaldb.AppendReceipt(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
+
 				if txTask.IsBlockEnd() { // block changed
 					cumulativeBlobGasUsedInBlock = 0
-				} else {
-					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
-						return err
-					}
-				}
+				} 
 			}
 
 			if produce.RCacheDomain {

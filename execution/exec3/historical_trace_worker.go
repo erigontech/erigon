@@ -154,7 +154,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 		rw.chain = consensuschain.NewReader(rw.execArgs.ChainConfig, rw.chainTx, rw.execArgs.BlockReader, rw.logger)
 	}
 	result.Err = nil
-
+	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateWriter = state.NewNoopWriter()
 	rw.vmCfg.Tracer = nil
 
@@ -372,7 +372,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
-		defer out.Close()
+		defer func() {
+			out.Close()
+		}()
 		return doHistoryReduce(ctx, consumer, cfg, toTxNum, outputTxNum, out, logger)
 	})
 	return g
@@ -480,13 +482,18 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, result.Err)
 		}
 
-		p.blockResult.Receipts = append(p.blockResult.Receipts, receipt)
-
+		if receipt != nil {
+			p.blockResult.Receipts = append(p.blockResult.Receipts, receipt)
+		}
+		
 		if result.IsBlockEnd() {
 			if result.BlockNumber() > 0 {
 				chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 				// End of block transaction in a block
-				ibs := state.New(state.NewHistoryReaderV3())
+				reader := state.NewHistoryReaderV3()
+				reader.SetTx(tx)
+				reader.SetTxNum(outputTxNum)
+				ibs := state.New(reader)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
 					ret, err := core.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, hooks, vm.Config{})
@@ -494,7 +501,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					return ret, err
 				}
 
-				_, err := txTask.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
+				_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
 				if err != nil {
 					result.Err = err
 				}
@@ -518,7 +525,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 	return
 }
 
-func CustomTraceMapReduce(ctx context.Context,fromBlock, toBlock uint64, consumer TraceConsumer,  tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
+func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consumer TraceConsumer, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("'CustomTraceMapReduce' paniced: %s, %s", rec, dbg.Stack())
@@ -643,7 +650,7 @@ func CustomTraceMapReduce(ctx context.Context,fromBlock, toBlock uint64, consume
 				Config:          cfg.ChainConfig,
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
-				Trace:            true,
+				//Trace:            true,
 			}
 
 			in.Add(ctx, txTask)
