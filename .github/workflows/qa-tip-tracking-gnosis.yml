@@ -47,7 +47,7 @@ jobs:
     - name: Run the datadir upgrade procedure
       working-directory: ${{ github.workspace }}
       run: |
-        ./build/bin/erigon seg reset --datadir $ERIGON_TESTBED_DATA_DIR --chain $CHAIN
+        ./build/bin/erigon seg update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step
