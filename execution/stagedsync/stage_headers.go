@@ -134,6 +134,14 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
 	}
 
+	syncStages := []stages.SyncStage{
+		stages.Snapshots,
+		stages.Headers,
+		stages.BlockHashes,
+		stages.Bodies,
+		stages.Senders,
+	}
+
 	jsonRpcAddr := cfg.L2RPCAddr
 	client, err := rpc.Dial(jsonRpcAddr, log.Root())
 	if err != nil {
@@ -194,24 +202,10 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 
 		select {
 		case <-timer.C:
-			if err := stages.SaveStageProgress(tx, stages.Snapshots, blockNum); err != nil {
-				return err
-			}
-			if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
-				return err
-			}
-			if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
-				return err
-			}
-			if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
-				return err
-			}
-			// fmt.Printf("Wrote block %d with hash %s\n", blockNum, blk.Hash().Hex())
-			if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
-				return err
-			}
-			if err = s.Update(tx, blockNum); err != nil {
-				return fmt.Errorf("saving Headers progress: %w", err)
+			for _, stage := range syncStages {
+				if err := stages.SaveStageProgress(tx, stage, blockNum); err != nil {
+					return err
+				}
 			}
 
 			blkSec := float64(blockNum-prev) / 40.0
@@ -246,25 +240,12 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Warn("Error updating db", "err", err)
 		return err
 	}
-	if err := stages.SaveStageProgress(tx, stages.Snapshots, latestProcessedBlock); err != nil {
-		return err
+	for _, stage := range syncStages {
+		if err := stages.SaveStageProgress(tx, stage, latestProcessedBlock); err != nil {
+			return err
+		}
 	}
-	if err := stages.SaveStageProgress(tx, stages.Headers, latestProcessedBlock); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.BlockHashes, latestProcessedBlock); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.Bodies, latestProcessedBlock); err != nil {
-		return err
-	}
-	// fmt.Printf("Wrote block %d with hash %s\n", latestProcessedBlock, blk.Hash().Hex())
-	if err := stages.SaveStageProgress(tx, stages.Senders, latestProcessedBlock); err != nil {
-		return err
-	}
-	if err = s.Update(tx, latestProcessedBlock); err != nil {
-		return fmt.Errorf("saving Headers progress: %w", err)
-	}
+
 	if !useExternalTx {
 		cfg.hd.SetSynced()
 		err = tx.Commit()
