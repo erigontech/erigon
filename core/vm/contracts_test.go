@@ -61,9 +61,9 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x05}):       &bigModExp{eip2565: false},
 	common.BytesToAddress([]byte{0xa5}):       &bigModExp{eip2565: true},
 	common.BytesToAddress([]byte{0xb5}):       &bigModExp{osaka: true},
-	common.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x06}):       &bn254AddIstanbul{},
+	common.BytesToAddress([]byte{0x07}):       &bn254ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x08}):       &bn254PairingIstanbul{},
 	common.BytesToAddress([]byte{0x09}):       &blake2F{},
 	common.BytesToAddress([]byte{0x0a}):       &pointEvaluation{},
 	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
@@ -255,8 +255,8 @@ func TestPrecompiledModExpEip7883(t *testing.T)      { testJson("modexp_eip7883"
 func BenchmarkPrecompiledModExpEip7883(b *testing.B) { benchJson("modexp_eip7883", "b5", b) }
 
 // Tests the sample inputs from the elliptic curve addition EIP 213.
-func TestPrecompiledBn256Add(t *testing.T)      { testJson("bn256Add", "06", t) }
-func BenchmarkPrecompiledBn256Add(b *testing.B) { benchJson("bn256Add", "06", b) }
+func TestPrecompiledBn254Add(t *testing.T)      { testJson("bn254Add", "06", t) }
+func BenchmarkPrecompiledBn254Add(b *testing.B) { benchJson("bn254Add", "06", b) }
 
 // Tests OOG
 func TestPrecompiledModExpOOG(t *testing.T) {
@@ -296,13 +296,13 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 }
 
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
-func TestPrecompiledBn256ScalarMul(t *testing.T)      { testJson("bn256ScalarMul", "07", t) }
-func BenchmarkPrecompiledBn256ScalarMul(b *testing.B) { benchJson("bn256ScalarMul", "07", b) }
-func TestPrecompiledBn256ScalarMulFail(t *testing.T)  { testJsonFail("bn256ScalarMul", "07", t) }
+func TestPrecompiledBn254ScalarMul(t *testing.T)      { testJson("bn254ScalarMul", "07", t) }
+func BenchmarkPrecompiledBn254ScalarMul(b *testing.B) { benchJson("bn254ScalarMul", "07", b) }
+func TestPrecompiledBn254ScalarMulFail(t *testing.T)  { testJsonFail("bn254ScalarMul", "07", t) }
 
 // Tests the sample inputs from the elliptic curve pairing check EIP 197.
-func TestPrecompiledBn256Pairing(t *testing.T)      { testJson("bn256Pairing", "08", t) }
-func BenchmarkPrecompiledBn256Pairing(b *testing.B) { benchJson("bn256Pairing", "08", b) }
+func TestPrecompiledBn254Pairing(t *testing.T)      { testJson("bn254Pairing", "08", t) }
+func BenchmarkPrecompiledBn254Pairing(b *testing.B) { benchJson("bn254Pairing", "08", b) }
 
 func TestPrecompiledBlake2F(t *testing.T)      { testJson("blake2F", "09", t) }
 func BenchmarkPrecompiledBlake2F(b *testing.B) { benchJson("blake2F", "09", b) }
