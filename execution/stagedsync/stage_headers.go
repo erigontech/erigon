@@ -157,6 +157,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	if curBlock > 0 {
 		curBlock++
 	}
+	firstBlock := curBlock
 	fmt.Printf("requesting headers from %d to %d\n", curBlock, latestBlock.Uint64())
 
 	var blockNumber big.Int
@@ -233,9 +234,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), prev, blockNum+1, ctx, logger); err != nil {
 				return err
 			}
-			if cfg.blockRetire != nil {
-				cfg.blockRetire.RetireBlocksInBackground(ctx, prev, blockNum, log.LvlInfo, nil, nil, nil)
-			}
 
 			prev = blockNum
 		default:
@@ -272,6 +270,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err != nil {
 			return err
 		}
+	}
+	if cfg.blockRetire != nil {
+		cfg.blockRetire.RetireBlocksInBackground(ctx, firstBlock, latestBlock.Uint64(), log.LvlInfo, nil, nil, nil)
 	}
 	return nil
 }
