@@ -476,3 +476,7 @@ func (back *RemoteBackend) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
 func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
 	return back.blockReader.BlockForTxNum(ctx, tx, txNum)
 }
+
+func (back *RemoteBackend) EarliestBlockNum(ctx context.Context) (uint64, error) {
+	return back.blockReader.EarliestBlockNum(ctx)
+}
