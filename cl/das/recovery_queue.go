@@ -71,7 +71,7 @@ func NewFileBasedQueue(fs afero.Fs) RecoveryQueue {
 		for {
 			r, err := q.take()
 			if err != nil {
-				log.Error("[recovery queue] failed to take a request", "err", err)
+				log.Error("take", "err", err)
 				continue
 			}
 			if r == nil {

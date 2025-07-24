@@ -125,7 +125,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if !available {
 				return ErrEIP7594ColumnDataNotAvailable
 			}
-		} /*else if block.Version() >= clparams.DenebVersion {
+		} else if block.Version() >= clparams.DenebVersion {
 			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
 				if errors.Is(err, ErrEIP4844DataNotAvailable) {
 					return err
@@ -135,7 +135,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if f.highestSeen.Load() < block.Block.Slot {
 				collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
 			}
-		}*/
+		}
 	}
 
 	var executionRequestsList []hexutil.Bytes = nil
