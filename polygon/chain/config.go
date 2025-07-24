@@ -28,12 +28,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-func init() {
-	chainspec.RegisterChainSpec(networkname.Amoy, Amoy)
-	chainspec.RegisterChainSpec(networkname.BorMainnet, BorMainnet)
-	chainspec.RegisterChainSpec(networkname.BorDevnet, BorDevnet)
-}
-
 //go:embed chainspecs
 var chainspecs embed.FS
 
@@ -72,3 +66,9 @@ var (
 		Genesis:     BorDevnetGenesisBlock(),
 	}
 )
+
+func init() {
+	chainspec.RegisterChainSpec(networkname.Amoy, Amoy)
+	chainspec.RegisterChainSpec(networkname.BorMainnet, BorMainnet)
+	chainspec.RegisterChainSpec(networkname.BorDevnet, BorDevnet)
+}
