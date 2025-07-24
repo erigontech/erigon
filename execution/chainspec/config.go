@@ -34,8 +34,6 @@ import (
 )
 
 func init() {
-	//RegisterChainSpec(networkname.Dev, )
-
 	RegisterChainSpec(networkname.Mainnet, Mainnet)
 	RegisterChainSpec(networkname.Sepolia, Sepolia)
 	RegisterChainSpec(networkname.Hoodi, Hoodi)
@@ -58,7 +56,7 @@ func init() {
 		if spec.GenesisStateRoot == (common.Hash{}) {
 			spec.GenesisStateRoot = empty.RootHash
 		}
-		spec.Config = spec.Genesis.Config
+		//spec.Config = spec.Genesis.Config
 		if spec.Config == nil {
 			panic("chain config is not set for chain " + spec.Name)
 		}
