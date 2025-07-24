@@ -50,11 +50,11 @@ type StatusDataProvider struct {
 	db          kv.RoDB
 	blockReader services.BlockReader
 
-	networkId   uint64
-	genesisHash common.Hash
-	genesisHead ChainHead
-	heightForks []uint64
-	timeForks   []uint64
+	mergeHeight, networkId uint64
+	genesisHash            common.Hash
+	genesisHead            ChainHead
+	heightForks            []uint64
+	timeForks              []uint64
 
 	logger log.Logger
 }
@@ -67,9 +67,15 @@ func NewStatusDataProvider(
 	logger log.Logger,
 	blockReader services.BlockReader,
 ) *StatusDataProvider {
+	mergeHeight := uint64(0)
+	if chainConfig.MergeHeight != nil {
+		mergeHeight = chainConfig.MergeHeight.Uint64()
+	}
+
 	s := &StatusDataProvider{
 		db:          db,
 		blockReader: blockReader,
+		mergeHeight: mergeHeight,
 		networkId:   networkId,
 		genesisHash: genesis.Hash(),
 		genesisHead: makeGenesisChainHead(genesis),
@@ -125,7 +131,7 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 }
 
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
-	chainHead, err := ReadChainHead(ctx, s.db, s.blockReader)
+	chainHead, err := ReadChainHead(ctx, s.db, s.blockReader, s.mergeHeight)
 	if err != nil {
 		if errors.Is(err, ErrNoHead) {
 			s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using genesis as a fallback.")
@@ -136,7 +142,7 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.St
 	return s.makeStatusData(chainHead), err
 }
 
-func ReadChainHeadWithTx(tx kv.Tx, blockReader services.BlockReader) (ChainHead, error) {
+func ReadChainHeadWithTx(tx kv.Tx, blockReader services.BlockReader, mergeHeight uint64) (ChainHead, error) {
 	header := rawdb.ReadCurrentHeaderHavingBody(tx)
 	if header == nil {
 		return ChainHead{}, ErrNoHead
@@ -155,20 +161,23 @@ func ReadChainHeadWithTx(tx kv.Tx, blockReader services.BlockReader) (ChainHead,
 		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty conversion error: %w", err)
 	}
 
-	earliestHeight, err := blockReader.EarliestBlockNum(context.Background())
+	earliestAvailableHeight, err := blockReader.EarliestBlockNum(context.Background())
 	if err != nil {
 		return ChainHead{}, fmt.Errorf("ReadChainHead: earliest block number error: %w", err)
 	}
+
+	// we only serve post-merge blocks over p2p
+	earliestHeight := max(earliestAvailableHeight, mergeHeight)
 
 	log.Info(fmt.Sprintf("ReadChainHead: earliest height is %d", earliestHeight))
 	return ChainHead{height, time, hash, earliestHeight, td256}, nil
 }
 
-func ReadChainHead(ctx context.Context, db kv.RoDB, blockReader services.BlockReader) (ChainHead, error) {
+func ReadChainHead(ctx context.Context, db kv.RoDB, blockReader services.BlockReader, mergeHeight uint64) (ChainHead, error) {
 	var head ChainHead
 	var err error
 	err = db.View(ctx, func(tx kv.Tx) error {
-		head, err = ReadChainHeadWithTx(tx, blockReader)
+		head, err = ReadChainHeadWithTx(tx, blockReader, mergeHeight)
 		return err
 	})
 	return head, err
