@@ -182,10 +182,10 @@ type CachedReceipts struct {
 func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket, isEth69 bool) (*CachedReceipts, bool, error) {
 	var (
 		numBytes     int
-		receiptsList []rlp.RawValue
 		pendingIndex int
 		needMore     = true
 	)
+	receiptsList := make([]rlp.RawValue, 0, len(query))
 
 	for lookups, hash := range query {
 		if numBytes >= softResponseLimit || len(receiptsList) >= maxReceiptsServe ||
