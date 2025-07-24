@@ -364,6 +364,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
+		defer func() {
+			out.Close()
+		}()
 		return doHistoryMap(ctx, consumer, cfg, in, workerCount, out, logger)
 	})
 	g.Go(func() (err error) {
@@ -371,9 +374,6 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
-		}()
-		defer func() {
-			out.Close()
 		}()
 		return doHistoryReduce(ctx, consumer, cfg, toTxNum, outputTxNum, out, logger)
 	})
@@ -485,7 +485,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		if receipt != nil {
 			p.blockResult.Receipts = append(p.blockResult.Receipts, receipt)
 		}
-		
+
 		if result.IsBlockEnd() {
 			if result.BlockNumber() > 0 {
 				chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
