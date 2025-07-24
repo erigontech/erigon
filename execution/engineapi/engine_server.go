@@ -788,9 +788,13 @@ func (e *EngineServer) HandleNewPayload(
 			waitTime := time.Duration(e.config.SecondsPerSlot()) * time.Second
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
-			if stillSyncing, _ := waitForStuff(waitTime, func() (bool, error) {
-				return e.blockDownloader.Status() != engine_block_downloader.Synced, nil
-			}); stillSyncing {
+			var respondSyncing bool
+			if _, _ = waitForStuff(waitTime, func() (bool, error) {
+				status := e.blockDownloader.Status()
+				respondSyncing = status != engine_block_downloader.Synced
+				// no point in waiting if the downloader is no longer syncing (e.g. it's dropped the download request)
+				return status == engine_block_downloader.Syncing, nil
+			}); respondSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
@@ -810,7 +814,7 @@ func (e *EngineServer) HandleNewPayload(
 			}
 
 			if status == execution.ExecutionStatus_Busy || status == execution.ExecutionStatus_TooFarAway {
-				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
+				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still respondSyncing", logPrefix))
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			} else {
 				return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash}, nil
