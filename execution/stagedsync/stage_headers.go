@@ -149,7 +149,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return err
 	}
 	var curBlock uint64
-	curBlock, err = stages.GetStageProgress(tx, stages.Bodies)
+	curBlock, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		log.Warn("can't check current block", "err", err)
 	}
