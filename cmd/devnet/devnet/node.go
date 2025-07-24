@@ -17,6 +17,7 @@
 package devnet
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math/big"
@@ -175,13 +176,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 		return err
 	}
 
-	debugMux := metricsMux
-
-	if debugMux == nil {
-		debugMux = pprofMux
-	} else {
-		debugMux = http.DefaultServeMux
-	}
+	debugMux := cmp.Or(metricsMux, pprofMux)
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 

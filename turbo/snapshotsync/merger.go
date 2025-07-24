@@ -36,7 +36,7 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
-	cfg := snapcfg.KnownCfg(m.chainConfig.ChainName)
+	cfg, _ := snapcfg.KnownCfg(m.chainConfig.ChainName)
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
 		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())

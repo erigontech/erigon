@@ -31,7 +31,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.5.0
 	github.com/alecthomas/kong v0.8.1
-	github.com/anacrolix/torrent v1.58.2-0.20250711050233-2297350498bc
+	github.com/anacrolix/torrent v1.58.2-0.20250714121614-df7052d6b54e
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.18.0
@@ -162,7 +162,7 @@ require (
 	github.com/elastic/go-freelru v0.16.0 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250619025539-884f4110f6af // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect

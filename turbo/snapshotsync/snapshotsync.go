@@ -332,8 +332,15 @@ func SyncSnapshots(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
-	log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
 	snapshots := blockReader.Snapshots()
+	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
+	if snapCfg.Local {
+		if !headerchain {
+			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified", logPrefix))
+		}
+		return firstNonGenesisCheck(tx, snapshots, logPrefix, dirs)
+	}
+	log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
 	borSnapshots := blockReader.BorSnapshots()
 
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
@@ -357,7 +364,6 @@ func SyncSnapshots(
 	// - After "download once" - Erigon will produce and seed new files
 
 	// send all hashes to the Downloader service
-	snapCfg := snapcfg.KnownCfg(cc.ChainName)
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
 
@@ -428,41 +434,40 @@ func SyncSnapshots(
 	}
 
 	// Only add the preverified hashes until the initial sync completed for the first time.
-	if !snapCfg.Local {
-		log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-			if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
-				log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
-				time.Sleep(10 * time.Second)
-				continue
-			}
+
+	log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
+			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+		break
+	}
+
+	// Check for completion immediately, then growing intervals.
+	interval := time.Second
+	for {
+		completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+		if err != nil {
+			return fmt.Errorf("waiting for snapshot download: %w", err)
+		}
+		if completedResp.GetCompleted() {
 			break
 		}
-
-		// Check for completion immediately, then growing intervals.
-		interval := time.Second
-		for {
-			completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
-			if err != nil {
-				return fmt.Errorf("waiting for snapshot download: %w", err)
-			}
-			if completedResp.GetCompleted() {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return context.Cause(ctx)
-			case <-time.After(interval):
-			}
-			interval = min(interval*2, 20*time.Second)
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-time.After(interval):
 		}
-		log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
+		interval = min(interval*2, 20*time.Second)
 	}
+	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
 
 	if !headerchain {
 		if err := agg.ReloadSalt(); err != nil {
@@ -484,6 +489,14 @@ func SyncSnapshots(
 		return err
 	}
 
+	if err := firstNonGenesisCheck(tx, snapshots, logPrefix, dirs); err != nil {
+		return err
+	}
+	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
+	return nil
+}
+
+func firstNonGenesisCheck(tx kv.RwTx, snapshots BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
@@ -495,6 +508,5 @@ func SyncSnapshots(
 			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
 		}
 	}
-	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
 	return nil
 }

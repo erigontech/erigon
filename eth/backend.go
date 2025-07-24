@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
@@ -43,8 +44,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
-
-	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon-db/downloader"
 	"github.com/erigontech/erigon-db/downloader/downloadercfg"
@@ -579,6 +578,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
 	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
+	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, kv.ChainDB, logger)
 
 	var currentBlock *types.Block
 	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
@@ -624,40 +624,38 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			heimdallClient = heimdall.NewIdleClient(config.Miner)
 		}
 
-		if config.PolygonSync {
-			borConfig := consensusConfig.(*borcfg.BorConfig)
+		borConfig := consensusConfig.(*borcfg.BorConfig)
 
-			polygonBridge = bridge.NewService(bridge.ServiceConfig{
-				Store:        bridgeStore,
-				Logger:       logger,
-				BorConfig:    borConfig,
-				EventFetcher: heimdallClient,
-			})
+		polygonBridge = bridge.NewService(bridge.ServiceConfig{
+			Store:        bridgeStore,
+			Logger:       logger,
+			BorConfig:    borConfig,
+			EventFetcher: heimdallClient,
+		})
 
-			if err := heimdallStore.Milestones().Prepare(ctx); err != nil {
-				return nil, err
-			}
-
-			_, err := heimdallStore.Milestones().DeleteFromBlockNum(ctx, 0)
-			if err != nil {
-				return nil, err
-			}
-
-			heimdallService = heimdall.NewService(heimdall.ServiceConfig{
-				Store:     heimdallStore,
-				BorConfig: borConfig,
-				Client:    heimdallClient,
-				Logger:    logger,
-			})
-
-			bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)
-			heimdallRPC = heimdall.NewBackendServer(ctx, heimdallService)
-
-			backend.polygonBridge = polygonBridge
-			backend.heimdallService = heimdallService
+		if err := heimdallStore.Milestones().Prepare(ctx); err != nil {
+			return nil, err
 		}
 
-		flags.Milestone = config.WithHeimdallMilestones
+		_, err := heimdallStore.Milestones().DeleteFromBlockNum(ctx, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		heimdallService = heimdall.NewService(heimdall.ServiceConfig{
+			Store:     heimdallStore,
+			BorConfig: borConfig,
+			Client:    heimdallClient,
+			Logger:    logger,
+		})
+
+		bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)
+		heimdallRPC = heimdall.NewBackendServer(ctx, heimdallService)
+
+		backend.polygonBridge = polygonBridge
+		backend.heimdallService = heimdallService
+
+		flags.Milestone = false
 	}
 
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
@@ -715,7 +713,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := chainConfig.Bor != nil && (config.PolygonSync)
+	sentryMcDisableBlockDownload := chainConfig.Bor != nil
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -865,7 +863,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		signatures = bor.Signatures
 	}
 
-	astridEnabled := chainConfig.Bor != nil && config.PolygonSync
+	astridEnabled := chainConfig.Bor != nil
 
 	// proof-of-work mining
 	mining := stagedsync.New(
@@ -1076,7 +1074,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}()
 	}
 
-	if chainConfig.Bor != nil && config.PolygonSync {
+	if chainConfig.Bor != nil {
 		backend.polygonSyncService = polygonsync.NewService(
 			config,
 			logger,
@@ -1553,18 +1551,13 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 
 	if chainConfig.Bor != nil {
 		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
-
-		if snConfig.PolygonSync {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
-		} else {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
-		}
+		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots, chainConfig.Bor)
+		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 
-	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3
+	_, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
+	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg
 	salt, err := libstate.GetStateIndicesSalt(dirs, createNewSaltFileIfNeeded, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
@@ -1648,7 +1641,7 @@ func (s *Ethereum) Start() error {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
-	} else if s.chainConfig.Bor != nil && s.config.PolygonSync {
+	} else if s.chainConfig.Bor != nil {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {

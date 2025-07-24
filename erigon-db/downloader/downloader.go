@@ -71,7 +71,7 @@ var debugWebseed = false
 
 func init() {
 	_, debugWebseed = os.LookupEnv("DOWNLOADER_DEBUG_WEBSEED")
-	webseed.PrintDebug = true
+	webseed.PrintDebug = debugWebseed
 }
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
@@ -230,8 +230,8 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 		http.StatusGatewayTimeout:
 
 		if debugWebseed {
-			// An error that's not handled by the torrent lib?
-			panic(resp.StatusCode)
+			// An interesting error that the torrent lib should probably handle.
+			fmt.Printf("got webseed response status %v\n", resp.Status)
 		}
 
 		WebseedServerFails.Add(1)
@@ -1350,8 +1350,10 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 		d.torrentClient.WriteStatus(w)
 	})
 	p := "/downloader/torrentClientStatus"
-	http.Handle(p, h)
-	if debugMux != nil {
+	// This is for gopprof.
+	defaultMux := http.DefaultServeMux
+	defaultMux.Handle(p, h)
+	if debugMux != nil && debugMux != defaultMux {
 		debugMux.Handle(p, h)
 	}
 }

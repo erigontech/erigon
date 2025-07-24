@@ -17,8 +17,8 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
-	"net/http"
 	"os"
 
 	"github.com/urfave/cli/v2"
@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/diagnostics"
-	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/params"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
@@ -37,16 +36,6 @@ import (
 )
 
 func main() {
-	//defer func() {
-	//	panicResult := recover()
-	//	if panicResult == nil {
-	//		return
-	//	}
-	//
-	//	log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
-	//	os.Exit(1)
-	//}()
-
 	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
@@ -57,24 +46,13 @@ func main() {
 	}
 }
 
-func runErigon(cliCtx *cli.Context) error {
-	var logger log.Logger
-	var tracer *tracers.Tracer
-	var err error
-	var metricsMux *http.ServeMux
-	var pprofMux *http.ServeMux
-
-	if logger, tracer, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
-		return err
+func runErigon(cliCtx *cli.Context) (err error) {
+	logger, tracer, metricsMux, pprofMux, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return
 	}
 
-	debugMux := metricsMux
-
-	if debugMux == nil {
-		debugMux = pprofMux
-	} else {
-		debugMux = http.DefaultServeMux
-	}
+	debugMux := cmp.Or(metricsMux, pprofMux)
 
 	// initializing the node and providing the current git commit there
 

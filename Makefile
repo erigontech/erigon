@@ -46,8 +46,7 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
-# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
-BUILD_TAGS = noboltdb
+BUILD_TAGS =
 
 ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
@@ -238,7 +237,7 @@ define run_suite
     printf "\n\n============================================================"; \
     echo "Running test: $1-$2"; \
     printf "\n"; \
-    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --client erigon $3 2>&1 | tee output.log; \
+    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --docker.nocache=true --client erigon $3 2>&1 | tee output.log; \
     if [ $$? -gt 0 ]; then \
         echo "Exitcode gt 0"; \
     fi; \
@@ -292,7 +291,7 @@ eest-hive:
 	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg branch=hive fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor

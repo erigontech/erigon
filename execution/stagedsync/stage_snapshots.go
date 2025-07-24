@@ -454,42 +454,55 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []snapshotsync.DownloadRequest) error {
-			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
+		started := cfg.blockRetire.RetireBlocksInBackground(
+			ctx,
+			minBlockNumber,
+			s.ForwardProgress,
+			log.LvlDebug,
+			func(downloadRequest []snapshotsync.DownloadRequest) error {
+				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
+					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
+						return err
+					}
+				}
+
+				return nil
+			}, func(l []string) error {
+				//if cfg.snapshotUploader != nil {
+				// TODO - we need to also remove files from the uploader (100k->500K transition)
+				//}
+
+				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
+					_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
 					return err
 				}
-			}
 
-			return nil
-		}, func(l []string) error {
-			//if cfg.snapshotUploader != nil {
-			// TODO - we need to also remove files from the uploader (100k->500K transition)
-			//}
-
-			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-				_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+				return nil
+			}, func() error {
+				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+				if filesDeleted && cfg.notifier != nil {
+					cfg.notifier.Events.OnNewSnapshot()
+				}
 				return err
-			}
-
-			return nil
-		}, func() error {
-			filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
-			if filesDeleted && cfg.notifier != nil {
-				cfg.notifier.Events.OnNewSnapshot()
-			}
-			return err
-		})
+			}, func() {
+				if cfg.notifier != nil {
+					cfg.notifier.Events.OnRetirementDone()
+				}
+			})
+		if cfg.notifier != nil {
+			cfg.notifier.Events.OnRetirementStart(started)
+		}
 
 		//	cfg.agg.BuildFilesInBackground()
-
 	}
 
 	pruneLimit := 10
+	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneLimit = 10_000
+		pruneTimeout = time.Hour
 	}
-	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
@@ -717,7 +730,8 @@ func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
 	}
 
 	if checkKnownSizes {
-		for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName).Preverified.Items {
+		snapCfg, _ := snapcfg.KnownCfg(u.cfg.chainConfig.ChainName)
+		for _, it := range snapCfg.Preverified.Items {
 			info, _, _ := snaptype.ParseFileName("", it.Name)
 
 			if fi.From == info.From {

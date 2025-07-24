@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type Aggregator struct {
@@ -871,6 +872,9 @@ func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles)
 	}
 	return files
 }
+func (at *AggregatorRoTx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return at.d[domain].d.version.DataKV.Current
+}
 func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {
 		if ii := a.searchII(idx); ii != nil {
@@ -976,7 +980,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	furiousPrune := timeout > 5*time.Hour
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
 
-	var pruneLimit uint64 = 1_000
+	var pruneLimit uint64 = 100
 	if furiousPrune {
 		pruneLimit = 1_000_000
 	}
@@ -1640,11 +1644,7 @@ func (at *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, t
 }
 
 func (at *AggregatorRoTx) HistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
-	hr, err := at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
-	if err != nil {
-		return nil, err
-	}
-	return stream.WrapKV(hr), nil
+	return at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
 }
 
 func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (totalKeys uint64) {

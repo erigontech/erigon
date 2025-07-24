@@ -18,11 +18,13 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"hash/crc32"
+	"math"
 	"math/big"
-	"reflect"
-	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -31,12 +33,12 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -258,7 +260,7 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 
 // EthHardForkConfig represents config of a hard-fork
 type EthHardForkConfig struct {
-	ActivationTime  hexutil.Uint              `json:"activationTime"`
+	ActivationTime  uint64                    `json:"activationTime"`
 	BlobSchedule    params.BlobConfig         `json:"blobSchedule"`
 	ChainId         hexutil.Uint              `json:"chainId"`
 	Precompiles     map[common.Address]string `json:"precompiles"`
@@ -267,155 +269,107 @@ type EthHardForkConfig struct {
 
 // EthConfigResp is the response type of eth_config
 type EthConfigResp struct {
-	Current     *EthHardForkConfig `json:"current"`
-	CurrentHash string             `json:"currentHash"`
-	Next        *EthHardForkConfig `json:"next"`
-	NextHash    *string            `json:"nextHash"`
-}
-
-// SystemContractsMap maps system contract addresses to names expected in eth_config
-var SystemContractsMap = map[common.Address]string{
-	params.BeaconRootsAddress:          "BEACON_ROOTS_ADDRESS",
-	params.ConsolidationRequestAddress: "CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS",
-	params.HistoryStorageAddress:       "HISTORY_STORAGE_ADDRESS",
-	params.WithdrawalRequestAddress:    "WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS",
-}
-
-// PrecompileNamesMap maps object names used in the codebase to expected names in the output of eth_config
-// DO NOT RENAME THE UNDERLYING PRECOMPILED CONTRACTS WITHOUT CHANGING THIS OR VICE-VERSA
-var PrecompileNamesMap = map[string]string{
-	"ecrecover":              "ECREC",
-	"sha256hash":             "SHA256",
-	"ripemd160hash":          "RIPEMD160",
-	"dataCopy":               "ID",
-	"bigModExp":              "MODEXP",
-	"bn256AddIstanbul":       "BN256_ADD",
-	"bn256ScalarMulIstanbul": "BN256_MUL",
-	"bn256PairingIstanbul":   "BN256_PAIRING",
-	"blake2F":                "BLAKE2F",
-	"pointEvaluation":        "KZG_POINT_EVALUATION",
-	"bls12381G1Add":          "BLS12_G1ADD",
-	"bls12381G1MultiExp":     "BLS12_G1MSM",
-	"bls12381G2Add":          "BLS12_G2ADD",
-	"bls12381G2MultiExp":     "BLS12_G2MSM",
-	"bls12381Pairing":        "BLS12_PAIRING_CHECK",
-	"bls12381MapFpToG1":      "BLS12_MAP_FP_TO_G1",
-	"bls12381MapFp2ToG2":     "BLS12_MAP_FP2_TO_G2",
+	Current       *EthHardForkConfig `json:"current"`
+	CurrentHash   hexutil.Bytes      `json:"currentHash"`
+	CurrentForkId hexutil.Bytes      `json:"currentForkId"`
+	Next          *EthHardForkConfig `json:"next"`
+	NextHash      *hexutil.Bytes     `json:"nextHash"`
+	NextForkId    *hexutil.Bytes     `json:"nextForkId"`
+	Last          *EthHardForkConfig `json:"last"`
+	LastHash      *hexutil.Bytes     `json:"lastHash"`
+	LastForkId    *hexutil.Bytes     `json:"lastForkId"`
 }
 
 // Config returns the HardFork config for current and upcoming forks:
 // assuming linear fork progression and ethereum-like schedule
-func (api *APIImpl) Config(ctx context.Context) (*EthConfigResp, error) {
+func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error) {
+	var timeUnix uint64
+	if timeArg != nil {
+		timeUnix = timeArg.Uint64()
+	} else {
+		timeUnix = uint64(time.Now().Unix())
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	config, err := api.BaseAPI.chainConfig(ctx, tx)
+	chainConfig, genesis, err := api.chainConfigWithGenesis(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	tt := uint64(time.Now().Unix())
+	if !chainConfig.IsCancun(timeUnix) {
+		return &EthConfigResp{}, fmt.Errorf("not supported: %w: time=%v", ErrForkTimeBeforeCancun, timeUnix)
+	}
 
-	ret := &EthConfigResp{
-		Current: &EthHardForkConfig{},
+	response := EthConfigResp{}
+	forkBlockNums, forkTimes := forkid.GatherForks(chainConfig, genesis.Time())
+	// current fork config
+	currentForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, timeUnix)
+	response.CurrentForkId = currentForkId.Hash[:]
+	response.Current = fillForkConfig(chainConfig, currentForkId.Activation)
+	response.CurrentHash, err = checkSumConfig(response.Current)
+	if err != nil {
+		return nil, err
 	}
-	switch {
-	case config.IsOsaka(tt):
-		fillOsakaForkConfig(ret.Current, config)
-		ret.Next = nil
-	case config.IsPrague(tt):
-		fillPragueForkConfig(ret.Current, config)
-		if config.OsakaTime != nil {
-			ret.Next = &EthHardForkConfig{}
-			fillOsakaForkConfig(ret.Next, config)
-		}
-	case config.IsCancun(tt):
-		fillCancunForkConfig(ret.Current, config)
-		if config.PragueTime != nil {
-			ret.Next = &EthHardForkConfig{}
-			fillPragueForkConfig(ret.Next, config)
-		}
-	default:
+
+	// next fork config
+	if currentForkId.Next == 0 {
+		// means there are no later forks setup to be activated after the current one
+		return &response, nil
 	}
-	if ret.Current != nil {
-		ret.CurrentHash = checkSumConfig(ret.Current)
+
+	nextForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, currentForkId.Next)
+	response.Next = fillForkConfig(chainConfig, nextForkId.Activation)
+	nextForkHash, err := checkSumConfig(response.Next)
+	if err != nil {
+		return nil, err
 	}
-	if ret.Next != nil {
-		cs := checkSumConfig(ret.Next)
-		ret.NextHash = &cs
+
+	nextForkIdBytes := hexutil.Bytes(nextForkId.Hash[:])
+	response.NextForkId = &nextForkIdBytes
+	response.NextHash = &nextForkHash
+
+	// last fork config
+	lastForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, math.MaxUint64)
+	response.Last = fillForkConfig(chainConfig, lastForkId.Activation)
+	lastForkHash, err := checkSumConfig(response.Last)
+	if err != nil {
+		return nil, err
 	}
-	return ret, nil
+
+	lastForkIdBytes := hexutil.Bytes(lastForkId.Hash[:])
+	response.LastForkId = &lastForkIdBytes
+	response.LastHash = &lastForkHash
+
+	return &response, nil
 }
 
-func fillPragueForkConfig(ret *EthHardForkConfig, config *chain.Config) {
-	ret.ActivationTime = hexutil.Uint(config.PragueTime.Uint64())
-	ret.BlobSchedule = *config.GetBlobConfig(config.PragueTime.Uint64())
-	ret.ChainId = hexutil.Uint(config.ChainID.Uint64())
-	ret.SystemContracts = makeSystemContractsConfigMap([]common.Address{
-		params.BeaconRootsAddress,
-		params.ConsolidationRequestAddress,
-		params.HistoryStorageAddress,
-		params.WithdrawalRequestAddress,
-	}, &config.DepositContract)
+var ErrForkTimeBeforeCancun = errors.New("fork time before cancun")
 
-	ret.Precompiles = make(map[common.Address]string)
-	for k, v := range vm.PrecompiledContractsPrague {
-		ret.Precompiles[k] = PrecompileNamesMap[reflect.TypeOf(v).Elem().Name()]
+func fillForkConfig(chainConfig *chain.Config, activationTime uint64) *EthHardForkConfig {
+	forkConfig := EthHardForkConfig{}
+	forkConfig.ActivationTime = activationTime
+	forkConfig.BlobSchedule = *chainConfig.GetBlobConfig(activationTime)
+	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
+	precompiles := vm.Precompiles(chainConfig.Rules(math.MaxUint64, activationTime))
+	forkConfig.Precompiles = make(map[common.Address]string, len(precompiles))
+	for addr, precompile := range precompiles {
+		forkConfig.Precompiles[addr] = precompile.Name()
 	}
+	forkConfig.SystemContracts = chainConfig.SystemContracts(activationTime)
+	return &forkConfig
 }
 
-func fillOsakaForkConfig(ret *EthHardForkConfig, config *chain.Config) {
-	ret.ActivationTime = hexutil.Uint(config.OsakaTime.Uint64())
-	ret.BlobSchedule = *config.GetBlobConfig(config.OsakaTime.Uint64())
-	ret.ChainId = hexutil.Uint(config.ChainID.Uint64())
-	ret.SystemContracts = makeSystemContractsConfigMap([]common.Address{
-		params.BeaconRootsAddress,
-		params.ConsolidationRequestAddress,
-		params.HistoryStorageAddress,
-		params.WithdrawalRequestAddress,
-	}, &config.DepositContract)
-
-	ret.Precompiles = make(map[common.Address]string)
-	for k, v := range vm.PrecompiledContractsOsaka {
-		ret.Precompiles[k] = PrecompileNamesMap[reflect.TypeOf(v).Elem().Name()]
-	}
-}
-
-func fillCancunForkConfig(ret *EthHardForkConfig, config *chain.Config) {
-	ret.ActivationTime = hexutil.Uint(config.CancunTime.Uint64())
-	ret.BlobSchedule = *config.GetBlobConfig(config.CancunTime.Uint64())
-	ret.ChainId = hexutil.Uint(config.ChainID.Uint64())
-	ret.SystemContracts = makeSystemContractsConfigMap(
-		[]common.Address{},
-		&config.DepositContract,
-	)
-	ret.Precompiles = make(map[common.Address]string)
-	for k, v := range vm.PrecompiledContractsCancun {
-		ret.Precompiles[k] = PrecompileNamesMap[reflect.TypeOf(v).Elem().Name()]
-	}
-}
-
-func checkSumConfig(ehfc *EthHardForkConfig) string {
+func checkSumConfig(ehfc *EthHardForkConfig) (hexutil.Bytes, error) {
 	ms, err := json.Marshal(ehfc)
 	if err != nil {
-		log.Error("checkSumConfig: Error occurred while json Marshalling config", "err", err)
-		return ""
+		return nil, fmt.Errorf("checkSumConfig: error occurred while json marshalling config: %w", err)
 	}
-	cs := uint64(crc32.ChecksumIEEE(ms))
-	return strconv.FormatUint(cs, 16)
-}
-
-func makeSystemContractsConfigMap(contracts []common.Address, depositContract *common.Address) map[string]common.Address {
-	ret := make(map[string]common.Address)
-	for _, c := range contracts {
-		ret[SystemContractsMap[c]] = c
-	}
-	if depositContract != nil {
-		ret["DEPOSIT_CONTRACT_ADDRESS"] = *depositContract
-	}
-	return ret
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, crc32.ChecksumIEEE(ms))
+	return b, nil
 }
 
 type GasPriceOracleBackend struct {

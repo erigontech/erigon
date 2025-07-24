@@ -16,53 +16,11 @@
 
 package seg
 
-import (
-	"fmt"
-)
-
 //Reader and Writer - decorators on Getter and Compressor - which
 //can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `WordLevelCompression` passed to constructor
 
 // Maybe in future will add support of io.Reader/Writer interfaces to this decorators
 // Maybe in future will merge decorators into it's parents
-
-type WordLevelCompression uint8
-
-const (
-	CompressNone WordLevelCompression = 0b0  // no compression
-	CompressKeys WordLevelCompression = 0b1  // compress keys only
-	CompressVals WordLevelCompression = 0b10 // compress values only
-)
-
-func ParseFileCompression(s string) (WordLevelCompression, error) {
-	switch s {
-	case "none", "":
-		return CompressNone, nil
-	case "k":
-		return CompressKeys, nil
-	case "v":
-		return CompressVals, nil
-	case "kv":
-		return CompressKeys | CompressVals, nil
-	default:
-		return 0, fmt.Errorf("invalid file compression type: %s", s)
-	}
-}
-func (c WordLevelCompression) Has(flag WordLevelCompression) bool { return c&flag != 0 }
-func (c WordLevelCompression) String() string {
-	switch c {
-	case CompressNone:
-		return "none"
-	case CompressKeys:
-		return "k"
-	case CompressVals:
-		return "v"
-	case CompressKeys | CompressVals:
-		return "kv"
-	default:
-		return ""
-	}
-}
 
 type Reader struct {
 	*Getter
@@ -127,23 +85,6 @@ func (g *Reader) Skip() (uint64, int) {
 	}
 	return g.Getter.SkipUncompressed()
 
-}
-
-type ReaderI interface {
-	Next(buf []byte) ([]byte, uint64)
-	Size() int
-	Count() int
-	Reset(offset uint64)
-	HasNext() bool
-	Skip() (nextOffset uint64, currentWordLen int)
-	FileName() string
-	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
-	MadvNormal() MadvDisabler
-	DisableReadAhead()
-}
-
-type MadvDisabler interface {
-	DisableReadAhead()
 }
 
 type Writer struct {
