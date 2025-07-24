@@ -794,6 +794,22 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 	return reply, nil
 }
 
+func (s *KvServer) HistoryStartFrom(_ context.Context, req *remote.HistoryStartFromReq) (reply *remote.HistoryStartFromReply, err error) {
+	reply = &remote.HistoryStartFromReply{}
+	if err := s.with(req.TxId, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("server DB doesn't implement kv.Temporal interface")
+		}
+		reply.StartFrom = ttx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return reply, nil
+}
+
 // see: https://cloud.google.com/apis/design/design_patterns
 func marshalPagination(m proto.Message) (string, error) {
 	pageToken, err := proto.Marshal(m)
