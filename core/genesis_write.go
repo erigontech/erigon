@@ -509,14 +509,13 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 			head.RequestsHash = &empty.RequestsHash
 		}
 	}
-
+	fmt.Printf("g.Config=%v , g.Config.Bor=%v\n", g.Config, g.Config.Bor)
 	if g.Config != nil && g.Config.Bor != nil {
-		if g.Config.IsBhilai(0) {
-			withdrawals = []*types.Withdrawal{}
-		}
+		withdrawals = []*types.Withdrawal{}
 		head.BlobGasUsed = new(uint64)
 		head.ExcessBlobGas = new(uint64)
-		head.ParentBeaconBlockRoot = &common.Hash{}
+		emptyHash := common.HexToHash("0x0")
+		head.ParentBeaconBlockRoot = &emptyHash
 	}
 
 	return
