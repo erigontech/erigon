@@ -117,14 +117,14 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 			denebBlocks = append(denebBlocks, block)
 		}
 	}
-	/*
-		if len(denebBlocks) > 0 && shouldProcessBlobs(denebBlocks, cfg) {
-			_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, denebBlocks)
-			if err != nil {
-				logger.Trace("[Caplin] Failed to process blobs", "err", err)
-				return err
-			}
-		}*/
+
+	if len(denebBlocks) > 0 && shouldProcessBlobs(denebBlocks, cfg) {
+		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, denebBlocks)
+		if err != nil {
+			logger.Trace("[Caplin] Failed to process blobs", "err", err)
+			return err
+		}
+	}
 
 	if len(fuluBlocks) > 0 && canDownloadColumnData(fuluBlocks, cfg) {
 		if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
