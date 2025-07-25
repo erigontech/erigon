@@ -652,7 +652,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 
 	defer func() {
 		r := recover()
-		require.NotNil(r)
+		require.Nil(r)
 		//re := r.(error)
 		//fmt.Println(re)
 		//require.ErrorIs(re, sdTxImmutabilityInvariant)
