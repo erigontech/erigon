@@ -380,7 +380,9 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				// recover the blobs
 				recover(toRecover)
 			}
-			d.queue.Done(toRecover)
+			if err := d.queue.Done(toRecover); err != nil {
+				log.Debug("queue.done err", "err", err, "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
+			}
 		}
 	}
 }

@@ -1,7 +1,9 @@
 package das
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,7 +67,7 @@ func NewFileBasedQueue(fs afero.Fs) RecoveryQueue {
 		takeCh:         make(chan *recoveryRequest, 16),
 		cache:          make([]*recoveryRequest, 0),
 		ongoing:        make(map[common.Hash]struct{}),
-		waitNewRequest: make(chan struct{}, 1),
+		waitNewRequest: make(chan struct{}, 1), // logically size 1 is enough
 	}
 	go func() {
 		for {
@@ -86,6 +88,8 @@ func NewFileBasedQueue(fs afero.Fs) RecoveryQueue {
 }
 
 func (q *fileBasedQueue) Add(r *recoveryRequest) (bool, error) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
 	dir, filepath := r.Filepath()
 	if err := q.fs.MkdirAll(dir, 0755); err != nil {
 		return false, err
@@ -231,15 +235,13 @@ func (q *fileBasedQueue) Done(r *recoveryRequest) error {
 		return err
 	}
 	defer dirFh.Close()
-	/*dirFiles, err := dirFh.Readdir(3)
-	if err != nil {
+	// rm dir if empty
+	dirFiles, err := dirFh.Readdir(1)
+	if errors.Is(err, io.EOF) || (err == nil && len(dirFiles) == 0) {
+		q.fs.Remove(dir)
+	} else if err != nil {
 		return err
 	}
-	if len(dirFiles) == 1 {
-		if err := q.fs.Remove(dir); err != nil {
-			return err
-		}
-	}*/
 	// remove from ongoing map
 	delete(q.ongoing, r.blockRoot)
 	return nil
