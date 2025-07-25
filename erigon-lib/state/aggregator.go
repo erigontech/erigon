@@ -926,11 +926,13 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	}
 	for _, d := range at.d {
 		if d.CanPruneUntil(tx, untilTx) {
+			fmt.Println("[agg] CanPrune domain", d.name, "untilTx", untilTx)
 			return true
 		}
 	}
 	for _, ii := range at.iis {
 		if ii.CanPrune(tx) {
+			fmt.Println("[agg] CanPrune inverted index", ii.name, "untilTx", untilTx)
 			return true
 		}
 	}
