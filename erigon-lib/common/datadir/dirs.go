@@ -305,7 +305,7 @@ func (d Dirs) RenameOldVersions() error {
 			return err
 		}
 	}
-	log.Info(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
+	log.Debug(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
 	if d.Downloader != "" && (renamed > 0 || removed > 0) {
 		if err := os.RemoveAll(d.Downloader); err != nil {
 			return err
