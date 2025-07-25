@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -81,7 +81,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		s := jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -112,7 +112,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 		}
 	}
 	var buf bytes.Buffer
-	s := jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracersConfig.TraceConfig{}, s)
 	if err != nil {
 		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
@@ -132,7 +132,7 @@ func TestTraceBlockByHash(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		s := jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -163,7 +163,7 @@ func TestTraceTransaction(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		s := jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{}, s)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
@@ -192,7 +192,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
-		s := jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		var norefunds = true
 		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{NoRefunds: &norefunds}, s)
 		if err != nil {
@@ -554,7 +554,7 @@ func TestGetBadBlocks(t *testing.T) {
 
 	putBlock := func(number uint64) common.Hash {
 		// prepare db so it works with our test
-		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		signer1 := types.MakeSigner(chainspec.MainnetChainConfig, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
 				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),

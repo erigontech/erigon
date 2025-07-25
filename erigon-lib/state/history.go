@@ -64,7 +64,7 @@ type History struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visibleFiles in zero-copy way
-	dirtyFiles *btree2.BTreeG[*filesItem]
+	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -118,7 +118,7 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 
 	h := History{
 		histCfg:       cfg,
-		dirtyFiles:    btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:    btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visibleFiles: []visibleFile{},
 	}
 
@@ -200,8 +200,8 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 
 func (h *History) openDirtyFiles() error {
 	invalidFilesMu := sync.Mutex{}
-	invalidFileItems := make([]*filesItem, 0)
-	h.dirtyFiles.Walk(func(items []*filesItem) bool {
+	invalidFileItems := make([]*FilesItem, 0)
+	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
@@ -227,8 +227,8 @@ func (h *History) openDirtyFiles() error {
 					if !fileVer.Less(h.version.DataV.MinSupported) {
 						h.version.DataV.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm v history snapshots")
-						//return false
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, h.version.DataV)
 					}
 				}
 
@@ -272,8 +272,8 @@ func (h *History) openDirtyFiles() error {
 						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
 							h.version.AccessorVI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm vi history snapshots")
-							//return false
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, h.version.AccessorVI)
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
@@ -299,8 +299,8 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
 	}
-	var toClose []*filesItem
-	h.dirtyFiles.Walk(func(items []*filesItem) bool {
+	var toClose []*FilesItem
+	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
 				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
@@ -336,11 +336,11 @@ func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) MissedMapAccessors() (l []*filesItem) {
+func (h *History) MissedMapAccessors() (l []*FilesItem) {
 	return h.missedMapAccessors(h.dirtyFiles.Items())
 }
 
-func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
+func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !h.Accessors.Has(AccessorHashMap) {
 		return nil
 	}
@@ -351,12 +351,12 @@ func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	})
 }
 
-func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
+func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
 	if item.decompressor == nil {
 		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
 	}
 
-	search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
+	search := &FilesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
 	iiItem, ok := h.InvertedIndex.dirtyFiles.Get(search)
 	if !ok {
 		return nil
@@ -958,6 +958,9 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	if h.snapshotsDisabled {
 		return
 	}
+	if txNumFrom == txNumTo {
+		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
+	}
 
 	h.InvertedIndex.integrateDirtyFiles(InvertedFiles{
 		decomp:    sf.efHistoryDecomp,
@@ -1421,9 +1424,14 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		}
 		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
-		if g.HasNext() {
-			key, offset := g.Next(nil)
-			heap.Push(&s.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+		wrapper := NewSegReaderWrapper(g)
+		if wrapper.HasNext() {
+			key, val, err := wrapper.Next()
+			if err != nil {
+				s.Close()
+				return nil, err
+			}
+			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
 		}
 	}
 	if err := s.advance(); err != nil {
@@ -1433,13 +1441,13 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 	return s, nil
 }
 
-func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KVS, error) {
+func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
 	rangeIsInFiles := toTxNum >= 0 && len(ht.iit.files) > 0 && ht.iit.files.EndTxNum() >= uint64(toTxNum)
 	if rangeIsInFiles {
-		return stream.EmptyKVS, nil
+		return stream.EmptyKV, nil
 	}
 	s := &HistoryChangesIterDB{
 		endTxNum:    toTxNum,
@@ -1458,7 +1466,7 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	return s, nil
 }
 
-func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KVS, error) {
+func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
@@ -1470,7 +1478,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if err != nil {
 		return nil, err
 	}
-	return stream.MergeKVS(itOnDB, itOnFiles, limit), nil
+	return stream.IntersectKV(itOnDB, itOnFiles, limit), nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {

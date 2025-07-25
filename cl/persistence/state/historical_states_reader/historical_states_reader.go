@@ -124,7 +124,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
 
-	epochData, err := state_accessors.ReadEpochData(kvGetter, roundedSlot)
+	epochData, err := state_accessors.ReadEpochData(kvGetter, roundedSlot, r.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read epoch data: %w", err)
 	}
@@ -204,7 +204,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetSlashings(slashingsVector)
 
 	// Finality
-	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, ok, err := state_accessors.ReadCheckpoints(kvGetter, roundedSlot)
+	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, ok, err := state_accessors.ReadCheckpoints(kvGetter, roundedSlot, r.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read checkpoints: %w", err)
 	}
@@ -308,21 +308,27 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		pendingWithdrawals    = solid.NewPendingWithdrawalList(r.cfg)
 	)
 
-	if err := readQueueSSZ(kvGetter, slot, kv.PendingConsolidationsDump, kv.PendingConsolidations, pendingConsolidations); err != nil {
+	if err := ReadQueueSSZ(kvGetter, slot, kv.PendingConsolidationsDump, kv.PendingConsolidations, pendingConsolidations); err != nil {
 		return nil, fmt.Errorf("failed to read pending consolidations: %w", err)
 	}
 
-	if err := readQueueSSZ(kvGetter, slot, kv.PendingDepositsDump, kv.PendingDeposits, pendingDeposits); err != nil {
+	if err := ReadQueueSSZ(kvGetter, slot, kv.PendingDepositsDump, kv.PendingDeposits, pendingDeposits); err != nil {
 		return nil, fmt.Errorf("failed to read pending deposits: %w", err)
 	}
 
-	if err := readQueueSSZ(kvGetter, slot, kv.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawals, pendingWithdrawals); err != nil {
+	if err := ReadQueueSSZ(kvGetter, slot, kv.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawals, pendingWithdrawals); err != nil {
 		return nil, fmt.Errorf("failed to read pending withdrawals: %w", err)
 	}
 
 	ret.SetPendingConsolidations(pendingConsolidations)
 	ret.SetPendingDeposits(pendingDeposits)
 	ret.SetPendingPartialWithdrawals(pendingWithdrawals)
+
+	if ret.Version() < clparams.FuluVersion {
+		return ret, nil
+	}
+
+	ret.SetProposerLookahead(epochData.ProposerLookahead)
 	return ret, nil
 }
 
@@ -983,7 +989,7 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter 
 	return common.BytesToHash(mixBytes), nil
 }
 
-func readQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
+func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
 

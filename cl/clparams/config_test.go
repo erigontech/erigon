@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func testConfig(t *testing.T, n NetworkType) {
@@ -32,9 +32,9 @@ func testConfig(t *testing.T, n NetworkType) {
 }
 
 func TestGetConfigsByNetwork(t *testing.T) {
-	testConfig(t, networkid.MainnetChainID)
-	testConfig(t, networkid.SepoliaChainID)
-	testConfig(t, networkid.GnosisChainID)
-	testConfig(t, networkid.ChiadoChainID)
-	testConfig(t, networkid.HoodiChainID)
+	testConfig(t, chainspec.MainnetChainID)
+	testConfig(t, chainspec.SepoliaChainID)
+	testConfig(t, chainspec.GnosisChainID)
+	testConfig(t, chainspec.ChiadoChainID)
+	testConfig(t, chainspec.HoodiChainID)
 }

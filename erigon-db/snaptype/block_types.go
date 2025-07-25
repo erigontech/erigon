@@ -30,11 +30,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/version"
 )
@@ -47,6 +47,7 @@ func init() {
 	snapcfg.RegisterKnownTypes(networkname.Gnosis, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Chiado, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Holesky, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Hoodi, ethereumTypes)
 }
 
 var Enums = struct {

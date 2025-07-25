@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var ( // Compile time interface checks
@@ -247,6 +248,26 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 		return fmt.Errorf("can't apply: transaction closed")
 	}
 	return applyTx.Apply(ctx, f)
+}
+
+func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
+	panic("not implemented")
+}
+
+func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
+	panic("not implemented")
 }
 
 func (tx *RwTx) WarmupDB(force bool) error {
@@ -537,16 +558,31 @@ func (db *DB) ReloadFiles() error { return db.agg.ReloadFiles() }
 func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
 	return db.agg.BuildMissedAccessors(ctx, workers)
 }
+func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
+	db.agg.MadvNormal()
+	return db
+}
+
+func (db *DB) DisableReadAhead() {
+	db.agg.DisableReadAhead()
+}
 
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
+func (tx *Tx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
+}
+
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 	return tx.aggtx.TxNumsInFiles(domains...)
 }
 
 func (tx *RwTx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
+}
+func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
 }
 func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)

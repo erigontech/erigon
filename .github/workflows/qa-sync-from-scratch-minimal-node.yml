@@ -15,7 +15,7 @@ concurrency:
 jobs:
   minimal-node-sync-from-scratch-test:
     runs-on: [self-hosted, qa, long-running]
-    timeout-minutes: 1100  # 18 hours plus 20 minutes
+    timeout-minutes: 740  # 12 hours plus 20 minutes
     strategy:
       fail-fast: false
       matrix:
@@ -25,7 +25,7 @@ jobs:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ERIGON_ASSERT: true
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 86400 # 24 hours
+      TOTAL_TIME_SECONDS: 43200 # 12 hours
       CHAIN: ${{ matrix.chain }}
 
     steps:
@@ -69,6 +69,13 @@ jobs:
             echo "Error detected during tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Upload Downloader Torrent Client Status
+        if: steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: torrent-client-status-${{ env.CHAIN }}
+          path: torrent-client-status.txt
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'

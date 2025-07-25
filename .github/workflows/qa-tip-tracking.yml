@@ -3,9 +3,7 @@ name: QA - Tip tracking
 on:
   push:
     branches:
-      - 'release/3.*'
-  schedule:
-    - cron: '0 20 * * 1-6'  # Run every night at 08:00 PM UTC except Sunday
+      - 'release/3.1'
   workflow_dispatch:     # Run manually
 
 concurrency:
@@ -13,8 +11,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tip-tracking-test:
-    runs-on: [self-hosted, qa, Erigon3]
+  mainnet-tip-tracking-test:
+    runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     timeout-minutes: 600
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
@@ -78,6 +76,12 @@ jobs:
           echo "Error detected during tests"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Upload Downloader Torrent Client Status
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        path: torrent-client-status.txt
 
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'

@@ -547,7 +547,7 @@ if ($BuildTarget -eq "db-tools") {
 
 } else {
 
-    # This has a naive assumption every target has a compilation unit wih same name
+    # This has a naive assumption every target has a compilation unit with the same name
 
     Write-Host "`n Building $BuildTarget"
     $outExecutable = [string](Join-Path $Erigon.BinPath "$BuildTarget.exe")

@@ -4,11 +4,12 @@ package gdbme
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon/cmd/utils"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
 const lldbPath = "/usr/bin/lldb"

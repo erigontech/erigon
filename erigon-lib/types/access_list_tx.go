@@ -310,13 +310,9 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		// decode tuple
 		*al = append(*al, AccessTuple{StorageKeys: []common.Hash{}})
 		tuple := &(*al)[len(*al)-1]
-		if b, err = s.Bytes(); err != nil {
+		if err = s.ReadBytes(tuple.Address[:]); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if len(b) != 20 {
-			return fmt.Errorf("wrong size for AccessTuple address: %d", len(b))
-		}
-		copy(tuple.Address[:], b)
 		if _, err = s.List(); err != nil {
 			return fmt.Errorf("open StorageKeys: %w", err)
 		}

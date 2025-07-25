@@ -81,7 +81,6 @@ func (tx *AccountAbstractionTransaction) GetSender() (common.Address, bool) {
 }
 
 func (tx *AccountAbstractionTransaction) SetSender(address common.Address) {
-	return
 }
 
 func (tx *AccountAbstractionTransaction) IsContractDeploy() bool {

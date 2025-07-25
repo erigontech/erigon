@@ -40,12 +40,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
 type SortedRange interface {
@@ -202,7 +202,8 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Confi
 		chainName = chainConfig.ChainName
 	}
 
-	mergeLimit := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, blockFrom)
+	snapCfg, _ := snapcfg.KnownCfg(chainName)
+	mergeLimit := snapcfg.MergeLimitFromCfg(snapCfg, snapType, blockFrom)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
@@ -532,11 +533,11 @@ type RoSnapshots struct {
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
 
-	// allows for pruning segments - this is the min availible segment
+	// allows for pruning segments - this is the minimum available segment
 	segmentsMin atomic.Uint64
 	ready       ready
 	operators   map[snaptype.Enum]*retireOperators
-	alignMin    bool // do we want to align all visible segments to min availible
+	alignMin    bool // do we want to align all visible segments to the minimum available
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -838,7 +839,7 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 	}
 
 	if alignMin {
-		// all types must have same hight
+		// all types must have the same height
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
 			if minMaxVisibleBlock == 0 {
@@ -907,21 +908,16 @@ func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	return _max
 }
 
-func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) uint64 {
-	tx := s.ViewType(segtype.Type())
-	defer tx.Close()
+func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
 
-	var _max uint64
-
-	for _, seg := range tx.Segments {
-		if !seg.IsIndexed() {
-			break
-		}
-
-		_max = seg.to - 1
+	visibleFiles := s.visible[segtype]
+	if len(visibleFiles) > 0 {
+		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
 	}
 
-	return _max
+	return
 }
 
 func (s *RoSnapshots) Ls() {
@@ -941,9 +937,8 @@ func (s *RoSnapshots) Ls() {
 func (s *RoSnapshots) Files() (list []string) {
 	view := s.View()
 	defer view.Close()
-
 	for _, t := range s.enums {
-		for _, seg := range s.visible[t] {
+		for _, seg := range view.segments[t].Segments {
 			list = append(list, seg.src.FileName())
 		}
 	}
@@ -1053,7 +1048,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
 
-	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
+	snConfig, _ := snapcfg.KnownCfg(s.cfg.ChainName)
 
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
