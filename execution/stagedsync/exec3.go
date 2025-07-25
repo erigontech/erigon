@@ -779,10 +779,12 @@ Loop:
 				if !initialCycle && isBatchFull {
 					break Loop
 				}
-				logger.Info("Committed", "time", time.Since(commitStart),
-					"block", outputBlockNum.GetValueUint64(), "txNum", inputTxNum,
-					"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
-					"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
+				if initialCycle {
+					logger.Info("Committed", "time", time.Since(commitStart),
+						"block", outputBlockNum.GetValueUint64(), "txNum", inputTxNum,
+						"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
+						"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
+				}
 			default:
 			}
 		}
