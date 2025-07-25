@@ -116,6 +116,10 @@ jobs:
       # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
       - name: Prune docker
         run: |
+          echo "Stopping and removing all containers..."
+          docker rm -f $(docker ps -aq) || true
+          echo "Removing all images..."
+          docker rmi -f $(docker images -aq) || true
           echo "Pruning docker..."
           docker system prune -af --volumes
         if: always()
