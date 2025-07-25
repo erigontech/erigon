@@ -408,7 +408,7 @@ func (s *server) getHeader(ctx context.Context, blockNum uint64) (*coretypes.Hea
 			}
 		}
 
-		s.activeSnapshots.OpenSegments([]snaptype.Type{coresnaptype.Headers}, true)
+		s.activeSnapshots.OpenSegments([]snaptype.Type{coresnaptype.Headers}, true, true)
 
 		header, err = s.blockReader.Header(ctx, nil, common.Hash{}, blockNum)
 

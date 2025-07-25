@@ -190,6 +190,9 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		rs = make(types.FlatRequests, 0)
 		allLogs := make(types.Logs, 0)
 		for _, rec := range receipts {
+			if rec == nil {
+				return nil, nil, nil, fmt.Errorf("receipt is nil. Possible reason: you trying to execute txs in-parallel. But `consensus.Finalize` requires 'all receipts of block', means `Final` system txn must be executed in reducer (after all other txs of given block)")
+			}
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)

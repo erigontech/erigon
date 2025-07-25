@@ -38,11 +38,11 @@ type ChainEventNotifier interface {
 func MiningStages(
 	ctx context.Context,
 	createBlockCfg MiningCreateBlockCfg,
-	borHeimdallCfg BorHeimdallCfg,
 	executeBlockCfg ExecuteBlockCfg,
 	sendersCfg SendersCfg,
 	execCfg MiningExecCfg,
 	finish MiningFinishCfg,
+	astridEnabled bool,
 ) []*Stage {
 	return []*Stage{
 		{
@@ -55,22 +55,6 @@ func MiningStages(
 				return nil
 			},
 			Prune: func(u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
-		},
-		{
-			ID:          stages.MiningBorHeimdall,
-			Description: "Download Bor-specific data from Heimdall",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if badBlockUnwind {
-					return nil
-				}
-				return MiningBorHeimdallForward(ctx, borHeimdallCfg, s, u, txc.Tx, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return nil
-			},
 		},
 		{
 			ID:          stages.MiningExecution,

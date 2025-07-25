@@ -203,7 +203,9 @@ func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-logEvery.C:
-				a.logger.Info("[agg] ", "files", a.ps.String())
+				if s := a.ps.String(); s != "" {
+					a.logger.Info("[agg] building", "files", s)
+				}
 			}
 		}
 	}()
@@ -214,6 +216,24 @@ type MissedFilesMap map[Accessors][]*filesItem
 type MissedAccessorAggFiles struct {
 	domain map[kv.Domain]*MissedAccessorDomainFiles
 	ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
+}
+
+func (m *MissedAccessorAggFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.domain {
+		if !v.IsEmpty() {
+			return false
+		}
+	}
+	for _, v := range m.ii {
+		if !v.IsEmpty() {
+			return false
+		}
+	}
+
+	return true
 }
 
 type MissedAccessorDomainFiles struct {
@@ -229,6 +249,18 @@ func (m *MissedAccessorDomainFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
 }
 
+func (m *MissedAccessorDomainFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return m.history.IsEmpty()
+}
+
 type MissedAccessorHistoryFiles struct {
 	ii    *MissedAccessorIIFiles
 	files MissedFilesMap
@@ -238,10 +270,34 @@ func (m *MissedAccessorHistoryFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
 }
 
+func (m *MissedAccessorHistoryFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return m.ii.IsEmpty()
+}
+
 type MissedAccessorIIFiles struct {
 	files MissedFilesMap
 }
 
 func (m *MissedAccessorIIFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
+}
+
+func (m *MissedAccessorIIFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return true
 }

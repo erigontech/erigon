@@ -34,13 +34,16 @@
       },
       "validatorContract": "0x0000000000000000000000000000000000001000",
       "stateReceiverContract": "0x0000000000000000000000000000000000001001",
-      "overrideStateSyncRecords": null,
+      "overrideStateSyncRecords": {
+        "r.23184305-23220127": 0
+      },
       "jaipurBlock": 73100,
       "delhiBlock": 73100,
       "indoreBlock": 73100,
       "agraBlock": 73100,
       "napoliBlock": 5423600,
       "ahmedabadBlock": 11865856,
+      "bhilaiBlock": 22765056,
       "blockAlloc": {
         "11865856": {
           "0000000000000000000000000000000000001001": {

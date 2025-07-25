@@ -35,14 +35,12 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -473,7 +471,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	br := m.BlockReader
-	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), br))
+	txNumReader := br.TxnumReader(context.Background())
 	require := require.New(t)
 	ctx := m.Ctx
 
@@ -500,7 +498,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 		TransactionIndex: 0,
 	}
-	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
+	receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
 	receipt2 := &types.Receipt{
 		PostState:         libcommon.Hash{2}.Bytes(),
@@ -516,7 +514,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		BlockHash:        header.Hash(),
 		TransactionIndex: 1,
 	}
-	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
+	receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
 	receipts := types.Receipts{receipt1, receipt2}
 
 	// Check that no receipt entries are in a pristine database

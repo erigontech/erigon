@@ -104,13 +104,6 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 	defer cfg.bd.ClearBodyCache()
 	var headerProgress, bodyProgress uint64
 
-	if cfg.chanConfig.Bor != nil {
-		headerProgress, err = stages.GetStageProgress(tx, stages.BorHeimdall)
-		if err != nil {
-			return err
-		}
-	}
-
 	if headerProgress == 0 {
 		headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {

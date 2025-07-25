@@ -48,7 +48,52 @@ import (
 )
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
-var BorDefaultMinerGasPrice = big.NewInt(25 * params.GWei)
+var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
+
+var (
+	DefaultMinerGasLimitEthMainnet uint64 = 45_000_000
+	BorDefaultMinerGasLimit        uint64 = 45_000_000
+	DefaultMinerGasLimitSepolia    uint64 = 60_000_000
+	DefaultMinerGasLimitHolesky    uint64 = 60_000_000
+	DefaultMinerGasLimitHoodi      uint64 = 60_000_000
+	DefaultMinerGasLimitBorMainnet uint64 = 45_000_000
+	DefaultMinerGasLimitAmoy       uint64 = 45_000_000
+	DefaultMinerGasLimitGnosis     uint64 = 17_000_000
+	DefaultMinerGasLimitChiado     uint64 = 17_000_000
+)
+
+func DefaultMinerGasLimitByChain(config *Config) uint64 {
+	if config.Genesis == nil {
+		return DefaultMinerGasLimitEthMainnet
+	}
+
+	switch config.NetworkID {
+	case params.MainnetChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitEthMainnet
+	case params.SepoliaChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitSepolia
+	case params.HoleskyChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitHolesky
+	case params.HoodiChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitHoodi
+	case params.BorMainnetChainConfig.ChainID.Uint64():
+		return BorDefaultMinerGasLimit
+	case params.AmoyChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitAmoy
+	case params.GnosisChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitGnosis
+	case params.ChiadoChainConfig.ChainID.Uint64():
+		return DefaultMinerGasLimitChiado
+	default:
+		if config.Genesis.Config == nil {
+			return DefaultMinerGasLimitEthMainnet
+		}
+		if config.Genesis.Config.Bor != nil {
+			return BorDefaultMinerGasLimit
+		}
+	}
+	return DefaultMinerGasLimitEthMainnet
+}
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -91,8 +136,7 @@ var Defaults = Config{
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
-		GasLimit: 36_000_000,
-		GasPrice: big.NewInt(params.GWei),
+		GasPrice: big.NewInt(common.GWei),
 		Recommit: 3 * time.Second,
 	},
 	TxPool:      txpoolcfg.DefaultConfig,

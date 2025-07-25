@@ -37,11 +37,6 @@ type unmarshalTest struct {
 }
 
 var (
-	encodeBytesTests = []marshalTest{
-		{[]byte{}, "0x"},
-		{[]byte{0}, "0x00"},
-		{[]byte{0, 0, 1, 2}, "0x00000102"},
-	}
 	encodeBigTests = []marshalTest{
 		{bigFromString("0"), "0x0"},
 		{bigFromString("1"), "0x1"},

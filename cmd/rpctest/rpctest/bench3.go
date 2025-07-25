@@ -20,8 +20,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"net/http"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -29,9 +27,7 @@ import (
 )
 
 func Bench3(erigon_url, geth_url string) error {
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
+
 	blockhash := libcommon.HexToHash("0xdf15213766f00680c6a20ba76ba2cc9534435e19bc490039f3a7ef42095c8d13")
 	req_id := 1
 

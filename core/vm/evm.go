@@ -40,6 +40,8 @@ var emptyHash = libcommon.Hash{}
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
+	case evm.chainRules.IsBhilai:
+		precompiles = PrecompiledContractsBhilai
 	case evm.chainRules.IsPrague:
 		precompiles = PrecompiledContractsPrague
 	case evm.chainRules.IsNapoli:
@@ -92,7 +94,7 @@ type EVM struct {
 	interpreter Interpreter
 	// abort is used to abort the EVM calling operations
 	// NOTE: must be set atomically
-	abort int32
+	abort atomic.Bool
 	// callGasTemp holds the gas available for the current call. This is needed because the
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
@@ -131,7 +133,7 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.intraBlockState = ibs
 
 	// ensure the evm is reset to be used again
-	atomic.StoreInt32(&evm.abort, 0)
+	evm.abort.Store(false)
 }
 
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
@@ -149,19 +151,17 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
 
 	// ensure the evm is reset to be used again
-	atomic.StoreInt32(&evm.abort, 0)
+	evm.abort.Store(false)
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and
 // it's safe to be called multiple times.
 func (evm *EVM) Cancel() {
-	atomic.StoreInt32(&evm.abort, 1)
+	evm.abort.Store(true)
 }
 
 // Cancelled returns true if Cancel has been called
-func (evm *EVM) Cancelled() bool {
-	return atomic.LoadInt32(&evm.abort) == 1
-}
+func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
 // CallGasTemp returns the callGasTemp for the EVM
 func (evm *EVM) CallGasTemp() uint64 {
@@ -472,22 +472,26 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if err == nil && evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
 		err = ErrInvalidCode
 	}
-	// if the contract creation ran successfully and no errors were returned
+	// If the contract creation ran successfully and no errors were returned,
 	// calculate the gas required to store the code. If the code could not
-	// be stored due to not enough gas set an error and let it be handled
+	// be stored due to not enough gas, set an error when we're in Homestead and let it be handled
 	// by the error checking condition below.
 	if err == nil {
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
 		if contract.UseGas(createDataGas, tracing.GasChangeCallCodeStorage) {
 			evm.intraBlockState.SetCode(address, ret)
-		} else if evm.chainRules.IsHomestead {
-			err = ErrCodeStoreOutOfGas
+		} else {
+			// If we run out of gas, we do not store the code: the returned code must be empty.
+			ret = []byte{}
+			if evm.chainRules.IsHomestead {
+				err = ErrCodeStoreOutOfGas
+			}
 		}
 	}
 
 	// When an error was returned by the EVM or when setting the creation code
-	// above we revert to the snapshot and consume any gas remaining. Additionally
-	// when we're in homestead this also counts for code storage gas errors.
+	// above, we revert to the snapshot and consume any gas remaining. Additionally,
+	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.intraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {

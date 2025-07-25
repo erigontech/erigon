@@ -242,7 +242,7 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 
 	if rs.syncCfg.PersistReceiptsCacheV2 {
 		var receipt *types.Receipt
-		if txTask.TxIndex > 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
+		if txTask.TxIndex >= 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
 			receipt = txTask.BlockReceipts[txTask.TxIndex]
 		}
 		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
@@ -578,7 +578,6 @@ type ReaderV3 struct {
 
 func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
-		//trace:     true,
 		tx:        tx,
 		composite: make([]byte, 20+32),
 	}

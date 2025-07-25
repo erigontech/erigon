@@ -33,12 +33,17 @@ var (
 	ArchiveMode = Mode{
 		Initialised: true,
 		History:     Distance(math.MaxUint64),
-		Blocks:      Distance(math.MaxUint64),
+		Blocks:      KeepAllBlocksPruneMode,
 		Experiments: Experiments{}, // all off
 	}
 	FullMode = Mode{
 		Initialised: true,
-		Blocks:      Distance(math.MaxUint64),
+		Blocks:      DefaultBlocksPruneMode,
+		History:     Distance(config3.DefaultPruneDistance),
+	}
+	BlocksMode = Mode{
+		Initialised: true,
+		Blocks:      KeepAllBlocksPruneMode,
 		History:     Distance(config3.DefaultPruneDistance),
 		Experiments: Experiments{},
 	}
@@ -50,40 +55,78 @@ var (
 	}
 
 	DefaultMode = ArchiveMode
+	MockMode    = Mode{
+		Initialised: true,
+		History:     Distance(math.MaxUint64),
+		Blocks:      Distance(math.MaxUint64),
+	}
 
 	ErrUnknownPruneMode       = errors.New("--prune.mode must be one of archive, full, minimal")
 	ErrDistanceOnlyForArchive = errors.New("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
 )
 
+const (
+	archiveModeStr = "archive"
+	blockModeStr   = "blocks"
+	fullModeStr    = "full"
+	minimalModeStr = "minimal"
+)
+
 type Experiments struct{}
 
-func FromCli(distanceHistory, distanceBlocks uint64, pruneMode string, experiments []string) (Mode, error) {
+type Mode struct {
+	Initialised bool // Set when the values are initialised (not default)
+	History     BlockAmount
+	Blocks      BlockAmount
+
+	Experiments Experiments // experiments to enable for this mode
+}
+
+func (m Mode) String() string {
+	if !m.Initialised {
+		return archiveModeStr
+	}
+	if m.History.toValue() == FullMode.History.toValue() && m.Blocks.toValue() == FullMode.Blocks.toValue() {
+		return fullModeStr
+	}
+	if m.History.toValue() == MinimalMode.History.toValue() && m.Blocks.toValue() == MinimalMode.Blocks.toValue() {
+		return minimalModeStr
+	}
+
+	if m.Blocks.toValue() == BlocksMode.Blocks.toValue() && m.History.toValue() == BlocksMode.History.toValue() {
+		return blockModeStr
+	}
+
+	short := archiveModeStr
+	if m.History.toValue() != DefaultMode.History.toValue() {
+		short += fmt.Sprintf(" --prune.distance=%d", m.History.toValue())
+	}
+	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
+		short += fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue())
+	}
+	return strings.TrimLeft(short, " ")
+}
+
+func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64, experiments []string) (Mode, error) {
 	var mode Mode
 	switch pruneMode {
 	case "archive", "":
 		mode = ArchiveMode
-		if distanceHistory > 0 {
-			mode.History = Distance(distanceHistory)
-		}
-		if distanceBlocks > 0 {
-			mode.Blocks = Distance(distanceBlocks)
-		}
-	case "full":
+	case fullModeStr:
 		mode = FullMode
 	case "minimal":
 		mode = MinimalMode
+	case blockModeStr:
+		mode = BlocksMode
 	default:
 		return Mode{}, ErrUnknownPruneMode
 	}
 
-	if pruneMode != "archive" {
-		// Override is not allowed for full/minimal mode
-		if distanceHistory > 0 && distanceHistory != mode.History.toValue() {
-			return Mode{}, ErrDistanceOnlyForArchive
-		}
-		if distanceBlocks > 0 && distanceBlocks != mode.Blocks.toValue() {
-			return Mode{}, ErrDistanceOnlyForArchive
-		}
+	if distanceHistory > 0 {
+		mode.History = Distance(distanceHistory)
+	}
+	if distanceBlocks > 0 {
+		mode.Blocks = Distance(distanceBlocks)
 	}
 
 	for _, ex := range experiments {
@@ -120,34 +163,10 @@ func Get(db kv.Getter) (Mode, error) {
 	return prune, nil
 }
 
-type Mode struct {
-	Initialised bool // Set when the values are initialised (not default)
-	History     BlockAmount
-	Blocks      BlockAmount
-	Experiments Experiments
-}
-
-func (m Mode) String() string {
-	if !m.Initialised {
-		return "archive"
-	}
-	if m.History.toValue() == FullMode.History.toValue() && m.Blocks.toValue() == FullMode.Blocks.toValue() {
-		return "full"
-	}
-	if m.History.toValue() == MinimalMode.History.toValue() && m.Blocks.toValue() == MinimalMode.Blocks.toValue() {
-		return "minimal"
-	}
-
-	short := "archive"
-	if m.History.toValue() != DefaultMode.History.toValue() {
-		short += fmt.Sprintf(" --prune.distance=%d", m.History.toValue())
-	}
-	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
-		short += fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue())
-	}
-
-	return strings.TrimLeft(short, " ")
-}
+const (
+	DefaultBlocksPruneMode = Distance(math.MaxUint64)     // Use chain-specific history pruning (aka. history-expiry)
+	KeepAllBlocksPruneMode = Distance(math.MaxUint64 - 1) // Keep all history
+)
 
 type BlockAmount interface {
 	PruneTo(stageHead uint64) uint64
@@ -208,7 +227,12 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
-
+		// Little initial design flaw: we used maxUint64 as default value for prune distance so history expiry was not accounted for.
+		// We need to use because we are changing defaults in archive node from DefaultBlocksPruneMode to KeepAllBlocksPruneMode which is a different value so it would fail if we are running --prune.mode=archive.
+		if (pm.History == DefaultBlocksPruneMode && pruneMode.History == DefaultBlocksPruneMode) &&
+			(pm.Blocks == DefaultBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
+			return pruneMode, nil
+		}
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
 			return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())

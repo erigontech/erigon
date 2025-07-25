@@ -4,7 +4,7 @@ participants_matrix:
       el_image: test/erigon:current
   cl:
     - cl_type: lighthouse
-      cl_image: sigp/lighthouse:v6.0.0
+      cl_image: sigp/lighthouse:v7.0.1
     - cl_type: teku
       cl_image: consensys/teku:develop
 network_params:

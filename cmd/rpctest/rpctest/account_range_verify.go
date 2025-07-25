@@ -77,12 +77,9 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 
 	f := func(url string, db kv.RwTx) error {
 		i := uint64(0)
-		reqGen := &RequestGenerator{
-			client: client,
-		}
+		reqGen := &RequestGenerator{}
 		next := []byte{}
 		for {
-			reqGen.reqID++
 			ar := DebugAccountRange{}
 			req := reqGen.accountRange(blockFrom, next, 256)
 			fmt.Println(req)
@@ -107,7 +104,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 					return err
 				}
 			}
-			fmt.Println("request id", reqGen.reqID, "accounts", i, addr.String())
+			fmt.Println("request id", reqGen.reqID.Load(), "accounts", i, addr.String())
 			if len(ar.Result.Next) == 0 {
 				return nil
 			}

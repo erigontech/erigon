@@ -259,6 +259,7 @@ type spanReader interface {
 
 type bridgeReader interface {
 	Events(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) ([]*types.Message, error)
+	EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 }
 
@@ -270,8 +271,19 @@ func ValidateHeaderTime(
 	config *borcfg.BorConfig,
 	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) error {
-	if header.Time > uint64(now.Unix()) {
-		return consensus.ErrFutureBlock
+	if config.IsBhilai(header.Number.Uint64()) {
+		// Don't waste time checking blocks from the future but allow a buffer of block time for
+		// early block announcements. Note that this is a loose check and would allow early blocks
+		// from non-primary producer. Such blocks will be rejected later when we know the succession
+		// number of the signer in the current sprint.
+		if header.Time > uint64(now.Unix())+config.CalculatePeriod(header.Number.Uint64()) {
+			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+		}
+	} else {
+		// Don't waste time checking blocks from the future
+		if header.Time > uint64(now.Unix()) {
+			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+		}
 	}
 
 	if parent == nil {
@@ -288,7 +300,14 @@ func ValidateHeaderTime(
 		return err
 	}
 
-	if header.Time < MinNextBlockTime(parent, succession, config) {
+	// Post Bhilai HF, reject blocks form non-primary producers if they're earlier than the expected time
+	if config.IsBhilai(header.Number.Uint64()) && succession != 0 {
+		if header.Time > uint64(now.Unix()) {
+			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+		}
+	}
+
+	if parent != nil && header.Time < MinNextBlockTime(parent, succession, config) {
 		return &BlockTooSoonError{header.Number.Uint64(), succession}
 	}
 
@@ -495,11 +514,25 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	if header.Number == nil {
 		return errUnknownBlock
 	}
+
 	number := header.Number.Uint64()
+	now := time.Now().Unix()
 
 	// Don't waste time checking blocks from the future
-	if header.Time > uint64(time.Now().Unix()) {
-		return consensus.ErrFutureBlock
+	// Allow early blocks if Bhilai HF is enabled
+	if c.config.IsBhilai(number) {
+		// Don't waste time checking blocks from the future but allow a buffer of block time for
+		// early block announcements. Note that this is a loose check and would allow early blocks
+		// from non-primary producer. Such blocks will be rejected later when we know the succession
+		// number of the signer in the current sprint.
+		if header.Time > uint64(now)+c.config.CalculatePeriod(number) {
+			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+		}
+	} else {
+		// Don't waste time checking blocks from the future
+		if header.Time > uint64(now) {
+			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+		}
 	}
 
 	if err := ValidateHeaderUnusedFields(header); err != nil {
@@ -931,10 +964,23 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if c.config.IsSprintEnd(number) {
-		spanID := uint64(heimdall.SpanIdAt(number + 1))
-		newValidators, err := c.spanner.GetCurrentProducers(spanID, chain.(ChainHeaderReader))
-		if err != nil {
-			return errUnknownValidators
+		var newValidators []*valset.Validator
+
+		if c.useSpanReader {
+			validators, err := c.spanReader.Producers(context.Background(), number+1)
+			if err != nil {
+				return err
+			}
+
+			newValidators = validators.Validators
+		} else {
+			var err error
+			spanID := uint64(heimdall.SpanIdAt(number + 1))
+
+			newValidators, err = c.spanner.GetCurrentProducers(spanID, chain.(ChainHeaderReader))
+			if err != nil {
+				return errUnknownValidators
+			}
 		}
 
 		// sort validator by address
@@ -1003,8 +1049,19 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	}
 
 	header.Time = MinNextBlockTime(parent, succession, c.config)
-	if header.Time < uint64(time.Now().Unix()) {
-		header.Time = uint64(time.Now().Unix())
+	now := time.Now()
+	if header.Time < uint64(now.Unix()) {
+		header.Time = uint64(now.Unix())
+	} else {
+		// For primary validators, wait until the current block production window
+		// starts. This prevents bor from starting to build next block before time
+		// as we'd like to wait for new transactions. Although this change doesn't
+		// need a check for hard fork as it doesn't change any consensus rules, we
+		// still keep it for safety and testing.
+		if c.config.IsBhilai(number) && succession == 0 {
+			startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
+			time.Sleep(time.Until(startTime))
+		}
 	}
 
 	return nil
@@ -1043,7 +1100,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			}
 
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, logger); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, logger, false); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, types.Receipts{}, nil, err
@@ -1109,7 +1166,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 				return nil, nil, types.Receipts{}, nil, err
 			}
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, logger); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, logger, true); err != nil {
 				err := fmt.Errorf("FinalizeAndAssemble.CommitStates: %w", err)
 				c.logger.Error("[bor] committing states", "err", err)
 				return nil, nil, types.Receipts{}, nil, err
@@ -1135,6 +1192,9 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	if chain != nil && chain.Config().IsBhilai(header.Number.Uint64()) {
+		misc.StoreBlockHashesEip2935(header, state, config, chain)
+	}
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -1151,7 +1211,7 @@ func (c *Bor) Authorize(currentSigner libcommon.Address, signFn SignerFn) {
 func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
 	block := blockWithReceipts.Block
 	receipts := blockWithReceipts.Receipts
-	header := block.HeaderNoCopy()
+	header := block.Header()
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
 
@@ -1192,8 +1252,15 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.B
 		}
 	}
 
+	var delay time.Duration
 	// Sweet, the protocol permits us to sign the block, wait for our time
-	delay := time.Until(time.Unix(int64(header.Time), 0))
+	if c.config.IsBhilai(header.Number.Uint64()) && successionNumber == 0 {
+		// For primary producers, set the delay to `header.Time - block time` instead of `header.Time`
+		// for early block announcement instead of waiting for full block time.
+		delay = time.Until(time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0))
+	} else {
+		delay = time.Until(time.Unix(int64(header.Time), 0)) // Wait until we reach header time
+	}
 	// wiggle was already accounted for in header.Time, this is just for logging
 	wiggle := time.Duration(successionNumber) * time.Duration(c.config.CalculateBackupMultiplier(number)) * time.Second
 
@@ -1545,13 +1612,51 @@ func (c *Bor) CommitStates(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 	logger log.Logger,
+	fetchEventsWithingTime bool,
 ) error {
 	blockNum := header.Number.Uint64()
 
 	if c.useBridgeReader {
-		events, err := c.bridgeReader.Events(c.execCtx, header.Hash(), blockNum)
-		if err != nil {
-			return err
+		var events []*types.Message
+		var err error
+
+		if fetchEventsWithingTime {
+			sprintLength := c.config.CalculateSprintLength(blockNum)
+
+			if blockNum < sprintLength {
+				return nil
+			}
+
+			prevSprintStart := chain.Chain.GetHeaderByNumber(blockNum - sprintLength)
+			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
+
+			timeFrom := time.Unix(int64(prevSprintStart.Time-stateSyncDelay), 0)
+			timeTo := time.Unix(int64(header.Time-stateSyncDelay), 0)
+
+			// Previous sprint was not indore.
+			if !c.config.IsIndore(prevSprintStart.Number.Uint64()) {
+				if prevSprintStart.Number.Uint64() >= sprintLength {
+					prevPrevSprintStart := chain.Chain.GetHeaderByNumber(prevSprintStart.Number.Uint64() - sprintLength)
+					timeFrom = time.Unix(int64(prevPrevSprintStart.Time), 0)
+				} else {
+					timeFrom = time.Unix(0, 0)
+				}
+			}
+
+			// Current sprint was not indore.
+			if !c.config.IsIndore(blockNum) {
+				timeTo = time.Unix(int64(prevSprintStart.Time), 0)
+			}
+
+			events, err = c.bridgeReader.EventsWithinTime(c.execCtx, timeFrom, timeTo)
+			if err != nil {
+				return err
+			}
+		} else {
+			events, err = c.bridgeReader.Events(c.execCtx, header.Hash(), blockNum)
+			if err != nil {
+				return err
+			}
 		}
 
 		for _, event := range events {

@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -31,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
@@ -42,6 +42,9 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	defer logEvery.Stop()
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	g := &errgroup.Group{}
+	g.SetLimit(estimate.AlmostAllCPUs())
+	txNumsReader := blockReader.TxnumReader(ctx)
+
 	for j := 0; j < 256; j++ {
 		j := j
 		for jj := 0; jj < 255; jj++ {
@@ -54,13 +57,11 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 				defer tx.Rollback()
 
 				var minStep uint64 = math.MaxUint64
-				keys, err := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugRangeLatest(tx, kv.AccountsDomain, []byte{byte(j), byte(jj)}, []byte{byte(j), byte(jj + 1)}, -1)
+				keys, err := state.AggTx(tx).DebugRangeLatest(tx, kv.AccountsDomain, []byte{byte(j), byte(jj)}, []byte{byte(j), byte(jj + 1)}, -1)
 				if err != nil {
 					return err
 				}
 				defer keys.Close()
-
-				txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
 				for keys.HasNext() {
 					key, _, err := keys.Next()
@@ -76,7 +77,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 						if err != nil {
 							return err
 						}
-						ok, blockNum, err := txNumsReader.FindBlockNum(tx, txNum)
+						blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
 						if err != nil {
 							return err
 						}
@@ -89,18 +90,18 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 						_min, _ := rawdbv3.TxNums.Min(tx, blockNum)
 						if txNum == _min {
 							minStep = min(minStep, txNum/agg.StepSize())
-							log.Warn(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/agg.StepSize(), txNum, blockNum, key))
+							log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/agg.StepSize(), txNum, blockNum, key))
 							break
-						}
-
-						select {
-						case <-logEvery.C:
-							log.Warn(fmt.Sprintf("[integrity] HistoryNoSystemTxs: checked=%dK keys", count.Load()/1_000))
-						default:
 						}
 					}
 					it.Close()
 					count.Add(1)
+
+					select {
+					case <-logEvery.C:
+						log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: checked=%.2fm keys", float64(count.Load())/1_000_000))
+					default:
+					}
 				}
 				return nil
 			})

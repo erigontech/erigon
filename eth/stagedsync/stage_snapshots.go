@@ -280,7 +280,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
+	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true, false); err != nil {
 		return err
 	}
 
@@ -293,7 +293,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
-	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, &cfg.chainConfig); err != nil {
+	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 		return err
 	}
 
@@ -336,10 +336,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	cfg.blockReader.Snapshots().LogStat("download")
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
+	txNumsReader := cfg.blockReader.TxnumReader(ctx)
 	if temporal, ok := tx.(*temporal.Tx); ok {
 		stats.LogStats(temporal, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 	}
@@ -348,7 +348,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 }
 
 func getPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
-	snapProgress := min(blockReader.FrozenBorBlocks(), blockReader.FrozenBlocks())
+	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
 	if blockReader.BorSnapshots() == nil {
 		snapProgress = blockReader.FrozenBlocks()
 	}
@@ -621,10 +621,12 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	pruneLimit := 10
+	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneLimit = 10_000
+		pruneTimeout = time.Hour
 	}
-	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {

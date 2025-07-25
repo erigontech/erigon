@@ -38,7 +38,6 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
@@ -214,17 +213,15 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 	defer exec.Close()
 
-	var blockHash common.Hash
 	var header *types.Header
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	txNumbers, err := applyFiltersV3(txNumsReader, tx, begin, end, crit)
+	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit)
 	if err != nil {
 		return logs, err
 	}
 
 	it := rawdbv3.TxNums2BlockNums(tx,
-		txNumsReader,
+		api._txNumReader,
 		txNumbers, order.Asc)
 	defer it.Close()
 	for it.HasNext() {
@@ -249,7 +246,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
-			blockHash = header.Hash()
 			exec.ChangeBlock(header)
 		}
 
@@ -262,28 +258,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		_, err = exec.ExecTxn(txNum, txIndex, txn, false)
+		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum+1)
 		if err != nil {
 			return nil, err
 		}
-		rawLogs := exec.GetRawLogs(txIndex)
-
-		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-		r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
-		if err != nil {
+		if r == nil {
 			return nil, err
 		}
-		var filtered types.Logs
-		if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
-			filtered = rawLogs.Filter(addrMap, crit.Topics, 0)
-			for _, log := range filtered {
-				log.BlockNumber = blockNum
-				log.BlockHash = blockHash
-				log.TxHash = txn.Hash()
-			}
-		} else {
-			filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
-		}
+		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
@@ -309,6 +291,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if err != nil {
 				return nil, err
 			}
+			if header == nil {
+				continue
+			}
 
 			// check for state sync event logs
 			events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
@@ -320,12 +305,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				continue
 			}
 
-			lastTxNum, err := txNumsReader.Max(tx, blockNum)
+			lastTxNum, err := api._txNumReader.Max(tx, blockNum)
 			if err != nil {
 				return nil, err
 			}
 
-			firstTxNum, err := txNumsReader.Min(tx, blockNum)
+			firstTxNum, err := api._txNumReader.Min(tx, blockNum)
 			if err != nil {
 				return nil, err
 			}
@@ -336,7 +321,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 
-			borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, int(txIndex), int(logIndex))
+			borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, int(txIndex), int(logIndex))
 			if err != nil {
 				return logs, err
 			}
@@ -459,9 +444,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-
-	txNumMin, err := txNumsReader.Min(tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +457,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 				return nil, err
 			}
 			if ok {
-				txNumNextBlock, err := txNumsReader.Min(tx, blockNum+1)
+				txNumNextBlock, err := api._txNumReader.Min(tx, blockNum+1)
 				if err != nil {
 					return nil, err
 				}
@@ -635,7 +618,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 		blockNumChanged = true
 
 		var ok bool
-		ok, i.blockNum, err = i.txNumsReader.FindBlockNum(i.tx, txNum)
+		i.blockNum, ok, err = i.txNumsReader.FindBlockNum(i.tx, txNum)
 		if err != nil {
 			return
 		}

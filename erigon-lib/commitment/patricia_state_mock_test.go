@@ -154,20 +154,20 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 	return nil
 }
 
-func (ms *MockState) applyBranchNodeUpdates(updates map[string]BranchData) {
-	for key, update := range updates {
-		if pre, ok := ms.cm[key]; ok {
-			// Merge
-			merged, err := pre.MergeHexBranches(update, nil)
-			if err != nil {
-				panic(err)
-			}
-			ms.cm[key] = merged
-		} else {
-			ms.cm[key] = update
-		}
-	}
-}
+//func (ms *MockState) applyBranchNodeUpdates(updates map[string]BranchData) {
+//	for key, update := range updates {
+//		if pre, ok := ms.cm[key]; ok {
+//			// Merge
+//			merged, err := pre.MergeHexBranches(update, nil)
+//			if err != nil {
+//				panic(err)
+//			}
+//			ms.cm[key] = merged
+//		} else {
+//			ms.cm[key] = update
+//		}
+//	}
+//}
 
 func decodeHex(in string) []byte {
 	payload, err := hex.DecodeString(in)

@@ -19,7 +19,6 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 
@@ -32,9 +31,6 @@ import (
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	var rec *bufio.Writer
 	var resultsCh chan CallResult = nil
@@ -66,11 +62,8 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 	}
 
 	var res CallResult
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
-	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
@@ -81,7 +74,7 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 	for bn := blockFrom; bn <= blockTo; bn++ {
-		reqGen.reqID++
+
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
@@ -92,7 +85,7 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 		}
 
 		for _, txn := range b.Result.Transactions {
-			reqGen.reqID++
+
 			request := reqGen.getTransactionReceipt(txn.Hash)
 			errCtx := fmt.Sprintf("block %d, txn %s", bn, txn.Hash)
 			if err := requestAndCompare(request, "eth_getTransactionReceipt", errCtx, reqGen, needCompare, rec, errs, resultsCh,
@@ -135,7 +128,7 @@ func BenchBlockReceipts(erigonURL, gethURL string, needCompare bool, blockFrom u
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getTransactionReceipt"}, resultsCh)
+		go vegetaWrite(true, []string{"eth_getBlockReceipts"}, resultsCh)
 	}
 
 	var res CallResult

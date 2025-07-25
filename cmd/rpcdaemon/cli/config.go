@@ -50,13 +50,14 @@ import (
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/remotedb"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
@@ -382,6 +383,16 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		// Accede mode preventing db-creation:
 		//    at first start RpcDaemon may start earlier than Erigon
 		//    Accede mode will check db existence (may wait with retries). It's ok to fail in this case - some supervisor will restart us.
+
+		// using salt files as proxy for empty directory or not
+		ok, err := ee.CheckSaltFilesExist(cfg.Dirs)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+		}
+		if !ok {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, ee.ErrCannotStartWithoutSaltFiles
+		}
+
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(roTxLimit)
 		rawDB, err := kv2.New(kv.ChainDB, logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)
@@ -400,6 +411,20 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			cc, err = rawdb.ReadChainConfig(tx, genesisHash)
 			if err != nil {
 				return err
+			}
+			cfg.Sync.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			if err != nil {
+				return err
+			}
+			if cfg.Sync.KeepExecutionProofs {
+				libstate.EnableHistoricalCommitment()
+			}
+			cfg.Sync.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
+			if err != nil {
+				return err
+			}
+			if cfg.Sync.PersistReceiptsCacheV2 {
+				libstate.EnableHistoricalRCache()
 			}
 			return nil
 		}); err != nil {
@@ -428,7 +453,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
-		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+		txNumsReader := blockReader.TxnumReader(ctx)
 
 		agg, err := libstate.NewAggregator2(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)
 		if err != nil {
@@ -460,6 +485,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		wg.SetLimit(1)
 		onNewSnapshot = func() {
 			wg.Go(func() error { // don't block events processing by network communication
+				logger.Info("on new snapshots triggered...")
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 				if err != nil {
 					logger.Warn("[snapshots] reopen", "err", err)
@@ -486,7 +512,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					}
 					defer tx.Rollback()
 					stats.LogStats(tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-						_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+						histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 						return histBlockNumProgress, err
 					})
 				}
@@ -503,7 +529,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			defer tx.Rollback()
 
 			stats.LogStats(tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-				_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+				histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 				return histBlockNumProgress, err
 			})
 		}
@@ -650,7 +676,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	ff = rpchelper.New(ctx, cfg.RpcFiltersConfig, eth, txPool, mining, onNewSnapshot, logger)
 	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err
 }
-
 func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	if cfg.Enabled {
 		return startRegularRpcServer(ctx, cfg, rpcAPI, logger)

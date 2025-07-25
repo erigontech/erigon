@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -35,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -149,7 +147,7 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 	if err != nil {
 		return nil, err
 	}
-	return CreateStateReaderFromBlockNumber(ctx, tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br)), blockNumber, latest, txnIndex, stateCache, chainName)
+	return CreateStateReaderFromBlockNumber(ctx, tx, br.TxnumReader(ctx), blockNumber, latest, txnIndex, stateCache, chainName)
 }
 
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
@@ -172,12 +170,12 @@ func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReade
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	earliestTxNum := r.StateHistoryStartFrom()
-	if txNum < earliestTxNum {
-		// data available only starting from earliestTxNum, throw error to avoid unintended
-		// consequences of using this StateReader
-		return r, state.PrunedError
-	}
+	//earliestTxNum := r.StateHistoryStartFrom()
+	//if txNum < earliestTxNum {
+	// data available only starting from earliestTxNum, throw error to avoid unintended
+	// consequences of using this StateReader
+	//	return r, state.PrunedError
+	//}
 	r.SetTxNum(txNum)
 	return r, nil
 }
@@ -186,8 +184,8 @@ func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
 	return state.NewReaderV3(sd)
 }
 
-func NewLatestDomainStateWriter(domains *state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
-	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
+func NewLatestStateWriter(tx kv.Tx, domains *state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+	minTxNum, err := blockReader.TxnumReader(context.Background()).Min(tx, blockNum)
 	if err != nil {
 		panic(err)
 	}
@@ -198,15 +196,6 @@ func NewLatestDomainStateWriter(domains *state2.SharedDomains, blockReader servi
 
 func NewLatestStateReader(tx kv.Tx) state.StateReader {
 	return state.NewReaderV3(tx.(kv.TemporalGetter))
-}
-func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
-	domains := txc.Doms
-	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
-	if err != nil {
-		panic(err)
-	}
-	domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
-	return state.NewWriterV4(domains)
 }
 
 func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.Tx) state.StateReader {

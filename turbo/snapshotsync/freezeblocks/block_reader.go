@@ -24,6 +24,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -46,7 +48,8 @@ import (
 )
 
 type RemoteBlockReader struct {
-	client remote.ETHBACKENDClient
+	client       remote.ETHBACKENDClient
+	txBlockIndex *txBlockIndexWithBlockReader
 }
 
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
@@ -127,7 +130,7 @@ func (r *RemoteBlockReader) Snapshots() snapshotsync.BlockSnapshots    { panic("
 func (r *RemoteBlockReader) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
 func (r *RemoteBlockReader) AllTypes() []snaptype.Type                 { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                      { panic("not supported") }
-func (r *RemoteBlockReader) FrozenBorBlocks() uint64                   { panic("not supported") }
+func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64         { panic("not supported") }
 func (r *RemoteBlockReader) FrozenFiles() (list []string)              { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing     { panic("not supported") }
 
@@ -161,7 +164,12 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 var _ services.FullBlockReader = &RemoteBlockReader{}
 
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
-	return &RemoteBlockReader{client}
+	br := &RemoteBlockReader{
+		client: client,
+	}
+	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
+	br.txBlockIndex = txnumReader
+	return br
 }
 
 func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
@@ -378,6 +386,14 @@ func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.G
 func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Checkpoint, bool, error) {
 	return nil, false, nil
 }
+func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+	if r == nil {
+		// tests
+		txnumReader := TxBlockIndexFromBlockReader(ctx, nil).(*txBlockIndexWithBlockReader)
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(txnumReader)
+	}
+	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
+}
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
@@ -385,12 +401,22 @@ type BlockReader struct {
 	borSn          *heimdall.RoSnapshots
 	borBridgeStore bridge.Store
 	heimdallStore  heimdall.Store
+	txBlockIndex   *txBlockIndexWithBlockReader
+
+	//files are immutable: no reorgs, on updates - means no invalidation needed
+	headerByNumCache *lru.Cache[uint64, *types.Header]
 }
+
+var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 
 func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store, borBridge bridge.Store) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
-	return &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore, borBridgeStore: borBridge}
+	br := &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore, borBridgeStore: borBridge}
+	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
+	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
+	br.txBlockIndex = txnumReader
+	return br
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
@@ -440,11 +466,27 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
-func (r *BlockReader) FrozenBorBlocks() uint64 {
-	if r.borSn != nil {
-		return r.borSn.BlocksAvailable()
+func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
+	if r.borSn == nil {
+		return 0
 	}
-	return 0
+
+	frozen := r.borSn.BlocksAvailable()
+
+	if !align {
+		return frozen
+	}
+
+	for _, t := range r.borSn.Types() {
+
+		available := r.borSn.VisibleBlocksAvailable(t.Enum())
+
+		if available < frozen {
+			frozen = available
+		}
+	}
+
+	return frozen
 }
 func (r *BlockReader) FrozenFiles() []string {
 	files := r.sn.Files()
@@ -900,6 +942,10 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 }
 
 func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.Header, []byte, error) {
+	if h, ok := r.headerByNumCache.Get(blockHeight); ok {
+		return h, buf, nil
+	}
+
 	index := sn.Src().Index()
 	if index == nil {
 		return nil, buf, nil
@@ -918,6 +964,8 @@ func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *snapshotsync.Vi
 	if err := rlp.DecodeBytes(buf[1:], h); err != nil {
 		return nil, buf, err
 	}
+
+	r.headerByNumCache.Add(blockHeight, h)
 	return h, buf, nil
 }
 
@@ -994,6 +1042,36 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *snapsho
 		}
 	}() // avoid crash because Erigon's core does many things
 
+	return BodyForStorageFromSnapshot(blockHeight, sn, buf)
+}
+
+func BodyForTxnFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.BodyOnlyTxn, []byte, error) {
+	index := sn.Src().Index()
+
+	if index == nil {
+		return nil, buf, nil
+	}
+
+	bodyOffset := index.OrdinalLookup(blockHeight - index.BaseDataID())
+
+	gg := sn.Src().MakeGetter()
+	gg.Reset(bodyOffset)
+	if !gg.HasNext() {
+		return nil, buf, nil
+	}
+	buf, _ = gg.Next(buf[:0])
+	if len(buf) == 0 {
+		return nil, buf, nil
+	}
+	b := &types.BodyOnlyTxn{}
+	if err := rlp.DecodeBytesPartial(buf, b); err != nil {
+		return nil, buf, err
+	}
+
+	return b, buf, nil
+}
+
+func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.BodyForStorage, []byte, error) {
 	index := sn.Src().Index()
 
 	if index == nil {
@@ -1157,8 +1235,8 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	}
 	defer release()
 
-	var b *types.BodyForStorage
-	b, _, err = r.bodyForStorageFromSnapshot(blockNum, seg, nil)
+	var b *types.BodyOnlyTxn
+	b, _, err = BodyForTxnFromSnapshot(blockNum, seg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1250,7 +1328,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 		}
 		firstBlockNum := snb.Src().Index().BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
-		b, _, err := r.bodyForStorageFromSnapshot(firstBlockNum, snb, nil)
+		b, _, err := BodyForTxnFromSnapshot(firstBlockNum, snb, nil)
 		if err != nil {
 			return err
 		}
@@ -1541,24 +1619,123 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 	return nil
 }
 
-func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.ReadTxNumFunc {
-	return func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
-		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(tx, c, blockNum)
+func (r *BlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+	if r == nil {
+		// tests
+		txnumReader := TxBlockIndexFromBlockReader(ctx, nil).(*txBlockIndexWithBlockReader)
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(txnumReader)
+	}
+	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
+}
+
+func TxBlockIndexFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.TxBlockIndex {
+	return &txBlockIndexWithBlockReader{
+		r:     r,
+		ctx:   ctx,
+		cache: NewBlockTxNumLookupCache(20),
+	}
+}
+
+type txBlockIndexWithBlockReader struct {
+	r     services.FullBlockReader
+	ctx   context.Context
+	cache *BlockTxNumLookupCache
+}
+
+func (t *txBlockIndexWithBlockReader) CopyWithContext(ctx context.Context) *txBlockIndexWithBlockReader {
+	return &txBlockIndexWithBlockReader{
+		r:     t.r,
+		ctx:   ctx,
+		cache: t.cache,
+	}
+}
+
+func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
+	maxTxNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.MaxTxNum(tx, c, blockNum)
+	if err != nil {
+		return
+	}
+	r := t.r
+	if ok || r == nil {
+		return
+	}
+	b, err := r.CanonicalBodyForStorage(t.ctx, tx, blockNum)
+	if err != nil {
+		return 0, false, err
+	}
+	if b == nil {
+		return 0, false, nil
+	}
+	ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
+	return ret, true, nil
+}
+
+func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
+	var buf []byte
+	var b *types.BodyOnlyTxn
+	view := t.r.Snapshots().(*RoSnapshots).View()
+	defer view.Close()
+
+	getMaxTxNum := func(seg *snapshotsync.VisibleSegment) GetMaxTxNum {
+		return func(i uint64) (uint64, error) {
+			b, buf, err = BodyForTxnFromSnapshot(i, seg, buf)
+			if err != nil {
+				return 0, err
+			}
+			if b == nil {
+				return 0, fmt.Errorf("BlockReader.BlockNumber: empty block: %d in file bodies.seg(%d-%d)", i, seg.From(), seg.To())
+			}
+			return b.BaseTxnID.U64() + uint64(b.TxCount) - 1, nil
+		}
+	}
+
+	// find the file
+	bodies := view.Bodies()
+	cache := t.cache
+	var maxTxNum uint64
+
+	blockIndex := sort.Search(len(bodies), func(i int) bool {
+		if err != nil {
+			return true
+		}
+		seg := bodies[i]
+		ran := seg.Range
+		maxTxNum, err = cache.GetLastMaxTxNum(ran, getMaxTxNum(seg))
+		if err != nil {
+			return true
+		}
+		return maxTxNum >= txNum
+	})
+
+	if err != nil {
+		return 0, false, err
+	}
+
+	if blockIndex == len(bodies) {
+		// not in snapshots
+		blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(tx, txNum)
 		if err != nil {
 			return
 		}
+		r := t.r
 		if ok || r == nil {
 			return
 		}
-		b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
-		if err != nil {
-			return 0, false, err
-		}
-		if b == nil {
-			return 0, false, nil
-		}
-		ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
-		return ret, true, nil
+
+		return 0, false, nil
 	}
 
+	seg := bodies[blockIndex]
+	ran := seg.Range
+
+	blkNum, err := cache.Find(ran, txNum, getMaxTxNum(seg))
+	if err != nil {
+		return 0, false, err
+	}
+
+	if blkNum >= ran.To() {
+		return 0, false, fmt.Errorf("BlockReader.BlockNumber: not found block: %d in file (%d-%d), searching for %d", blkNum, ran.From(), ran.To(), txNum)
+	}
+
+	return blkNum, true, nil
 }

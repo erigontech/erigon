@@ -2,6 +2,10 @@ package state
 
 import (
 	"context"
+	"errors"
+	"io/fs"
+	"path/filepath"
+	"strings"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -16,6 +20,10 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
 		return nil, err
+	}
+
+	if err := Compatibility(dirs); err != nil {
+		panic(err)
 	}
 
 	a, err := NewAggregator(ctx, dirs, aggregationStep, db, logger)
@@ -279,3 +287,45 @@ func EnableHistoricalRCache() {
 }
 
 var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
+
+func isNewVerFormat(name string) bool {
+	if !strings.HasPrefix(name, "v") {
+		return false
+	}
+	name = strings.TrimPrefix(name, "v")
+	parts := strings.SplitN(name, "-", 2)
+	version := parts[0]
+	return strings.Count(version, ".") == 1
+}
+
+func Compatibility(d datadir.Dirs) error {
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !entry.IsDir() {
+				name := entry.Name()
+				if isNewVerFormat(name) {
+					return errors.New("the current snapshots are not compatible with this version of Erigon. " +
+						"Please ensure you're using Erigon v3.1 or later, or run " +
+						"`erigon seg reset-to-old-ver-format` to revert snapshots to the old format " +
+						"(they would be compatible with this 3.0)")
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

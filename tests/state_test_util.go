@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // StateTest checks transaction processing without block context.
@@ -212,7 +213,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	defer domains.Close()
 	txc.Doms = domains
 	r := rpchelper.NewLatestStateReader(tx)
-	w := rpchelper.NewLatestStateWriter(txc, nil, writeBlockNr)
+	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb := state.New(r)
 
 	var baseFee *big.Int
@@ -328,7 +329,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	defer domains.Flush(context2.Background(), tx)
 	txc.Doms = domains
 
-	w := rpchelper.NewLatestStateWriter(txc, nil, blockNr-1)
+	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), blockNr-1)
 
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {

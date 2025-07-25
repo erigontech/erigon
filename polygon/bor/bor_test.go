@@ -75,7 +75,7 @@ func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, 
 	return nil, nil
 }
 
-func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
 	return nil, nil
 }
 
@@ -184,8 +184,8 @@ func (r headerReader) Config() *chain.Config {
 	return r.validator.ChainConfig
 }
 
-func (r headerReader) FrozenBlocks() uint64    { return 0 }
-func (r headerReader) FrozenBorBlocks() uint64 { return 0 }
+func (r headerReader) FrozenBlocks() uint64              { return 0 }
+func (r headerReader) FrozenBorBlocks(align bool) uint64 { return 0 }
 
 func (r headerReader) CurrentHeader() *types.Header {
 	return nil

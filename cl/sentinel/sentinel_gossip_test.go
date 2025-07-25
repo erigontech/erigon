@@ -55,6 +55,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	bcfg.BellatrixForkEpoch = math.MaxUint64
 	bcfg.CapellaForkEpoch = math.MaxUint64
 	bcfg.DenebForkEpoch = math.MaxUint64
+	bcfg.ElectraForkEpoch = math.MaxUint64
 	bcfg.InitializeForkSchedule()
 
 	sentinel1, err := New(ctx, &SentinelConfig{

@@ -19,9 +19,7 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 )
 
 // BenchEthGetTransactionByHash compares response of Erigon with Geth
@@ -36,9 +34,6 @@ import (
 //	errorFile stores information when erigon and geth doesn't return same data
 func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	var rec *bufio.Writer
 	var errs *bufio.Writer
@@ -72,14 +67,10 @@ func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, b
 	}
 	var res CallResult
 
-	reqGen := &RequestGenerator{
-		client: client,
-	}
-
-	reqGen.reqID++
+	reqGen := &RequestGenerator{}
 
 	for bn := blockFrom; bn <= blockTo; bn++ {
-		reqGen.reqID++
+
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
@@ -112,7 +103,6 @@ func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, b
 
 		for _, txn := range b.Result.Transactions {
 
-			reqGen.reqID++
 			nTransactions = nTransactions + 1
 
 			var request string

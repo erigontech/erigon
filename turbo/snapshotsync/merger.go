@@ -52,7 +52,7 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 			}
 			aggFrom := r.To() - span
 			toMerge = append(toMerge, NewRange(aggFrom, r.To()))
-			for currentRanges[i].From() > aggFrom {
+			for i >= 0 && currentRanges[i].From() > aggFrom {
 				i--
 			}
 			break
@@ -99,9 +99,11 @@ func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileI
 			ext := filepath.Ext(f)
 			withoutExt := f[:len(f)-len(ext)]
 			_ = os.Remove(withoutExt + ".idx")
+			_ = os.Remove(withoutExt + ".idx.torrent")
 			isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 			if isTxnType {
 				_ = os.Remove(withoutExt + "-to-block.idx")
+				_ = os.Remove(withoutExt + "-to-block.idx.torrent")
 			}
 		}
 	}()
@@ -203,7 +205,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	defer snapshots.recalcVisibleFiles()
+	defer snapshots.recalcVisibleFiles(snapshots.alignMin)
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()
@@ -233,7 +235,20 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 	// delete old sub segments
 	for enum, delSegs := range out {
 		dirtySegments := snapshots.dirty[enum]
+		inDirtySegments := in[enum]
+
 		for _, delSeg := range delSegs {
+			skip := false
+			for _, inDSeg := range inDirtySegments {
+				if inDSeg.from == delSeg.from && inDSeg.to == delSeg.to {
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+
 			dirtySegments.Delete(delSeg)
 			delSeg.canDelete.Store(true)
 		}

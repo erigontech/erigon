@@ -24,8 +24,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/execution/exec3"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -33,12 +31,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
@@ -48,10 +44,10 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 const (
@@ -182,7 +178,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	}
 	rs := state.NewStateV3(domains, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
+	txNumsReader := br.TxnumReader(ctx)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := txNumsReader.Min(txc.Tx, u.UnwindPoint+1)
@@ -245,10 +241,6 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 	return prevStageProgress, nil
 }
 
-func BorHeimdallStageProgress(tx kv.Tx, cfg BorHeimdallCfg) (prevStageProgress uint64, err error) {
-	return stageProgress(tx, cfg.db, stages.BorHeimdall)
-}
-
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
@@ -257,67 +249,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	}
 	if err = ExecBlockV3(s, u, txc, toBlock, ctx, cfg, s.CurrentSyncCycle.IsInitialCycle, logger, false); err != nil {
 		return err
-	}
-	return nil
-}
-
-func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, histV3 bool) (chan uint64, context.CancelFunc) {
-	const readAheadBlocks = 100
-	readAhead := make(chan uint64, readAheadBlocks)
-	g, gCtx := errgroup.WithContext(ctx)
-	for workerNum := 0; workerNum < workers; workerNum++ {
-		g.Go(func() (err error) {
-			var bn uint64
-			var ok bool
-			var tx kv.Tx
-			defer func() {
-				if tx != nil {
-					tx.Rollback()
-				}
-			}()
-
-			for i := 0; ; i++ {
-				select {
-				case bn, ok = <-readAhead:
-					if !ok {
-						return
-					}
-				case <-gCtx.Done():
-					return gCtx.Err()
-				}
-
-				if i%100 == 0 {
-					if tx != nil {
-						tx.Rollback()
-					}
-					tx, err = cfg.db.BeginRo(ctx)
-					if err != nil {
-						return err
-					}
-				}
-
-				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks, histV3); err != nil {
-					return err
-				}
-			}
-		})
-	}
-	return readAhead, func() {
-		close(readAhead)
-		_ = g.Wait()
-	}
-}
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64, histV3 bool) error {
-	block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return err
-	}
-	if block == nil {
-		return nil
-	}
-	_, _ = cfg.engine.Author(block.HeaderNoCopy()) // Bor consensus: this calc is heavy and has cache
-	if histV3 {
-		return nil
 	}
 	return nil
 }
@@ -393,15 +324,28 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
+
+	// on chain-tip:
+	//  - can prune only between blocks (without blocking blocks processing)
+	//  - need also leave some time to prune blocks
+	//  - need keep "fsync" time of db fast
+	// Means - the best is:
+	//  - sto
+	// p prune when `tx.SpaceDirty()` is big
+	//  - and set ~500ms timeout
+	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
+	quickPruneTimeout := 250 * time.Millisecond
+
 	if s.ForwardProgress > config3.MaxReorgDepthV3 && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
-		pruneTimeout := 250 * time.Millisecond
+		pruneTimeout := quickPruneTimeout
 		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneDiffsLimitOnChainTip = math.MaxInt
 			pruneTimeout = time.Hour
 		}
+		pruneChangeSetsStartTime := time.Now()
 		if err := rawdb.PruneTable(
 			tx,
 			kv.ChangeSets3,
@@ -414,30 +358,47 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		); err != nil {
 			return err
 		}
+		if duration := time.Since(pruneChangeSetsStartTime); duration > quickPruneTimeout {
+			logger.Debug(
+				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
+				"duration", duration,
+				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+				"externalTx", useExternalTx,
+			)
+		}
 	}
 
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
 
-	// on chain-tip:
-	//  - can prune only between blocks (without blocking blocks processing)
-	//  - need also leave some time to prune blocks
-	//  - need keep "fsync" time of db fast
-	// Means - the best is:
-	//  - sto
-	// p prune when `tx.SpaceDirty()` is big
-	//  - and set ~500ms timeout
-	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	pruneTimeout := 250 * time.Millisecond
+	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
 
 		// allow greedy prune on non-chain-tip
+		greedyPruneCommitmentHistoryStartTime := time.Now()
 		if err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
 			return err
 		}
+		if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
+			logger.Debug(
+				fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
+				"duration", duration,
+				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+				"externalTx", useExternalTx,
+			)
+		}
 	}
+	pruneSmallBatchesStartTime := time.Now()
 	if _, err := tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil {
 		return err
+	}
+	if duration := time.Since(pruneSmallBatchesStartTime); duration > quickPruneTimeout {
+		logger.Debug(
+			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
+			"duration", duration,
+			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+			"externalTx", useExternalTx,
+		)
 	}
 
 	// prune receipts cache
@@ -447,8 +408,17 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneLimit = -1
 		}
+		pruneReceiptsCacheStartTime := time.Now()
 		if err := rawdb.PruneReceiptsCache(tx, pruneTo, pruneLimit); err != nil {
 			return err
+		}
+		if duration := time.Since(pruneReceiptsCacheStartTime); duration > quickPruneTimeout {
+			logger.Debug(
+				fmt.Sprintf("[%s] prune receipts cache timing", s.LogPrefix()),
+				"duration", duration,
+				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+				"externalTx", useExternalTx,
+			)
 		}
 	}
 

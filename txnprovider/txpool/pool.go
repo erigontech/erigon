@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -139,6 +140,8 @@ type TxPool struct {
 	isPostShanghai          atomic.Bool
 	agraBlock               *uint64
 	isPostAgra              atomic.Bool
+	bhilaiBlock             *uint64
+	isPostBhilai            atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
@@ -150,7 +153,7 @@ type TxPool struct {
 	newSlotsStreams         *NewSlotsStreams
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
-	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
+	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
 	blobHashToTxn           map[common.Hash]struct {
 		index   int
 		txnHash common.Hash
@@ -171,6 +174,7 @@ func New(
 	chainID uint256.Int,
 	shanghaiTime *big.Int,
 	agraBlock *big.Int,
+	bhilaiBlock *big.Int,
 	cancunTime *big.Int,
 	pragueTime *big.Int,
 	blobSchedule *chain.BlobSchedule,
@@ -231,11 +235,11 @@ func New(
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
-		auths:                   map[common.Address]*metaTxn{},
-		blobHashToTxn: map[common.Hash]struct {
+		auths:                   make(map[AuthAndNonce]*metaTxn),
+		blobHashToTxn: make(map[common.Hash]struct {
 			index   int
 			txnHash common.Hash
-		}{},
+		}),
 	}
 
 	if shanghaiTime != nil {
@@ -251,6 +255,13 @@ func New(
 		}
 		agraBlockU64 := agraBlock.Uint64()
 		res.agraBlock = &agraBlockU64
+	}
+	if bhilaiBlock != nil {
+		if !bhilaiBlock.IsUint64() {
+			return nil, errors.New("bhilaiBlock overflow")
+		}
+		bhilaiBlockU64 := bhilaiBlock.Uint64()
+		res.bhilaiBlock = &bhilaiBlockU64
 	}
 	if cancunTime != nil {
 		if !cancunTime.IsUint64() {
@@ -694,8 +705,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 	best := p.pending.best
 
-	isShanghai := p.isShanghai() || p.isAgra()
-	isPrague := p.isPrague()
+	isEIP3860 := p.isShanghai() || p.isAgra()
+	isEIP7623 := p.isPrague() || p.isBhilai()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -748,9 +759,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		authorizationLen := uint64(len(mt.TxnSlot.Authorities))
-		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague)
-		if isPrague && floorGas > intrinsicGas {
+		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
+		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isEIP3860, isEIP7623)
+		if isEIP7623 && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
 		}
 		if intrinsicGas > availableGas {
@@ -854,8 +865,9 @@ func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
-	isShanghai := p.isShanghai() || p.isAgra()
-	if isShanghai && txn.Creation && txn.DataLen > fixedgas.MaxInitCodeSize {
+	isEIP3860 := p.isShanghai() || p.isAgra()
+	isPrague := p.isPrague() || p.isBhilai()
+	if isEIP3860 && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
 		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
 	if txn.Type == BlobTxnType {
@@ -907,9 +919,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	authorizationLen := len(txn.Authorities)
+	authorizationLen := len(txn.AuthAndNonces)
 	if txn.Type == SetCodeTxnType {
-		if !p.isPrague() {
+		if !isPrague {
 			return txpoolcfg.TypeNotActivated
 		}
 		if txn.Creation {
@@ -928,15 +940,15 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.UnderPriced
 	}
 
-	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isShanghai, p.isPrague())
-	if p.isPrague() && floorGas > gas {
+	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isEIP3860, isPrague)
+	if isPrague && floorGas > gas {
 		gas = floorGas
 	}
 
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
-	if overflow != false {
+	if overflow {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed due to overflow idHash=%x", txn.IDHash))
 		}
@@ -970,6 +982,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.NonceTooLow
 	}
+
 	// Transactor should have enough funds to cover the costs
 	total := requiredBalance(txn)
 	if senderBalance.Cmp(total) < 0 {
@@ -1042,20 +1055,20 @@ func (p *TxPool) isShanghai() bool {
 	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
 }
 
-func (p *TxPool) isAgra() bool {
+func (p *TxPool) isBlockNumBasedForkActivated(isPostFlag *atomic.Bool, forkBlockNum *uint64) bool {
 	// once this flag has been set for the first time we no longer need to check the block
-	set := p.isPostAgra.Load()
+	set := isPostFlag.Load()
 	if set {
 		return true
 	}
-	if p.agraBlock == nil {
+	if forkBlockNum == nil {
 		return false
 	}
-	agraBlock := *p.agraBlock
+	forkBlock := *forkBlockNum
 
-	// a zero here means Agra is always active
-	if agraBlock == 0 {
-		p.isPostAgra.Swap(true)
+	// a zero here means the fork is always active
+	if forkBlock == 0 {
+		isPostFlag.Swap(true)
 		return true
 	}
 
@@ -1069,13 +1082,21 @@ func (p *TxPool) isAgra() bool {
 	if headBlock == nil || err != nil {
 		return false
 	}
-	// A new block is built on top of the head block, so when the head is agraBlock-1,
-	// the new block should use the Agra rules.
-	activated := (*headBlock + 1) >= agraBlock
+	// A new block is built on top of the head block, so when the head is forkBlock-1,
+	// the new block should use the new fork rules.
+	activated := (*headBlock + 1) >= forkBlock
 	if activated {
-		p.isPostAgra.Swap(true)
+		isPostFlag.Swap(true)
 	}
 	return activated
+}
+
+func (p *TxPool) isAgra() bool {
+	return p.isBlockNumBasedForkActivated(&p.isPostAgra, p.agraBlock)
+}
+
+func (p *TxPool) isBhilai() bool {
+	return p.isBlockNumBasedForkActivated(&p.isPostBhilai, p.bhilaiBlock)
 }
 
 func (p *TxPool) isCancun() bool {
@@ -1464,34 +1485,31 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
-	// Do not allow transaction from if sender has authority
-	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
+	// Do not allow transaction from this same (sender + nonce) if sender has existing pooled authorization as authority
+	senderAddr, ok := p.senders.senderID2Addr[mt.TxnSlot.SenderID]
 	if !ok {
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[addr]; ok {
+	if _, ok := p.auths[AuthAndNonce{senderAddr.String(), mt.TxnSlot.Nonce}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.Type == SetCodeTxnType {
-		foundDuplicate := false
-		for _, a := range mt.TxnSlot.Authorities {
-			p.logger.Debug("setCodeTxn ", "authority", a.String())
-			if _, ok := p.auths[*a]; ok {
-				foundDuplicate = true
-				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
-				break
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			// Self authorization nonce should be senderNonce + 1
+			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce+1 {
+				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				return txpoolcfg.NonceTooLow
+			}
+			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority, "at nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				return txpoolcfg.ErrAuthorityReserved
 			}
 		}
-
-		if foundDuplicate {
-			return txpoolcfg.ErrAuthorityReserved
-		} else {
-			for _, a := range mt.TxnSlot.Authorities {
-				p.auths[*a] = mt
-			}
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			p.auths[AuthAndNonce{a.authority, a.nonce}] = mt
 		}
 	}
 
@@ -1538,8 +1556,8 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.BlobHashes)))
 	}
 	if mt.TxnSlot.Type == SetCodeTxnType {
-		for _, a := range mt.TxnSlot.Authorities {
-			delete(p.auths, *a)
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			delete(p.auths, a)
 		}
 	}
 }

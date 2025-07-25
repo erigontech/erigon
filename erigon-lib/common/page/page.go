@@ -111,17 +111,17 @@ func (c *Writer) DisableFsync() {
 
 var be = binary.BigEndian
 
-func Get(key, compressedPage []byte, snappyBuf []byte, snappyEnabled bool) (v []byte, snappyBufOut []byte) {
+func Get(key, compressedPage []byte, decompressPageBuf []byte, snappyEnabled bool) (v []byte, snappyBufOut []byte) {
 	var err error
 	var page []byte
-	snappyBuf, page, err = compress.DecodeZstdIfNeed(snappyBuf, compressedPage, snappyEnabled)
+	decompressPageBuf, page, err = compress.DecodeZstdIfNeed(decompressPageBuf[:0], compressedPage, snappyEnabled)
 	if err != nil {
 		panic(err)
 	}
 
 	cnt := int(page[0])
 	if cnt == 0 {
-		return nil, snappyBuf
+		return nil, decompressPageBuf
 	}
 	meta, data := page[1:1+cnt*4*2], page[1+cnt*4*2:]
 	kLens, vLens := meta[:cnt*4], meta[cnt*4:]
@@ -138,14 +138,14 @@ func Get(key, compressedPage []byte, snappyBuf []byte, snappyEnabled bool) (v []
 		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
 		foundKey := keys[kOffset : kOffset+kLen]
 		if bytes.Equal(key, foundKey) {
-			return vals[vOffset : vOffset+vLen], snappyBuf
+			return vals[vOffset : vOffset+vLen], decompressPageBuf
 		} else {
 			_ = data
 		}
 		kOffset += kLen
 		vOffset += vLen
 	}
-	return nil, snappyBuf
+	return nil, decompressPageBuf
 }
 
 type Reader struct {
@@ -164,7 +164,7 @@ func FromBytes(buf []byte, snappyEnabled bool) *Reader {
 
 func (r *Reader) Reset(v []byte, snappyEnabled bool) (n int) {
 	var err error
-	r.pageCompressionBuf, v, err = compress.DecodeZstdIfNeed(r.pageCompressionBuf, v, snappyEnabled)
+	r.pageCompressionBuf, v, err = compress.DecodeZstdIfNeed(r.pageCompressionBuf[:0], v, snappyEnabled)
 	if err != nil {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}

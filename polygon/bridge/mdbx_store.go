@@ -52,6 +52,7 @@ var databaseTablesCfg = kv.TableCfg{
 	kv.BorEvents:               {},
 	kv.BorEventNums:            {},
 	kv.BorEventProcessedBlocks: {},
+	kv.BorEventTimes:           {},
 	kv.BorTxLookup:             {},
 }
 
@@ -248,15 +249,14 @@ func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecor
 	return tx.Commit()
 }
 
-// Events gets raw events, start inclusive, end exclusive
-func (s *MdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+func (s *MdbxStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.Events(ctx, start, end)
+	return txStore{tx}.EventsByTimeframe(ctx, timeFrom, timeTo)
 }
 
 func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
@@ -496,9 +496,14 @@ func (s txStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWi
 			return err
 		}
 
-		k := event.MarshallIdBytes()
-		err = tx.Put(kv.BorEvents, k, v)
-		if err != nil {
+		evID := event.MarshallIdBytes()
+		evTime := event.MarshallTimeBytes()
+
+		if err = tx.Put(kv.BorEvents, evID, v); err != nil {
+			return err
+		}
+
+		if err = tx.Put(kv.BorEventTimes, evTime, evID); err != nil {
 			return err
 		}
 	}
@@ -506,8 +511,40 @@ func (s txStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWi
 	return nil
 }
 
+// returns events withing [timeFrom, timeTo) interval.
+func (s txStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, error) {
+	var events [][]byte
+
+	kStart := make([]byte, 8)
+	binary.BigEndian.PutUint64(kStart, timeFrom)
+
+	kEnd := make([]byte, 8)
+	binary.BigEndian.PutUint64(kEnd, timeTo)
+
+	it, err := s.tx.Range(kv.BorEventTimes, kStart, kEnd, order.Asc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+
+	for it.HasNext() {
+		_, evID, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		v, err := s.tx.GetOne(kv.BorEvents, evID)
+		if err != nil {
+			return nil, err
+		}
+
+		events = append(events, bytes.Clone(v))
+	}
+
+	return events, nil
+}
+
 // Events gets raw events, start inclusive, end exclusive
-func (s txStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+func (s txStore) events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	var events [][]byte
 
 	kStart := make([]byte, 8)
@@ -620,7 +657,7 @@ func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHe
 	if !ok {
 		return []rlp.RawValue{}, nil
 	}
-	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
+	bytevals, err := s.events(ctx, startEventId, endEventId+1)
 	if err != nil {
 		return nil, err
 	}
@@ -669,14 +706,26 @@ func (s txStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteL
 	}
 	defer c1.Close()
 	counter := blocksDeleteLimit
-	for k, _, err = c1.First(); err == nil && k != nil && counter > 0; k, _, err = c1.Next() {
+	for k, v, err = c1.First(); err == nil && k != nil && counter > 0; k, v, err = c1.Next() {
 		eventId := binary.BigEndian.Uint64(k)
 		if eventId >= eventIdTo {
 			break
 		}
+
+		var event heimdall.EventRecordWithTime
+		if err := event.UnmarshallBytes(v); err != nil {
+			return deleted, err
+		}
+
+		// this needs to be called after v is unmarshalled - it may alter the contents of v
 		if err = c1.DeleteCurrent(); err != nil {
 			return deleted, err
 		}
+
+		if err := tx.Delete(kv.BorEventTimes, event.MarshallTimeBytes()); err != nil {
+			return deleted, err
+		}
+
 		deleted++
 		counter--
 	}
@@ -766,8 +815,19 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	defer eventCursor.Close()
 
 	var k []byte
-	for k, _, err = eventCursor.Seek(from); err == nil && k != nil; k, _, err = eventCursor.Next() {
+	var v []byte
+
+	for k, v, err = eventCursor.Seek(from); err == nil && k != nil; k, v, err = eventCursor.Next() {
 		if err = eventCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+
+		var event heimdall.EventRecordWithTime
+		if err := event.UnmarshallBytes(v); err != nil {
+			return err
+		}
+
+		if err := tx.Delete(kv.BorEventTimes, event.MarshallTimeBytes()); err != nil {
 			return err
 		}
 	}

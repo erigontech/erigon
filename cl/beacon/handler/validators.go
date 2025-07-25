@@ -827,7 +827,8 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation slot mismatch"))
 	}
 
-	return newBeaconResponse(att), nil
+	version := a.ethClock.StateVersionByEpoch(slotNum / a.beaconChainCfg.SlotsPerEpoch)
+	return newBeaconResponse(att).WithVersion(version), nil
 }
 
 func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

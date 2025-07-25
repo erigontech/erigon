@@ -17,7 +17,6 @@
 package aura
 
 import (
-	"bytes"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -87,51 +86,29 @@ func callBlockGasLimitAbi(contractAddr libcommon.Address, syscall consensus.Syst
 }
 
 func blockGasLimitAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockGasLimit))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.BlockGasLimitABI
 }
 
 func blockRewardAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockReward))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.BlockRewardABI
 }
 
 func certifierAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Certifier))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.CertifierABI
 }
 
 func registrarAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Registrar))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.RegistrarABI
 }
 
 func withdrawalAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Withdrawal))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.WithdrawalABI
 }
 
+var serviceTransactionCheckerHashedKey, _ = libcommon.HashData([]byte("service_transaction_checker"))
+
 func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *libcommon.Address {
-	hashedKey, err := libcommon.HashData([]byte("service_transaction_checker"))
-	if err != nil {
-		panic(err)
-	}
-	packed, err := registrarAbi().Pack("getAddress", hashedKey, "A")
+	packed, err := registrarAbi().Pack("getAddress", serviceTransactionCheckerHashedKey, "A")
 	if err != nil {
 		panic(err)
 	}

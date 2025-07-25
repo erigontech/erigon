@@ -373,7 +373,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 		}
 		defer roTx.Rollback()
 
-		_, blockNum, err := txNumsReader.FindBlockNum(roTx, toTxNumRange-1)
+		blockNum, _, err := txNumsReader.FindBlockNum(roTx, toTxNumRange-1)
 		if err != nil {
 			a.logger.Warn("failed to find block number for txNum", "txNum", toTxNumRange, "err", err)
 			return nil, err
@@ -534,6 +534,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			if !smthDone {
 				break
 			}
+			a.onFilesChange(nil)
 		}
 
 		keyIter.Close()

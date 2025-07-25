@@ -18,10 +18,12 @@ package heimdall
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -78,6 +80,12 @@ func (e *EventRecordWithTime) MarshallIdBytes() []byte {
 	return id[:]
 }
 
+func (e *EventRecordWithTime) MarshallTimeBytes() []byte {
+	var t [8]byte
+	binary.BigEndian.PutUint64(t[:], uint64(e.Time.Unix()))
+	return t[:]
+}
+
 func (e *EventRecordWithTime) MarshallBytes() ([]byte, error) {
 	eventRecordWithoutTime := e.BuildEventRecord()
 	rlpBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
@@ -122,14 +130,59 @@ func (e *EventRecordWithTime) UnmarshallBytes(v []byte) error {
 	return nil
 }
 
-type StateSyncEventsResponse struct {
+type StateSyncEventsResponseV1 struct {
 	Height string                 `json:"height"`
 	Result []*EventRecordWithTime `json:"result"`
 }
 
-type StateSyncEventResponse struct {
-	Height string              `json:"height"`
-	Result EventRecordWithTime `json:"result"`
+type StateSyncEventsResponseV2 struct {
+	EventRecords []struct {
+		ID       string            `json:"id" yaml:"id"`
+		Contract libcommon.Address `json:"contract" yaml:"contract"`
+		Data     string            `json:"data" yaml:"data"`
+		TxHash   libcommon.Hash    `json:"tx_hash" yaml:"tx_hash"`
+		LogIndex string            `json:"log_index" yaml:"log_index"`
+		ChainID  string            `json:"bor_chain_id" yaml:"bor_chain_id"`
+		Time     time.Time         `json:"record_time" yaml:"record_time"`
+	} `json:"event_records"`
+}
+
+func (v *StateSyncEventsResponseV2) GetEventRecords() ([]*EventRecordWithTime, error) {
+	records := make([]*EventRecordWithTime, 0, len(v.EventRecords))
+
+	for i := range v.EventRecords {
+		r := &EventRecordWithTime{
+			EventRecord: EventRecord{
+				Contract: v.EventRecords[i].Contract,
+				TxHash:   v.EventRecords[i].TxHash,
+				ChainID:  v.EventRecords[i].ChainID,
+			},
+		}
+
+		id, err := strconv.Atoi(v.EventRecords[i].ID)
+		if err != nil {
+			return nil, err
+		}
+
+		logIndex, err := strconv.Atoi(v.EventRecords[i].LogIndex)
+		if err != nil {
+			return nil, err
+		}
+
+		decoded, err := base64.StdEncoding.DecodeString(v.EventRecords[i].Data)
+		if err != nil {
+			return nil, err
+		}
+
+		r.ID = uint64(id)
+		r.LogIndex = uint64(logIndex)
+		r.Data = decoded
+		r.Time = v.EventRecords[i].Time
+
+		records = append(records, r)
+	}
+
+	return records, nil
 }
 
 var methodId []byte = borabi.StateReceiverContractABI().Methods["commitState"].ID

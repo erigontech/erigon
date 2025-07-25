@@ -134,20 +134,6 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []DownloadReq
 	return nil
 }
 
-func adjustStepPrune(steps uint64) uint64 {
-	if steps == 0 {
-		return 0
-	}
-	if steps < snaptype.Erigon3SeedableSteps {
-		return snaptype.Erigon3SeedableSteps
-	}
-	if steps%snaptype.Erigon3SeedableSteps == 0 {
-		return steps
-	}
-	// round to nearest multiple of 64. if less than 64, round to 64
-	return steps + steps%snaptype.Erigon3SeedableSteps
-}
-
 func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
 		minBlocksToDownload = snaptype.Erigon2MergeLimit
@@ -174,7 +160,6 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 	if !pruneMode {
 		return blackList, nil
 	}
-	stepPrune = adjustStepPrune(stepPrune)
 	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
 	for _, p := range preverified {
 		name := p.Name
@@ -182,7 +167,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 		if !canSnapshotBePruned(name) {
 			continue
 		}
-		var _, to uint64
+		var to uint64
 		var err error
 		if isStateSnapshot(name) {
 			// parse "from" (0) and "to" (64) from the name
@@ -201,12 +186,11 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 		} else {
 			// e.g 'v1-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
-			s, _, ok := snaptype.ParseFileName("", name)
+			res, _, ok := snaptype.ParseFileName("", name)
 			if !ok {
 				continue
 			}
-			to = s.To
-			if blockPrune < to {
+			if blockPrune < res.To {
 				continue
 			}
 			blackList[name] = struct{}{}
@@ -226,16 +210,16 @@ type blockReader interface {
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
-func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint64, blockPruneTo, historyPruneTo uint64) (uint64, uint64, error) {
+func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, maxStateStep uint64, historyPruneTo uint64) (minBlockToDownload uint64, minStateStepToDownload uint64, err error) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
-	minStepToDownload := uint64(math.MaxUint32)
-	stateTxNum := minStep * config3.DefaultStepSize
+	minStateStepToDownload = uint64(math.MaxUint32)
+	stateTxNum := maxStateStep * config3.DefaultStepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if blockNum == historyPruneTo {
-			minStepToDownload = (baseTxNum - (config3.DefaultStepSize - 1)) / config3.DefaultStepSize
+			minStateStepToDownload = (baseTxNum - (config3.DefaultStepSize - 1)) / config3.DefaultStepSize
 			if baseTxNum < (config3.DefaultStepSize - 1) {
-				minStepToDownload = 0
+				minStateStepToDownload = 0
 			}
 		}
 		if stateTxNum <= baseTxNum { // only cosnider the block if it
@@ -254,7 +238,7 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint6
 	}
 
 	// return the minimum number of blocks to download and the minimum step.
-	return frozenBlocks - minToDownload, minStepToDownload, nil
+	return frozenBlocks - minToDownload, minStateStepToDownload, nil
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
@@ -281,6 +265,21 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
+}
+
+// isTransactionsSegmentExpired - check if the transactions segment is expired according to whichever history expiry policy we use.
+func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snapcfg.PreverifiedItem) bool {
+	// History expiry is the default.
+	if pruneMode.Blocks != prune.DefaultBlocksPruneMode {
+		return false
+	}
+
+	// We use the pre-merge data policy.
+	s, _, ok := snaptype.ParseFileName("", p.Name)
+	if !ok {
+		return false
+	}
+	return cc.IsPreMerge(s.From)
 }
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
@@ -316,11 +315,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	blackListForPruning := make(map[string]struct{})
 	wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
 	if !headerchain && wantToPrune {
-		minStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
+		maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}
-		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, blockPrune, historyPrune)
+		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, maxStateStep, historyPrune)
 		if err != nil {
 			return err
 		}
@@ -356,11 +355,14 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
 			continue
 		}
-		if !syncCfg.PersistReceiptsCacheV2 && isStateHistory(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
+		if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
 			continue
 		}
 
 		if _, ok := blackListForPruning[p.Name]; ok {
+			continue
+		}
+		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
 			continue
 		}
 
