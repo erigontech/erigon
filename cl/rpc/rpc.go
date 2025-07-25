@@ -78,6 +78,7 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	return rpc
 }
 
+
 func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte) ([]*cltypes.SignedBeaconBlock, string, error) {
 	responses, pid, err := b.sendRequest(ctx, topic, reqData)
 	if err != nil {
