@@ -107,6 +107,8 @@ var (
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
 		Usage: "name of the network to join",
+		// Can we remove this default? It can be destructive.
+		// Giulio here after it broke CI: no, we cannot remove it.
 		Value: networkname.Mainnet,
 	}
 	IdentityFlag = cli.StringFlag{
@@ -679,7 +681,7 @@ var (
 	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
-		Value: 2,
+		Value: 1,
 		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{

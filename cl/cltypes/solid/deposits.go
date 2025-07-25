@@ -55,11 +55,11 @@ func (p *DepositRequest) Static() bool {
 }
 
 type PendingDeposit struct {
-	PubKey                common.Bytes48 // BLS public key
-	WithdrawalCredentials common.Hash
-	Amount                uint64         // Gwei
-	Signature             common.Bytes96 // BLS signature
-	Slot                  uint64
+	PubKey                common.Bytes48 `json:"pubkey"` // BLS public key
+	WithdrawalCredentials common.Hash    `json:"withdrawal_credentials"`
+	Amount                uint64         `json:"amount"`    // Gwei
+	Signature             common.Bytes96 `json:"signature"` // BLS signature
+	Slot                  uint64         `json:"slot"`
 }
 
 func (p *PendingDeposit) EncodingSizeSSZ() int {

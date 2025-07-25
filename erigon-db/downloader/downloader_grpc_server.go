@@ -60,7 +60,7 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer s.d.resetLogInterval.Broadcast()
+	defer s.d.ResetLogInterval()
 
 	var progress atomic.Int32
 
@@ -95,6 +95,10 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			}
 			continue
 		} else {
+			// There's no circuit breaker in Downloader.RequestSnapshot.
+			if ctx.Err() != nil {
+				return nil, context.Cause(ctx)
+			}
 			ih := Proto2InfoHash(it.TorrentHash)
 			if err := s.d.RequestSnapshot(ih, it.Path); err != nil {
 				err = fmt.Errorf("requesting snapshot %s with infohash %v: %w", it.Path, ih, err)

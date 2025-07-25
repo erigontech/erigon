@@ -1,38 +1,30 @@
 # Downloader Components
 
-The diagram below shows the components used to manage downloads between torrents and webpeers.
+The diagram below shows the components used to manage downloads between torrents and WebSeeds.
 
 ![components](components.png)
 
 # Operations
 
-By default the downloader will try to use the underlying bittorrent library to download files from peers and web peers.  
+By default, the Downloader will try to use the underlying BitTorrent library to download files from peers and web peers.  
 
-However this can result in slow or stalled downloads.  When this happens [rclone](https://rclone.org/) can be used as an auxiliary process to aid the download process.  When it is available the download library will pass downloads to rclone under the following circumstances:
-
-* There are no torrent peers available for a file
-* There is not torrent info available for a file, but a torrent file with a matching info hash can be found on the webseeds
-
-To enable [rclone](https://rclone.org/) should be installed on the local machine and its executable added to the `PATH` in the environment so that it can be launched by erigon.
-
-For web downloading no additional configuration is necessary as the downloader will auto configure rclone to use the webseeds which are discovered via the torrent library.
+However, this can result in slow or stalled downloads if the selected snapshot becomes unavailable. Use `erigon snapshot reset` or restart the downloader to sync to a different snapshot in this event. Pass `--local=false` keep files that aren't in the latest snapshot. This means only incomplete files that don't match the latest snapshot will be removed.
 
 # Configuration/Control Files
 
 The sections below describe the roles of the various control structures shown in the diagram above.  They combine to perform the following management and control functions:
 
-* Definition of verified well know hashes for segment files - which identifies a known trusted universe of files (**chain.toml**)
+* Definition of verified well know hashes for segment files - which identifies a known trusted universe of files (**$CHAIN.toml**)
 
 * Management of the completion state of the local download process (**BittorrentInfo**)
 
-* Definition of the accepted local hash set which are used to ensure that the local snapshots retain a consistent specified view as other definitions in the environment changes.  i.e. chain.toml gets re-versioned or BittorentInfo gets reset (**snapshot-lock.json**).
+* Definition of the accepted local hash set which are used to ensure that the local snapshots retain a consistent specified view as other definitions in the environment changes.  i.e. chain.toml gets re-versioned or BittorentInfo gets reset (**preverified.toml**).
 
-* Ability to override downloaded files with locally defined alternatives, for development or to fix errors and omissions (**snapshot-lock.json**)
+* Ability to override downloaded files with locally defined alternatives, for development or to fix errors and omissions (**preverified.toml**)
 
-## chain.toml
+## preverified snapshot hashes
 
-This is an embedded file which gets its contents from the [erigon seg repository](https://github.com/erigontech/erigon-snapshot) during the erigon build process. It contains 
-the `well know` hash for a particular segment file in the following format. 
+These are distributed in toml files in the following format. They can be hosted on a central server, embedded in the erigon binary or stored locally by a client (`preverified.toml`).
 
 ```toml
 'v1.0-000000-000100-beaconblocks.seg' = 'eaee23c3db187c8be69e332b4ff50aa73380d0ef'
@@ -41,40 +33,8 @@ the `well know` hash for a particular segment file in the following format.
 'v1.0-000000-000500-transactions.seg' = '92bb09068baa8eab9d5ad5e69c1eecd404a82258'
 ```
 
-Where multiple version of files exists there may be several likes per segment and the code in the released Erigon version will select the version that it is interesting.
+## $CHAIN.toml
 
-As this file is versioned as part of the Erigon release process the file to hash mapping can potentially change between releases.  This can potentially cause an issue for running Erigon node which expect the downloads in the snapshots directory to remain constant, which is why a separate file is used to record the hases used by the process when it originally downloaded its files.
-
-## snapshot-lock.json
-
-This is a file which resides in the <data-dir>/snapshots directory for an Erigon node.  It is created when the node performs its initial download.  It contains the list of downloaded files and their respective hashes.
-
-When a `snapshot-lock` file exists it is used rather than the chain.toml file to determine which files should be downloaded.  This means that the directory contents can be maintained even if Erigon is re-versioned and the chain.toml contents change.
-
-### Deleting snapshot-lock.json
-
-If the snapshot-lock file is deleted it will be recreated from the `chain.toml` file embedded in the Erigon process.  If the hashes change then the associated files will be re-downloaded.
-
-### How to override downloads
-
-As the `snapshot-lock` is used as the master hash list by the executing process, the `.seg` file used by the process can be changed by changing its associated hash.  There are two models of operation here. Both involve updating the hash in snapshot-lock.json first. 
-
-* First method involves deleting the old file (`.seg` file), this will trigger download of new file
-
-* Second method involves inserting the new replacement file into the directory. This file will be used - with no download.
-    * If no other method to determine the file hash exists, the hash of the new file will be printed by the process on start-up if it does not match the `snapshot-lock` entry and this can be used to insert the hash into the ``snapshot-lock`
-
-## BittorrentInfo (in the downloader db)
-
-This is an internal db table used for managing the state of the download from either the torrent or its associated web host.  It has been created to manage the fact that the internal torrent library does not necessarily manage the overall download state of the file associated with a has completely consistently.
-
-It contains the following entries
-
-||                                                                                                                                                                                                                                                                      |
-|----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Name | The unqualified name of the file being downloaded.  e.g. `v1.0-000000-000500-transactions.seg`.  This field is treated as the primary key for the table, there can only be one download per file.                                                                    |
-| Hash | The hash of the file being downloaded.  This value can change if the external hash received either from `chain.toml` or `snapshot-lock.json` changes.  If the hash changes the entry is treated as a new download and the `Length` and `Completed` fields are reset. 
-| Length | The length of the file downloaded.  This may be available from the torrent info - but in general is only completed once the file has been downloaded.                                                                                                                |
-| Created | The date and time that this record was created, or that the `Hash` field changed, effectively making this a new download.                                                                                                                                            |
-| Completed | This is the date and time that the download was completed.  The presence of a completion date is also used as an indication of completion.  If the field is nil then the download is treated as incomplete                                                           |
+There is an embedded toml file in [erigon seg repository](https://github.com/erigontech/erigon-snapshot) during the erigon build process. It contains 
+the `well known` hash for a particular segment file in the following format. 
 
