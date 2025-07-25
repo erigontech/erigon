@@ -27,7 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/version"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -36,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // filesItem is "dirty" file - means file which can be:
