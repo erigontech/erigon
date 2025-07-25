@@ -21,7 +21,6 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -52,7 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/version"
 )
 
 type InvertedIndex struct {

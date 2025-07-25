@@ -21,12 +21,10 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -44,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/version"
 )
 
 type History struct {
