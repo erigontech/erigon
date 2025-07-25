@@ -1545,7 +1545,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
-	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
+	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load() + a.StepSize() {
 		close(fin)
 		return fin
 	}
