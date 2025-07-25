@@ -271,7 +271,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
-	cfg.BatchSize = 1 * datasize.MB
+	cfg.BatchSize = 3 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
