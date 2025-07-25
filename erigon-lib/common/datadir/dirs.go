@@ -255,7 +255,7 @@ func CopyFile(from, to string) error {
 	return nil
 }
 
-func (d Dirs) RenameOldVersions() error {
+func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
@@ -305,7 +305,11 @@ func (d Dirs) RenameOldVersions() error {
 			return err
 		}
 	}
-	log.Debug(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
+	if cmdCommand {
+		log.Info(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
+	} else {
+		log.Debug(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
+	}
 	if d.Downloader != "" && (renamed > 0 || removed > 0) {
 		if err := os.RemoveAll(d.Downloader); err != nil {
 			return err
