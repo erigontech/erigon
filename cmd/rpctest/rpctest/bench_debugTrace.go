@@ -137,6 +137,9 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 	if additionalParams == "" {
 		additionalParams = "\"disableStorage\": true,\"disableMemory\": true,\"disableStack\": true"
 	}
+	if additionalParams == "" {
+		additionalParams = "\"disableStorage\": true,\"disableMemory\": true,\"disableStack\": true"
+	}
 
 	var rec *bufio.Writer
 	if recordFileName != "" {
