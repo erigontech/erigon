@@ -9,8 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	cryptoKzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -311,6 +313,23 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			for index := range anyColumnSidecar.KzgCommitmentsInclusionProof.Length() {
 				p.Set(index+len(branchProof), anyColumnSidecar.KzgCommitmentsInclusionProof.Get(index))
 			}
+		}
+		// verify blobs
+		blobs := []gokzg4844.BlobRef{}
+		commitments := []gokzg4844.KZGCommitment{}
+		proofs := []gokzg4844.KZGProof{}
+		for _, blob := range blobSidecars {
+			if !cltypes.VerifyCommitmentInclusionProof(blob.KzgCommitment, blob.CommitmentInclusionProof, blob.Index, clparams.DenebVersion, blob.SignedBlockHeader.Header.BodyRoot) {
+				log.Debug("[blobsRecover] invalid commitment inclusion proof", "slot", slot, "blockRoot", blockRoot, "blobIndex", blob.Index)
+				return
+			}
+			blobs = append(blobs, gokzg4844.BlobRef(blob.Blob[:]))
+			commitments = append(commitments, gokzg4844.KZGCommitment(blob.KzgCommitment))
+			proofs = append(proofs, gokzg4844.KZGProof(blob.KzgProof))
+		}
+		if err := cryptoKzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs); err != nil {
+			log.Debug("[blobsRecover] invalid blob kzg proof", "err", err, "slot", slot, "blockRoot", blockRoot)
+			return
 		}
 
 		// Save blobs
