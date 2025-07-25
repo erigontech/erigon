@@ -120,9 +120,6 @@ make erigon
 ./build/bin/erigon
 ```
 
-Increase download speed by `--torrent.download.rate=20mb`. <code>🔬
-See [Downloader docs](./cmd/downloader/readme.md)</code>
-
 Use `--datadir` to choose where to store data.
 
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
@@ -134,14 +131,11 @@ Running `make help` will list and describe the convenience commands available in
 
 ### Upgrading from 3.0 to 3.1
 
-* Erigon3.1 has 2 upgrade options (backup recommended in both):
-    * Just upgrade Erigon binary - it will work on old files
-    * Upgrade binary and data:
-        * upgrade Erigon version
-        * run `./build/bin/erigon snapshots reset --datadir /your-datadir --chain your-chain` . After this command: at
-        next start of Erigon - will download latest files (but re-use unchanged files)
-        * start Erigon - it will download changed files
-        * it will take many hours (can increase speed by `--torrent.download.rate=1g`)
+When running Erigon 3.1+, your snapshot files will be upgraded automatically to a new file naming scheme. It's recommended that you take a backup or filesystem snapshot of your datadir before upgrading.
+
+The downloader component in Erigon 3.1 will check the file data of snapshots when `--downloader.verify` is provided. Incorrect data will be repaired.
+
+A new `snapshots reset` subcommand is added, that lets you trigger Erigon to perform an initial sync on the next run, reusing existing files where possible. Use this if your datadir is corrupted, or your client is unable to obtain missing snapshot data due to having committed to a snapshot that is no longer available. It will remove any locally generated files, and your chain data. 
 
 ### Datadir structure
 
@@ -159,6 +153,8 @@ datadir
    
 # There is 4 domains: account, storage, code, commitment 
 ```
+
+See the [lib](erigon-db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
 
 ### History on cheap disk
 
