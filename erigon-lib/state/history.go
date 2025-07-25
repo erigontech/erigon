@@ -440,7 +440,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				if err != nil {
 					return err
 				}
-				histKey = historyKey(txNum, keyBuf, histKey[:0])
+				histKey = stepPrefixedHistoryKey(keyBuf, txNum, h.aggregationStep, histKey[:0])
 				if err = rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
@@ -721,7 +721,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 	baseTxNum := step * h.aggregationStep
 	cnt := 0
-	var histKeyBuf []byte
+
 	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
 
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -763,8 +763,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 					val = nil
 				}
 
-				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
-				if err := historyWriter.Add(histKeyBuf, val); err != nil {
+				stepKeyBuf := stepPrefixedHistoryKey(prevKey, vTxNum, h.aggregationStep, nil)
+				if err := historyWriter.Add(stepKeyBuf, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
 				}
 				continue
@@ -780,8 +780,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				val = nil
 			}
 
-			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
-			if err := historyWriter.Add(histKeyBuf, val); err != nil {
+			stepKeyBuf := stepPrefixedHistoryKey(prevKey, vTxNum, h.aggregationStep, nil)
+			if err := historyWriter.Add(stepKeyBuf, val); err != nil {
 				return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, stepKey, err)
 			}
 		}
@@ -1343,18 +1343,18 @@ func stepPrefixedHistoryKeyAddr(addr []byte, txNum uint64, aggregationStep uint6
 	return buf
 }
 
-func historyKey(txNum uint64, key []byte, buf []byte) []byte {
-	if buf == nil || cap(buf) < 8+len(key) {
-		buf = make([]byte, 8+len(key))
-	}
-	buf = buf[:8+len(key)]
-	binary.BigEndian.PutUint64(buf, txNum)
-	copy(buf[8:], key)
-	return buf
-}
-
 func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
-	ht._bufTs = historyKey(txNum, key, ht._bufTs)
+	if key == nil {
+		// For value prefix in SeekBothRange, just return txNum bytes
+		if ht._bufTs == nil || cap(ht._bufTs) < 8 {
+			ht._bufTs = make([]byte, 8)
+		}
+		ht._bufTs = ht._bufTs[:8]
+		binary.BigEndian.PutUint64(ht._bufTs, txNum)
+		return ht._bufTs
+	}
+	// For file lookups, use step-prefixed format
+	ht._bufTs = stepPrefixedHistoryKey(key, txNum, ht.aggStep, ht._bufTs)
 	return ht._bufTs
 }
 

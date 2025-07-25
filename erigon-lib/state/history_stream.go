@@ -145,7 +145,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			g.Reset(offset)
 			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
+				histKey := stepPrefixedHistoryKey(hi.nextKey, txNum, hi.hc.h.aggregationStep, nil)
 				if bytes.Equal(histKey, k) {
 					hi.nextVal = v
 					break
@@ -438,7 +438,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			g.Reset(offset)
 			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
+				histKey := stepPrefixedHistoryKey(hi.nextKey, txNum, hi.hc.h.aggregationStep, nil)
 				if bytes.Equal(histKey, k) {
 					hi.nextVal = v
 					break
