@@ -113,12 +113,13 @@ jobs:
           path: hive/workspace/logs
       - name: Test Results
         run: |
+          cat result.log
           if grep -q "failed" hive/failed.log; then
             echo "One or more tests failed."
             exit 1
           fi
           echo "All tests passed successfully."
-          cat result.log
+
 
 
       # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
