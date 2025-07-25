@@ -23,7 +23,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/debug"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -32,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
