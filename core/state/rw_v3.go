@@ -83,15 +83,15 @@ func (rs *ParallelExecutionState) AddWork(ctx context.Context, txTask *TxTask, i
 }
 
 func (rs *ParallelExecutionState) RegisterSender(txTask *TxTask) bool {
-	//TODO: it deadlocks on panic, fix it
+	// To avoid deadlock on panic, always unlock the mutex even if a panic occurs.
+	// Both unlock and recover are handled in a single defer.
+	rs.triggerLock.Lock()
 	defer func() {
-		rec := recover()
-		if rec != nil {
+		rs.triggerLock.Unlock()
+		if rec := recover(); rec != nil {
 			fmt.Printf("panic?: %s,%s\n", rec, dbg.Stack())
 		}
 	}()
-	rs.triggerLock.Lock()
-	defer rs.triggerLock.Unlock()
 	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender()]
 	if deferral {
 		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
