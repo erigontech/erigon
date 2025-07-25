@@ -1944,36 +1944,6 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	return stat, nil
 }
 
-type SegStreamReader struct {
-	s *seg.Reader
-
-	limit int
-}
-
-// SegStreamReader implements stream.KV for segment reader.
-// limit -1 means no limit.
-func NewSegStreamReader(s *seg.Reader, limit int) *SegStreamReader {
-	s.Reset(0)
-	return &SegStreamReader{
-		s: s, limit: limit,
-	}
-}
-
-func (sr *SegStreamReader) HasNext() bool { return sr.s.HasNext() && (sr.limit == -1 || sr.limit > 0) }
-func (sr *SegStreamReader) Close()        { sr.s = nil }
-
-func (sr *SegStreamReader) Next() (k, v []byte, err error) {
-	k, _ = sr.s.Next(k)
-	if !sr.s.HasNext() {
-		return nil, nil, fmt.Errorf("key %x has no associated value: %s", k, sr.s.FileName())
-	}
-	v, _ = sr.s.Next(v)
-	if sr.limit > 0 {
-		sr.limit--
-	}
-	return k, v, nil
-}
-
 func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return dt.ht.iit.stepsRangeInDB(tx)
 }
