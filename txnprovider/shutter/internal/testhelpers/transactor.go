@@ -25,12 +25,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
@@ -48,7 +48,7 @@ func NewTransactor(rpcApiClient requests.RequestGenerator, chainId *big.Int) Tra
 	}
 }
 
-func (t Transactor) SubmitSimpleTransfer(from *ecdsa.PrivateKey, to libcommon.Address, amount *big.Int) (types.Transaction, error) {
+func (t Transactor) SubmitSimpleTransfer(from *ecdsa.PrivateKey, to common.Address, amount *big.Int) (types.Transaction, error) {
 	signedTxn, err := t.createSimpleTransfer(from, to, amount)
 	if err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (t Transactor) SubmitSimpleTransfer(from *ecdsa.PrivateKey, to libcommon.Ad
 
 func (t Transactor) createSimpleTransfer(
 	from *ecdsa.PrivateKey,
-	to libcommon.Address,
+	to common.Address,
 	amount *big.Int,
 ) (types.Transaction, error) {
 	amountU256, _ := uint256.FromBig(amount)
@@ -107,7 +107,7 @@ func NewEncryptedTransactor(
 	sequencerAddr string,
 	cb bind.ContractBackend,
 ) EncryptedTransactor {
-	sequencer, err := shuttercontracts.NewSequencer(libcommon.HexToAddress(sequencerAddr), cb)
+	sequencer, err := shuttercontracts.NewSequencer(common.HexToAddress(sequencerAddr), cb)
 	if err != nil {
 		panic(err)
 	}
@@ -122,7 +122,7 @@ func NewEncryptedTransactor(
 func (et EncryptedTransactor) SubmitEncryptedTransfer(
 	ctx context.Context,
 	from *ecdsa.PrivateKey,
-	to libcommon.Address,
+	to common.Address,
 	amount *big.Int,
 	eon shutter.Eon,
 ) (EncryptedSubmission, error) {

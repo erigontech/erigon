@@ -23,34 +23,34 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/consensus/merge"
 )
 
 // ETH1Block represents a block structure CL-side.
 type Eth1Block struct {
-	ParentHash    libcommon.Hash    `json:"parent_hash"`
-	FeeRecipient  libcommon.Address `json:"fee_recipient"`
-	StateRoot     libcommon.Hash    `json:"state_root"`
-	ReceiptsRoot  libcommon.Hash    `json:"receipts_root"`
-	LogsBloom     types.Bloom       `json:"logs_bloom"`
-	PrevRandao    libcommon.Hash    `json:"prev_randao"`
-	BlockNumber   uint64            `json:"block_number,string"`
-	GasLimit      uint64            `json:"gas_limit,string"`
-	GasUsed       uint64            `json:"gas_used,string"`
-	Time          uint64            `json:"timestamp,string"`
-	Extra         *solid.ExtraData  `json:"extra_data"`
-	BaseFeePerGas libcommon.Hash    `json:"base_fee_per_gas"`
+	ParentHash    common.Hash      `json:"parent_hash"`
+	FeeRecipient  common.Address   `json:"fee_recipient"`
+	StateRoot     common.Hash      `json:"state_root"`
+	ReceiptsRoot  common.Hash      `json:"receipts_root"`
+	LogsBloom     types.Bloom      `json:"logs_bloom"`
+	PrevRandao    common.Hash      `json:"prev_randao"`
+	BlockNumber   uint64           `json:"block_number,string"`
+	GasLimit      uint64           `json:"gas_limit,string"`
+	GasUsed       uint64           `json:"gas_used,string"`
+	Time          uint64           `json:"timestamp,string"`
+	Extra         *solid.ExtraData `json:"extra_data"`
+	BaseFeePerGas common.Hash      `json:"base_fee_per_gas"`
 	// Extra fields
-	BlockHash     libcommon.Hash              `json:"block_hash"`
+	BlockHash     common.Hash                 `json:"block_hash"`
 	Transactions  *solid.TransactionsSSZ      `json:"transactions"`
 	Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
 	BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
@@ -116,19 +116,19 @@ func (*Eth1Block) Static() bool {
 
 func (b *Eth1Block) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		ParentHash    libcommon.Hash              `json:"parent_hash"`
-		FeeRecipient  libcommon.Address           `json:"fee_recipient"`
-		StateRoot     libcommon.Hash              `json:"state_root"`
-		ReceiptsRoot  libcommon.Hash              `json:"receipts_root"`
+		ParentHash    common.Hash                 `json:"parent_hash"`
+		FeeRecipient  common.Address              `json:"fee_recipient"`
+		StateRoot     common.Hash                 `json:"state_root"`
+		ReceiptsRoot  common.Hash                 `json:"receipts_root"`
 		LogsBloom     types.Bloom                 `json:"logs_bloom"`
-		PrevRandao    libcommon.Hash              `json:"prev_randao"`
+		PrevRandao    common.Hash                 `json:"prev_randao"`
 		BlockNumber   uint64                      `json:"block_number,string"`
 		GasLimit      uint64                      `json:"gas_limit,string"`
 		GasUsed       uint64                      `json:"gas_used,string"`
 		Time          uint64                      `json:"timestamp,string"`
 		Extra         *solid.ExtraData            `json:"extra_data"`
 		BaseFeePerGas string                      `json:"base_fee_per_gas"`
-		BlockHash     libcommon.Hash              `json:"block_hash"`
+		BlockHash     common.Hash                 `json:"block_hash"`
 		Transactions  *solid.TransactionsSSZ      `json:"transactions"`
 		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
 		BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
@@ -156,19 +156,19 @@ func (b *Eth1Block) MarshalJSON() ([]byte, error) {
 
 func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		ParentHash    libcommon.Hash              `json:"parent_hash"`
-		FeeRecipient  libcommon.Address           `json:"fee_recipient"`
-		StateRoot     libcommon.Hash              `json:"state_root"`
-		ReceiptsRoot  libcommon.Hash              `json:"receipts_root"`
+		ParentHash    common.Hash                 `json:"parent_hash"`
+		FeeRecipient  common.Address              `json:"fee_recipient"`
+		StateRoot     common.Hash                 `json:"state_root"`
+		ReceiptsRoot  common.Hash                 `json:"receipts_root"`
 		LogsBloom     types.Bloom                 `json:"logs_bloom"`
-		PrevRandao    libcommon.Hash              `json:"prev_randao"`
+		PrevRandao    common.Hash                 `json:"prev_randao"`
 		BlockNumber   uint64                      `json:"block_number,string"`
 		GasLimit      uint64                      `json:"gas_limit,string"`
 		GasUsed       uint64                      `json:"gas_used,string"`
 		Time          uint64                      `json:"timestamp,string"`
 		Extra         *solid.ExtraData            `json:"extra_data"`
 		BaseFeePerGas string                      `json:"base_fee_per_gas"`
-		BlockHash     libcommon.Hash              `json:"block_hash"`
+		BlockHash     common.Hash                 `json:"block_hash"`
 		Transactions  *solid.TransactionsSSZ      `json:"transactions"`
 		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals"`
 		BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
@@ -194,7 +194,7 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	tmpBaseFee := tmp.Bytes32()
-	b.BaseFeePerGas = libcommon.Hash{}
+	b.BaseFeePerGas = common.Hash{}
 	copy(b.BaseFeePerGas[:], utils.ReverseOfByteSlice(tmpBaseFee[:]))
 	b.BlockHash = aux.BlockHash
 	b.Transactions = aux.Transactions
@@ -207,9 +207,9 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 // PayloadHeader returns the equivalent ExecutionPayloadHeader object.
 func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 	var err error
-	var transactionsRoot, withdrawalsRoot libcommon.Hash
+	var transactionsRoot, withdrawalsRoot common.Hash
 	// Corner case: before TTD this is 0, since all fields are 0, a 0 hash check will suffice.
-	if b.BlockHash != (libcommon.Hash{}) {
+	if b.BlockHash != (common.Hash{}) {
 		if transactionsRoot, err = b.Transactions.HashSSZ(); err != nil {
 			return nil, err
 		}
@@ -306,17 +306,17 @@ func (b *Eth1Block) getSchema() []interface{} {
 }
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
-func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash, executionReqHash libcommon.Hash) (*types.Header, error) {
+func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.Hash) (*types.Header, error) {
 	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
-	reversedBaseFeePerGas := libcommon.Copy(b.BaseFeePerGas[:])
+	reversedBaseFeePerGas := common.Copy(b.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
 	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
 	// If the block version is Capella or later, calculate the withdrawals hash.
-	var withdrawalsHash *libcommon.Hash
+	var withdrawalsHash *common.Hash
 	if b.version >= clparams.CapellaVersion {
-		withdrawalsHash = new(libcommon.Hash)
+		withdrawalsHash = new(common.Hash)
 		// extract all withdrawals from itearable list
 		withdrawals := make([]*types.Withdrawal, b.Withdrawals.Len())
 		b.Withdrawals.Range(func(idx int, w *Withdrawal, _ int) bool {
@@ -332,7 +332,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash, executionReqHash libco
 
 	header := &types.Header{
 		ParentHash:            b.ParentHash,
-		UncleHash:             types.EmptyUncleHash,
+		UncleHash:             empty.UncleHash,
 		Coinbase:              b.FeeRecipient,
 		Root:                  b.StateRoot,
 		TxHash:                types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),

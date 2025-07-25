@@ -24,13 +24,12 @@ import (
 	"hash"
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/rlphacks"
 )
 
 type hasher struct {
@@ -39,7 +38,7 @@ type hasher struct {
 	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
 	bw                   *ByteArrayWriter
-	callback             func(libcommon.Hash, Node)
+	callback             func(common.Hash, Node)
 }
 
 const rlpPrefixLength = 4
@@ -118,7 +117,7 @@ func (h *hasher) hashInternal(n Node, force bool, storeTo []byte, bufOffset int)
 	}
 
 	if h.callback != nil && len(n.reference()) == length.Hash {
-		var hash libcommon.Hash
+		var hash common.Hash
 		copy(hash[:], storeTo)
 		h.callback(hash, n)
 	}
@@ -164,7 +163,7 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 		// Encode key
 		compactKey := hexToCompact(n.Key)
 		h.bw.Setup(buffer, pos)
-		written, err := rlphacks.EncodeByteArrayAsRlp(compactKey, h.bw, h.prefixBuf[:])
+		written, err := rlp.EncodeByteArrayAsRlp(compactKey, h.bw, h.prefixBuf[:])
 		if err != nil {
 			return nil, err
 		}
@@ -283,12 +282,12 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 func (h *hasher) valueNodeToBuffer(vn ValueNode, buffer []byte, pos int) (int, error) {
 	h.bw.Setup(buffer, pos)
 
-	var val rlphacks.RlpSerializable
+	var val rlp.RlpSerializable
 
 	if h.valueNodesRlpEncoded {
-		val = rlphacks.RlpEncodedBytes(vn)
+		val = rlp.RlpEncodedBytes(vn)
 	} else {
-		val = rlphacks.RlpSerializableBytes(vn)
+		val = rlp.RlpSerializableBytes(vn)
 	}
 
 	if err := val.ToDoubleRLP(h.bw, h.prefixBuf[:]); err != nil {
@@ -300,7 +299,7 @@ func (h *hasher) valueNodeToBuffer(vn ValueNode, buffer []byte, pos int) (int, e
 func (h *hasher) accountNodeToBuffer(ac *AccountNode, buffer []byte, pos int) (int, error) {
 	acRlp := make([]byte, ac.EncodingLengthForHashing())
 	ac.EncodeForHashing(acRlp)
-	enc := rlphacks.RlpEncodedBytes(acRlp)
+	enc := rlp.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)
 
 	if err := enc.ToDoubleRLP(h.bw, h.prefixBuf[:]); err != nil {

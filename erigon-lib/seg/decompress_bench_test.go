@@ -24,77 +24,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func BenchmarkDecompressNext(b *testing.B) {
+func BenchmarkDecompress(b *testing.B) {
 	t := new(testing.T)
-	d := prepareDict(t)
+	d := prepareDict(t, 100_000)
 	defer d.Close()
-	g := d.MakeGetter()
-	for i := 0; i < b.N; i++ {
-		_, _ = g.Next(nil)
-		if !g.HasNext() {
-			g.Reset(0)
+
+	b.Run("next", func(b *testing.B) {
+		b.ReportAllocs()
+		var buf []byte
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			buf, _ = g.Next(buf[:0])
+			if !g.HasNext() {
+				g.Reset(0)
+			}
 		}
-	}
-}
-
-func BenchmarkDecompressFastNext(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-	buf := make([]byte, 100)
-	for i := 0; i < b.N; i++ {
-		_, _ = g.FastNext(buf)
-		if !g.HasNext() {
-			g.Reset(0)
+	})
+	b.Run("skip", func(b *testing.B) {
+		b.ReportAllocs()
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			_, _ = g.Skip()
+			if !g.HasNext() {
+				g.Reset(0)
+			}
 		}
-	}
-}
-
-func BenchmarkDecompressSkip(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-
-	for i := 0; i < b.N; i++ {
-		_, _ = g.Skip()
-		if !g.HasNext() {
-			g.Reset(0)
+	})
+	b.Run("matchcmp_non_existing_key", func(b *testing.B) {
+		b.ReportAllocs()
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			_ = g.MatchCmp([]byte("longlongword"))
+			if !g.HasNext() {
+				g.Reset(0)
+			}
 		}
-	}
-}
-
-func BenchmarkDecompressMatchCmp(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-	for i := 0; i < b.N; i++ {
-		_ = g.MatchCmp([]byte("longlongword"))
-		if !g.HasNext() {
-			g.Reset(0)
-		}
-	}
-}
-
-func BenchmarkDecompressMatchPrefix(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-
-	for i := 0; i < b.N; i++ {
-		_ = g.MatchPrefix([]byte("longlongword"))
-	}
+	})
 }
 
 func BenchmarkDecompressTorrent(t *testing.B) {
 	t.Skip()
 
-	//fpath := "/Volumes/wotah/mainnet/snapshots/v1-013500-014000-bodies.seg"
-	fpath := "/Volumes/wotah/mainnet/snapshots/v1-013500-014000-transactions.seg"
-	//fpath := "./v1-006000-006500-transactions.seg"
+	//fpath := "/Volumes/wotah/mainnet/snapshots/v1.0-013500-014000-bodies.seg"
+	fpath := "/Volumes/wotah/mainnet/snapshots/v1.0-013500-014000-transactions.seg"
+	//fpath := "./v1.0-006000-006500-transactions.seg"
 	st, err := os.Stat(fpath)
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())

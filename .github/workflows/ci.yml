@@ -1,4 +1,4 @@
-name: CI
+name: Unit tests
 on:
   push:
     branches:
@@ -15,24 +15,23 @@ on:
     
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: ${{ !contains(fromJSON('[
-      "refs/heads/release/2.60",
-      "refs/heads/release/2.61",
-      "refs/heads/release/3.0",
-      "refs/heads/main"
-    ]'), github.ref) }}
-
 jobs:
-  tests:
+  linux:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
+        }}
+      cancel-in-progress: true
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         # list of os: https://github.com/actions/virtual-environments
         os:
-          - ubuntu-22.04
-          - macos-14
+          - ubuntu-latest
+          - macos-latest
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -68,21 +67,21 @@ jobs:
           fi
 
       - name: Test
-        run: make test
+        run: make test-short
 
-      - name: SonarCloud
-        if: runner.os == 'Linux'
-        uses: SonarSource/sonarcloud-github-action@v2.3.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        continue-on-error: true
-
-  tests-windows:
+  win:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
+        }}
+      cancel-in-progress: true
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
-        os: [ windows-2022 ]
+        os: [ windows-2025 ]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -115,7 +114,10 @@ jobs:
         run: .\wmake.ps1 all
 
       - name: Test
-        run: .\wmake.ps1 test
+        run: .\wmake.ps1 test-short
 
       - name: Test erigon-lib
-        run: cd erigon-lib && make test-no-fuzz
+        run: cd erigon-lib && make test-short
+
+      - name: Test erigon-db
+        run: cd erigon-db && make test-short

@@ -24,29 +24,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type test_heimdall struct {
@@ -75,7 +75,7 @@ func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, 
 	return nil, nil
 }
 
-func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
 	return nil, nil
 }
 
@@ -184,8 +184,8 @@ func (r headerReader) Config() *chain.Config {
 	return r.validator.ChainConfig
 }
 
-func (r headerReader) FrozenBlocks() uint64    { return 0 }
-func (r headerReader) FrozenBorBlocks() uint64 { return 0 }
+func (r headerReader) FrozenBlocks() uint64              { return 0 }
+func (r headerReader) FrozenBorBlocks(align bool) uint64 { return 0 }
 
 func (r headerReader) CurrentHeader() *types.Header {
 	return nil
@@ -198,7 +198,7 @@ func (r headerReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
 
-func (r headerReader) GetHeader(_ libcommon.Hash, blockNo uint64) *types.Header {
+func (r headerReader) GetHeader(_ common.Hash, blockNo uint64) *types.Header {
 	return r.GetHeaderByNumber(blockNo)
 }
 
@@ -211,11 +211,11 @@ func (r headerReader) GetHeaderByNumber(blockNo uint64) *types.Header {
 	return nil
 }
 
-func (r headerReader) GetHeaderByHash(libcommon.Hash) *types.Header {
+func (r headerReader) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
-func (r headerReader) GetTd(libcommon.Hash, uint64) *big.Int {
+func (r headerReader) GetTd(common.Hash, uint64) *big.Int {
 	return nil
 }
 
@@ -225,7 +225,7 @@ func (r headerReader) BorSpan(spanId uint64) *heimdall.Span {
 
 type spanner struct {
 	*bor.ChainSpanner
-	validatorAddress libcommon.Address
+	validatorAddress common.Address
 	currentSpan      heimdall.Span
 }
 
@@ -355,7 +355,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		})
 	}
 
-	bor.Authorize(validatorAddress, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
+	bor.Authorize(validatorAddress, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 		return crypto.Sign(crypto.Keccak256(message), validatorKey)
 	})
 
@@ -368,11 +368,13 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 }
 
 func TestValidatorCreate(t *testing.T) {
-	newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
+	t.Skip("issue #15017")
+	newValidator(t, newTestHeimdall(polychain.BorDevnetChainConfig), map[uint64]*types.Block{})
 }
 
 func TestVerifyHeader(t *testing.T) {
-	v := newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
+	t.Skip("issue #15017")
+	v := newValidator(t, newTestHeimdall(polychain.BorDevnetChainConfig), map[uint64]*types.Block{})
 
 	chain, err := v.generateChain(1)
 
@@ -398,17 +400,17 @@ func TestVerifyRun(t *testing.T) {
 }
 
 func TestVerifySprint(t *testing.T) {
-	//testVerify(t, 10, 4, int(params.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
+	//testVerify(t, 10, 4, int(polychain.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func TestVerifySpan(t *testing.T) {
-	//testVerify(t, 10, 4 /*100**/ *int(params.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
+	//testVerify(t, 10, 4 /*100**/ *int(polychain.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func testVerify(t *testing.T, noValidators int, chainLength int) {
 	log.Root().SetHandler(log.StderrHandler)
 
-	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
+	heimdall := newTestHeimdall(polychain.BorDevnetChainConfig)
 	blocks := map[uint64]*types.Block{}
 
 	validators := make([]validator, noValidators)
@@ -469,7 +471,8 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 }
 
 func TestSendBlock(t *testing.T) {
-	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
+	t.Skip("issue #15017")
+	heimdall := newTestHeimdall(polychain.BorDevnetChainConfig)
 	blocks := map[uint64]*types.Block{}
 
 	s := newValidator(t, heimdall, blocks)

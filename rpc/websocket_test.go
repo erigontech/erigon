@@ -85,6 +85,10 @@ func TestWebsocketOriginCheck(t *testing.T) {
 
 // This test checks whether calls exceeding the request size limit are rejected.
 func TestWebsocketLargeCall(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	logger := log.New()
 
@@ -121,6 +125,10 @@ func TestWebsocketLargeCall(t *testing.T) {
 
 // This test checks that client handles WebSocket ping frames correctly.
 func TestClientWebsocketPing(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
@@ -170,6 +178,10 @@ func TestClientWebsocketPing(t *testing.T) {
 
 // This checks that the websocket transport can deal with large messages.
 func TestClientWebsocketLargeMessage(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	var (
 		srv     = NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)

@@ -21,15 +21,15 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 type DifficultyCalculator struct {
 	borConfig            *borcfg.BorConfig
-	signaturesCache      *lru.ARCCache[libcommon.Hash, libcommon.Address]
+	signaturesCache      *lru.ARCCache[common.Hash, common.Address]
 	blockProducersReader blockProducersReader
 }
 
@@ -44,7 +44,7 @@ func (calc *DifficultyCalculator) HeaderDifficulty(ctx context.Context, header *
 
 func (calc *DifficultyCalculator) signerDifficulty(
 	ctx context.Context,
-	signer libcommon.Address,
+	signer common.Address,
 	headerNum uint64,
 ) (uint64, error) {
 	producers, err := calc.blockProducersReader.Producers(ctx, headerNum)

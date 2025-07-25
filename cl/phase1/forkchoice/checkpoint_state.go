@@ -21,13 +21,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -51,7 +50,7 @@ type checkpointState struct {
 
 	validatorSetSize int
 	// fork data
-	genesisValidatorsRoot libcommon.Hash
+	genesisValidatorsRoot common.Hash
 	fork                  *cltypes.Fork
 	activeBalance, epoch  uint64 // current active balance and epoch
 	checkpoint            solid.Checkpoint
@@ -74,7 +73,7 @@ func readFromBitset(bitset []byte, i int) bool {
 }
 
 func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegistry public_keys_registry.PublicKeyRegistry, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
-	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint) *checkpointState {
+	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint) *checkpointState {
 	balances := make([]uint64, len(validatorSet))
 
 	bitsetSize := (len(validatorSet) + 7) / 8
@@ -144,7 +143,8 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 		bitIndex := i % 8
 		sliceIndex := i / 8
 		if sliceIndex >= len(aggregationBits) {
-			return nil, errors.New("GetAttestingIndicies: committee is too big")
+			return nil, fmt.Errorf("getAttestingIndicies: committee is too big, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
+				sliceIndex, len(aggregationBits), len(committee))
 		}
 		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
 			attestingIndices = append(attestingIndices, member)

@@ -17,7 +17,7 @@
 package forkchoice
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
@@ -40,10 +40,10 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 		return
 	}
 	f.mu.Lock()
-	f.headHash = libcommon.Hash{}
+	f.headHash = common.Hash{}
 	f.mu.Unlock()
 	// If this is a new slot, reset store.proposer_boost_root
-	f.proposerBoostRoot.Store(libcommon.Hash{})
+	f.proposerBoostRoot.Store(common.Hash{})
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
 		f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
 	}

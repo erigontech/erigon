@@ -17,17 +17,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func TestTransaction(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	txt := new(testMatcher)
 
 	// We don't allow more than uint64 in gas amount
@@ -37,7 +39,7 @@ func TestTransaction(t *testing.T) {
 
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
 		t.Parallel()
-		cfg := params.MainnetChainConfig
+		cfg := chainspec.MainnetChainConfig
 		if err := txt.checkFailure(t, test.Run(cfg.ChainID)); err != nil {
 			t.Error(err)
 		}

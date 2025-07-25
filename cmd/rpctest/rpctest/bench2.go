@@ -19,7 +19,7 @@ package rpctest
 import (
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
@@ -53,11 +53,11 @@ func Bench2(erigon_url string) error {
 		for i, txn := range b.Result.Transactions {
 			if txn.To != nil && txn.Gas.ToInt().Uint64() > 21000 {
 				// Request storage range
-				// blockHash libcommon.Hash, txIndex int, contractAddress libcommon.Address, keyStart hexutil.Bytes, maxResult int
+				// blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int
 				req_id++
 				storageRangeTemplate := `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}` //nolint
-				sm := make(map[libcommon.Hash]storageEntry)
-				nextKey := &libcommon.Hash{}
+				sm := make(map[common.Hash]storageEntry)
+				nextKey := &common.Hash{}
 				for nextKey != nil {
 					var sr DebugStorageRange
 					if err := post(client, erigon_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, txn.To, *nextKey, 1024, req_id), &sr); err != nil {

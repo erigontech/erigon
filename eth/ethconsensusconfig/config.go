@@ -22,24 +22,22 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor/borabi"
-
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bridge"
-
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/aura"
-	"github.com/erigontech/erigon/consensus/clique"
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
-	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/aura"
+	"github.com/erigontech/erigon/execution/consensus/clique"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borabi"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -72,7 +70,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
 			}, notify, noVerify)
 		}
-	case *params.ConsensusSnapshotConfig:
+	case *chainspec.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
 			if consensusCfg.InMemory {
 				nodeConfig.Dirs.DataDir = ""
@@ -147,7 +145,7 @@ func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Conf
 	var consensusConfig interface{}
 
 	if chainConfig.Clique != nil {
-		consensusConfig = params.CliqueSnapshot
+		consensusConfig = chainspec.CliqueSnapshot
 	} else if chainConfig.Aura != nil {
 		consensusConfig = chainConfig.Aura
 	} else if chainConfig.Bor != nil {

@@ -26,12 +26,11 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -232,9 +231,6 @@ func (a *Antiquary) Loop() error {
 		}
 	}
 
-	if a.states {
-		go a.loopStates(a.ctx)
-	}
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
 		return err
 	}
@@ -242,6 +238,10 @@ func (a *Antiquary) Loop() error {
 	a.logger.Info("[Antiquary] Restarting Caplin")
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+
+	if a.states {
+		go a.loopStates(a.ctx)
 	}
 	// Check for snapshots retirement every 3 minutes
 	retirementTicker := time.NewTicker(12 * time.Second)

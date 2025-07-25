@@ -53,18 +53,18 @@ func TestForkGraphInDisk(t *testing.T) {
 	graph := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitter)
 	_, status, err := graph.AddChainSegment(blockA, true)
 	require.NoError(t, err)
-	require.Equal(t, status, Success)
+	require.Equal(t, Success, status)
 	// Now make blockC a bad block
 	blockC.Block.ProposerIndex = 81214459 // some invalid thing
 	_, status, err = graph.AddChainSegment(blockC, true)
 	require.Error(t, err)
-	require.Equal(t, status, InvalidBlock)
+	require.Equal(t, InvalidBlock, status)
 	// Save current state hash
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
-	require.Equal(t, status, Success)
+	require.Equal(t, Success, status)
 	// Try again with same should yield success
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
-	require.Equal(t, status, PreValidated)
+	require.Equal(t, PreValidated, status)
 }

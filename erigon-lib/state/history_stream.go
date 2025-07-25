@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -56,13 +56,13 @@ type HistoryRangeAsOfFiles struct {
 func (hi *HistoryRangeAsOfFiles) Close() {
 }
 
-func (hi *HistoryRangeAsOfFiles) init(files visibleFiles) error {
-	for i, item := range files {
+func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
+	for i, item := range iiFiles {
 		if item.endTxNum <= hi.startTxNum {
 			continue
 		}
 		// TODO: seek(from)
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), hi.hc.h.compression)
+		g := hi.hc.iit.dataReader(item.src.decompressor)
 
 		idx := hi.hc.iit.statelessIdxReader(i)
 		var offset uint64
@@ -76,8 +76,14 @@ func (hi *HistoryRangeAsOfFiles) init(files visibleFiles) error {
 		}
 		g.Reset(offset)
 		if g.HasNext() {
-			key, offset := g.Next(nil)
-			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+			wrapper := NewSegReaderWrapper(g)
+			if wrapper.HasNext() {
+				key, val, err := wrapper.Next()
+				if err != nil {
+					return err
+				}
+				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			}
 		}
 	}
 	binary.BigEndian.PutUint64(hi.startTxKey[:], hi.startTxNum)
@@ -92,18 +98,15 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
 		key := top.key
-		var idxVal []byte
-		//if hi.compressVals {
-		idxVal, _ = top.g.Next(nil)
-		//} else {
-		//	idxVal, _ = top.g.NextUncompressed()
-		//}
+		idxVal := top.val
+
+		// Get the next key-value pair for the next iteration
 		if top.g.HasNext() {
-			//if hi.compressVals {
-			top.key, _ = top.g.Next(nil)
-			//} else {
-			//	top.key, _ = top.g.NextUncompressed()
-			//}
+			var err error
+			top.key, top.val, err = top.g.Next()
+			if err != nil {
+				return err
+			}
 			if hi.toPrefix == nil || bytes.Compare(top.key, hi.toPrefix) < 0 {
 				heap.Push(&hi.h, top)
 			}
@@ -116,13 +119,14 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
+
+		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
 		}
 
 		hi.nextKey = key
-		binary.BigEndian.PutUint64(hi.txnKey[:], n)
+		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
 			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
@@ -132,9 +136,22 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if !ok {
 			continue
 		}
-		g := hi.hc.statelessGetter(historyItem.i)
-		g.Reset(offset)
-		hi.nextVal, _ = g.Next(nil)
+		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
+			g := hi.hc.statelessGetter(historyItem.i)
+			g.Reset(offset)
+			hi.nextVal, _ = g.Next(nil)
+		} else {
+			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historyValuesOnCompressedPage, true)
+			g.Reset(offset)
+			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
+				k, v, _, _ := g.Next2(nil)
+				histKey := historyKey(txNum, hi.nextKey, nil)
+				if bytes.Equal(histKey, k) {
+					hi.nextVal = v
+					break
+				}
+			}
+		}
 		return nil
 	}
 	hi.nextKey = nil
@@ -378,35 +395,29 @@ func (hi *HistoryChangesIterFiles) Close() {
 func (hi *HistoryChangesIterFiles) advance() error {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
-		key := top.key
-		var idxVal []byte
-		//if hi.compressVals {
-		idxVal, _ = top.g.Next(nil)
-		//} else {
-		//	idxVal, _ = top.g.NextUncompressed()
-		//}
+		key, idxVal := top.key, top.val
 		if top.g.HasNext() {
-			//if hi.compressVals {
-			top.key, _ = top.g.Next(nil)
-			//} else {
-			//	top.key, _ = top.g.NextUncompressed()
-			//}
+			var err error
+			top.key, top.val, err = top.g.Next()
+			if err != nil {
+				return err
+			}
 			heap.Push(&hi.h, top)
 		}
 
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
+		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
 		}
-		if int(n) >= hi.endTxNum {
+		if int(txNum) >= hi.endTxNum {
 			continue
 		}
 
 		hi.nextKey = key
-		binary.BigEndian.PutUint64(hi.txnKey[:], n)
+		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
 			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
@@ -416,9 +427,23 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if !ok {
 			continue
 		}
-		g := hi.hc.statelessGetter(historyItem.i)
-		g.Reset(offset)
-		hi.nextVal, _ = g.Next(nil)
+
+		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
+			g := hi.hc.statelessGetter(historyItem.i)
+			g.Reset(offset)
+			hi.nextVal, _ = g.Next(nil)
+		} else {
+			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historyValuesOnCompressedPage, true)
+			g.Reset(offset)
+			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
+				k, v, _, _ := g.Next2(nil)
+				histKey := historyKey(txNum, hi.nextKey, nil)
+				if bytes.Equal(histKey, k) {
+					hi.nextVal = v
+					break
+				}
+			}
+		}
 		return nil
 	}
 	hi.nextKey = nil
@@ -463,9 +488,7 @@ type HistoryChangesIterDB struct {
 	startTxKey      [8]byte
 
 	nextKey, nextVal []byte
-	nextStep         uint64
 	k, v             []byte
-	step             uint64
 	err              error
 }
 
@@ -620,15 +643,15 @@ func (hi *HistoryChangesIterDB) HasNext() bool {
 	return true
 }
 
-func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, uint64, error) {
+func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	if hi.err != nil {
-		return nil, nil, 0, hi.err
+		return nil, nil, hi.err
 	}
 	hi.limit--
-	hi.k, hi.v, hi.step = hi.nextKey, hi.nextVal, hi.nextStep
+	hi.k, hi.v = hi.nextKey, hi.nextVal
 	if err := hi.advance(); err != nil {
-		return nil, nil, 0, err
+		return nil, nil, err
 	}
 	order.Asc.Assert(hi.k, hi.nextKey)
-	return hi.k, hi.v, hi.step, nil
+	return hi.k, hi.v, nil
 }

@@ -62,7 +62,7 @@ var (
 
 	debugURLsFlag = cli.StringSliceFlag{
 		Name:     "debug.addrs",
-		Usage:    "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
+		Usage:    "Comma separated list of URLs to the debug endpoints that are being diagnosed",
 		Required: false,
 		Value:    cli.NewStringSlice("localhost:6062"),
 	}
@@ -79,7 +79,7 @@ var supportCommand = cli.Command{
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
 	ArgsUsage: "--diagnostics.addr <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
 	Before: func(cliCtx *cli.Context) error {
-		_, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -608,8 +608,8 @@ func (nc *nodeConnection) processResponses() {
 	}
 }
 
-// detect is the method is a txpool subscription
-// TODO: implementation of othere subscribtions (e.g. downloader)
+// detect if the method is a txpool subscription
+// TODO: implementation of other subscriptions (e.g. downloader)
 // TODO: change subscribe from plain string to something more structured
 func isSubscribe(method string) bool {
 	return method == "subscribe/txpool"

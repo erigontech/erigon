@@ -51,6 +51,9 @@ func StartDiagnostics(ctx context.Context) error {
 }
 
 func TestProviderRegistration(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	// diagnostics receiver
 	ctx, ch, cancel := diagnostics.Context[testInfo](context.Background(), 1)

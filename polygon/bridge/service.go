@@ -25,12 +25,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/log/v3"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -201,7 +201,33 @@ func (s *Service) Run(ctx context.Context) error {
 			// we've reached the tip
 			s.reachedTip.Store(true)
 			s.signalFetchedEvents()
-			if err := libcommon.Sleep(ctx, time.Second); err != nil {
+			if err := common.Sleep(ctx, time.Second); err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		orderedAndNoGaps := true
+		knownEventID := lastFetchedEventId
+
+		for i := 0; i < len(events); i++ {
+			if events[i].ID == knownEventID+1 {
+				knownEventID = events[i].ID
+				continue
+			}
+
+			orderedAndNoGaps = false
+		}
+
+		if !orderedAndNoGaps {
+			s.logger.Warn(
+				bridgeLogPrefix("fetched new events are not ordered or contain gaps"),
+				"count", len(events),
+				"lastKnownEventId", lastFetchedEventId,
+			)
+
+			if err := common.Sleep(ctx, time.Second); err != nil {
 				return err
 			}
 
@@ -305,7 +331,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 	)
 
 	blockNumToEventId := make(map[uint64]uint64)
-	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
+	eventTxnToBlockNum := make(map[common.Hash]uint64)
 	processedBlocks := make([]ProcessedBlockInfo, 0, 1+len(blocks)/int(s.borConfig.CalculateSprintLength(from)))
 	for _, block := range blocks {
 		// check if block is start of span and > 0
@@ -317,7 +343,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 			continue
 		}
 
-		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + s.borConfig.CalculateSprintLength(blockNum)
+		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + s.borConfig.CalculateSprintLength(lastProcessedBlockInfo.BlockNum)
 		if blockNum != expectedNextBlockNum {
 			return fmt.Errorf("nonsequential block in bridge processing: %d != %d", blockNum, expectedNextBlockNum)
 		}
@@ -328,22 +354,70 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 			return err
 		}
 
-		if err = s.waitForScraper(ctx, toTime); err != nil {
-			return err
-		}
-
 		startId := lastProcessedEventId + 1
-		endId, err := s.store.LastEventIdWithinWindow(ctx, startId, time.Unix(int64(toTime), 0))
-		if err != nil {
-			return err
-		}
+		var eventLimit *uint64
 
 		if s.borConfig.OverrideStateSyncRecords != nil {
-			if eventLimit, ok := s.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
-				if eventLimit == 0 {
-					endId = 0
-				} else {
-					endId = startId + uint64(eventLimit) - 1
+			if el, ok := s.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+				uel := uint64(el)
+				eventLimit = &uel
+			}
+
+			for k, el := range s.borConfig.OverrideStateSyncRecords {
+				if len(k) == 0 {
+					continue
+				}
+
+				if k[0] != 'r' {
+					continue
+				}
+
+				var from uint64
+				var to uint64
+
+				n, err := fmt.Sscanf(k, "r.%d-%d", &from, &to)
+				if err != nil {
+					return err
+				}
+
+				if n != 2 {
+					return errors.New("failed to decode override state sync records")
+				}
+
+				if blockNum < from {
+					continue
+				}
+
+				if blockNum > to {
+					continue
+				}
+
+				if el == 0 {
+					uel := uint64(el)
+					eventLimit = &uel
+				}
+			}
+		}
+
+		var endId uint64
+
+		if eventLimit == nil || *eventLimit > 0 {
+			if err = s.waitForScraper(ctx, toTime); err != nil {
+				return err
+			}
+
+			endId, err = s.store.LastEventIdWithinWindow(ctx, startId, time.Unix(int64(toTime), 0))
+			if err != nil {
+				return err
+			}
+		}
+
+		if eventLimit != nil {
+			if *eventLimit == 0 {
+				endId = 0
+			} else {
+				if endId > startId && endId-startId >= *eventLimit {
+					endId = startId + *eventLimit - 1
 				}
 			}
 		}
@@ -421,12 +495,16 @@ func (s *Service) Unwind(ctx context.Context, blockNum uint64) error {
 	return nil
 }
 
-// Events returns all sync events at blockNum
-func (s *Service) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	return s.reader.Events(ctx, blockNum)
+func (s *Service) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error) {
+	return s.reader.EventsWithinTime(ctx, timeFrom, timeTo)
 }
 
-func (s *Service) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+// Events returns all sync events at blockNum
+func (s *Service) Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error) {
+	return s.reader.Events(ctx, blockHash, blockNum)
+}
+
+func (s *Service) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
 	return s.reader.EventTxnLookup(ctx, borTxHash)
 }
 

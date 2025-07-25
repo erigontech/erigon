@@ -8,31 +8,30 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-// default freezer implementation for relational appendables (which have RootRelationI)
+// default freezer implementation for relational forkables (which have RootRelationI)
 // implements Freezer interface
 type SimpleRelationalFreezer struct {
 	rel     RootRelationI
 	valsTbl string
-	coll    Collector
 }
 
-func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum, db kv.RoDB) error {
+func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_entityIdFrom, err := sf.rel.RootNum2Num(from, tx)
+	_entityNumFrom, err := sf.rel.RootNum2Num(from, tx)
 	if err != nil {
 		return err
 	}
-	entityIdFrom := hexutil.EncodeTs(uint64(_entityIdFrom))
+	entityNumFrom := hexutil.EncodeTs(uint64(_entityNumFrom))
 
-	_entityIdTo, err := sf.rel.RootNum2Num(to, tx)
+	_entityNumTo, err := sf.rel.RootNum2Num(to, tx)
 	if err != nil {
 		return err
 	}
-	entityIdTo := hexutil.EncodeTs(uint64(_entityIdTo))
+	entityNumTo := hexutil.EncodeTs(uint64(_entityNumTo))
 
 	cursor, err := tx.Cursor(sf.valsTbl)
 	if err != nil {
@@ -42,11 +41,11 @@ func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum,
 	defer cursor.Close()
 
 	// bytes.Compare assume big endianness
-	for k, v, err := cursor.Seek(entityIdFrom); k != nil && bytes.Compare(k, entityIdTo) < 0; k, _, err = cursor.Next() {
+	for k, v, err := cursor.Seek(entityNumFrom); k != nil && bytes.Compare(k, entityNumTo) < 0; k, v, err = cursor.Next() {
 		if err != nil {
 			return err
 		}
-		if err := sf.coll(v); err != nil {
+		if err := coll(v); err != nil {
 			return err
 		}
 	}
@@ -54,6 +53,62 @@ func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum,
 	return nil
 }
 
-func (sf *SimpleRelationalFreezer) SetCollector(coll Collector) {
-	sf.coll = coll
+// a simple freezer for marked forkables
+
+type SimpleMarkedFreezer struct {
+	mfork *Forkable[MarkedTxI]
+}
+
+func (sf *SimpleMarkedFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	mfork := sf.mfork
+	_entityNumFrom, err := mfork.rel.RootNum2Num(from, tx)
+	if err != nil {
+		return err
+	}
+	entityNumFrom := mfork.encTs(_entityNumFrom)
+
+	_entityNumTo, err := mfork.rel.RootNum2Num(to, tx)
+	if err != nil {
+		return err
+	}
+	entityNumTo := mfork.encTs(_entityNumTo)
+
+	cursor, err := tx.Cursor(mfork.canonicalTbl)
+	if err != nil {
+		return err
+	}
+
+	defer cursor.Close()
+
+	vcursor, err := tx.Cursor(mfork.valsTbl)
+	if err != nil {
+		return err
+	}
+	defer vcursor.Close()
+
+	combK := mfork.valsTblKey2
+
+	// bytes.Compare assume big endianness
+	for k, v, err := cursor.Seek(entityNumFrom); k != nil && bytes.Compare(k, entityNumTo) < 0; k, v, err = cursor.Next() {
+		if err != nil {
+			return err
+		}
+		valsKey := combK(k, v)
+		_, value, err := vcursor.SeekExact(valsKey)
+		if err != nil {
+			return err
+		}
+
+		if err := coll(value); err != nil {
+			return err
+		}
+	}
+
+	return nil
+
 }

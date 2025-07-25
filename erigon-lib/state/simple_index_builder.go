@@ -9,16 +9,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // interfaces defined here are not required to be implemented in
-// appendables. These are just helpers when SimpleAccessorBuilder is used. Also can be used to provide some structure
+// forkables. These are just helpers when SimpleAccessorBuilder is used. Also can be used to provide some structure
 // to build more custom indexes.
 type IndexInputDataQuery interface {
 	GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] // (word/value, index, offset)
@@ -64,7 +63,8 @@ func NewAccessorArgs(enums, lessFalsePositives bool) *AccessorArgs {
 type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
-	id       AppendableId
+	id       ForkableId
+	parser   SnapNameSchema
 	kf       IndexKeyFactory
 	fetcher  FirstEntityNumFetcher
 	logger   log.Logger
@@ -74,10 +74,11 @@ type FirstEntityNumFetcher = func(from, to RootNum, seg *seg.Decompressor) Num
 
 var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id AppendableId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
 		args:   args,
 		id:     id,
+		parser: Registry.SnapshotConfig(id).Schema,
 		logger: logger,
 	}
 
@@ -86,11 +87,12 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id AppendableId, logger log.Lo
 	}
 
 	if b.kf == nil {
-		b.kf = &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
+		b.kf = NewSimpleIndexKeyFactory() //&SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
 	}
 
 	if b.fetcher == nil {
 		// assume rootnum and num is same
+		logger.Debug("using default first entity num fetcher for %s", id)
 		b.fetcher = func(from, to RootNum, seg *seg.Decompressor) Num {
 			return Num(from)
 		}
@@ -103,8 +105,8 @@ type AccessorBuilderOptions func(*SimpleAccessorBuilder)
 
 func WithIndexPos(indexPos uint64) AccessorBuilderOptions {
 	return func(s *SimpleAccessorBuilder) {
-		if int(s.indexPos) >= len(s.id.IndexPrefix()) {
-			panic("indexPos greater than indexPrefix length")
+		if int(s.indexPos) >= len(Registry.IndexFileTag(s.id)) {
+			panic("indexPos greater than indexFileTag length")
 		}
 		s.indexPos = indexPos
 	}
@@ -126,7 +128,7 @@ func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumF
 }
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
-	sgname := ae.SnapFilePath(s.id, snaptype.Version(1), from, to)
+	sgname := s.parser.DataFile(version.V1_0, from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
 }
@@ -142,19 +144,19 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.id.IndexPrefix()[s.indexPos], from, to, rec, dbg.Stack())
+			err = fmt.Errorf("%s: at=%d-%d, %v, %s", Registry.IndexFileTag(s.id)[s.indexPos], from, to, rec, dbg.Stack())
 		}
 	}()
 	iidq := s.GetInputDataQuery(from, to)
 	defer iidq.Close()
-	idxFile := ae.IdxFilePath(s.id, snaptype.Version(1), from, to, s.indexPos)
+	idxFile := s.parser.AccessorIdxFile(version.V1_0, from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {
 		p.Name.Store(&idxFile)
 		p.Total.Store(keyCount)
 	}
-	salt, err := s.id.Salt()
+	salt, err := Registry.Salt(s.id)
 	if err != nil {
 		return nil, err
 	}
@@ -167,18 +169,19 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		IndexFile:          idxFile,
 		Salt:               &salt,
 		NoFsync:            s.args.Nofsync,
-		TmpDir:             s.id.Dirs().Tmp,
+		TmpDir:             Registry.Dirs(s.id).Tmp,
 		LessFalsePositives: s.args.LessFalsePositives,
 		BaseDataID:         iidq.GetBaseDataId(),
 	}, s.logger)
 	if err != nil {
 		return nil, err
 	}
+	defer rs.Close()
 
 	s.kf.Refresh()
 	defer s.kf.Close()
 
-	defer iidq.decomp.EnableReadAhead().DisableReadAhead()
+	defer iidq.decomp.MadvSequential().DisableReadAhead()
 
 	for {
 		stream := iidq.GetStream(ctx)
@@ -234,7 +237,7 @@ func (d *DecompressorIndexInputDataQuery) GetStream(ctx context.Context) stream.
 func (d *DecompressorIndexInputDataQuery) GetBaseDataId() uint64 {
 	// discuss: adding base data id to snapshotfile?
 	// or might need to add callback to get first basedataid...
-	return 0
+	return d.baseDataId
 	//return d.from
 }
 
@@ -283,14 +286,22 @@ type SimpleIndexKeyFactory struct {
 	num []byte
 }
 
+func NewSimpleIndexKeyFactory() *SimpleIndexKeyFactory {
+	return &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
+}
+
 func (n *SimpleIndexKeyFactory) Refresh() {}
 
 func (n *SimpleIndexKeyFactory) Make(_ []byte, index uint64) []byte {
+	if n.num == nil {
+		panic("index key factory closed or not initialized properly")
+	}
+
 	// everywhere except heimdall indexes, which use BigIndian format
 	nm := binary.PutUvarint(n.num, index)
 	return n.num[:nm]
 }
 
 func (n *SimpleIndexKeyFactory) Close() {
-	n.num = []byte{}
+	//n.num = nil
 }

@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -38,12 +39,12 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
 	"github.com/erigontech/erigon/cmd/devnet/networks"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/requests"
 	erigon_app "github.com/erigontech/erigon/turbo/app"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
@@ -165,6 +166,10 @@ func (ph PanicHandler) Log(r *log.Record) error {
 	fmt.Printf("Msg: %s\nStack: %s\n", r.Msg, dbg.Stack())
 	os.Exit(2)
 	return nil
+}
+
+func (ph PanicHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
 }
 
 func main() {

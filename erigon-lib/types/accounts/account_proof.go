@@ -17,18 +17,18 @@
 package accounts
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 )
 
 // Result structs for GetProof
 type AccProofResult struct {
-	Address      libcommon.Address `json:"address"`
+	Address      common.Address    `json:"address"`
 	AccountProof []hexutil.Bytes   `json:"accountProof"`
 	Balance      *hexutil.Big      `json:"balance"`
-	CodeHash     libcommon.Hash    `json:"codeHash"`
+	CodeHash     common.Hash       `json:"codeHash"`
 	Nonce        hexutil.Uint64    `json:"nonce"`
-	StorageHash  libcommon.Hash    `json:"storageHash"`
+	StorageHash  common.Hash       `json:"storageHash"`
 	StorageProof []StorProofResult `json:"storageProof"`
 }
 type StorProofResult struct {

@@ -35,20 +35,20 @@ import (
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/estimate"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
@@ -59,10 +59,11 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -83,6 +84,7 @@ var CLI struct {
 	CheckBlobsSnapshotsCount  CheckBlobsSnapshotsCount  `cmd:"" help:"check blobs snapshots count"`
 	DumpBlobsSnapshotsToStore DumpBlobsSnapshotsToStore `cmd:"" help:"dump blobs snapshots to store"`
 	DumpStateSnapshots        DumpStateSnapshots        `cmd:"" help:"dump state snapshots"`
+	MakeDepositArgs           MakeDepositArgs           `cmd:"" help:"make deposit args"`
 }
 
 type chainCfg struct {
@@ -194,7 +196,7 @@ type ChainEndpoint struct {
 	outputFolder
 }
 
-func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
+func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *common.Hash) (*cltypes.SignedBeaconBlock, error) {
 	log.Debug("[Checkpoint Sync] Requesting beacon block", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
@@ -283,7 +285,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	log.Info("Starting with", "root", libcommon.Hash(currentRoot), "slot", currentBlock.Block.Slot)
+	log.Info("Starting with", "root", common.Hash(currentRoot), "slot", currentBlock.Block.Slot)
 	currentRoot = currentBlock.Block.ParentRoot
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 		return err
@@ -303,9 +305,9 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		}
 		defer tx.Rollback()
 
-		stringifiedRoot := libcommon.Bytes2Hex(currentRoot[:])
+		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
-		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
+		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*common.Hash)(&currentRoot))
 		if err != nil {
 			return false, fmt.Errorf("failed to retrieve block: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot))
 		}
@@ -620,7 +622,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
+	log.Info("Got state", "slot", haveState.Slot(), "root", common.Hash(hRoot), "elapsed", endTime)
 
 	if err := haveState.InitBeaconState(); err != nil {
 		return err
@@ -695,7 +697,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 				log.Error("WithdrawableEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).WithdrawableEpoch(), "want", wantState.ValidatorSet().Get(i).WithdrawableEpoch())
 			}
 		}
-		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
+		return fmt.Errorf("state mismatch: got %s, want %s", common.Hash(hRoot), common.Hash(wRoot))
 	}
 	return nil
 }
@@ -740,31 +742,31 @@ func getHead(beaconApiURL string) (uint64, error) {
 	return slot, nil
 }
 
-func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error) {
+func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
 	response := map[string]interface{}{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return libcommon.Hash{}, nil
+		return common.Hash{}, nil
 	}
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	data := response["data"].(map[string]interface{})
 	if len(data) == 0 {
-		return libcommon.Hash{}, errors.New("no head found")
+		return common.Hash{}, errors.New("no head found")
 	}
 	rootStr := data["root"].(string)
 
-	return libcommon.HexToHash(rootStr), nil
+	return common.HexToHash(rootStr), nil
 }
 
 func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
@@ -821,7 +823,7 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		if stateRoot == (libcommon.Hash{}) {
+		if stateRoot == (common.Hash{}) {
 			continue
 		}
 		state, err := getBeaconState(ctx, beaconConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i), i)
@@ -1221,7 +1223,7 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if blockRoot == (common.Hash{}) {
 			continue
 		}
 		if err := blobStore.WriteBlobSidecars(ctx, blockRoot, sds); err != nil {
@@ -1292,5 +1294,119 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	r, _ = stateSn.Get(kv.BlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 
+	return nil
+}
+
+type MakeDepositArgs struct {
+	PrivateKey         string `name:"private-key" help:"private key to use for signing deposit" default:""`
+	WithdrawalAddress  string `name:"withdrawal-address" help:"withdrawal address to use for deposit" default:""`
+	AmountEth          uint64 `name:"amount-eth" help:"amount of ETH to deposit" default:"32"`                                     // in ETH
+	DomainDeposit      string `name:"domain-deposit" help:"domain for deposit signature" default:"0x03000000"`                     // 0x03000000 for mainnet
+	GenesisForkVersion string `name:"genesis-fork-version" help:"genesis fork version for deposit signature" default:"0x00000000"` // 0x00000000 for mainnet
+}
+
+func (m *MakeDepositArgs) Run(ctx *Context) error {
+
+	var privateKeyBls *bls.PrivateKey
+	if m.PrivateKey == "" {
+		var err error
+		privateKeyBls, err = bls.GenerateKey()
+		if err != nil {
+			return fmt.Errorf("failed to generate private key: %w", err)
+		}
+	} else {
+		var err error
+		privateKeyBls, err = bls.NewPrivateKeyFromBytes(common.Hex2Bytes(m.PrivateKey))
+		if err != nil {
+			return fmt.Errorf("failed to create private key from bytes: %w", err)
+		}
+	}
+	withdrawalAddress := common.HexToAddress(m.WithdrawalAddress)
+	if withdrawalAddress == (common.Address{}) {
+		return fmt.Errorf("invalid withdrawal address: %s", m.WithdrawalAddress)
+	}
+
+	publicKey := privateKeyBls.PublicKey()
+	if publicKey == nil {
+		return errors.New("failed to get public key from private key")
+	}
+	// get the public key in compressed bytes format
+	publicKey48 := common.Bytes48(bls.CompressPublicKey(publicKey))
+	// amount in gwei
+	amountGwei := m.AmountEth * 1_000_000_000
+
+	var credentials common.Hash
+	credentials[0] = 0x2
+	copy(credentials[1:], make([]byte, 11))
+	copy(credentials[12:], withdrawalAddress[:])
+
+	var genesisForkVersion clparams.ConfigForkVersion
+	var genesisForkVersion4 common.Bytes4
+
+	if err := genesisForkVersion4.UnmarshalText([]byte(m.GenesisForkVersion)); err != nil {
+		return fmt.Errorf("failed to parse genesis fork version: %w", err)
+	}
+	genesisForkVersion = clparams.ConfigForkVersion(utils.Bytes4ToUint32(genesisForkVersion4))
+
+	deposit := &cltypes.DepositData{
+		PubKey:                publicKey48,
+		WithdrawalCredentials: credentials,
+		Amount:                amountGwei,
+		// Signature:             nil, // will be set later
+	}
+
+	// trim 0x prefix if present
+	if len(m.DomainDeposit) > 2 && m.DomainDeposit[:2] == "0x" {
+		m.DomainDeposit = m.DomainDeposit[2:]
+	}
+
+	domainDeposit := common.Hex2Bytes(m.DomainDeposit)
+
+	domain, err := fork.ComputeDomain(
+		domainDeposit,
+		utils.Uint32ToBytes4(uint32(genesisForkVersion)),
+		[32]byte{},
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to compute domain: %w", err)
+	}
+
+	depositMessageRootForSigning, err := deposit.MessageHash()
+	if err != nil {
+		return err
+	}
+
+	messageToSign := utils.Sha256(depositMessageRootForSigning[:], domain)
+
+	signature := privateKeyBls.Sign(messageToSign[:])
+	signatureBytes := signature.Bytes()
+
+	var signature96 common.Bytes96
+	if len(signatureBytes) != 96 {
+		return fmt.Errorf("signature length is not 96 bytes, got %d bytes", len(signatureBytes))
+	}
+	copy(signature96[:], signatureBytes)
+	deposit.Signature = signature96
+
+	depositTreeRoot, err := deposit.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to compute deposit tree root: %w", err)
+	}
+
+	privateKey := privateKeyBls.Bytes()
+
+	// Print all the details in json format
+	depositDetails := map[string]interface{}{
+		"deposit":           deposit,
+		"deposit_tree_root": common.Hash(depositTreeRoot),
+		"private_key":       "0x" + common.Bytes2Hex(privateKey),
+	}
+
+	depositJSON, err := json.MarshalIndent(depositDetails, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal deposit details to JSON: %w", err)
+	}
+	fmt.Println(string(depositJSON))
 	return nil
 }

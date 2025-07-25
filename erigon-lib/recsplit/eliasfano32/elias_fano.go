@@ -226,11 +226,9 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 	return currWord*64 + uint64(sel) - i
 }
 
-// TODO: optimize me - to avoid object allocation
 func Seek(data []byte, n uint64) (uint64, bool) {
-	ef, _ := ReadEliasFano(data)
-	//TODO: if startTxNum==0, can do ef.Get(0)
-	return ef.Search(n)
+	ef, _ := ReadEliasFano(data) //for better perf: app-code can use ef.Reset(data).Seek(n)
+	return ef.Seek(n)
 }
 
 func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64, ok bool) {
@@ -276,8 +274,8 @@ func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64,
 	return 0, 0, false
 }
 
-// Search returns the value in the sequence, equal or greater than given value
-func (ef *EliasFano) Search(v uint64) (uint64, bool) {
+// Seek returns the value in the sequence, equal or greater than given value
+func (ef *EliasFano) Seek(v uint64) (uint64, bool) {
 	n, _, ok := ef.search(v, false /* reverse */)
 	return n, ok
 }
@@ -541,12 +539,13 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 }
 
 // Reset - like ReadEliasFano, but for existing object
-func (ef *EliasFano) Reset(r []byte) {
+func (ef *EliasFano) Reset(r []byte) *EliasFano {
 	ef.count = binary.BigEndian.Uint64(r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
 	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[16])), (len(r)-16)/uint64Size)
 	ef.maxOffset = ef.u - 1
 	ef.deriveFields()
+	return ef
 }
 
 func Max(r []byte) uint64   { return binary.BigEndian.Uint64(r[8:16]) - 1 }

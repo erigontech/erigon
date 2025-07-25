@@ -17,35 +17,34 @@
 package state
 
 import (
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-type SelectedStaticFilesV3 struct {
-	d     [kv.DomainLen][]*filesItem
-	dHist [kv.DomainLen][]*filesItem
-	dIdx  [kv.DomainLen][]*filesItem
-	ii    [][]*filesItem
+type SelectedStaticFiles struct {
+	d     [kv.DomainLen][]*FilesItem
+	dHist [kv.DomainLen][]*FilesItem
+	dIdx  [kv.DomainLen][]*FilesItem
+	ii    [][]*FilesItem
 }
 
-func (sf *SelectedStaticFilesV3) DomainFiles(name kv.Domain) []FilesItem {
-	return common.SliceMap(sf.d[name], func(item *filesItem) FilesItem { return item })
+func (sf *SelectedStaticFiles) DomainFiles(name kv.Domain) []*FilesItem {
+	return sf.d[name]
 }
 
-func (sf *SelectedStaticFilesV3) DomainHistoryFiles(name kv.Domain) []FilesItem {
-	return common.SliceMap(sf.dHist[name], func(item *filesItem) FilesItem { return item })
+func (sf *SelectedStaticFiles) DomainHistoryFiles(name kv.Domain) []*FilesItem {
+	return sf.dHist[name]
 }
 
-func (sf *SelectedStaticFilesV3) DomainInvertedIndexFiles(name kv.Domain) []FilesItem {
-	return common.SliceMap(sf.dIdx[name], func(item *filesItem) FilesItem { return item })
+func (sf *SelectedStaticFiles) DomainInvertedIndexFiles(name kv.Domain) []*FilesItem {
+	return sf.dIdx[name]
 }
 
-func (sf *SelectedStaticFilesV3) InvertedIndexFiles(id int) []FilesItem {
-	return common.SliceMap(sf.ii[id], func(item *filesItem) FilesItem { return item })
+func (sf *SelectedStaticFiles) InvertedIndexFiles(id int) []*FilesItem {
+	return sf.ii[id]
 }
 
-func (sf *SelectedStaticFilesV3) Close() {
-	clist := make([][]*filesItem, 0, int(kv.DomainLen)+len(sf.ii))
+func (sf *SelectedStaticFiles) Close() {
+	clist := make([][]*FilesItem, 0, int(kv.DomainLen)+len(sf.ii))
 	for id := range sf.d {
 		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
 	}
@@ -65,15 +64,21 @@ func (sf *SelectedStaticFilesV3) Close() {
 	}
 }
 
-func (at *AggregatorRoTx) StaticFilesInRange(r *RangesV3) (*SelectedStaticFilesV3, error) {
-	sf := &SelectedStaticFilesV3{ii: make([][]*filesItem, len(r.invertedIndex))}
+func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) {
+	sf := &SelectedStaticFiles{ii: make([][]*FilesItem, len(r.invertedIndex))}
 	for id := range at.d {
+		if at.d[id].d.disable {
+			continue
+		}
 		if !r.domain[id].any() {
 			continue
 		}
 		sf.d[id], sf.dIdx[id], sf.dHist[id] = at.d[id].staticFilesInRange(r.domain[id])
 	}
 	for id, rng := range r.invertedIndex {
+		if at.iis[id].ii.disable {
+			continue
+		}
 		if rng == nil || !rng.needMerge {
 			continue
 		}
@@ -91,10 +96,10 @@ func (at *AggregatorRoTx) InvertedIndexName(id int) kv.InvertedIdx {
 }
 
 type MergedFilesV3 struct {
-	d     [kv.DomainLen]*filesItem
-	dHist [kv.DomainLen]*filesItem
-	dIdx  [kv.DomainLen]*filesItem
-	iis   []*filesItem
+	d     [kv.DomainLen]*FilesItem
+	dHist [kv.DomainLen]*FilesItem
+	dIdx  [kv.DomainLen]*FilesItem
+	iis   []*FilesItem
 }
 
 func (mf MergedFilesV3) FrozenList() (frozen []string) {
@@ -119,8 +124,11 @@ func (mf MergedFilesV3) FrozenList() (frozen []string) {
 	}
 	return frozen
 }
-func (mf MergedFilesV3) Close() {
-	clist := make([]*filesItem, 0, kv.DomainLen+4)
+func (mf *MergedFilesV3) Close() {
+	if mf == nil {
+		return
+	}
+	clist := make([]*FilesItem, 0, kv.DomainLen+4)
 	for id := range mf.d {
 		clist = append(clist, mf.d[id], mf.dHist[id], mf.dIdx[id])
 	}
@@ -138,9 +146,9 @@ func (mf MergedFilesV3) Close() {
 }
 
 type MergedFiles struct {
-	d     [kv.DomainLen]*filesItem
-	dHist [kv.DomainLen]*filesItem
-	dIdx  [kv.DomainLen]*filesItem
+	d     [kv.DomainLen]*FilesItem
+	dHist [kv.DomainLen]*FilesItem
+	dIdx  [kv.DomainLen]*FilesItem
 }
 
 func (mf MergedFiles) FillV3(m *MergedFilesV3) MergedFiles {
@@ -152,7 +160,7 @@ func (mf MergedFiles) FillV3(m *MergedFilesV3) MergedFiles {
 
 func (mf MergedFiles) Close() {
 	for id := range mf.d {
-		for _, item := range []*filesItem{mf.d[id], mf.dHist[id], mf.dIdx[id]} {
+		for _, item := range []*FilesItem{mf.d[id], mf.dHist[id], mf.dIdx[id]} {
 			if item != nil {
 				if item.decompressor != nil {
 					item.decompressor.Close()

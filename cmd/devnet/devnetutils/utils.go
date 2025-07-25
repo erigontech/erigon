@@ -27,7 +27,7 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -136,9 +136,9 @@ func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func GenerateTopic(signature string) []libcommon.Hash {
+func GenerateTopic(signature string) []common.Hash {
 	hashed := crypto.Keccak256([]byte(signature))
-	return []libcommon.Hash{libcommon.BytesToHash(hashed)}
+	return []common.Hash{common.BytesToHash(hashed)}
 }
 
 // RandomNumberInRange returns a random number between min and max NOT inclusive

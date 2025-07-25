@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	blst "github.com/supranational/blst/bindings/go"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -47,7 +48,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 	m1 := encryptedMessage()
 	m2 := &EncryptedMessage{}
 	err := m2.Unmarshal(m1.Marshal())
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, m1, m2)
 }
 
@@ -77,31 +78,31 @@ func TestMarshal(t *testing.T) {
 	ask := (*EonSecretKeyShare)(big.NewInt(123))
 	ashM := ask.Marshal()
 	askD := new(EonSecretKeyShare)
-	assert.NoError(t, askD.Unmarshal(ashM))
+	require.NoError(t, askD.Unmarshal(ashM))
 	assert.True(t, ask.Equal(askD))
 
 	apks := (*EonPublicKeyShare)(makeTestG2(5))
 	apksM := apks.Marshal()
 	apksD := new(EonPublicKeyShare)
-	assert.NoError(t, apksD.Unmarshal(apksM))
+	require.NoError(t, apksD.Unmarshal(apksM))
 	assert.True(t, apksD.Equal(apks))
 
 	apk := (*EonPublicKey)(makeTestG2(6))
 	apkM := apk.Marshal()
 	apkD := new(EonPublicKey)
-	assert.NoError(t, apkD.Unmarshal(apkM))
+	require.NoError(t, apkD.Unmarshal(apkM))
 	assert.True(t, apkD.Equal(apk))
 
 	esks := (*EpochSecretKeyShare)(makeTestG1(7))
 	esksM := esks.Marshal()
 	esksD := new(EpochSecretKeyShare)
-	assert.NoError(t, esksD.Unmarshal(esksM))
+	require.NoError(t, esksD.Unmarshal(esksM))
 	assert.True(t, esksD.Equal(esks))
 
 	esk := (*EpochSecretKey)(makeTestG1(8))
 	eskM := esk.Marshal()
 	eskD := new(EpochSecretKey)
-	assert.NoError(t, eskD.Unmarshal(eskM))
+	require.NoError(t, eskD.Unmarshal(eskM))
 	assert.True(t, eskD.Equal(esk))
 }
 
@@ -148,13 +149,13 @@ func TestMarshalGammasRoundtrip(t *testing.T) {
 		m := gammas.Marshal()
 		assert.True(t, len(m) == len([]*blst.P2Affine(*gammas))*96)
 		g := &Gammas{}
-		assert.NoError(t, g.Unmarshal(m))
+		require.NoError(t, g.Unmarshal(m))
 		assert.Equal(t, gammas, g)
 
 		mText, err := gammas.MarshalText()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		gText := &Gammas{}
-		assert.NoError(t, gText.UnmarshalText(mText))
+		require.NoError(t, gText.UnmarshalText(mText))
 		assert.Equal(t, gammas, gText)
 	}
 }

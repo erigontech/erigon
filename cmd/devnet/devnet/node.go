@@ -17,6 +17,7 @@
 package devnet
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math/big"
@@ -27,14 +28,14 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/args"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/debug"
 	enode "github.com/erigontech/erigon/turbo/node"
 )
@@ -155,6 +156,7 @@ func (n *devnetNode) EnableMetrics(int) {
 // run configures, creates and serves an erigon node
 func (n *devnetNode) run(ctx *cli.Context) error {
 	var logger log.Logger
+	var tracer *tracers.Tracer
 	var err error
 	var metricsMux *http.ServeMux
 	var pprofMux *http.ServeMux
@@ -170,13 +172,15 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 		n.Unlock()
 	}()
 
-	if logger, metricsMux, pprofMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
+	if logger, tracer, metricsMux, pprofMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
 		return err
 	}
 
+	debugMux := cmp.Or(metricsMux, pprofMux)
+
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
-	nodeConf, err := enode.NewNodConfigUrfave(ctx, logger)
+	nodeConf, err := enode.NewNodConfigUrfave(ctx, debugMux, logger)
 	if err != nil {
 		return err
 	}
@@ -204,7 +208,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 		logger.Warn("TODO: custom BorStateSyncDelay is not applied to BorConfig.StateSyncConfirmationDelay", "delay", stateSyncConfirmationDelay)
 	}
 
-	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger)
+	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger, tracer)
 
 	diagnostics.Setup(ctx, n.ethNode, metricsMux, pprofMux)
 

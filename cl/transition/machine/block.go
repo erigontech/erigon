@@ -19,6 +19,7 @@ package machine
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -26,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
-	"github.com/pkg/errors"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -41,7 +41,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	)
 	payloadHeader, err := body.GetPayloadHeader()
 	if err != nil {
-		return errors.WithMessage(err, "processBlock: failed to extract execution payload header")
+		return fmt.Errorf("processBlock: failed to extract execution payload header: %w", err)
 	}
 
 	// Check the state version is correct.
@@ -50,7 +50,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	}
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {
-		return errors.WithMessagef(err, "processBlock: failed to hash block body")
+		return fmt.Errorf("processBlock: failed to hash block body: %w", err)
 	}
 	if err := impl.ProcessBlockHeader(s, block.GetSlot(), block.GetProposerIndex(), block.GetParentRoot(), bodyRoot); err != nil {
 		return fmt.Errorf("processBlock: failed to process block header: %v", err)

@@ -33,7 +33,8 @@ make rpcdaemon
 
 ### Running locally
 
-Run `rpcdaemon` on same computer with Erigon. It's default option because it using Shared Memory access to Erigon's db -
+Run `rpcdaemon` on the same computer with Erigon. This is the default option because it uses Shared Memory access to
+Erigon's db -
 it's much faster than TCP access. Provide both `--datadir` and `--private.api.addr` flags:
 
 ```[bash]
@@ -47,7 +48,7 @@ Note that we've also specified which RPC namespaces to enable in the above comma
 
 ### Running remotely
 
-To start the daemon remotely - just don't set `--datadir` flag:
+To start the daemon remotely - just don't set the `--datadir` flag:
 
 ```[bash]
 make erigon
@@ -70,9 +71,8 @@ it may scale well for some workloads that are heavy on the current state queries
 
 ### Healthcheck
 
-There are 2 options for running healtchecks, POST request, or GET request with custom headers. Both options are
-available
-at the `/health` endpoint.
+There are 2 options for running healtchecks: POST request or a GET request with custom headers. Both options are
+available at the `/health` endpoint.
 
 #### POST request
 
@@ -103,9 +103,9 @@ Example response
 
 ```json
 {
-    "check_block": "HEALTHY",
-    "healthcheck_query": "HEALTHY",
-    "min_peer_count": "HEALTHY"
+  "check_block": "HEALTHY",
+  "healthcheck_query": "HEALTHY",
+  "min_peer_count": "HEALTHY"
 }
 ```
 
@@ -139,10 +139,10 @@ Example Response
 
 ```json
 {
-    "check_block":"DISABLED",
-    "max_seconds_behind":"HEALTHY",
-    "min_peer_count":"HEALTHY",
-    "synced":"HEALTHY"
+  "check_block": "DISABLED",
+  "max_seconds_behind": "HEALTHY",
+  "min_peer_count": "HEALTHY",
+  "synced": "HEALTHY"
 }
 ```
 
@@ -209,7 +209,7 @@ note that this is NOT geth-style IPC. for that, read the next section, IPC endpo
 
 Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
 
-To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `-https.cert="/path/to.cert"`
+To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `--https.cert="/path/to.cert"`
 and `--https.key=/path/to.key`
 
 By default, the HTTPS server will run on the HTTP port + 363. use flag `--https.port` to set the port
@@ -245,7 +245,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | web3_sha3                                  | Yes     |                                                       |
 |                                            |         |                                                       |
 | net_listening                              | HC      | (`remote` hard coded returns true)                    |
-| net_peerCount                              | Limited | internal sentries only                                |
+| net_peerCount                              | Limited | only internal sentries counted                        |
 | net_version                                | Yes     | `remote`.                                             |
 |                                            |         |                                                       |
 | eth_blockNumber                            | Yes     |                                                       |
@@ -291,7 +291,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getFilterChanges                       | Yes     |                                                       |
 | eth_uninstallFilter                        | Yes     |                                                       |
 | eth_getLogs                                | Yes     |                                                       |
-| interned spe                               |         |                                                       |
+|                                            |         |                                                       |
 | eth_accounts                               | No      | deprecated                                            |
 | eth_sendRawTransaction                     | Yes     | `remote`.                                             |
 | eth_sendTransaction                        | -       | not yet implemented                                   |
@@ -318,12 +318,18 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_newPayloadV1                        | Yes     |                                                       |
 | engine_newPayloadV2                        | Yes     |                                                       |
 | engine_newPayloadV3                        | Yes     |                                                       |
+| engine_newPayloadV4                        | Yes     | Added in Pectra                                       |
 | engine_forkchoiceUpdatedV1                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV2                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV3                 | Yes     |                                                       |
 | engine_getPayloadV1                        | Yes     |                                                       |
 | engine_getPayloadV2                        | Yes     |                                                       |
 | engine_getPayloadV3                        | Yes     |                                                       |
+| engine_getPayloadV4                        | Yes     | Added in Pectra                                       |
+| engine_getPayloadBodiesByHashV1            | Yes     |                                                       |
+| engine_getPayloadBodiesByRangeV1           | Yes     |                                                       |
+| engine_getClientVersionV1                  | Yes     |                                                       |
+| engine_getBlobsV1                          | Yes     |                                                       |
 |                                            |         |                                                       |
 | debug_getRawReceipts                       | Yes     | `debug_` expected to be private                       |
 | debug_accountRange                         | Yes     |                                                       |
@@ -336,6 +342,11 @@ The following table shows the current implementation status of Erigon's RPC daem
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)                   |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)                   |
 | debug_traceCallMany                        | Yes     | Erigon Method PR#4567.                                |
+| debug_setMemoryLimit                       | Yes     |                                                       |
+| debug_setGCPercent                         | Yes     |                                                       |
+| debug_freeOSMemory                         | Yes     |                                                       |
+| debug_gcStats                              | Yes     |                                                       |
+| debug_memStats                             | Yes     |                                                       |
 |                                            |         |                                                       |
 | trace_call                                 | Yes     |                                                       |
 | trace_callMany                             | Yes     |                                                       |
@@ -399,7 +410,7 @@ Erigon and RPC daemon nodes that are supposed to work together):
 
 1. Generate key pair for the Certificate Authority (CA). The private key of CA will be used to authorise new Erigon
    instances as well as new RPC daemon instances, so that they can mutually authenticate.
-2. Create CA certificate file that needs to be deployed on any Erigon instance and any RPC daemon. This CA cerf file is
+2. Create CA certificate file that needs to be deployed on any Erigon instance and any RPC daemon. This CA cert file is
    used as a "root of trust", whatever is in it, will be trusted by the participants when they authenticate their
    counterparts.
 3. For each Erigon instance and each RPC daemon instance, generate a key pair. If you are lazy, you can generate one
@@ -483,7 +494,7 @@ will be turned on again once we have updated the instruction above on how to pro
 Name".
 
 When running Erigon instance in the Google Cloud, for example, you need to specify the **Internal IP** in
-the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, to that connection
+the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, so that connection
 to the Erigon instances can be made.
 
 ### Ethstats

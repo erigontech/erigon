@@ -21,15 +21,15 @@ import (
 	"crypto/ecdsa"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
 type ContractsDeployer struct {
 	key                  *ecdsa.PrivateKey
-	address              libcommon.Address
+	address              common.Address
 	contractBackend      bind.ContractBackend
 	cl                   *MockCl
 	chainId              *big.Int
@@ -126,85 +126,85 @@ func (d ContractsDeployer) DeployKeyperSet(
 	ctx context.Context,
 	dep ContractsDeployment,
 	ekg EonKeyGeneration,
-) (libcommon.Address, *shuttercontracts.KeyperSet, error) {
+) (common.Address, *shuttercontracts.KeyperSet, error) {
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	keyperSetAddr, keyperSetDeployTxn, keyperSet, err := shuttercontracts.DeployKeyperSet(transactOpts, d.contractBackend)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	block, err := d.cl.BuildBlock(ctx)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, keyperSetDeployTxn.Hash())
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	setPublisherTxn, err := keyperSet.SetPublisher(transactOpts, d.address)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	setThresholdTxn, err := keyperSet.SetThreshold(transactOpts, ekg.Threshold)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	addMembersTxn, err := keyperSet.AddMembers(transactOpts, ekg.Members())
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	setFinalizedTxn, err := keyperSet.SetFinalized(transactOpts)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	block, err = d.cl.BuildBlock(ctx)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, setPublisherTxn.Hash(), setThresholdTxn.Hash(), addMembersTxn.Hash(), setFinalizedTxn.Hash())
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	addKeyperSetTxn, err := dep.Ksm.AddKeyperSet(transactOpts, ekg.ActivationBlock, keyperSetAddr)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	block, err = d.cl.BuildBlock(ctx)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, addKeyperSetTxn.Hash())
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	broadcastKeyTxn, err := dep.KeyBroadcast.BroadcastEonKey(transactOpts, uint64(ekg.EonIndex), ekg.EonPublicKey.Marshal())
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	block, err = d.cl.BuildBlock(ctx)
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, broadcastKeyTxn.Hash())
 	if err != nil {
-		return libcommon.Address{}, nil, err
+		return common.Address{}, nil, err
 	}
 
 	return keyperSetAddr, keyperSet, nil
@@ -212,9 +212,9 @@ func (d ContractsDeployer) DeployKeyperSet(
 
 type ContractsDeployment struct {
 	Sequencer        *shuttercontracts.Sequencer
-	SequencerAddr    libcommon.Address
+	SequencerAddr    common.Address
 	Ksm              *shuttercontracts.KeyperSetManager
-	KsmAddr          libcommon.Address
+	KsmAddr          common.Address
 	KeyBroadcast     *shuttercontracts.KeyBroadcastContract
-	KeyBroadcastAddr libcommon.Address
+	KeyBroadcastAddr common.Address
 }

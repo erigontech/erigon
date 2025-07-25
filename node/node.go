@@ -31,24 +31,20 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon/params"
+	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/debug"
-
-	"github.com/gofrs/flock"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon/migrations"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/node/migrations"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 // Node is a container on which services can be registered.

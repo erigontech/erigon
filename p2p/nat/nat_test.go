@@ -29,6 +29,10 @@ import (
 // consistent results when multiple goroutines call its methods
 // concurrently.
 func TestAutoDiscRace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	ad := startautodisc("thing", func() Interface {
 		time.Sleep(500 * time.Millisecond)
 		return ExtIP{33, 44, 55, 66}

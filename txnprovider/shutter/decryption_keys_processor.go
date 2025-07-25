@@ -25,14 +25,16 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"golang.org/x/sync/errgroup"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon-lib/types"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -40,7 +42,7 @@ import (
 
 type DecryptionKeysProcessor struct {
 	logger            log.Logger
-	config            Config
+	config            shuttercfg.Config
 	encryptedTxnsPool *EncryptedTxnsPool
 	decryptedTxnsPool *DecryptedTxnsPool
 	blockListener     *BlockListener
@@ -53,7 +55,7 @@ type DecryptionKeysProcessor struct {
 
 func NewDecryptionKeysProcessor(
 	logger log.Logger,
-	config Config,
+	config shuttercfg.Config,
 	encryptedTxnsPool *EncryptedTxnsPool,
 	decryptedTxnsPool *DecryptedTxnsPool,
 	blockListener *BlockListener,
@@ -116,20 +118,22 @@ func (dkp *DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 }
 
 func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
+	processingTimeStart := time.Now()
+	slot := msg.GetGnosis().Slot
+	eonIndex := EonIndex(msg.Eon)
 	dkp.logger.Debug(
 		"processing decryption keys message",
 		"instanceId", msg.InstanceId,
-		"eon", msg.Eon,
-		"slot", msg.GetGnosis().Slot,
-		"txPointer", msg.GetGnosis().TxPointer,
+		"eonIndex", eonIndex,
+		"slot", slot,
+		"txnIndex", msg.GetGnosis().TxPointer,
 		"keys", len(msg.Keys),
 	)
 
 	keys := msg.Keys[1:] // skip placeholder (we can safely do this because msg has already been validated)
-	eonIndex := EonIndex(msg.Eon)
 	from := TxnIndex(msg.GetGnosis().TxPointer)
 	to := from + TxnIndex(len(keys)) // [from,to)
-	processedMark := ProcessedMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex, From: from, To: to}
+	processedMark := ProcessedMark{Slot: slot, Eon: eonIndex, From: from, To: to}
 	if dkp.processed.Contains(processedMark) {
 		dkp.logger.Debug(
 			"skipping decryption keys message - already processed",
@@ -154,15 +158,16 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	var eg errgroup.Group
 	eg.SetLimit(estimate.AlmostAllCPUs())
 	txns := make([]types.Transaction, len(encryptedTxns))
-	totalGasLimit := atomic.Uint64{}
+	var totalGasLimit atomic.Uint64
+	var totalBytes atomic.Int64
 	for i, encryptedTxn := range encryptedTxns {
 		eg.Go(func() error {
 			txn, err := dkp.decryptTxn(txnIndexToKey, encryptedTxn)
 			if err != nil {
-				dkp.logger.Warn(
+				dkp.logger.Debug(
 					"failed to decrypt transaction - skipping",
-					"slot", msg.GetGnosis().Slot,
-					"eonIndex", msg.Eon,
+					"slot", slot,
+					"eonIndex", eonIndex,
 					"txnIndex", encryptedTxn.TxnIndex,
 					"err", err,
 				)
@@ -173,6 +178,11 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 
 			txns[i] = txn
 			totalGasLimit.Add(encryptedTxn.GasLimit.Uint64())
+			// note this is rlp encoding size and so it doesn't reflect 1:1 mem size occupied by the go struct,
+			// but it gives us somewhat of an estimate - this is probably ok for our metrics for now
+			txnSize := txn.EncodingSize()
+			totalBytes.Add(int64(txnSize))
+			decryptedTxnSizeBytes.Observe(float64(txnSize))
 			return nil
 		})
 	}
@@ -192,10 +202,23 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 		filteredTxns = append(filteredTxns, txn)
 	}
 
-	decryptionMark := DecryptionMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex}
-	txnBatch := TxnBatch{Transactions: filteredTxns, TotalGasLimit: totalGasLimit.Load()}
+	decryptionMark := DecryptionMark{Slot: slot, Eon: eonIndex}
+	txnBatch := TxnBatch{Transactions: filteredTxns, TotalGasLimit: totalGasLimit.Load(), TotalBytes: totalBytes.Load()}
 	dkp.decryptedTxnsPool.AddDecryptedTxns(decryptionMark, txnBatch)
 	dkp.processed.Add(processedMark)
+
+	failures := len(txns) - len(filteredTxns)
+	if failures > 0 {
+		dkp.logger.Debug("decryption failures for decryption keys", "slot", slot, "eonIndex", eonIndex, "count", failures)
+	}
+
+	decryptionKeysCount.Observe(float64(len(keys)))
+	decryptionKeysGas.Observe(float64(totalGasLimit.Load()))
+	decryptionSuccesses.Add(float64(len(filteredTxns)))
+	decryptionFailures.Add(float64(failures))
+	decryptionKeysProcessingTimeSecs.ObserveDuration(processingTimeStart)
+	slotStartTime := time.Unix(int64(dkp.slotCalculator.CalcSlotStartTimestamp(slot)), 0)
+	decryptionKeysSlotDelaySecs.ObserveDuration(slotStartTime)
 	return nil
 }
 
@@ -250,15 +273,15 @@ func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub
 }
 
 // threadSafeParseTxn is needed because txnParseCtx.ParseTransaction is not thread safe
-func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnSlot, libcommon.Address, error) {
+func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnSlot, common.Address, error) {
 	dkp.txnParseCtxMu.Lock()
 	defer dkp.txnParseCtxMu.Unlock()
 
 	var txnSlot txpool.TxnSlot
-	var sender libcommon.Address
+	var sender common.Address
 	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], true, true, nil)
 	if err != nil {
-		return nil, libcommon.Address{}, err
+		return nil, common.Address{}, err
 	}
 
 	return &txnSlot, sender, nil
@@ -294,9 +317,14 @@ func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEve
 	}
 
 	// decryptedTxnsPool is not re-org aware since it is slot based - we can clean it up straight away
-	decryptedTxnsDeletions := dkp.decryptedTxnsPool.DeleteDecryptedTxnsUpToSlot(slot)
-	if decryptedTxnsDeletions > 0 {
-		dkp.logger.Debug("cleaned up decrypted txns up to", "slot", slot, "deletions", decryptedTxnsDeletions)
+	decryptedMarkDeletions, decryptedTxnsDeletions := dkp.decryptedTxnsPool.DeleteDecryptedTxnsUpToSlot(slot)
+	if decryptedMarkDeletions > 0 {
+		dkp.logger.Debug(
+			"cleaned up decrypted txns up to",
+			"slot", slot,
+			"decryptedMarkDeletions", decryptedMarkDeletions,
+			"decryptedTxnsDeletions", decryptedTxnsDeletions,
+		)
 	}
 
 	// encryptedTxnPool on the other hand may be sensitive to re-orgs - clean it up with some delay

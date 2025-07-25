@@ -24,23 +24,19 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/erigontech/erigon-lib/kv/backup"
-	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/state"
+	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
-	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
-	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var cmdResetState = &cobra.Command{
@@ -55,7 +51,8 @@ var cmdResetState = &cobra.Command{
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
+
+		sn, borSn, _, _, _, _, err := allSnapshots(ctx, db, logger)
 		if err != nil {
 			logger.Error("Opening snapshots", "error", err)
 			return
@@ -63,16 +60,15 @@ var cmdResetState = &cobra.Command{
 
 		defer sn.Close()
 		defer borSn.Close()
-		defer agg.Close()
 
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) }); err != nil {
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
 			return
 		}
 
-		if err = reset2.ResetState(db, agg, ctx, chain, "", log.Root()); err != nil {
+		if err = reset2.ResetState(db, ctx); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -81,7 +77,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) }); err != nil {
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -104,7 +100,7 @@ var cmdClearBadBlocks = &cobra.Command{
 		defer db.Close()
 
 		return db.Update(ctx, func(tx kv.RwTx) error {
-			return backup.ClearTable(ctx, db, tx, "BadHeaderNumber")
+			return backup.ClearTables(ctx, tx, kv.BadHeaderNumber)
 		})
 	},
 }
@@ -119,7 +115,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots, agg *state.Aggregator) error {
+func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -156,15 +152,7 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
 
-	var filesAmount []int
-	var aggIsNotOkMessage string
-	if agg != nil {
-		filesAmount = agg.FilesAmount()
-	} else {
-		aggIsNotOkMessage = "failed to open aggregator snapshots"
-	}
-
-	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d), filesAmount: %d%s\n\n", rawdbhelpers.IdxStepsCountV3(tx), _lb, _lt, filesAmount, aggIsNotOkMessage)
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n\n", rawdbhelpers.IdxStepsCountV3(tx), _lb, _lt)
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
@@ -195,6 +183,26 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.
 		fmt.Fprintf(w, "in db: first header %d, last header %d, first body %d, last body %d\n", fstHeader, lstHeader, fstBody, lstBody)
 	}
 
+	fmt.Fprintf(w, "--\n\n\n")
+	w.Flush()
+
+	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
+	fmt.Fprintf(w, "domain and ii progress\n\n")
+	fmt.Fprintf(w, "Note: progress for commitment domain (in terms of txNum) is not presented.\n")
+	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
+
+	dbg := tx.Debug()
+	stepSize := dbg.StepSize()
+	for i := 0; i < int(kv.DomainLen); i++ {
+		d := kv.Domain(i)
+		txNum := dbg.DomainProgress(d)
+		step := txNum / stepSize
+		if d == kv.CommitmentDomain {
+			fmt.Fprintf(w, "%s \t\t - \t\t - \t\t %d\n", d.String(), step)
+			continue
+		}
+		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), dbg.HistoryStartFrom(d), txNum, step)
+	}
 	fmt.Fprintf(w, "--\n")
 
 	//fmt.Printf("==== state =====\n")

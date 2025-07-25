@@ -23,8 +23,7 @@ import (
 	"bytes"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -77,7 +76,7 @@ func checkInput(id byte, inputLen int) bool {
 // other values are reserved for future use.
 func fuzz(id byte, data []byte) int {
 	// Even on bad input, it should not crash, so we still test the gas calc
-	precompile := vm.PrecompiledContractsPrague[libcommon.BytesToAddress([]byte{id})]
+	precompile := vm.PrecompiledContractsPrague[common.BytesToAddress([]byte{id})]
 	gas := precompile.RequiredGas(data)
 	if !checkInput(id, len(data)) {
 		return 0

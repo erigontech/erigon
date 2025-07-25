@@ -27,10 +27,11 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func TestMsgID(t *testing.T) {
-	n := clparams.NetworkConfigs[clparams.MainnetNetwork]
+	n := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	s := &Sentinel{
 		ctx: context.TODO(),
 		cfg: &SentinelConfig{

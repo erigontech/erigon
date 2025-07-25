@@ -517,7 +517,7 @@ func generate2(tx kv.RwTx, entries int) error {
 func generate3(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 61; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.CreateBucket(k); err != nil {
+		if err := tx.CreateTable(k); err != nil {
 			return false, err
 		}
 	}
@@ -594,7 +594,7 @@ func generate6(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 }
 
 func dropT(_ kv.RwDB, tx kv.RwTx) (bool, error) {
-	if err := tx.ClearBucket("t"); err != nil {
+	if err := tx.ClearTable("t"); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -624,14 +624,14 @@ func generate7(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 }
 
 func dropT1(_ kv.RwDB, tx kv.RwTx) (bool, error) {
-	if err := tx.ClearBucket("t1"); err != nil {
+	if err := tx.ClearTable("t1"); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 func dropT2(_ kv.RwDB, tx kv.RwTx) (bool, error) {
-	if err := tx.ClearBucket("t2"); err != nil {
+	if err := tx.ClearTable("t2"); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -641,7 +641,7 @@ func dropT2(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 func generate8(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.CreateBucket(k); err != nil {
+		if err := tx.CreateTable(k); err != nil {
 			return false, err
 		}
 	}
@@ -673,7 +673,7 @@ func generate9(tx kv.RwTx, entries int) error {
 func dropAll(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.DropBucket(k); err != nil {
+		if err := tx.DropTable(k); err != nil {
 			return false, err
 		}
 	}
@@ -686,7 +686,7 @@ func dropGradually(db kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i += 2 {
 		k := fmt.Sprintf("table_%05d", i)
 		if err := db.Update(context.Background(), func(tx1 kv.RwTx) error {
-			return tx1.DropBucket(k)
+			return tx1.DropTable(k)
 		}); err != nil {
 			return false, err
 		}
@@ -805,7 +805,6 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 		var display bool
 		if err = db.Update(context.Background(), func(tx kv.RwTx) error {
 			var err1 error
-			//nolint:scopelint
 			display, err1 = generateF(db, tx)
 			return err1
 		}); err != nil {

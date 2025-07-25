@@ -37,7 +37,7 @@ type table struct {
 func (m *MemoryDiff) Flush(tx kv.RwTx) error {
 	// Obliterate buckets who are to be deleted
 	for _, bucket := range m.clearedTableNames {
-		if err := tx.ClearBucket(bucket); err != nil {
+		if err := tx.ClearTable(bucket); err != nil {
 			return err
 		}
 	}

@@ -26,16 +26,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cmd/utils"
-
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	devnet_args "github.com/erigontech/erigon/cmd/devnet/args"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/requests"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 )
@@ -55,7 +53,6 @@ type Network struct {
 	BorStateSyncDelay  time.Duration
 	BorPeriod          time.Duration
 	BorMinBlockSize    int
-	BorWithMilestones  *bool
 	wg                 sync.WaitGroup
 	peers              []string
 	namedNodes         map[string]Node
@@ -88,12 +85,6 @@ func (nw *Network) Start(ctx context.Context) error {
 		HttpPort:       nw.BaseRPCPort,
 		PrivateApiAddr: nw.BasePrivateApiAddr,
 		Snapshots:      nw.Snapshots,
-	}
-
-	if nw.BorWithMilestones != nil {
-		baseNode.WithHeimdallMilestones = *nw.BorWithMilestones
-	} else {
-		baseNode.WithHeimdallMilestones = utils.WithHeimdallMilestones.Value
 	}
 
 	nw.namedNodes = map[string]Node{}
@@ -139,7 +130,7 @@ func (nw *Network) Start(ctx context.Context) error {
 	return nil
 }
 
-var blockProducerFunds = (&big.Int{}).Mul(big.NewInt(1000), big.NewInt(params.Ether))
+var blockProducerFunds = (&big.Int{}).Mul(big.NewInt(1000), big.NewInt(common.Ether))
 
 func (nw *Network) createNode(nodeArgs Node) (Node, error) {
 	nodeAddr := fmt.Sprintf("%s:%d", nw.BaseRPCHost, nodeArgs.GetHttpPort())

@@ -19,7 +19,7 @@ package debugprint
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // nolint

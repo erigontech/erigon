@@ -26,18 +26,18 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	snaptype2 "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
-	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -52,8 +52,12 @@ var (
 )
 
 func doSqueeze(cliCtx *cli.Context) error {
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -87,7 +91,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
 
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
@@ -96,16 +100,16 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	if err := agg.OpenFolder(); err != nil {
 		return err
 	}
-	if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	if err := state.SqueezeCommitmentFiles(ac, logger); err != nil {
+	if err := state.SqueezeCommitmentFiles(ctx, ac, logger); err != nil {
 		return err
 	}
 	ac.Close()
-	if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	return nil
@@ -115,7 +119,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
@@ -131,13 +135,13 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err := agg.OpenFolder(); err != nil {
 		return err
 	}
-	if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	aggOld, err := state.NewAggregator2(ctx, dirsOld, config3.DefaultStepSize, db, logger)
+	aggOld, err := state.NewAggregator(ctx, dirsOld, config3.DefaultStepSize, db, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -146,25 +150,25 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 		panic(err)
 	}
 	aggOld.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	if err := aggOld.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := aggOld.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
-	if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 
 	acOld := aggOld.BeginFilesRo()
 	defer acOld.Close()
 
-	if err = state.SqueezeCommitmentFiles(acOld, logger); err != nil {
+	if err = state.SqueezeCommitmentFiles(ctx, acOld, logger); err != nil {
 		return err
 	}
 	acOld.Close()
 	ac.Close()
-	if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
-	if err := aggOld.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := aggOld.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	agg.Close()
@@ -178,7 +182,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	agg, err := state.NewAggregator2(ctx, dirs, config3.DefaultStepSize, db, logger)
+	agg, err := state.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
 	if err != nil {
 		return err
 	}
@@ -192,7 +196,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	if err = agg.OpenFolder(); err != nil {
 		return err
 	}
-	if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	return nil
@@ -227,13 +231,13 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil); err != nil {
 		return err
 	}
 	return nil

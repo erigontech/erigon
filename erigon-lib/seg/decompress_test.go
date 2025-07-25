@@ -19,7 +19,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -36,10 +35,10 @@ import (
 
 func prepareLoremDict(t *testing.T) *Decompressor {
 	t.Helper()
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
@@ -64,6 +63,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 }
 
 func TestDecompressSkip(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -81,9 +81,16 @@ func TestDecompressSkip(t *testing.T) {
 		}
 		i++
 	}
+
+	g.Reset(0)
+	_, offset := g.Next(nil)
+	require.Equal(t, 8, int(offset))
+	_, offset = g.Next(nil)
+	require.Equal(t, 16, int(offset))
 }
 
 func TestDecompressMatchOK(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -108,6 +115,7 @@ func TestDecompressMatchOK(t *testing.T) {
 }
 
 func TestDecompressMatchCmpOK(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -136,7 +144,6 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed2")
-	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
@@ -187,6 +194,7 @@ func TestDecompressMatchOKCondensed(t *testing.T) {
 }
 
 func TestDecompressMatchNotOK(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -210,6 +218,7 @@ func TestDecompressMatchNotOK(t *testing.T) {
 }
 
 func TestDecompressMatchPrefix(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -250,17 +259,18 @@ func TestDecompressMatchPrefix(t *testing.T) {
 
 func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	t.Helper()
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	slices.Sort(loremStrings)
+
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
-	slices.Sort(loremStrings)
 	for k, w := range loremStrings {
 		if len(w) == 0 {
 			err = c.AddUncompressedWord([]byte(w))
@@ -279,6 +289,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 }
 
 func TestUncompressed(t *testing.T) {
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDictUncompressed(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -329,18 +340,18 @@ func TestUncompressed(t *testing.T) {
 		_, ok := g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ := g.Next(nil)
-		require.Equal("", string(k))
+		require.Empty(string(k))
 
 		_, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ = g.Next(nil)
-		require.Equal("", string(k))
+		require.Empty(string(k))
 	})
 
 }
 
 func TestDecompressor_OpenCorrupted(t *testing.T) {
-	t.Helper()
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger := log.New()
 	tmpDir := t.TempDir()
 
@@ -440,7 +451,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{},
 			"file is some garbage or smaller compressedMinSize(%d) bytes, got error %v", compressedMinSize, err)
 		require.Nil(t, d)
 
@@ -468,7 +479,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{},
 			"file contains incorrect pattern dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
@@ -484,7 +495,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{},
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
@@ -501,7 +512,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{},
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
@@ -512,7 +523,6 @@ dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco la
 consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
 excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
 
-var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 func rmNewLine(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
 }
@@ -520,7 +530,7 @@ func rmNewLine(s string) string {
 func TestDecompressTorrent(t *testing.T) {
 	t.Skip()
 
-	fpath := "/mnt/data/chains/mainnet/snapshots/v1-014000-014500-transactions.seg"
+	fpath := "/mnt/data/chains/mainnet/snapshots/v1.0-014000-014500-transactions.seg"
 	st, err := os.Stat(fpath)
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
@@ -544,10 +554,6 @@ func TestDecompressTorrent(t *testing.T) {
 
 const N = 100
 
-var WORDS = [N][]byte{}
-var WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
-var INPUT_FLAGS = []int{}  // []byte or nil input
-
 func randWord() []byte {
 	size := rand.Intn(256) // size of the word
 	word := make([]byte, size)
@@ -557,27 +563,25 @@ func randWord() []byte {
 	return word
 }
 
-func generateRandWords() {
+func generateRandWords() (WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
+	WORDS = [N][]byte{}
+	WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
+	INPUT_FLAGS = []int{}  // []byte or nil input
+
 	for i := 0; i < N-2; i++ {
 		WORDS[i] = randWord()
 	}
 	// make sure we have at least 2 emtpy []byte
 	WORDS[N-2] = []byte{}
 	WORDS[N-1] = []byte{}
+	return
 }
 
-func clearPrevDict() {
-	WORDS = [N][]byte{}
-	WORD_FLAGS = [N]bool{}
-	INPUT_FLAGS = []int{}
-}
-
-func prepareRandomDict(t *testing.T) *Decompressor {
+func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "complex")
-	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
@@ -587,9 +591,8 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 	}
 	// c.DisableFsync()
 	defer c.Close()
-	clearPrevDict()
 	rand.Seed(time.Now().UnixNano())
-	generateRandWords()
+	WORDS, WORD_FLAGS, INPUT_FLAGS = generateRandWords()
 
 	idx := 0
 	for idx < N {
@@ -623,15 +626,14 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 	if err = c.Compress(); err != nil {
 		t.Fatal(err)
 	}
-	var d *Decompressor
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
-	return d
+	return d, WORDS, WORD_FLAGS, INPUT_FLAGS
 }
 
 func TestDecompressRandomMatchCmp(t *testing.T) {
-	d := prepareRandomDict(t)
+	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
 	defer d.Close()
 
 	if d.wordsCount != uint64(len(INPUT_FLAGS)) {
@@ -699,7 +701,7 @@ func TestDecompressRandomMatchCmp(t *testing.T) {
 }
 
 func TestDecompressRandomMatchBool(t *testing.T) {
-	d := prepareRandomDict(t)
+	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
 	defer d.Close()
 
 	if d.wordsCount != uint64(len(INPUT_FLAGS)) {
@@ -753,197 +755,3 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 		t.Fatalf("expected word count: %d, got %d\n", int(d.wordsCount), total)
 	}
 }
-
-func TestDecompressRandomFastNext(t *testing.T) {
-	d := prepareRandomDict(t)
-	defer d.Close()
-
-	if d.wordsCount != uint64(len(INPUT_FLAGS)) {
-		t.Fatalf("TestDecompressRandomDict: d.wordsCount != len(INPUT_FLAGS)")
-	}
-
-	g := d.MakeGetter()
-
-	word_idx := 0
-	input_idx := 0
-	total := 0
-	buf := make([]byte, (1 << 23))
-	// check for existing and non existing keys
-	for g.HasNext() {
-		if INPUT_FLAGS[input_idx] == 0 { // []byte input
-			expected := WORDS[word_idx]
-			word, _ := g.FastNext(buf)
-			if bytes.Compare(expected, word) != 0 {
-				t.Fatalf("1 expected: %v, got %v\n", expected, word)
-			}
-			word_idx++
-		} else { // nil input
-			expected := []byte{}
-			word, _ := g.FastNext(buf)
-			if bytes.Compare(expected, word) != 0 {
-				t.Fatalf("2 expected: %v, got %v\n", expected, word)
-			}
-		}
-		input_idx++
-		total++
-	}
-	if total != int(d.wordsCount) {
-		t.Fatalf("expected word count: %d, got %d\n", int(d.wordsCount), total)
-	}
-}
-
-// func TestDecompressRandomDict(t *testing.T) {
-// 	d := prepareRandomDict(t)
-// 	defer d.Close()
-
-// 	if d.wordsCount != uint64(len(INPUT_FLAGS)) {
-// 		t.Fatalf("TestDecompressRandomDict: d.wordsCount != len(INPUT_FLAGS)")
-// 	}
-
-// 	g := d.MakeGetter()
-
-// 	word_idx := 0
-// 	input_idx := 0
-// 	total := 0
-// 	// check for existing and non existing keys
-// 	for g.HasNext() {
-// 		pos := g.dataP
-// 		if INPUT_FLAGS[input_idx] == 0 { // []byte input
-// 			notExpected := string(WORDS[word_idx]) + "z"
-// 			ok, _ := g.Match([]byte(notExpected))
-// 			if ok {
-// 				t.Fatalf("not expected match: %s\n got: %s\n", notExpected, WORDS[word_idx])
-// 			}
-
-// 			expected := WORDS[word_idx]
-// 			ok, _ = g.Match(expected)
-// 			if !ok {
-// 				g.Reset(pos)
-// 				word, _ := g.Next(nil)
-// 				t.Fatalf("expected match: %s\n got: %s\n", expected, word)
-// 			}
-// 			word_idx++
-// 		} else { // nil input
-// 			notExpected := []byte{0}
-// 			ok, _ := g.Match(notExpected)
-// 			if ok {
-// 				t.Fatal("not expected match []byte{0} with nil\n")
-// 			}
-
-// 			expected := []byte{}
-// 			ok, _ = g.Match(nil)
-// 			if !ok {
-// 				g.Reset(pos)
-// 				word, _ := g.Next(nil)
-// 				t.Fatalf("expected match: %s\n got: %s\n", expected, word)
-// 			}
-// 		}
-// 		input_idx++
-// 		total++
-// 	}
-// 	if total != int(d.wordsCount) {
-// 		t.Fatalf("expected word count: %d, got %d\n", int(d.wordsCount), total)
-// 	}
-
-// 	// TODO: check for non existing keys, suffixes, prefixes
-// 	g.Reset(0)
-
-// 	word_idx = 0
-// 	input_idx = 0
-// 	// check for existing and non existing prefixes
-// 	var notExpected = []byte{2, 3, 4}
-// 	for g.HasNext() {
-
-// 		if INPUT_FLAGS[input_idx] == 0 { // []byte input
-// 			expected := WORDS[word_idx]
-// 			prefix_size := len(expected) / 2
-// 			if len(expected)/2 > 3 {
-// 				prefix_size = randIntInRange(3, len(expected)/2)
-// 			}
-// 			expected = expected[:prefix_size]
-// 			if len(expected) > 0 {
-// 				if !g.MatchPrefix(expected) {
-// 					t.Errorf("expected match with %s", expected)
-// 				}
-// 				expected[len(expected)-1]++
-// 				if g.MatchPrefix(expected) {
-// 					t.Errorf("not expected match with %s", expected)
-// 				}
-// 			} else {
-// 				if !g.MatchPrefix([]byte{}) {
-// 					t.Error("expected match with empty []byte")
-// 				}
-// 				if g.MatchPrefix(notExpected) {
-// 					t.Error("not expected empty []byte to match with []byte{2, 3, 4}")
-// 				}
-// 			}
-// 			word_idx++
-// 		} else { // nil input
-// 			if !g.MatchPrefix(nil) {
-// 				t.Error("expected match with nil")
-// 			}
-// 			if g.MatchPrefix(notExpected) {
-// 				t.Error("not expected nil to match with []byte{2, 3, 4}")
-// 			}
-// 		}
-
-// 		g.Skip()
-// 		input_idx++
-// 	}
-
-// 	g.Reset(0)
-
-// 	word_idx = 0
-// 	input_idx = 0
-// 	// check for existing and non existing suffixes
-// 	notExpected = []byte{2, 3, 4}
-// 	for g.HasNext() {
-
-// 		if INPUT_FLAGS[input_idx] == 0 { // []byte input
-// 			suffix := WORDS[word_idx]
-// 			if len(suffix) > 1 {
-// 				prefix := suffix[:len(suffix)/2]
-// 				suffix = suffix[len(suffix)/2:]
-// 				equal := reflect.DeepEqual(prefix, suffix)
-// 				// check existing suffixes
-// 				if g.MatchPrefix(suffix) { // suffix has to be equal to prefix
-// 					if !equal {
-// 						t.Fatalf("MatchPrefix(suffix) expected match: prefix is unequal to suffix %v != %v, full slice %v\n", prefix, suffix, WORDS[word_idx])
-// 					}
-// 				} else { // suffix has not to be the same as prefix
-// 					if equal {
-// 						t.Fatalf("MatchPrefix(suffix) expected unmatch: prefix is equal to suffix %v != %v, full slice %v\n", prefix, suffix, WORDS[word_idx])
-// 					}
-// 				}
-
-// 				if len(suffix) > 0 {
-// 					suffix[0]++
-// 					if g.MatchPrefix(suffix) && reflect.DeepEqual(prefix, suffix) {
-// 						t.Fatalf("MatchPrefix(suffix) not expected match: prefix is unequal to suffix %v != %v, full slice %v\n", prefix, suffix, WORDS[word_idx])
-// 					}
-// 				}
-
-// 				g.Skip()
-// 			} else {
-// 				ok, _ := g.Match(suffix)
-// 				if !ok {
-// 					t.Fatal("Match(suffix): expected match suffix")
-// 				}
-// 			}
-// 			word_idx++
-// 		} else { // nil input
-// 			if !g.MatchPrefix(nil) {
-// 				t.Error("MatchPrefix(suffix): expected match with nil")
-// 			}
-// 			if g.MatchPrefix(notExpected) {
-// 				t.Error("MatchPrefix(suffix): not expected nil to match with []byte{2, 3, 4}")
-// 			}
-// 			ok, _ := g.Match(nil)
-// 			if !ok {
-// 				t.Errorf("Match(suffix): expected to match with nil")
-// 			}
-// 		}
-
-// 		input_idx++
-// 	}
-// }

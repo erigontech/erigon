@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 const (
@@ -46,12 +47,12 @@ const (
 
 type DecryptionKeysListener struct {
 	logger    log.Logger
-	config    Config
+	config    shuttercfg.Config
 	validator pubsub.ValidatorEx
 	observers *event.Observers[*proto.DecryptionKeys]
 }
 
-func NewDecryptionKeysListener(logger log.Logger, config Config, validator pubsub.ValidatorEx) *DecryptionKeysListener {
+func NewDecryptionKeysListener(logger log.Logger, config shuttercfg.Config, validator pubsub.ValidatorEx) *DecryptionKeysListener {
 	return &DecryptionKeysListener{
 		logger:    logger,
 		config:    config,
@@ -89,15 +90,6 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	//
-	// TODO play around with go-libp2p-kad-dht for routing and discovery analogous to rolling-shutter
-	//      check if it improves number of peers for topic
-	//
-
-	//
-	// TODO persist connected nodes to be able to re-use on restart
-	//
 
 	eg, ctx := errgroup.WithContext(ctx)
 
@@ -243,6 +235,7 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 			err = backoff.Retry(connect, backoff.WithContext(backoff.NewExponentialBackOff(), ctx))
 			if err != nil {
 				dkl.logger.Error("failed to connect to bootstrap node", "node", node, "err", err)
+				return nil
 			}
 
 			dkl.logger.Info("connected to bootstrap node", "node", node)
@@ -317,6 +310,7 @@ func (dkl DecryptionKeysListener) peerInfoLoop(ctx context.Context, pubSub *pubs
 		case <-ticker.C:
 			peers := pubSub.ListPeers(DecryptionKeysTopic)
 			dkl.logger.Info("decryption keys peer count", "peers", len(peers))
+			decryptionKeysTopicPeerCount.Set(float64(len(peers)))
 		}
 	}
 }

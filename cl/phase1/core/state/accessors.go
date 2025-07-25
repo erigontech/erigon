@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"runtime"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/utils/bls"
 
@@ -49,7 +49,7 @@ func Epoch(b abstract.BeaconStateBasic) uint64 {
 	return GetEpochAtSlot(b.BeaconConfig(), b.Slot())
 }
 
-func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature libcommon.Bytes96) bool {
+func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature common.Bytes96) bool {
 	modulo := max(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
 	hashSlotSignatue := utils.Sha256(slotSignature[:])
 	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
@@ -94,7 +94,7 @@ func PreviousEpoch(b abstract.BeaconState) uint64 {
 }
 
 // GetBlockRoot returns blook root at start of a given epoch
-func GetBlockRoot(b abstract.BeaconState, epoch uint64) (libcommon.Hash, error) {
+func GetBlockRoot(b abstract.BeaconState, epoch uint64) (common.Hash, error) {
 	return b.GetBlockRootAtSlot(epoch * b.BeaconConfig().SlotsPerEpoch)
 }
 
@@ -262,39 +262,53 @@ func ComputeTimestampAtSlot(b abstract.BeaconState, slot uint64) uint64 {
 
 // ExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
 func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltypes.Withdrawal, uint64) {
-	// Get the current epoch, the next withdrawal index, and the next withdrawal validator index
 	nextWithdrawalIndex := b.NextWithdrawalIndex()
 	nextWithdrawalValidatorIndex := b.NextWithdrawalValidatorIndex()
-
-	// Determine the upper bound for the loop and initialize the withdrawals slice with a capacity of bound
-	maxValidators := uint64(b.ValidatorLength())
-	maxValidatorsPerWithdrawalsSweep := b.BeaconConfig().MaxValidatorsPerWithdrawalsSweep
-	bound := min(maxValidators, maxValidatorsPerWithdrawalsSweep)
-	withdrawals := make([]*cltypes.Withdrawal, 0, bound)
+	withdrawals := make([]*cltypes.Withdrawal, 0)
 	partialWithdrawalsCount := uint64(0)
 
 	// [New in Electra:EIP7251] Consume pending partial withdrawals
 	cfg := b.BeaconConfig()
-	if b.Version().AfterOrEqual(clparams.ElectraVersion) {
+	if b.Version() >= clparams.ElectraVersion {
 		b.GetPendingPartialWithdrawals().Range(func(index int, w *solid.PendingPartialWithdrawal, length int) bool {
 			if w.WithdrawableEpoch > currentEpoch || len(withdrawals) == int(cfg.MaxPendingPartialsPerWithdrawalsSweep) {
 				return false
 			}
-			validatorBalance, err := b.ValidatorBalance(int(w.Index))
+
+			validator := b.ValidatorSet().Get(int(w.Index))
+			hasSufficientEffectiveBalance := validator.EffectiveBalance() >= cfg.MinActivationBalance
+
+			// Calculate total withdrawn amount for this validator from previous withdrawals
+			totalWithdrawn := uint64(0)
+			for _, withdrawal := range withdrawals {
+				if withdrawal.Validator == w.Index {
+					totalWithdrawn += withdrawal.Amount
+				}
+			}
+
+			balance, err := b.ValidatorBalance(int(w.Index))
 			if err != nil {
 				log.Warn("Failed to get validator balance", "index", w.Index, "error", err)
 				return false
 			}
-			validator := b.ValidatorSet().Get(int(w.Index))
+			if balance > totalWithdrawn {
+				balance -= totalWithdrawn
+			} else {
+				balance = 0
+			}
+
+			hasExcessBalance := balance > cfg.MinActivationBalance
+
 			if validator.ExitEpoch() == cfg.FarFutureEpoch &&
-				validator.EffectiveBalance() >= cfg.MinActivationBalance &&
-				validatorBalance > cfg.MinActivationBalance {
+				hasSufficientEffectiveBalance &&
+				hasExcessBalance {
+
 				wd := validator.WithdrawalCredentials()
-				withdrawableBalance := min(validatorBalance-cfg.MinActivationBalance, w.Amount)
+				withdrawableBalance := min(balance-cfg.MinActivationBalance, w.Amount)
 				withdrawals = append(withdrawals, &cltypes.Withdrawal{
 					Index:     nextWithdrawalIndex,
 					Validator: w.Index,
-					Address:   libcommon.BytesToAddress(wd[12:]),
+					Address:   common.BytesToAddress(wd[12:]),
 					Amount:    withdrawableBalance,
 				})
 				nextWithdrawalIndex++
@@ -304,59 +318,60 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltype
 		})
 	}
 
-	// Loop through the validators to calculate expected withdrawals
+	// Sweep for remaining withdrawals
+	maxValidators := uint64(b.ValidatorLength())
+	maxValidatorsPerWithdrawalsSweep := b.BeaconConfig().MaxValidatorsPerWithdrawalsSweep
+	bound := min(maxValidators, maxValidatorsPerWithdrawalsSweep)
+
 	for validatorCount := uint64(0); validatorCount < bound && len(withdrawals) != int(b.BeaconConfig().MaxWithdrawalsPerPayload); validatorCount++ {
-		// Get the validator and balance for the current validator index
-		// supposedly this operation is safe because we checked the validator length about
 		currentValidator, _ := b.ValidatorForValidatorIndex(int(nextWithdrawalValidatorIndex))
+
+		// Calculate total withdrawn amount for this validator from previous withdrawals
+		totalWithdrawn := uint64(0)
+		if b.Version() >= clparams.ElectraVersion {
+			for _, w := range withdrawals {
+				if w.Validator == nextWithdrawalValidatorIndex {
+					totalWithdrawn += w.Amount
+				}
+			}
+		}
+
 		currentBalance, err := b.ValidatorBalance(int(nextWithdrawalValidatorIndex))
 		if err != nil {
 			log.Warn("Failed to get validator balance", "index", nextWithdrawalValidatorIndex, "error", err)
 		}
-		if b.Version() >= clparams.ElectraVersion {
-			partiallyWithdrawnBalance := uint64(0)
-			for _, w := range withdrawals {
-				if w.Validator == nextWithdrawalValidatorIndex {
-					partiallyWithdrawnBalance += w.Amount
-				}
-			}
-			if currentBalance <= partiallyWithdrawnBalance {
-				currentBalance = 0
-			} else {
-				currentBalance -= partiallyWithdrawnBalance
-			}
+		if currentBalance > totalWithdrawn {
+			currentBalance -= totalWithdrawn
+		} else {
+			currentBalance = 0
 		}
+
 		wd := currentValidator.WithdrawalCredentials()
-		// Check if the validator is fully withdrawable
+
 		if isFullyWithdrawableValidator(b, currentValidator, currentBalance, currentEpoch) {
-			// Add a new withdrawal with the validator's withdrawal credentials and balance
-			newWithdrawal := &cltypes.Withdrawal{
+			withdrawals = append(withdrawals, &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
-				Address:   libcommon.BytesToAddress(wd[12:]),
+				Address:   common.BytesToAddress(wd[12:]),
 				Amount:    currentBalance,
-			}
-			withdrawals = append(withdrawals, newWithdrawal)
+			})
 			nextWithdrawalIndex++
-		} else if isPartiallyWithdrawableValidator(b, currentValidator, currentBalance) { // Check if the validator is partially withdrawable
-			// Add a new withdrawal with the validator's withdrawal credentials and balance minus the maximum effective balance
-			amount := currentBalance - b.BeaconConfig().MaxEffectiveBalance
+		} else if isPartiallyWithdrawableValidator(b, currentValidator, currentBalance) {
+			maxEffectiveBalance := b.BeaconConfig().MaxEffectiveBalance
 			if b.Version() >= clparams.ElectraVersion {
-				amount = currentBalance - getMaxEffectiveBalanceElectra(currentValidator, b.BeaconConfig())
+				maxEffectiveBalance = getMaxEffectiveBalanceElectra(currentValidator, b.BeaconConfig())
 			}
-			newWithdrawal := &cltypes.Withdrawal{
+			withdrawals = append(withdrawals, &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
-				Address:   libcommon.BytesToAddress(wd[12:]),
-				Amount:    amount,
-			}
-			withdrawals = append(withdrawals, newWithdrawal)
+				Address:   common.BytesToAddress(wd[12:]),
+				Amount:    currentBalance - maxEffectiveBalance,
+			})
 			nextWithdrawalIndex++
 		}
-		// Increment the validator index, looping back to 0 if necessary
+
 		nextWithdrawalValidatorIndex = (nextWithdrawalValidatorIndex + 1) % maxValidators
 	}
 
-	// Return the withdrawals slice
 	return withdrawals, partialWithdrawalsCount
 }

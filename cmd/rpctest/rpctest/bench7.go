@@ -20,19 +20,19 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func Bench7(erigonURL, gethURL string) error {
 	setRoutes(erigonURL, gethURL)
 
-	blockhash := libcommon.HexToHash("0xdd3eb495312b11621669be45a2d50f8a66f2616bc72a610e2cbf1aebf9e4a9aa")
+	blockhash := common.HexToHash("0xdd3eb495312b11621669be45a2d50f8a66f2616bc72a610e2cbf1aebf9e4a9aa")
 	reqID := 1
-	to := libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413")
-	var sm map[libcommon.Hash]storageEntry
-	var smg map[libcommon.Hash]storageEntry
-	//start := libcommon.HexToHash("0x4a17477338cba00d8a94336ef62ea15f68e77ad0ca738fa405daa13bf0874134")
-	start := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000")
+	to := common.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413")
+	var sm map[common.Hash]storageEntry
+	var smg map[common.Hash]storageEntry
+	//start := common.HexToHash("0x4a17477338cba00d8a94336ef62ea15f68e77ad0ca738fa405daa13bf0874134")
+	start := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000")
 
 	reqID++
 	template := `
@@ -41,8 +41,8 @@ func Bench7(erigonURL, gethURL string) error {
 	i := 2
 	nextKey := &start
 	nextKeyG := &start
-	sm = make(map[libcommon.Hash]storageEntry)
-	smg = make(map[libcommon.Hash]storageEntry)
+	sm = make(map[common.Hash]storageEntry)
+	smg = make(map[common.Hash]storageEntry)
 	for nextKey != nil {
 		var sr DebugStorageRange
 		if err := post(client, erigonURL, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, reqID), &sr); err != nil {
