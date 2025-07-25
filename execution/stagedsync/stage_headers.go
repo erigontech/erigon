@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/arb/ethdb"
 	"math/big"
 	"os"
 	"runtime"
@@ -267,6 +268,8 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 		log.Info("Committed transaction", "block", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
+
+	ethdb.InitialiazeLocalWasmTarget()
 
 	log.Info("Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "extTx", useExternalTx)
 	return nil
