@@ -875,12 +875,9 @@ func ExecV3(ctx context.Context,
 					}
 					rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
 					se.doms.SetTrace(false, false)
+
 					if err != nil {
 						return err
-					}
-					if !bytes.Equal(rh, header.Root.Bytes()) {
-						logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-						return fmt.Errorf("wrong trie root: %d", blockNum)
 					}
 
 					computeCommitmentDuration += time.Since(start)
@@ -891,6 +888,11 @@ func ExecV3(ctx context.Context,
 						}
 					}
 					executor.domains().SetChangesetAccumulator(nil)
+
+					if !bytes.Equal(rh, header.Root.Bytes()) {
+						logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+						return fmt.Errorf("wrong trie root: %d", blockNum)
+					}
 				}
 
 				if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
@@ -1120,6 +1122,15 @@ func ExecV3(ctx context.Context,
 								if err != nil {
 									return err
 								}
+
+								executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+								if !inMemExec {
+									if err := libstate.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
+										return err
+									}
+								}
+								executor.domains().SetChangesetAccumulator(nil)
+
 								if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
 									logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
 									if !dbg.BatchCommitments {
@@ -1151,14 +1162,6 @@ func ExecV3(ctx context.Context,
 								pe.lastCommittedTxNum = lastBlockResult.lastTxNum
 								pe.committedGas += uncommittedGas
 								uncommittedGas = 0
-
-								executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
-								if !inMemExec {
-									if err := libstate.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
-										return err
-									}
-								}
-								executor.domains().SetChangesetAccumulator(nil)
 							}
 						}
 
