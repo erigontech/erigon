@@ -98,8 +98,8 @@ func (sd *SharedDomainsCommitmentContext) CheckSubTx() bool {
 		if stx.txNum != sd.mainTtx.txNum {
 			panic(fmt.Errorf("CheckSubTx: sub-tx %d has txNum %d, expected %d", si, stx.txNum, sd.mainTtx.txNum))
 		}
-		if stx.domainsOnly != sd.mainTtx.domainsOnly {
-			panic(fmt.Errorf("CheckSubTx: sub-tx %d has domainsOnly %v, expected %v", si, stx.domainsOnly, sd.mainTtx.domainsOnly))
+		if stx.withHistory != sd.mainTtx.withHistory {
+			panic(fmt.Errorf("CheckSubTx: sub-tx %d has withHistory %v, expected %v", si, stx.withHistory, sd.mainTtx.withHistory))
 		}
 		if rtx, ok := stx.roTtx.(kv.Tx); !ok || rtx == nil {
 			panic(fmt.Errorf("CheckSubTx: sub-tx %d has nil roTtx %T", si, stx.roTtx))
