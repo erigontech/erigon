@@ -74,9 +74,9 @@ jobs:
             failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
 
             echo -e "\n"
-            echo "-----------   Results for ${1}    -----------" 
-            echo "Tests: $tests, Failed: $failed"
-            echo -e "\n\n============================================================"
+            message="-----------   Results for ${1}    -----------\nTests: $tests, Failed: $failed\n\n============================================================"
+            echo -e "$message"
+            echo -e "$message" >> result.log
 
             if (( tests < 4 )); then
               echo "Too few tests run for suite ${1} - ${tests} tests"
@@ -96,13 +96,15 @@ jobs:
         with:
           name: hive-workspace-log
           path: hive/workspace/logs
-      - name: Check for failures
+      - name: Test Results
         run: |
           if grep -q "failed" hive/failed.log; then
             echo "One or more tests failed."
             exit 1
           fi
           echo "All tests passed successfully."
+          cat result.log
+
 
       # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
       # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
