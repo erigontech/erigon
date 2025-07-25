@@ -18,43 +18,99 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/hex"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 )
 
+type PoolChangeEvent struct {
+	Pool    string `json:"pool"`
+	Event   string `json:"event"`
+	TxnHash string `json:"txnHash"`
+	Order   uint8  `json:"order"`
+}
+
 type DiagTxn struct {
-	IDHash              [32]byte      `json:"hash"`
+	IDHash              string        `json:"hash"`
 	SenderID            uint64        `json:"senderID"`
-	Nonce               uint64        `json:"nonce"`
-	Value               uint256.Int   `json:"value"`
-	Gas                 uint64        `json:"gas"`
-	FeeCap              uint256.Int   `json:"feeCap"`
-	Tip                 uint256.Int   `json:"tip"`
 	Size                uint32        `json:"size"`
-	Type                byte          `json:"type"`
 	Creation            bool          `json:"creation"`
 	DataLen             int           `json:"dataLen"`
 	AccessListAddrCount int           `json:"accessListAddrCount"`
 	AccessListStorCount int           `json:"accessListStorCount"`
 	BlobHashes          []common.Hash `json:"blobHashes"`
-	Blobs               [][]byte      `json:"blobs"`
+	IsLocal             bool          `json:"isLocal"`
+	DiscardReason       string        `json:"discardReason"`
+	Pool                string        `json:"pool"`
+	OrderMarker         uint8         `json:"orderMarker"`
+	RLP                 []byte        `json:"rlp"`
 }
 
 type IncomingTxnUpdate struct {
-	Txns      []DiagTxn `json:"txns"`
-	Senders   []byte    `json:"senders"`
-	IsLocal   []bool    `json:"isLocal"`
-	KnownTxns [][]byte  `json:"knownTxns"` //hashes of incomming transactions from p2p network which are already in the pool
+	Txns    []DiagTxn             `json:"txns"`
+	Updates map[string][][32]byte `json:"updates"`
 }
 
 func (ti IncomingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
+type TxnHashOrder struct {
+	OrderMarker uint8
+	Hash        [32]byte
+}
+
+type PoolChangeBatch struct {
+	Pool         string         `json:"pool"`
+	OrderMarker  uint8          `json:"orderMarker"`
+	Event        string         `json:"event"`
+	TxnHashOrder []TxnHashOrder `json:"txnHash"`
+}
+
+type PoolChangeBatchEvent struct {
+	Changes []PoolChangeBatch `json:"changes"`
+}
+
+func (ti PoolChangeBatchEvent) Type() Type {
+	return TypeOf(ti)
+}
+
+type BlockUpdate struct {
+	MinedTxns       []DiagTxn `json:"minedTxns"`
+	UnwoundTxns     []DiagTxn `json:"unwoundTxns"`
+	UnwoundBlobTxns []DiagTxn `json:"unwoundBlobTxns"`
+	BlockNum        uint64    `json:"blkNum"`
+	BlkTime         uint64    `json:"blkTime"`
+}
+
+func (ti BlockUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+type SenderInfoUpdate struct {
+	SenderId      uint64      `json:"senderId"`
+	SenderNonce   uint64      `json:"senderNonce"`
+	SenderBalance uint256.Int `json:"senderBalance"`
+	BlockGasLimit uint64      `json:"blockGasLimit"`
+}
+
+func (ti SenderInfoUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+type TxpoolDiagMessage struct {
+	Type    string      `json:"type"`
+	Message interface{} `json:"message"`
+}
+
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
+	d.runOnPoolChangeBatchEvent(rootCtx)
+	d.runOnNewBlockListener(rootCtx)
+	d.runOnSenderUpdateListener(rootCtx)
+
 	d.SetupNotifier()
 }
 
@@ -71,7 +127,88 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 			case info := <-ch:
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
-					Message:     info,
+					Message: TxpoolDiagMessage{
+						Type:    "incomingTxnUpdate",
+						Message: info,
+					},
+				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[PoolChangeBatchEvent](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(PoolChangeBatchEvent{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				for _, change := range info.Changes {
+					for _, txnHash := range change.TxnHashOrder {
+						d.Notify(DiagMessages{
+							MessageType: "txpool",
+							Message: TxpoolDiagMessage{
+								Type: "poolChangeEvent",
+								Message: PoolChangeEvent{
+									Pool:    change.Pool,
+									Event:   change.Event,
+									TxnHash: hex.EncodeToString(txnHash.Hash[:]),
+									Order:   txnHash.OrderMarker,
+								},
+							},
+						})
+					}
+				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnNewBlockListener(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[BlockUpdate](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(BlockUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message: TxpoolDiagMessage{
+						Type:    "blockUpdate",
+						Message: info,
+					},
+				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnSenderUpdateListener(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[SenderInfoUpdate](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(SenderInfoUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message: TxpoolDiagMessage{
+						Type:    "senderInfoUpdate",
+						Message: info,
+					},
 				})
 			}
 		}

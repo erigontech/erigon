@@ -52,13 +52,14 @@ var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
 type txPool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
-	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64) (bool, error)
+	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, availableRlpSpace int) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
+	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
 
 var _ txpool_proto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
@@ -150,7 +151,7 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_pro
 	reply := &txpool_proto.PendingReply{}
 	reply.Txs = make([]*txpool_proto.PendingReply_Tx, 0, 32)
 	txnsRlp := TxnsRlp{}
-	if _, err := s.txPool.PeekBest(ctx, math.MaxInt16, &txnsRlp, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */); err != nil {
+	if _, err := s.txPool.PeekBest(ctx, math.MaxInt16, &txnsRlp, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */, math.MaxInt /* availableRlpSpace */); err != nil {
 		return nil, err
 	}
 	var senderArr [20]byte
@@ -223,6 +224,33 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 		reply.Errors[i] = discardReasons[j].String()
 		j++
 	}
+	return reply, nil
+}
+
+func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpool_proto.GetBlobsRequest) (*txpool_proto.GetBlobsReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hashes := make([]common.Hash, len(in.BlobHashes))
+	for i := range in.BlobHashes {
+		hashes[i] = gointerfaces.ConvertH256ToHash(in.BlobHashes[i])
+	}
+	blobBundles := s.txPool.GetBlobs(hashes)
+	blobs := make([][]byte, 0)
+	proofs := make([][]byte, 0)
+	for _, bb := range blobBundles {
+		blobs = append(blobs, bb.Blob)
+		if len(bb.Proofs) == 0 {
+			proofs = append(proofs, nil)
+		}
+		for _, p := range bb.Proofs {
+			proofs = append(proofs, p[:])
+		}
+	}
+	reply := &txpool_proto.GetBlobsReply{Blobs: blobs, Proofs: proofs}
 	return reply, nil
 }
 

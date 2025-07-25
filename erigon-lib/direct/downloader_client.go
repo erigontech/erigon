@@ -20,9 +20,10 @@ import (
 	"context"
 	"io"
 
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 )
 
 type DownloaderClient struct {
@@ -37,14 +38,8 @@ func (c *DownloaderClient) Add(ctx context.Context, in *proto_downloader.AddRequ
 	return c.server.Add(ctx, in)
 }
 
-func (c *DownloaderClient) ProhibitNewDownloads(ctx context.Context, in *proto_downloader.ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.ProhibitNewDownloads(ctx, in)
-}
 func (c *DownloaderClient) Delete(ctx context.Context, in *proto_downloader.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Delete(ctx, in)
-}
-func (c *DownloaderClient) Verify(ctx context.Context, in *proto_downloader.VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.Verify(ctx, in)
 }
 func (c *DownloaderClient) SetLogPrefix(ctx context.Context, in *proto_downloader.SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.SetLogPrefix(ctx, in)
@@ -53,14 +48,21 @@ func (c *DownloaderClient) Completed(ctx context.Context, in *proto_downloader.C
 	return c.server.Completed(ctx, in)
 }
 
-func (c *DownloaderClient) TorrentCompleted(ctx context.Context, in *proto_downloader.TorrentCompletedRequest, opts ...grpc.CallOption) (proto_downloader.Downloader_TorrentCompletedClient, error) {
-	ch := make(chan *downloadedReply, 1<<16)
-	streamServer := &DownloadeSubscribeS{ch: ch, ctx: ctx}
+func (c *DownloaderClient) ProhibitNewDownloads(ctx context.Context, in *proto_downloader.ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.ProhibitNewDownloads(ctx, in, opts...)
+}
 
+func (c *DownloaderClient) Verify(ctx context.Context, in *proto_downloader.VerifyRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.Verify(ctx, in)
+}
+
+func (c *DownloaderClient) TorrentCompleted(ctx context.Context, in *proto_downloader.TorrentCompletedRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto_downloader.TorrentCompletedReply], error) {
+	ch := make(chan *downloadedReply, 16384)
+	streamServer := &DownloadeSubscribeS{ch: ch, ctx: ctx}
 	go func() {
+		defer close(ch)
 		streamServer.Err(c.server.TorrentCompleted(in, streamServer))
 	}()
-
 	return &DownloadeSubscribeC{ch: ch, ctx: ctx}, nil
 }
 

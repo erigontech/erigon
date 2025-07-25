@@ -17,32 +17,24 @@
 package kvcfg
 
 import (
-	"context"
+	"errors"
 
 	"github.com/erigontech/erigon-lib/kv"
 )
 
 type ConfigKey []byte
 
+var (
+	PersistReceipts   = ConfigKey("persist.receipts")
+	CommitmentHistory = ConfigKey("commitment.history")
+)
+
 func (k ConfigKey) Enabled(tx kv.Tx) (bool, error) { return kv.GetBool(tx, kv.DatabaseInfo, k) }
-func (k ConfigKey) FromDB(db kv.RoDB) (enabled bool) {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		var err error
-		enabled, err = k.Enabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	return enabled
-}
 func (k ConfigKey) WriteOnce(tx kv.RwTx, v bool) (bool, error) {
 	_, enabled, err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, k, v)
 	return enabled, err
 }
-func (k ConfigKey) EnsureNotChanged(tx kv.RwTx, value bool) (ok, enabled bool, err error) {
+func (k ConfigKey) EnsureNotChanged(tx kv.RwTx, value bool) (notChanged, enabled bool, err error) {
 	return kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, k, value)
 }
 func (k ConfigKey) ForceWrite(tx kv.RwTx, enabled bool) error {
@@ -54,6 +46,16 @@ func (k ConfigKey) ForceWrite(tx kv.RwTx, enabled bool) error {
 		if err := tx.Put(kv.DatabaseInfo, k, []byte{0}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+func (k ConfigKey) MustBeEnabled(tx kv.Tx, msg string) error {
+	enabled, err := k.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return errors.New(msg)
 	}
 	return nil
 }

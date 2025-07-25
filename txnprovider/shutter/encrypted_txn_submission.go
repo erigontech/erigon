@@ -21,7 +21,7 @@ package shutter
 import (
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
@@ -32,17 +32,14 @@ type EncryptedTxnSubmission struct {
 	EonIndex             EonIndex
 	TxnIndex             TxnIndex
 	IdentityPrefix       [32]byte
-	Sender               libcommon.Address
+	Sender               common.Address
 	EncryptedTransaction []byte
 	GasLimit             *big.Int
 	BlockNum             uint64
 }
 
 func (ets EncryptedTxnSubmission) IdentityPreimageBytes() []byte {
-	buf := make([]byte, len(ets.IdentityPrefix)+len(ets.Sender))
-	copy(buf[:len(ets.IdentityPrefix)], ets.IdentityPrefix[:])
-	copy(buf[len(ets.IdentityPrefix):], ets.Sender.Bytes())
-	return buf
+	return IdentityPreimageFromSenderPrefix(ets.IdentityPrefix, ets.Sender)[:]
 }
 
 func EncryptedTxnSubmissionFromLogEvent(event *contracts.SequencerTransactionSubmitted) EncryptedTxnSubmission {

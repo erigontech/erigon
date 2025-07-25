@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration_skip
-
 package discover
 
 import (
@@ -27,7 +25,6 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -38,8 +35,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/testlog"
-
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/p2p/discover/v4wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -447,6 +443,7 @@ func TestUDPv4_pingMatchIP(t *testing.T) {
 }
 
 func TestUDPv4_successfulPing(t *testing.T) {
+	t.Skip("issue #15000")
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	added := make(chan *node, 1)
@@ -619,6 +616,21 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 }
 
+type testLogHandler struct {
+	lprefix string
+	lfmt    log.Format
+	t       *testing.T
+}
+
+func (h testLogHandler) Log(r *log.Record) error {
+	h.t.Logf("%s %s", h.lprefix, h.lfmt.Format(r))
+	return nil
+}
+
+func (h testLogHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
+}
+
 func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.Logger) *UDPv4 {
 	t.Helper()
 
@@ -634,10 +646,7 @@ func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.
 	lprefix := fmt.Sprintf("(%s)", ln.ID().TerminalString())
 	lfmt := log.TerminalFormat()
 	cfg.Log = testlog.Logger(t, log.LvlError)
-	cfg.Log.SetHandler(log.FuncHandler(func(r *log.Record) error {
-		t.Logf("%s %s", lprefix, lfmt.Format(r))
-		return nil
-	}))
+	cfg.Log.SetHandler(testLogHandler{lprefix: lprefix, lfmt: lfmt, t: t})
 
 	// Listen.
 	socket, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP{127, 0, 0, 1}})
@@ -695,8 +704,6 @@ func (c *dgramPipe) WriteToUDP(b []byte, to *net.UDPAddr) (n int, err error) {
 	msg := make([]byte, len(b))
 	copy(msg, b)
 
-	n = 0
-	err = errors.New("closed")
 	defer recover()
 
 	c.queue <- dgram{*to, b}

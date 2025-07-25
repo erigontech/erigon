@@ -389,9 +389,17 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.Gene
 	}
 
 	// Verify commitments are under limit
-	// assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-	if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
-		return errors.New("ProcessExecutionPayload: too many blob commitments")
+	if s.Version() >= clparams.FuluVersion {
+		// Fulu:EIP7892
+		blobParameters := s.BeaconConfig().GetBlobParameters(state.Epoch(s))
+		if body.GetBlobKzgCommitments().Len() > int(blobParameters.MaxBlobsPerBlock) {
+			return errors.New("ProcessExecutionPayload: too many blob commitments")
+		}
+	} else {
+		// assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
+		if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
+			return errors.New("ProcessExecutionPayload: too many blob commitments")
+		}
 	}
 
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
@@ -1044,6 +1052,12 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 				return err
 			}
 		}
+
+		if state.Epoch(s) == beaconConfig.FuluForkEpoch {
+			if err := s.UpgradeToFulu(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1213,9 +1227,9 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 	}
 
 	// Initiate source validator exit and append pending consolidation
-	sourceValidator.SetExitEpoch(computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance()))
-	sourceValidator.SetWithdrawableEpoch(sourceValidator.ExitEpoch() + s.BeaconConfig().MinValidatorWithdrawabilityDelay)
-	s.SetValidatorAtIndex(int(sourceIndex), sourceValidator) // update the state and underlying validator set. Mark the merkle tree dirty.
+	s.SetExitEpochForValidatorAtIndex(int(sourceIndex), computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance()))
+	s.SetWithdrawableEpochForValidatorAtIndex(int(sourceIndex), sourceValidator.ExitEpoch()+s.BeaconConfig().MinValidatorWithdrawabilityDelay)
+
 	s.AppendPendingConsolidation(&solid.PendingConsolidation{
 		SourceIndex: sourceIndex,
 		TargetIndex: targetIndex,
@@ -1269,8 +1283,7 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	newWc := common.Hash{}
 	copy(newWc[:], wc[:])
 	newWc[0] = byte(s.BeaconConfig().CompoundingWithdrawalPrefix)
-	validator.SetWithdrawalCredentials(newWc)
-	s.SetValidatorAtIndex(int(vindex), validator) // update the state
+	s.SetWithdrawalCredentialForValidatorAtIndex(int(vindex), newWc)
 	return state.QueueExcessActiveBalance(s, vindex, &validator)
 }
 

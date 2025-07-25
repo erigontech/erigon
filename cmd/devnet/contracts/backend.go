@@ -22,13 +22,13 @@ import (
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 func NewBackend(node devnet.Node) bind.ContractBackend {
@@ -39,7 +39,7 @@ type contractBackend struct {
 	node devnet.Node
 }
 
-func (cb contractBackend) CodeAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) ([]byte, error) {
+func (cb contractBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
 	return cb.node.GetCode(contract, rpc.AsBlockReference(blockNumber))
 }
 
@@ -72,11 +72,11 @@ func (cb contractBackend) CallContract(ctx context.Context, call ethereum.CallMs
 	}, blockRef, nil)
 }
 
-func (cb contractBackend) PendingCodeAt(ctx context.Context, account libcommon.Address) ([]byte, error) {
+func (cb contractBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
 	return cb.node.GetCode(account, rpc.PendingBlock)
 }
 
-func (cb contractBackend) PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error) {
+func (cb contractBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
 	res, err := cb.node.GetTransactionCount(account, rpc.PendingBlock)
 
 	if err != nil {

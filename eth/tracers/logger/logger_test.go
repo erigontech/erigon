@@ -25,24 +25,22 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/params"
 )
 
 type dummyContractRef struct {
 	calledForEach bool
 }
 
-func (dummyContractRef) ReturnGas(*big.Int)             {}
-func (dummyContractRef) Address() libcommon.Address     { return libcommon.Address{} }
-func (dummyContractRef) Value() *big.Int                { return new(big.Int) }
-func (dummyContractRef) SetCode(libcommon.Hash, []byte) {}
-func (d *dummyContractRef) ForEachStorage(callback func(key, value libcommon.Hash) bool) {
+func (dummyContractRef) ReturnGas(*big.Int)          {}
+func (dummyContractRef) Address() common.Address     { return common.Address{} }
+func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
+func (dummyContractRef) SetCode(common.Hash, []byte) {}
+func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
 	d.calledForEach = true
 }
 func (d *dummyContractRef) SubBalance(amount *big.Int) {}
@@ -51,36 +49,57 @@ func (d *dummyContractRef) SetBalance(*big.Int)        {}
 func (d *dummyContractRef) SetNonce(uint64)            {}
 func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
 
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }
-
 func TestStoreCapture(t *testing.T) {
-	c := vm.NewJumpDestCache()
-	var (
-		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{})
-		logger   = NewStructLogger(nil)
-		mem      = vm.NewMemory()
-		stack    = stack.New()
-		contract = vm.NewContract(&dummyContractRef{}, libcommon.Address{}, new(uint256.Int), 0, false /* skipAnalysis */, c)
-	)
-	stack.Push(uint256.NewInt(1))
-	stack.Push(uint256.NewInt(0))
-	var index libcommon.Hash
-	logger.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false, false, nil, 0, nil, nil)
-	logger.CaptureState(0, vm.SSTORE, 0, 0, &vm.ScopeContext{
-		Memory:   mem,
-		Stack:    stack,
-		Contract: contract,
-	}, nil, 0, nil)
+	c := vm.NewJumpDestCache(128)
+	ibs := state.New(state.NewNoopReader())
+	ibs.AddRefund(1337)
 
-	if len(logger.storage[contract.Address()]) == 0 {
-		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(), len(logger.storage[contract.Address()]))
+	var (
+		logger   = NewStructLogger(nil)
+		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+		contract = vm.NewContract(&dummyContractRef{}, common.Address{}, new(uint256.Int), 100000, false /* skipAnalysis */, c)
+	)
+	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
+	var index common.Hash
+	logger.OnTxStart(evm.GetVMContext(), nil, common.Address{})
+	_, err := evm.Interpreter().Run(contract, []byte{}, false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	exp := libcommon.BigToHash(big.NewInt(1))
+	if len(logger.storage[contract.Address()]) == 0 {
+		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(),
+			len(logger.storage[contract.Address()]))
+	}
+	exp := common.BigToHash(big.NewInt(1))
 	if logger.storage[contract.Address()][index] != exp {
 		t.Errorf("expected %x, got %x", exp, logger.storage[contract.Address()][index])
 	}
 }
+
+//func TestStoreCapture(t *testing.T) {
+//	c := vm.NewJumpDestCache()
+//	var (
+//		logger   = NewStructLogger(nil)
+//		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+//		mem      = vm.NewMemory()
+//		stack    = vm.New()
+//		contract = vm.NewContract(&dummyContractRef{}, common.Address{}, new(uint256.Int), 0, false /* skipAnalysis */, c)
+//	)
+//	stack.push(uint256.NewInt(1))
+//	stack.push(uint256.NewInt(0))
+//	var index common.Hash
+//	logger.OnTxStart(env.GetVMContext(), nil, common.Address{})
+//	logger.OnOpcode(0, byte(vm.SSTORE), 0, 0, &vm.ScopeContext{
+//		Memory:   mem,
+//		Stack:    stack,
+//		Contract: contract,
+//	}, nil, 0, nil)
+//
+//	if len(logger.storage[contract.Address()]) == 0 {
+//		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(), len(logger.storage[contract.Address()]))
+//	}
+//	exp := common.BigToHash(big.NewInt(1))
+//	if logger.storage[contract.Address()][index] != exp {
+//		t.Errorf("expected %x, got %x", exp, logger.storage[contract.Address()][index])
+//	}
+//}

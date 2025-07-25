@@ -36,7 +36,7 @@ func checkError(t *testing.T, input string, got, want error) {
 		require.NoError(t, want, "input %s", input)
 		return
 	}
-	require.EqualValues(t, want.Error(), got.Error(), "input %s", input)
+	require.Equal(t, want.Error(), got.Error(), "input %s", input)
 }
 
 func bigFromString(s string) *big.Int {
@@ -93,7 +93,7 @@ func TestUnmarshalBig(t *testing.T) {
 			err := json.Unmarshal([]byte(test.input), &v)
 			checkError(t, test.input, err, test.wantErr)
 			if test.want != nil {
-				require.EqualValues(t, test.want.(*big.Int).Bytes(), v.ToInt().Bytes())
+				require.Equal(t, test.want.(*big.Int).Bytes(), v.ToInt().Bytes())
 			}
 		})
 	}
@@ -116,8 +116,8 @@ func TestMarshalBig(t *testing.T) {
 			out, err := json.Marshal((*Big)(in))
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
-			require.EqualValues(t, want, string(out))
-			require.EqualValues(t, test.want, (*Big)(in).String())
+			require.Equal(t, want, string(out))
+			require.Equal(t, test.want, (*Big)(in).String())
 		})
 	}
 }
@@ -173,8 +173,8 @@ func TestMarshalUint64(t *testing.T) {
 			out, err := json.Marshal(Uint64(in))
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
-			require.EqualValues(t, want, string(out))
-			require.EqualValues(t, test.want, (Uint64)(in).String())
+			require.Equal(t, want, string(out))
+			require.Equal(t, test.want, (Uint64)(in).String())
 		})
 	}
 }
@@ -186,8 +186,8 @@ func TestMarshalUint(t *testing.T) {
 			out, err := json.Marshal(Uint(in))
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
-			require.EqualValues(t, want, string(out))
-			require.EqualValues(t, test.want, (Uint)(in).String())
+			require.Equal(t, want, string(out))
+			require.Equal(t, test.want, (Uint)(in).String())
 		})
 	}
 }
@@ -264,7 +264,7 @@ func TestUnmarshalFixedUnprefixedText(t *testing.T) {
 			err := UnmarshalFixedUnprefixedText("x", []byte(test.input), out)
 			checkError(t, test.input, err, test.wantErr)
 			if test.want != nil {
-				require.EqualValues(t, out, test.want)
+				require.Equal(t, test.want, out)
 			}
 		})
 	}

@@ -20,8 +20,7 @@ import (
 	_ "embed"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/stretchr/testify/require"
@@ -40,7 +39,7 @@ func TestBeaconStateCapellaEncodingDecoding(t *testing.T) {
 	require.NoError(t, state.DecodeSSZ(decodedSSZ, int(clparams.CapellaVersion)))
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, libcommon.Hash(root), libcommon.HexToHash("0xb3012b73c02ab66b2779d996f9d33d36e58bf71ffc8f3e12e07024606617a9c0"))
+	require.Equal(t, common.Hash(root), common.HexToHash("0xb3012b73c02ab66b2779d996f9d33d36e58bf71ffc8f3e12e07024606617a9c0"))
 
 }
 
@@ -51,5 +50,5 @@ func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
 	state.DecodeSSZ(decodedSSZ, int(clparams.Phase0Version))
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, libcommon.Hash(root), libcommon.HexToHash("0xf23b6266af40567516afeee250c1f8c06e9800f34a990a210604c380b506e053"))
+	require.Equal(t, common.Hash(root), common.HexToHash("0xf23b6266af40567516afeee250c1f8c06e9800f34a990a210604c380b506e053"))
 }

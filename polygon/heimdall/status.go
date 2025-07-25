@@ -17,14 +17,21 @@
 package heimdall
 
 type Status struct {
-	LatestBlockHash   string `json:"latest_block_hash"`
-	LatestAppHash     string `json:"latest_app_hash"`
-	LatestBlockHeight string `json:"latest_block_height"`
-	LatestBlockTime   string `json:"latest_block_time"`
-	CatchingUp        bool   `json:"catching_up"`
+	LatestBlockHash string `json:"latest_block_hash"`
+	LatestAppHash   string `json:"latest_app_hash"`
+	LatestBlockTime string `json:"latest_block_time"`
+	CatchingUp      bool   `json:"catching_up"`
 }
 
 type StatusResponse struct {
 	Height string `json:"height"`
 	Result Status `json:"result"`
+}
+
+type ChainManagerStatus struct {
+	Params struct {
+		ChainParams struct {
+			PolTokenAddress *string `json:"pol_token_address,omitempty"`
+		} `json:"chain_params"`
+	} `json:"params"`
 }

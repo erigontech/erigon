@@ -22,6 +22,7 @@ import (
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
@@ -140,6 +141,7 @@ func (u *BitList) removeMsb() {
 // addMsb adds a most significant bit to the list, but doesn't change the length l.
 func (u *BitList) addMsb() int {
 	byteLen := len(u.u)
+	found := false
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
 			msb := bits.Len8(u.u[i])
@@ -152,28 +154,17 @@ func (u *BitList) addMsb() int {
 			} else {
 				u.u[i] |= 1 << uint(msb)
 			}
+			found = true
 			break
 		}
 		byteLen--
 	}
-	return byteLen
-}
-
-func (u *BitList) SetOnBit(bitIndex int) {
-	if bitIndex >= u.c {
-		return
+	if !found {
+		u.u[0] = 1
+		byteLen = 1
 	}
-	// remove the last on bit if necessary
-	u.removeMsb()
-	// expand the bitlist if necessary
-	for len(u.u)*8 <= bitIndex {
-		u.u = append(u.u, 0)
-	}
-	// set the bit
-	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
-	// set last bit
-	byteLen := u.addMsb()
 	u.l = byteLen
+	return byteLen
 }
 
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.
@@ -262,27 +253,17 @@ func (u *BitList) UnmarshalJSON(input []byte) error {
 }
 
 func (u *BitList) Merge(other *BitList) (*BitList, error) {
-	if u.c != other.c {
-		return nil, errors.New("bitlist union: different capacity")
+	if u.Bits() != other.Bits() {
+		log.Warn("bitlist union: different length", "u", u.Bits(), "other", other.Bits())
+		return nil, errors.New("bitlist union: different length")
 	}
 	// copy by the longer one
 	var ret, unionFrom *BitList
-	if u.l < other.l {
-		ret = other.Copy()
-		unionFrom = u
-	} else {
-		ret = u.Copy()
-		unionFrom = other
-	}
-	// union
-	unionFrom.removeMsb()
-	ret.removeMsb()
-	for i := 0; i < unionFrom.l; i++ {
+	ret = other.Copy()
+	unionFrom = u
+	for i := 0; i < len(unionFrom.u); i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
-	unionFrom.addMsb()
-	byteLen := ret.addMsb()
-	ret.l = byteLen
 	return ret, nil
 }
 

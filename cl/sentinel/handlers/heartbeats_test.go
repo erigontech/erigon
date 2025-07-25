@@ -20,23 +20,27 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"net/http"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	peerdasstatemock "github.com/erigontech/erigon/cl/das/state/mock_services"
+	forkchoicemock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -85,7 +89,7 @@ func TestPing(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewForkChoiceStorageMock(t)
+	f := forkchoicemock.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -99,7 +103,7 @@ func TestPing(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -140,7 +144,7 @@ func TestGoodbye(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewForkChoiceStorageMock(t)
+	f := forkchoicemock.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
@@ -153,7 +157,7 @@ func TestGoodbye(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -200,9 +204,9 @@ func TestMetadataV2(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewForkChoiceStorageMock(t)
+	f := forkchoicemock.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
-	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
+	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
@@ -214,7 +218,7 @@ func TestMetadataV2(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -258,9 +262,9 @@ func TestMetadataV1(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewForkChoiceStorageMock(t)
+	f := forkchoicemock.NewForkChoiceStorageMock(t)
 
-	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
+	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
@@ -273,7 +277,7 @@ func TestMetadataV1(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -316,17 +320,39 @@ func TestStatus(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewForkChoiceStorageMock(t)
+	f := forkchoicemock.NewForkChoiceStorageMock(t)
 
-	hs := handshake.New(ctx, getEthClock(t), &clparams.MainnetBeaconConfig, nil)
+	// Create mock for PeerDasStateReader
+	ctrl := gomock.NewController(t)
+	mockPeerDasStateReader := peerdasstatemock.NewMockPeerDasStateReader(ctrl)
+	mockPeerDasStateReader.EXPECT().
+		GetEarliestAvailableSlot().
+		Return(uint64(0)).
+		AnyTimes()
+	mockPeerDasStateReader.EXPECT().
+		GetRealCgc().
+		Return(uint64(0)).
+		AnyTimes()
+	mockPeerDasStateReader.EXPECT().
+		GetAdvertisedCgc().
+		Return(uint64(0)).
+		AnyTimes()
+
+	// Create a simple HTTP handler for the handshake
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simple handler that returns success
+		w.WriteHeader(http.StatusOK)
+	})
+
+	hs := handshake.New(ctx, getEthClock(t), &clparams.MainnetBeaconConfig, handler, mockPeerDasStateReader)
 	s := &cltypes.Status{
-		FinalizedRoot:  libcommon.Hash{1, 2, 4},
-		HeadRoot:       libcommon.Hash{1, 2, 4},
+		FinalizedRoot:  common.Hash{1, 2, 4},
+		HeadRoot:       common.Hash{1, 2, 4},
 		FinalizedEpoch: 1,
 		HeadSlot:       1,
 	}
 	hs.SetStatus(s)
-	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
+	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
@@ -338,7 +364,7 @@ func TestStatus(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		getEthClock(t),
-		hs, f, nil, true,
+		hs, f, nil, nil, mockPeerDasStateReader, true,
 	)
 	c.Start()
 

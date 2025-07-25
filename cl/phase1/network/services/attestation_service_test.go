@@ -365,6 +365,10 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 }
 
 func TestAttestation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	suite.Run(t, &attestationTestSuite{})
 }
 

@@ -119,3 +119,7 @@ func (s *TxPoolClient) Status(ctx context.Context, in *txpool_proto.StatusReques
 func (s *TxPoolClient) Nonce(ctx context.Context, in *txpool_proto.NonceRequest, opts ...grpc.CallOption) (*txpool_proto.NonceReply, error) {
 	return s.server.Nonce(ctx, in)
 }
+
+func (s *TxPoolClient) GetBlobs(ctx context.Context, in *txpool_proto.GetBlobsRequest, opts ...grpc.CallOption) (*txpool_proto.GetBlobsReply, error) {
+	return s.server.GetBlobs(ctx, in)
+}

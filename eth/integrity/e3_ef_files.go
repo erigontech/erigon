@@ -20,12 +20,15 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
 )
 
 func E3EfFiles(ctx context.Context, db kv.TemporalRwDB, failFast bool, fromStep uint64) error {
+	defer log.Info("[integrity] E3EfFiles done")
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	g := &errgroup.Group{}
@@ -38,7 +41,7 @@ func E3EfFiles(ctx context.Context, db kv.TemporalRwDB, failFast bool, fromStep 
 			}
 			defer tx.Rollback()
 
-			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).IntegrityInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
+			err = state.AggTx(tx).IntegrityInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
 			if err != nil {
 				return err
 			}

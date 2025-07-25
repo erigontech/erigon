@@ -12,7 +12,7 @@ package bor
 import (
 	reflect "reflect"
 
-	consensus "github.com/erigontech/erigon/consensus"
+	consensus "github.com/erigontech/erigon/execution/consensus"
 	valset "github.com/erigontech/erigon/polygon/bor/valset"
 	heimdall "github.com/erigontech/erigon/polygon/heimdall"
 	gomock "go.uber.org/mock/gomock"

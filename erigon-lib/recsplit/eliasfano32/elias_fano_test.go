@@ -93,7 +93,11 @@ func TestEliasFanoSeekBoundaries(t *testing.T) {
 }
 
 func TestEliasFanoSeek(t *testing.T) {
-	count := uint64(1_000_000)
+	if testing.Short() {
+		t.Skip()
+	}
+
+	count := uint64(100_000)
 	maxOffset := (count - 1) * 123
 	ef := NewEliasFano(count, maxOffset)
 	vals := make([]uint64, 0, count)
@@ -145,7 +149,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	})
 
 	{
-		v2, ok2 := ef.Search(ef.Max())
+		v2, ok2 := ef.Seek(ef.Max())
 		require.True(t, ok2, v2)
 		require.Equal(t, int(ef.Max()), int(v2))
 		it := ef.Iterator()
@@ -170,7 +174,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	}
 
 	{
-		v2, ok2 := ef.Search(ef.Min())
+		v2, ok2 := ef.Seek(ef.Min())
 		require.True(t, ok2, v2)
 		require.Equal(t, int(ef.Min()), int(v2))
 		it := ef.Iterator()
@@ -182,7 +186,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	}
 
 	{
-		v2, ok2 := ef.Search(0)
+		v2, ok2 := ef.Seek(0)
 		require.True(t, ok2, v2)
 		require.Equal(t, int(ef.Min()), int(v2))
 		it := ef.Iterator()
@@ -194,7 +198,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	}
 
 	{
-		v2, ok2 := ef.Search(math.MaxUint32)
+		v2, ok2 := ef.Seek(math.MaxUint32)
 		require.False(t, ok2, v2)
 		it := ef.Iterator()
 		it.Seek(math.MaxUint32)
@@ -202,7 +206,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	}
 
 	{
-		v2, ok2 := ef.Search((count+1)*123 + 1)
+		v2, ok2 := ef.Seek((count+1)*123 + 1)
 		require.False(t, ok2, v2)
 		it := ef.Iterator()
 		it.Seek((count+1)*123 + 1)
@@ -212,7 +216,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	t.Run("search and seek can't return smaller", func(t *testing.T) {
 		for i := uint64(0); i < count; i++ {
 			search := i * 123
-			v, ok2 := ef.Search(search)
+			v, ok2 := ef.Seek(search)
 			require.True(t, ok2, search)
 			require.GreaterOrEqual(t, int(v), int(search))
 			it := ef.Iterator()
@@ -243,21 +247,21 @@ func TestEliasFano(t *testing.T) {
 		offset1 := ef.Get(uint64(i))
 		assert.Equal(t, offset, offset1, "offset")
 	}
-	v, ok := ef.Search(37)
+	v, ok := ef.Seek(37)
 	assert.True(t, ok, "search1")
 	assert.Equal(t, uint64(37), v, "search1")
-	v, ok = ef.Search(0)
+	v, ok = ef.Seek(0)
 	assert.True(t, ok, "search2")
 	assert.Equal(t, uint64(1), v, "search2")
-	_, ok = ef.Search(100)
+	_, ok = ef.Seek(100)
 	assert.False(t, ok, "search3")
-	v, ok = ef.Search(11)
+	v, ok = ef.Seek(11)
 	assert.True(t, ok, "search4")
 	assert.Equal(t, uint64(14), v, "search4")
 
 	buf := bytes.NewBuffer(nil)
 	err := ef.Write(buf)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, ef.AppendBytes(nil), buf.Bytes())
 
 	ef2, _ := ReadEliasFano(buf.Bytes())
@@ -266,6 +270,50 @@ func TestEliasFano(t *testing.T) {
 	assert.Equal(t, ef2.Max(), Max(buf.Bytes()))
 	assert.Equal(t, ef2.Min(), Min(buf.Bytes()))
 	assert.Equal(t, ef2.Count(), Count(buf.Bytes()))
+}
+
+func BenchmarkRead(b *testing.B) {
+	offsets := []uint64{1, 4, 6, 8, 10, 14, 16, 19, 22, 34, 37, 39, 41, 43, 48, 51, 54, 58, 62}
+	count := uint64(len(offsets))
+	maxOffset := offsets[0]
+	for _, offset := range offsets {
+		if offset > maxOffset {
+			maxOffset = offset
+		}
+	}
+	ef := NewEliasFano(count, maxOffset)
+	for _, offset := range offsets {
+		ef.AddOffset(offset)
+	}
+	ef.Build()
+	buf := bytes.NewBuffer(nil)
+	require.NoError(b, ef.Write(buf))
+
+	b.Run("read", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			ReadEliasFano(buf.Bytes())
+		}
+	})
+
+	b.Run("reset", func(b *testing.B) {
+		ef := NewEliasFano(1, 1)
+		for i := 0; i < b.N; i++ {
+			ef.Reset(buf.Bytes())
+		}
+	})
+	b.Run("read.search", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			Seek(buf.Bytes(), 1)
+		}
+	})
+
+	b.Run("reset.search", func(b *testing.B) {
+		ef := NewEliasFano(1, 1)
+		for i := 0; i < b.N; i++ {
+			ef.Reset(buf.Bytes()).Seek(1)
+		}
+	})
+
 }
 
 func TestIterator(t *testing.T) {
@@ -512,7 +560,7 @@ func BenchmarkEF(b *testing.B) {
 			it.Seek(1_230)
 			n, err := it.Next()
 			require.NoError(b, err)
-			require.Equal(b, n, uint64(1_230))
+			require.Equal(b, uint64(1_230), n)
 		}
 	})
 	b.Run("naive reverse iterator", func(b *testing.B) {

@@ -47,12 +47,12 @@ var FinalityFinality = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spe
 		}
 	}
 	expectedRoot, err := testState.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	haveRoot, err := expectedState.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot, "state root")
+	assert.EqualValues(t, expectedRoot, haveRoot, "state root")
 
 	return nil
 })

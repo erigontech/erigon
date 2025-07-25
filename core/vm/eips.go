@@ -26,9 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -99,7 +98,7 @@ func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeCo
 	if err != nil {
 		return nil, err
 	}
-	callContext.Stack.Push(balance)
+	callContext.Stack.push(&balance)
 	return nil, nil
 }
 
@@ -118,7 +117,7 @@ func enable1344(jt *JumpTable) {
 // opChainID implements CHAINID opcode
 func opChainID(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	chainId, _ := uint256.FromBig(interpreter.evm.ChainRules().ChainID)
-	callContext.Stack.Push(chainId)
+	callContext.Stack.push(chainId)
 	return nil, nil
 }
 
@@ -204,8 +203,8 @@ func enable1153(jt *JumpTable) {
 
 // opTload implements TLOAD opcode
 func opTload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	loc := scope.Stack.Peek()
-	hash := libcommon.Hash(loc.Bytes32())
+	loc := scope.Stack.peek()
+	hash := common.Hash(loc.Bytes32())
 	val := interpreter.evm.IntraBlockState().GetTransientState(scope.Contract.Address(), hash)
 	loc.SetBytes(val.Bytes())
 	return nil, nil
@@ -216,8 +215,8 @@ func opTstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
-	loc := scope.Stack.Pop()
-	val := scope.Stack.Pop()
+	loc := scope.Stack.pop()
+	val := scope.Stack.pop()
 	interpreter.evm.IntraBlockState().SetTransientState(scope.Contract.Address(), loc.Bytes32(), val)
 	return nil, nil
 }
@@ -225,7 +224,7 @@ func opTstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 // opBaseFee implements BASEFEE opcode
 func opBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	baseFee := interpreter.evm.Context.BaseFee
-	callContext.Stack.Push(baseFee)
+	callContext.Stack.push(baseFee)
 	return nil, nil
 }
 
@@ -242,7 +241,7 @@ func enable3855(jt *JumpTable) {
 
 // opPush0 implements the PUSH0 opcode
 func opPush0(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.Push(new(uint256.Int))
+	scope.Stack.push(new(uint256.Int))
 	return nil, nil
 }
 
@@ -266,13 +265,20 @@ func enable4844(jt *JumpTable) {
 
 // opBlobHash implements the BLOBHASH opcode
 func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	idx := scope.Stack.Peek()
+	idx := scope.Stack.peek()
 	if idx.LtUint64(uint64(len(interpreter.evm.BlobHashes))) {
 		hash := interpreter.evm.BlobHashes[idx.Uint64()]
 		idx.SetBytes(hash.Bytes())
 	} else {
 		idx.Clear()
 	}
+	return nil, nil
+}
+
+func opCLZ(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	x := scope.Stack.peek()
+	// count leading zero bits in x
+	x.SetUint64(256 - uint64(x.BitLen()))
 	return nil, nil
 }
 
@@ -292,9 +298,9 @@ func enable5656(jt *JumpTable) {
 // opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
 func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		dst    = scope.Stack.Pop()
-		src    = scope.Stack.Pop()
-		length = scope.Stack.Pop()
+		dst    = scope.Stack.pop()
+		src    = scope.Stack.pop()
+		length = scope.Stack.pop()
 	)
 	// These values are checked for overflow during memory expansion calculation
 	// (the memorySize function on the opcode).
@@ -310,7 +316,7 @@ func enable6780(jt *JumpTable) {
 // opBlobBaseFee implements the BLOBBASEFEE opcode
 func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	blobBaseFee := interpreter.evm.Context.BlobBaseFee
-	callContext.Stack.Push(blobBaseFee)
+	callContext.Stack.push(blobBaseFee)
 	return nil, nil
 }
 
@@ -330,4 +336,13 @@ func enable7702(jt *JumpTable) {
 	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
 	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702
 	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7702
+}
+
+func enable7939(jt *JumpTable) {
+	jt[CLZ] = &operation{
+		execute:     opCLZ,
+		constantGas: GasFastStep,
+		numPop:      1,
+		numPush:     1,
+	}
 }

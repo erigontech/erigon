@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -37,19 +38,19 @@ type BlockListener struct {
 	events             *event.Observers[BlockEvent]
 }
 
-func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) BlockListener {
-	return BlockListener{
+func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) *BlockListener {
+	return &BlockListener{
 		logger:             logger,
 		stateChangesClient: stateChangesClient,
 		events:             event.NewObservers[BlockEvent](),
 	}
 }
 
-func (bl BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.UnregisterFunc {
+func (bl *BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.UnregisterFunc {
 	return bl.events.Register(o)
 }
 
-func (bl BlockListener) Run(ctx context.Context) error {
+func (bl *BlockListener) Run(ctx context.Context) error {
 	defer bl.logger.Info("block listener stopped")
 	bl.logger.Info("running block listener")
 
@@ -76,5 +77,10 @@ func (bl BlockListener) Run(ctx context.Context) error {
 		bl.events.NotifySync(blockEvent)
 	}
 
-	return err
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return fmt.Errorf("block listener sub.Recv: %w", err)
+	}
 }

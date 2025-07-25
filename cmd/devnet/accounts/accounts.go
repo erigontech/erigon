@@ -19,7 +19,7 @@ package accounts
 import (
 	"crypto/ecdsa"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core"
 )
@@ -28,12 +28,12 @@ const DevAddress = "0x67b1d87101671b127f5f8714789C7192f7ad340e"
 
 type Account struct {
 	Name    string
-	Address libcommon.Address
+	Address common.Address
 	sigKey  *ecdsa.PrivateKey
 }
 
 func init() {
-	core.DevnetSignKey = func(addr libcommon.Address) *ecdsa.PrivateKey {
+	core.DevnetSignKey = func(addr common.Address) *ecdsa.PrivateKey {
 		return SigKey(addr)
 	}
 
@@ -46,7 +46,7 @@ func init() {
 	accountsByName[devnetEtherbaseAccount.Name] = devnetEtherbaseAccount
 }
 
-var accountsByAddress = map[libcommon.Address]*Account{}
+var accountsByAddress = map[common.Address]*Account{}
 var accountsByName = map[string]*Account{}
 
 func NewAccount(name string) *Account {
@@ -77,7 +77,7 @@ func GetAccount(account string) *Account {
 		return account
 	}
 
-	if account, ok := accountsByAddress[libcommon.HexToAddress(account)]; ok {
+	if account, ok := accountsByAddress[common.HexToAddress(account)]; ok {
 		return account
 	}
 
@@ -86,7 +86,7 @@ func GetAccount(account string) *Account {
 
 func SigKey(source interface{}) *ecdsa.PrivateKey {
 	switch source := source.(type) {
-	case libcommon.Address:
+	case common.Address:
 		if account, ok := accountsByAddress[source]; ok {
 			return account.sigKey
 		}

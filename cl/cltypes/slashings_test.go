@@ -19,9 +19,11 @@ package cltypes
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestProposerSlashing(t *testing.T) {
@@ -43,11 +45,11 @@ func TestProposerSlashing(t *testing.T) {
 
 	// Test EncodeSSZ and DecodeSSZ
 	encodedData, err := proposerSlashing.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	decodedProposerSlashing := &ProposerSlashing{}
 	err = decodedProposerSlashing.DecodeSSZ(encodedData, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Test EncodingSizeSSZ
 	expectedEncodingSize := proposerSlashing.EncodingSizeSSZ()
@@ -57,7 +59,7 @@ func TestProposerSlashing(t *testing.T) {
 	// Test HashSSZ
 	expectedRoot := common.HexToHash("0x5b69db0d6559ec57c3869eabc50cadb0a956071716b9174ed8647f23a37b6cd8") // Expected root value
 	root, err := proposerSlashing.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, expectedRoot, common.Hash(root))
 }
 
@@ -80,11 +82,11 @@ func TestAttesterSlashing(t *testing.T) {
 
 	// Test EncodeSSZ and DecodeSSZ
 	encodedData, err := attesterSlashing.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	decodedAttesterSlashing := &AttesterSlashing{}
 	err = decodedAttesterSlashing.DecodeSSZ(encodedData, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Test EncodingSizeSSZ
 	expectedEncodingSize := attesterSlashing.EncodingSizeSSZ()
@@ -94,6 +96,6 @@ func TestAttesterSlashing(t *testing.T) {
 	// Test HashSSZ
 	expectedRoot := common.HexToHash("54b2c5a7b42c22af13ee41982858a6977af16358b5ced64f985385944c305e99") // Expected root value
 	root, err := attesterSlashing.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, expectedRoot, common.Hash(root))
 }

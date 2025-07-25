@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"slices"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -78,6 +78,13 @@ func IdentityPreimageFromBytes(b []byte) (*IdentityPreimage, error) {
 	return &ip, err
 }
 
+func IdentityPreimageFromSenderPrefix(prefix [32]byte, sender common.Address) *IdentityPreimage {
+	var ip IdentityPreimage
+	copy(ip[:len(prefix)], prefix[:])
+	copy(ip[len(prefix):], sender.Bytes())
+	return &ip
+}
+
 type IdentityPreimages []*IdentityPreimage
 
 func (ips IdentityPreimages) ToListSSZ() *solid.ListSSZ[*IdentityPreimage] {
@@ -114,7 +121,7 @@ func (d DecryptionKeysSignatureData) Sign(key *ecdsa.PrivateKey) ([]byte, error)
 	return crypto.Sign(h[:], key)
 }
 
-func (d DecryptionKeysSignatureData) Verify(signature []byte, address libcommon.Address) (bool, error) {
+func (d DecryptionKeysSignatureData) Verify(signature []byte, address common.Address) (bool, error) {
 	h, err := d.HashSSZ()
 	if err != nil {
 		return false, err

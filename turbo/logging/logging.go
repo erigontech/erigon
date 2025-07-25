@@ -54,19 +54,28 @@ func LogDirPath(ctx *cli.Context) string {
 // This function which is used in Erigon itself.
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
-func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
-	consoleDefaultLevel log.Lvl, dirDefaultLevel log.Lvl, rootHandler bool) log.Logger {
+func SetupLoggerCtx(
+	filePrefix string,
+	ctx *cli.Context,
+	consoleDefaultLevel log.Lvl,
+	dirDefaultLevel log.Lvl,
+	rootHandler bool,
+) log.Logger {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
 
 	metrics.DelayLoggingEnabled = ctx.Bool(LogBlockDelayFlag.Name)
 
-	consoleLevel, lErr := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name))
-	if lErr != nil {
-		// try verbosity flag
-		consoleLevel, lErr = tryGetLogLevel(ctx.String(LogVerbosityFlag.Name))
-		if lErr != nil {
-			consoleLevel = consoleDefaultLevel
+	consoleLevel := consoleDefaultLevel
+
+	// Priority: LogConsoleVerbosityFlag (if explicitly set) > LogVerbosityFlag (if explicitly set) > default
+	if ctx.IsSet(LogConsoleVerbosityFlag.Name) {
+		if level, err := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name)); err == nil {
+			consoleLevel = level
+		}
+	} else if ctx.IsSet(LogVerbosityFlag.Name) {
+		if level, err := tryGetLogLevel(ctx.String(LogVerbosityFlag.Name)); err == nil {
+			consoleLevel = level
 		}
 	}
 
@@ -162,7 +171,7 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 	return log.Root()
 }
 
-// SetupLoggerCmd perform the logging using parametrs specifying by `flag` package, and sets it to the root logger
+// SetupLoggerCmd performs the logging using parameters specified by the `flag` package and sets it on the root logger
 // This is the function which is NOT used by Erigon itself, but instead by utility commands
 func SetupLogger(filePrefix string) log.Logger {
 	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)

@@ -40,6 +40,8 @@ type CommonResponse struct {
 	Error     *EthError `json:"error"`
 }
 
+func (c CommonResponse) GetRequestId() int { return c.RequestId }
+
 type EthBlockNumber struct {
 	CommonResponse
 	Number hexutil.Uint64 `json:"result"`

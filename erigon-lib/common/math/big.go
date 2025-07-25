@@ -175,14 +175,6 @@ func U256Min(x, y *uint256.Int) *uint256.Int {
 	return x
 }
 
-// Min256 returns the smaller of x or y.
-func Min256(x, y *uint256.Int) *uint256.Int {
-	if x.Cmp(y) > 0 {
-		return y
-	}
-	return x
-}
-
 // FirstBitSet returns the index of the first 1 bit in v, counting from LSB.
 func FirstBitSet(v *big.Int) int {
 	for i := 0; i < v.BitLen(); i++ {

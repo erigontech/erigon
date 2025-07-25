@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"context"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -28,24 +29,34 @@ import (
 //	    return err
 //	}
 func EscalateErrHandler(h log.Handler) log.Handler {
-	return log.FuncHandler(func(r *log.Record) error {
-		if r.Lvl > log.LvlError {
-			for i := 1; i < len(r.Ctx); i++ {
-				if v, ok := r.Ctx[i].(error); ok && v != nil {
-					r.Lvl = log.LvlError
-					break
-				}
+	return escalateErrHandler{h: h}
+}
+
+type escalateErrHandler struct {
+	h log.Handler
+}
+
+func (h escalateErrHandler) Log(r *log.Record) error {
+	if r.Lvl > log.LvlError {
+		for i := 1; i < len(r.Ctx); i++ {
+			if v, ok := r.Ctx[i].(error); ok && v != nil {
+				r.Lvl = log.LvlError
+				break
 			}
 		}
-		return h.Log(r)
-	})
+	}
+	return h.h.Log(r)
+}
+
+func (h escalateErrHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }
 
 // SpeculativeHandler is a handler for speculative logging. It
 // keeps a ring buffer of the given size full of the last events
 // logged into it. When Flush is called, all buffered log records
 // are written to the wrapped handler. This is extremely for
-// continuosly capturing debug level output, but only flushing those
+// continuously capturing debug level output, but only flushing those
 // log records if an exceptional condition is encountered.
 func SpeculativeHandler(size int, h log.Handler) *Speculative {
 	return &Speculative{
@@ -71,6 +82,10 @@ func (h *Speculative) Log(r *log.Record) error {
 	h.idx = (h.idx + 1) % len(h.recs)
 	h.full = h.full || h.idx == 0
 	return nil
+}
+
+func (h *Speculative) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return h.handler.Enabled(ctx, lvl)
 }
 
 // Flush logs all records on the handler.
@@ -116,6 +131,10 @@ func (h *HotSwap) Log(r *log.Record) error {
 	return (*(*log.Handler)(atomic.LoadPointer(&h.handler))).Log(r)
 }
 
+func (h *HotSwap) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return (*(*log.Handler)(atomic.LoadPointer(&h.handler))).Enabled(ctx, lvl)
+}
+
 // Swap atomically the logger handler.
 func (h *HotSwap) Swap(newHandler log.Handler) {
 	atomic.StorePointer(&h.handler, unsafe.Pointer(&newHandler))
@@ -125,11 +144,21 @@ func (h *HotSwap) Swap(newHandler log.Handler) {
 // immediately, much like the log.Fatal* methods from the
 // standard log package
 func FatalHandler(h log.Handler) log.Handler {
-	return log.FuncHandler(func(r *log.Record) error {
-		err := h.Log(r)
-		if r.Lvl == log.LvlCrit {
-			os.Exit(1)
-		}
-		return err
-	})
+	return fatalHandler{h: h}
+}
+
+type fatalHandler struct {
+	h log.Handler
+}
+
+func (h fatalHandler) Log(r *log.Record) error {
+	err := h.h.Log(r)
+	if r.Lvl == log.LvlCrit {
+		os.Exit(1)
+	}
+	return err
+}
+
+func (h fatalHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return h.h.Enabled(ctx, lvl)
 }

@@ -30,19 +30,18 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-
+	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -82,7 +81,7 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 		if err := db.View(context.TODO(), func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
 			value, err = tx.GetOne(tableName, key)
-			value = libcommon.Copy(value)
+			value = common.Copy(value)
 			return err
 		}); err != nil {
 			return nil, nil, err
@@ -94,23 +93,29 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 	return SnapshotTypes{
 		KeyValueGetters: map[string]KeyValueGetter{
-			kv.ValidatorEffectiveBalance: getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
-			kv.ValidatorSlashings:        getKvGetterForStateTable(db, kv.ValidatorSlashings),
-			kv.ValidatorBalance:          getKvGetterForStateTable(db, kv.ValidatorBalance),
-			kv.StateEvents:               getKvGetterForStateTable(db, kv.StateEvents),
-			kv.ActiveValidatorIndicies:   getKvGetterForStateTable(db, kv.ActiveValidatorIndicies),
-			kv.StateRoot:                 getKvGetterForStateTable(db, kv.StateRoot),
-			kv.BlockRoot:                 getKvGetterForStateTable(db, kv.BlockRoot),
-			kv.SlotData:                  getKvGetterForStateTable(db, kv.SlotData),
-			kv.EpochData:                 getKvGetterForStateTable(db, kv.EpochData),
-			kv.InactivityScores:          getKvGetterForStateTable(db, kv.InactivityScores),
-			kv.NextSyncCommittee:         getKvGetterForStateTable(db, kv.NextSyncCommittee),
-			kv.CurrentSyncCommittee:      getKvGetterForStateTable(db, kv.CurrentSyncCommittee),
-			kv.Eth1DataVotes:             getKvGetterForStateTable(db, kv.Eth1DataVotes),
-			kv.IntraRandaoMixes:          getKvGetterForStateTable(db, kv.IntraRandaoMixes),
-			kv.RandaoMixes:               getKvGetterForStateTable(db, kv.RandaoMixes),
-			kv.BalancesDump:              getKvGetterForStateTable(db, kv.BalancesDump),
-			kv.EffectiveBalancesDump:     getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
+			kv.ValidatorEffectiveBalance:     getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
+			kv.ValidatorSlashings:            getKvGetterForStateTable(db, kv.ValidatorSlashings),
+			kv.ValidatorBalance:              getKvGetterForStateTable(db, kv.ValidatorBalance),
+			kv.StateEvents:                   getKvGetterForStateTable(db, kv.StateEvents),
+			kv.ActiveValidatorIndicies:       getKvGetterForStateTable(db, kv.ActiveValidatorIndicies),
+			kv.StateRoot:                     getKvGetterForStateTable(db, kv.StateRoot),
+			kv.BlockRoot:                     getKvGetterForStateTable(db, kv.BlockRoot),
+			kv.SlotData:                      getKvGetterForStateTable(db, kv.SlotData),
+			kv.EpochData:                     getKvGetterForStateTable(db, kv.EpochData),
+			kv.InactivityScores:              getKvGetterForStateTable(db, kv.InactivityScores),
+			kv.NextSyncCommittee:             getKvGetterForStateTable(db, kv.NextSyncCommittee),
+			kv.CurrentSyncCommittee:          getKvGetterForStateTable(db, kv.CurrentSyncCommittee),
+			kv.Eth1DataVotes:                 getKvGetterForStateTable(db, kv.Eth1DataVotes),
+			kv.IntraRandaoMixes:              getKvGetterForStateTable(db, kv.IntraRandaoMixes),
+			kv.RandaoMixes:                   getKvGetterForStateTable(db, kv.RandaoMixes),
+			kv.BalancesDump:                  getKvGetterForStateTable(db, kv.BalancesDump),
+			kv.EffectiveBalancesDump:         getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
+			kv.PendingConsolidations:         getKvGetterForStateTable(db, kv.PendingConsolidations),
+			kv.PendingPartialWithdrawals:     getKvGetterForStateTable(db, kv.PendingPartialWithdrawals),
+			kv.PendingDeposits:               getKvGetterForStateTable(db, kv.PendingDeposits),
+			kv.PendingConsolidationsDump:     getKvGetterForStateTable(db, kv.PendingConsolidationsDump),
+			kv.PendingPartialWithdrawalsDump: getKvGetterForStateTable(db, kv.PendingPartialWithdrawalsDump),
+			kv.PendingDepositsDump:           getKvGetterForStateTable(db, kv.PendingDepositsDump),
 		},
 		Compression: map[string]bool{},
 	}
@@ -146,7 +151,7 @@ type CaplinStateSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
-	// allows for pruning segments - this is the min availible segment
+	// allows for pruning segments - this is the minimum available segment
 	segmentsMin atomic.Uint64
 	// chain cfg
 	beaconCfg *clparams.BeaconChainConfig
@@ -199,7 +204,7 @@ func (s *CaplinStateSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load(
 
 func (s *CaplinStateSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
-		"blocks", libcommon.PrettyCounter(s.SegmentsMax()+1), "indices", libcommon.PrettyCounter(s.IndicesMax()+1))
+		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1))
 }
 
 func (s *CaplinStateSnapshots) LS() {
@@ -283,7 +288,7 @@ Loop:
 		var exists bool
 		var sn *DirtySegment
 
-		dirtySegments, ok := s.dirty[f.TypeString]
+		dirtySegments, ok := s.dirty[f.CaplinTypeString]
 		if !ok {
 			continue
 		}
@@ -593,7 +598,7 @@ func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegme
 func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger, compress bool) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.SnapCaplin
 
-	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
+	segName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, fromSlot, toSlot)
 	// a little bit ugly.
 	segName = strings.ReplaceAll(segName, "beaconblocks", snapName)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)

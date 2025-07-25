@@ -15,7 +15,7 @@ import (
 	reflect "reflect"
 
 	common "github.com/erigontech/erigon-lib/common"
-	types "github.com/erigontech/erigon/core/types"
+	types "github.com/erigontech/erigon-lib/types"
 	p2p "github.com/erigontech/erigon/polygon/p2p"
 	gomock "go.uber.org/mock/gomock"
 )

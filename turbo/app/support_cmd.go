@@ -62,7 +62,7 @@ var (
 
 	debugURLsFlag = cli.StringSliceFlag{
 		Name:     "debug.addrs",
-		Usage:    "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
+		Usage:    "Comma separated list of URLs to the debug endpoints that are being diagnosed",
 		Required: false,
 		Value:    cli.NewStringSlice("localhost:6062"),
 	}
@@ -79,7 +79,7 @@ var supportCommand = cli.Command{
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
 	ArgsUsage: "--diagnostics.addr <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
 	Before: func(cliCtx *cli.Context) error {
-		_, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -181,30 +181,31 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 //
 // Listen for incoming requests from diagnostics system and send them to the incommitg request channel
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
-	ctx1, cancel1 := context.WithCancel(ctx)
-	defer cancel1()
-
 	go func() {
 		select {
 		case <-sigs:
 			logger.Info("Got interrupt, shutting down...")
-			cancel1()
-		case <-ctx1.Done():
-			logger.Info("Context done")
+			cancel() // Cancel the outer context
+		case <-ctx.Done():
 			return
 		}
 	}()
 
-	codec, err := createCodec(ctx1, diagnosticsUrl)
+	codec, err := createCodec(ctx, diagnosticsUrl)
 	if err != nil {
 		return err
 	}
 	defer codec.Close()
 
+	go func() {
+		<-ctx.Done()
+		codec.Close()
+	}()
+
 	metricsClient := &http.Client{}
 	defer metricsClient.CloseIdleConnections()
 
-	connections, err := createConnections(ctx1, codec, metricsClient, debugURLs)
+	connections, err := createConnections(ctx, codec, metricsClient, debugURLs)
 	if err != nil {
 		return err
 	}
@@ -213,7 +214,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		return nil
 	}
 
-	err = sendNodesInfoToDiagnostics(ctx1, codec, sessionIds, connections)
+	err = sendNodesInfoToDiagnostics(ctx, codec, sessionIds, connections)
 	if err != nil {
 		return err
 	}
@@ -223,7 +224,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	for {
 		requests, _, err := codec.ReadBatch()
 		select {
-		case <-ctx1.Done():
+		case <-ctx.Done():
 			return nil
 		default:
 			if err != nil {
@@ -607,8 +608,8 @@ func (nc *nodeConnection) processResponses() {
 	}
 }
 
-// detect is the method is a txpool subscription
-// TODO: implementation of othere subscribtions (e.g. downloader)
+// detect if the method is a txpool subscription
+// TODO: implementation of other subscriptions (e.g. downloader)
 // TODO: change subscribe from plain string to something more structured
 func isSubscribe(method string) bool {
 	return method == "subscribe/txpool"

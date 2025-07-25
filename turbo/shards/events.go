@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type RpcEventType uint64
@@ -38,25 +38,29 @@ type LogsSubscription func([]*remote.SubscribeLogsReply) error
 
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
-	id                        int
-	headerSubscriptions       map[int]chan [][]byte
-	newSnapshotSubscription   map[int]chan struct{}
-	pendingLogsSubscriptions  map[int]PendingLogsSubscription
-	pendingBlockSubscriptions map[int]PendingBlockSubscription
-	pendingTxsSubscriptions   map[int]PendingTxsSubscription
-	logsSubscriptions         map[int]chan []*remote.SubscribeLogsReply
-	hasLogSubscriptions       bool
-	lock                      sync.RWMutex
+	id                          int
+	headerSubscriptions         map[int]chan [][]byte
+	newSnapshotSubscription     map[int]chan struct{}
+	retirementStartSubscription map[int]chan bool
+	retirementDoneSubscription  map[int]chan struct{}
+	pendingLogsSubscriptions    map[int]PendingLogsSubscription
+	pendingBlockSubscriptions   map[int]PendingBlockSubscription
+	pendingTxsSubscriptions     map[int]PendingTxsSubscription
+	logsSubscriptions           map[int]chan []*remote.SubscribeLogsReply
+	hasLogSubscriptions         bool
+	lock                        sync.RWMutex
 }
 
 func NewEvents() *Events {
 	return &Events{
-		headerSubscriptions:       map[int]chan [][]byte{},
-		pendingLogsSubscriptions:  map[int]PendingLogsSubscription{},
-		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
-		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
-		logsSubscriptions:         map[int]chan []*remote.SubscribeLogsReply{},
-		newSnapshotSubscription:   map[int]chan struct{}{},
+		headerSubscriptions:         map[int]chan [][]byte{},
+		pendingLogsSubscriptions:    map[int]PendingLogsSubscription{},
+		pendingBlockSubscriptions:   map[int]PendingBlockSubscription{},
+		pendingTxsSubscriptions:     map[int]PendingTxsSubscription{},
+		logsSubscriptions:           map[int]chan []*remote.SubscribeLogsReply{},
+		newSnapshotSubscription:     map[int]chan struct{}{},
+		retirementStartSubscription: map[int]chan bool{},
+		retirementDoneSubscription:  map[int]chan struct{}{},
 	}
 }
 
@@ -86,6 +90,32 @@ func (e *Events) AddNewSnapshotSubscription() (chan struct{}, func()) {
 	}
 }
 
+func (e *Events) AddRetirementStartSubscription() (chan bool, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan bool, 8)
+	e.id++
+	id := e.id
+	e.retirementStartSubscription[id] = ch
+	return ch, func() {
+		delete(e.retirementStartSubscription, id)
+		close(ch)
+	}
+}
+
+func (e *Events) AddRetirementDoneSubscription() (chan struct{}, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan struct{}, 8)
+	e.id++
+	id := e.id
+	e.retirementDoneSubscription[id] = ch
+	return ch, func() {
+		delete(e.retirementDoneSubscription, id)
+		close(ch)
+	}
+}
+
 func (e *Events) AddLogsSubscription() (chan []*remote.SubscribeLogsReply, func()) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
@@ -99,13 +129,13 @@ func (e *Events) AddLogsSubscription() (chan []*remote.SubscribeLogsReply, func(
 	}
 }
 
-func (e *Events) EmptyLogSubsctiption(empty bool) {
+func (e *Events) EmptyLogSubscription(empty bool) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	e.hasLogSubscriptions = !empty
 }
 
-func (e *Events) HasLogSubsriptions() bool {
+func (e *Events) HasLogSubscriptions() bool {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
 	return e.hasLogSubscriptions
@@ -157,6 +187,22 @@ func (e *Events) OnLogs(logs []*remote.SubscribeLogsReply) {
 	}
 }
 
+func (e *Events) OnRetirementStart(started bool) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.retirementStartSubscription {
+		common.PrioritizedSend(ch, started)
+	}
+}
+
+func (e *Events) OnRetirementDone() {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.retirementDoneSubscription {
+		common.PrioritizedSend(ch, struct{}{})
+	}
+}
+
 type Notifications struct {
 	Events               *Events
 	Accumulator          *Accumulator // StateAccumulator
@@ -194,7 +240,7 @@ func NewRecentLogs(limit uint64) *RecentLogs {
 
 // [from,to)
 func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
-	if !n.HasLogSubsriptions() {
+	if !n.HasLogSubscriptions() {
 		return
 	}
 	r.mu.Lock()
@@ -276,5 +322,14 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 		if bn+r.limit < blockNum {
 			delete(r.receipts, bn)
 		}
+	}
+}
+
+func (r *RecentLogs) CopyAndReset(target *RecentLogs) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for blockNum, receipts := range r.receipts {
+		target.Add(receipts)
+		delete(r.receipts, blockNum)
 	}
 }

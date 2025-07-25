@@ -30,6 +30,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/go-chi/chi/v5"
+	"github.com/prysmaticlabs/go-bitfield"
 
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -43,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -88,20 +90,23 @@ type Sentinel struct {
 
 	handshaker *handshake.HandShaker
 
-	blockReader freezeblocks.BeaconSnapshotReader
-	blobStorage blob_storage.BlobStorage
-	bwc         *metrics.BandwidthCounter
+	blockReader       freezeblocks.BeaconSnapshotReader
+	blobStorage       blob_storage.BlobStorage
+	dataColumnStorage blob_storage.DataColumnStorage
+	bwc               *metrics.BandwidthCounter
 
 	indiciesDB kv.RoDB
 
-	discoverConfig   discover.Config
-	pubsub           *pubsub.PubSub
-	subManager       *GossipManager
-	metrics          bool
-	logger           log.Logger
-	forkChoiceReader forkchoice.ForkChoiceStorageReader
-	pidToEnr         sync.Map
-	ethClock         eth_clock.EthereumClock
+	discoverConfig     discover.Config
+	pubsub             *pubsub.PubSub
+	subManager         *GossipManager
+	metrics            bool
+	logger             log.Logger
+	forkChoiceReader   forkchoice.ForkChoiceStorageReader
+	pidToEnr           sync.Map
+	pidToEnodeId       sync.Map
+	ethClock           eth_clock.EthereumClock
+	peerDasStateReader peerdasstate.PeerDasStateReader
 
 	metadataLock sync.Mutex
 }
@@ -178,7 +183,15 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
+	handlers.NewConsensusHandlers(
+		s.ctx,
+		s.blockReader,
+		s.indiciesDB,
+		s.host,
+		s.peers,
+		s.cfg.NetworkConfig,
+		localNode,
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
 
 	return net, err
 }
@@ -193,17 +206,21 @@ func New(
 	indiciesDB kv.RoDB,
 	logger log.Logger,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	dataColumnStorage blob_storage.DataColumnStorage,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 ) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:              ctx,
-		cfg:              cfg,
-		blockReader:      blockReader,
-		indiciesDB:       indiciesDB,
-		metrics:          true,
-		logger:           logger,
-		forkChoiceReader: forkChoiceReader,
-		blobStorage:      blobStorage,
-		ethClock:         ethClock,
+		ctx:                ctx,
+		cfg:                cfg,
+		blockReader:        blockReader,
+		indiciesDB:         indiciesDB,
+		metrics:            true,
+		logger:             logger,
+		forkChoiceReader:   forkChoiceReader,
+		blobStorage:        blobStorage,
+		ethClock:           ethClock,
+		dataColumnStorage:  dataColumnStorage,
+		peerDasStateReader: peerDasStateReader,
 	}
 
 	// Setup discovery
@@ -250,7 +267,7 @@ func New(
 	mux.Get("/", httpreqresp.NewRequestHandler(host))
 	s.httpApi = mux
 
-	s.handshaker = handshake.New(ctx, s.ethClock, cfg.BeaconConfig, s.httpApi)
+	s.handshaker = handshake.New(ctx, s.ethClock, cfg.BeaconConfig, s.httpApi, peerDasStateReader)
 
 	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
@@ -337,18 +354,17 @@ func (s *Sentinel) RecvGossip() <-chan *GossipMessage {
 	return s.subManager.Recv()
 }
 
-func (s *Sentinel) Start() error {
+func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	if s.started {
 		s.logger.Warn("[Sentinel] already running")
 	}
 	var err error
 	s.listener, err = s.createListener()
 	if err != nil {
-		return fmt.Errorf("failed creating sentinel listener err=%w", err)
+		return nil, fmt.Errorf("failed creating sentinel listener err=%w", err)
 	}
-
 	if err := s.connectToBootnodes(); err != nil {
-		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
+		return nil, fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
 	// Configuring handshake
 	s.host.Network().Notify(&network.NotifyBundle{
@@ -365,7 +381,7 @@ func (s *Sentinel) Start() error {
 	go s.forkWatcher()
 	go s.observeBandwidth(s.ctx)
 
-	return nil
+	return s.LocalNode(), nil
 }
 
 func (s *Sentinel) Stop() {
@@ -513,6 +529,11 @@ func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
 		} else {
 			continue
 		}
+		if enodeId, ok := s.pidToEnodeId.Load(p); ok {
+			entry.EnodeId = enodeId.(enode.ID).String()
+		} else {
+			continue
+		}
 		agent, err := s.host.Peerstore().Get(p, "AgentVersion")
 		if err == nil {
 			entry.AgentVersion = agent.(string)
@@ -550,22 +571,28 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 		port := s.listener.LocalNode().Node().UDP()
 		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
 	}
-	subnetField := [8]byte{}
-	syncnetField := [1]byte{}
-	attSubEnr := enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField[:])
-	syncNetEnr := enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, syncnetField[:])
+	subnetField := bitfield.NewBitvector64()
+	syncnetField := bitfield.NewBitvector8()
+	attSubEnr := enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField)
+	syncNetEnr := enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &syncnetField)
 	if err := s.listener.LocalNode().Node().Load(attSubEnr); err != nil {
-		return
+		s.logger.Debug("[IDENTITY] Could not load att subnet", "err", err)
 	}
 	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
-		return
+		s.logger.Debug("[IDENTITY] Could not load sync subnet", "err", err)
 	}
+	cgc := s.forkChoiceReader.GetPeerDas().StateReader().GetAdvertisedCgc()
 	metadata = &cltypes.Metadata{
-		SeqNumber: s.listener.LocalNode().Seq(),
-		Attnets:   subnetField,
-		Syncnets:  &syncnetField,
+		SeqNumber:         s.listener.LocalNode().Seq(),
+		Attnets:           [8]byte(subnetField),
+		Syncnets:          (*[1]byte)(syncnetField),
+		CustodyGroupCount: &cgc,
 	}
 	return
+}
+
+func (s *Sentinel) LocalNode() *enode.LocalNode {
+	return s.listener.LocalNode()
 }
 
 func (s *Sentinel) Host() host.Host {

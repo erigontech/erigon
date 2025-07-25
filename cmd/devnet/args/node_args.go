@@ -28,10 +28,12 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/requests"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 type NodeArgs struct {
@@ -66,7 +68,6 @@ type NodeArgs struct {
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
 	HeimdallURL               string `arg:"--bor.heimdall" json:"bor.heimdall,omitempty"`
-	WithHeimdallMilestones    bool   `arg:"--bor.milestone" json:"bor.milestone"`
 	VMDebug                   bool   `arg:"--vmdebug" flag:"" default:"false" json:"dmdebug"`
 
 	NodeKey    *ecdsa.PrivateKey `arg:"-"`
@@ -116,8 +117,6 @@ func (node *NodeArgs) Configure(base NodeArgs, nodeNumber int) error {
 
 	node.Port = base.Port + nodeNumber
 
-	node.WithHeimdallMilestones = base.WithHeimdallMilestones
-
 	return nil
 }
 
@@ -126,7 +125,7 @@ func (node *NodeArgs) GetName() string {
 }
 
 func (node *NodeArgs) ChainID() *big.Int {
-	config := params.ChainConfigByChainName(node.Chain)
+	config := chainspec.ChainConfigByChainName(node.Chain)
 	if config == nil {
 		return nil
 	}

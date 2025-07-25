@@ -21,9 +21,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/observer/database"
 )
 
@@ -33,7 +33,7 @@ func StatusLoggerLoop(ctx context.Context, db database.DB, networkID uint, perio
 	var prevDistinctIPCount uint
 
 	for ctx.Err() == nil {
-		if err := libcommon.Sleep(ctx, period); err != nil {
+		if err := common.Sleep(ctx, period); err != nil {
 			break
 		}
 

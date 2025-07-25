@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -93,7 +93,7 @@ func (m *MockBlockReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, 
 	return m.U[slot].Blinded()
 }
 
-func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
+func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
 	// do a linear search
 	for _, v := range m.U {
 		r, err := v.Block.HashSSZ()
@@ -107,7 +107,7 @@ func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRo
 	}
 	return nil, nil
 }
-func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
+func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
 	block, err := m.ReadBlockByRoot(ctx, tx, blockRoot)
 	if err != nil {
 		return nil, err

@@ -21,7 +21,7 @@ import (
 	"errors"
 	"net/http"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -86,7 +86,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		if err != nil {
 			return nil, err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if blockRoot == (common.Hash{}) {
 			continue
 		}
 		blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)

@@ -141,6 +141,24 @@ func has0xPrefix(input string) bool {
 	return len(input) >= 2 && input[0] == '0' && (input[1] == 'x' || input[1] == 'X')
 }
 
+// IsValidQuantity checks if input is a valid hex-encoded quantity as per JSON-RPC spec.
+// It returns nil if the input is valid, otherwise an error.
+func IsValidQuantity(input string) error {
+	input, err := checkNumber(input)
+	if err != nil {
+		return err
+	}
+	if len(input) > 64 {
+		return ErrTooBigHexString
+	}
+	for _, b := range input {
+		if decodeNibble(byte(b)) == badNibble {
+			return ErrHexStringInvalid
+		}
+	}
+	return nil
+}
+
 func checkNumber(input string) (raw string, err error) {
 	if len(input) == 0 {
 		return "", ErrEmptyString
@@ -158,7 +176,7 @@ func checkNumber(input string) (raw string, err error) {
 	return input, nil
 }
 
-// ignore these errors to keep compatiblity with go ethereum
+// ignore these errors to keep compatibility with go ethereum
 // nolint:errorlint
 func mapError(err error) error {
 	if err, ok := err.(*strconv.NumError); ok {

@@ -25,17 +25,21 @@ import (
 	"sync"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/mmap"
 )
 
 var (
-	doMemstat           = EnvBool("NO_MEMSTAT", true)
-	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
-	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
-	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
+	MaxReorgDepth = EnvInt("MAX_REORG_DEPTH", 512)
+
+	noMemstat            = EnvBool("NO_MEMSTAT", false)
+	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
+	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
+	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
+	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -54,9 +58,6 @@ var (
 	// allows to collect reading metrics for kv by file level
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
-	// run prune on flush with given timeout. If timeout is 0, no prune on flush will be performed
-	PruneOnFlushTimeout = EnvDuration("PRUNE_ON_FLUSH_TIMEOUT", time.Duration(0))
-
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
@@ -67,12 +68,28 @@ var (
 	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
+
+	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)
+	numWorkers    = runtime.NumCPU() / 2
+	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
+
+	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
+	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
+	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
+	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
+	TraceTxIndexes       = EnvInts("TRACE_TRANSACTIONS", ",", nil)
+	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
+	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
+	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
-	if doMemstat {
-		runtime.ReadMemStats(m)
+	if noMemstat {
+		return
 	}
+	runtime.ReadMemStats(m)
 }
 
 func MdbxLockInRam() bool { return mdbxLockInRam }
@@ -189,11 +206,11 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	if logger != nil {
 		logger.Info(
 			"[Experiment] heap profile threshold check",
-			"alloc", libcommon.ByteCount(memStats.Alloc),
-			"total", libcommon.ByteCount(totalMemory),
+			"alloc", common.ByteCount(memStats.Alloc),
+			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if memStats.Alloc < (totalMemory/100)*45 {
+	if memStats.Alloc < (totalMemory/100)*heapProfileThreshold {
 		return
 	}
 
@@ -232,7 +249,7 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 		return
 	}
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(heapProfileFrequency)
 	defer ticker.Stop()
 
 	for {

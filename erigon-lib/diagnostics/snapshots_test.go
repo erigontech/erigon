@@ -36,7 +36,7 @@ func TestUpdateFileDownloadingStats(t *testing.T) {
 
 	sd := d.SyncStatistics().SnapshotDownload.SegmentsDownloading
 	require.NotNil(t, sd)
-	require.NotEqual(t, len(sd), 0)
+	require.NotEmpty(t, sd)
 
 	require.Equal(t, sd["test"], segmentDownloadStatsMock)
 
@@ -83,23 +83,23 @@ func TestPercentDiownloaded(t *testing.T) {
 
 	//Test metadata not ready
 	progress := diagnostics.GetShanpshotsPercentDownloaded(downloaded, total, torrentMetadataReady, files)
-	require.Equal(t, progress, "calculating...")
+	require.Equal(t, "calculating...", progress)
 
 	//Test metadata ready
 	progress = diagnostics.GetShanpshotsPercentDownloaded(downloaded, total, files, files)
-	require.Equal(t, progress, "10%")
+	require.Equal(t, "10%", progress)
 
 	//Test 100 %
 	progress = diagnostics.GetShanpshotsPercentDownloaded(total, total, files, files)
-	require.Equal(t, progress, "100%")
+	require.Equal(t, "100%", progress)
 
 	//Test 0 %
 	progress = diagnostics.GetShanpshotsPercentDownloaded(0, total, files, files)
-	require.Equal(t, progress, "0%")
+	require.Equal(t, "0%", progress)
 
 	//Test more than 100 %
 	progress = diagnostics.GetShanpshotsPercentDownloaded(total+1, total, files, files)
-	require.Equal(t, progress, "100%")
+	require.Equal(t, "100%", progress)
 }
 
 func TestFillDBFromSnapshots(t *testing.T) {
@@ -109,7 +109,7 @@ func TestFillDBFromSnapshots(t *testing.T) {
 	d.SetFillDBInfo(diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
 	stats := d.SyncStatistics()
 	require.NotEmpty(t, stats.SnapshotFillDB.Stages)
-	require.Equal(t, stats.SnapshotFillDB.Stages[0], diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
+	require.Equal(t, diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10}, stats.SnapshotFillDB.Stages[0])
 }
 
 func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
@@ -134,7 +134,7 @@ func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
 	require.NotEmpty(t, stats.SnapshotIndexing)
 	require.NotEmpty(t, stats.SnapshotIndexing.Segments)
 	require.Equal(t, stats.SnapshotIndexing.Segments[0], dts[0])
-	require.True(t, stats.SnapshotIndexing.TimeElapsed == 0)
+	require.Zero(t, stats.SnapshotIndexing.TimeElapsed)
 	require.False(t, stats.SnapshotIndexing.IndexingFinished)
 
 	dts = []diagnostics.SnapshotSegmentIndexingStatistics{
@@ -158,7 +158,7 @@ func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
 	})
 
 	stats = d.SyncStatistics()
-	require.Equal(t, stats.SnapshotIndexing.Segments[0].Percent, 100)
+	require.Equal(t, 100, stats.SnapshotIndexing.Segments[0].Percent)
 
 	finished := d.UpdateIndexingStatus()
 	require.False(t, finished)

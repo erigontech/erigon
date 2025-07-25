@@ -36,7 +36,7 @@ func TestUnmarshallDecryptionKeys(t *testing.T) {
 	}{
 		{
 			name: "invalid envelope version",
-			data: testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+			data: testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 				Version: "XXX",
 			}),
 			wantErr: shutterproto.ErrEnveloperVersionMismatch,

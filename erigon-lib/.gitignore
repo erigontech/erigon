@@ -75,4 +75,5 @@ tests/testdata/*
 
 go.work*
 
-coverage.out
+coverage-test.out
+coverage-test-all.out

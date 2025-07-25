@@ -1,6 +1,7 @@
 package log
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -78,8 +79,11 @@ type Record struct {
 	Lvl      Lvl
 	Msg      string
 	Ctx      []interface{}
-	Call     stack.Call
 	KeyNames RecordKeyNames
+}
+
+func (r *Record) Call(skip int) stack.Call {
+	return stack.Caller(skip)
 }
 
 // RecordKeyNames are the predefined names of the log props used by the Logger interface.
@@ -99,6 +103,9 @@ type Logger interface {
 
 	// SetHandler updates the logger to write records to the specified handler.
 	SetHandler(h Handler)
+
+	// Enabled reports whether l emits log records at the given context and level.
+	Enabled(ctx context.Context, lvl Lvl) bool
 
 	// Log a message at the given level with context key/value pairs
 	Trace(msg string, ctx ...interface{})
@@ -121,7 +128,6 @@ func (l *logger) write(msg string, lvl Lvl, ctx []interface{}) {
 		Lvl:  lvl,
 		Msg:  msg,
 		Ctx:  newContext(l.ctx, ctx),
-		Call: stack.Caller(2),
 		KeyNames: RecordKeyNames{
 			Time: timeKey,
 			Msg:  msgKey,
@@ -171,6 +177,10 @@ func (l *logger) Crit(msg string, ctx ...interface{}) {
 // Log method to route configurable log level
 func (l *logger) Log(level Lvl, msg string, ctx ...interface{}) {
 	l.write(msg, level, ctx)
+}
+
+func (l *logger) Enabled(ctx context.Context, lvl Lvl) bool {
+	return l.GetHandler().Enabled(ctx, lvl)
 }
 
 func (l *logger) GetHandler() Handler {

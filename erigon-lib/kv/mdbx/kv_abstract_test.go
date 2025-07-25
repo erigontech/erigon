@@ -23,7 +23,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/remotedb"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -180,7 +180,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	v1.Major++
 
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	a, err := remotedb.NewRemote(v1, logger, remote.NewKVClient(cc)).Open()
 	if err != nil {
 		t.Fatalf("%v", err)
@@ -352,9 +352,9 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	go f2()
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	rdb, err := remotedb.NewRemote(v, logger, remote.NewKVClient(cc)).Open()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	readDBs = []kv.RwDB{
 		writeDBs[0],
 		writeDBs[1],
@@ -383,6 +383,7 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 	t.Helper()
 	assert, ctx := assert.New(t), context.Background()
+	require := require.New(t)
 
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		c1, err := tx.Cursor(bucket1)
@@ -395,84 +396,84 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 		}
 
 		k1, v1, err := c1.First()
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err := c2.First()
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 		k1, v1, err = c1.Seek([]byte{2})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{2})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		return nil
 	}); err != nil {
-		assert.NoError(err)
+		require.NoError(err)
 	}
 }
 

@@ -18,15 +18,15 @@ package services
 
 import (
 	"context"
+	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -93,6 +93,7 @@ type BodyReader interface {
 	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
 	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error)
 	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
+	BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error)
 }
 
 type TxnReader interface {
@@ -112,6 +113,12 @@ type BlockAndTxnReader interface {
 	TxnReader
 }
 
+type HeaderAndBodyReader interface {
+	BlockReader
+	BodyReader
+	HeaderReader
+}
+
 type FullBlockReader interface {
 	BlockReader
 	BodyReader
@@ -124,7 +131,7 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	FrozenBlocks() uint64
-	FrozenBorBlocks() uint64
+	FrozenBorBlocks(align bool) uint64
 	FrozenFiles() (list []string)
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
@@ -135,13 +142,23 @@ type FullBlockReader interface {
 	Ready(ctx context.Context) <-chan error
 
 	AllTypes() []snaptype.Type
+
+	TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
-	PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error)
-	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
-	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
+	PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error)
+	RetireBlocksInBackground(
+		ctx context.Context,
+		miBlockNum uint64,
+		maxBlockNum uint64,
+		lvl log.Lvl,
+		seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
+		onDelete func(l []string) error,
+		onFinishRetire func() error,
+		onDone func()) bool
+	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
 	SetWorkers(workers int)
 	GetWorkers() int
 }

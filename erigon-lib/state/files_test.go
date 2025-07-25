@@ -10,19 +10,19 @@ import (
 	btree2 "github.com/tidwall/btree"
 )
 
-func TestFileItemWithMissingAccessor(t *testing.T) {
+func TestFileItemWithMissedAccessor(t *testing.T) {
 	tmp := t.TempDir()
 
 	// filesItem
-	f1 := &filesItem{
+	f1 := &FilesItem{
 		startTxNum: 1,
 		endTxNum:   10,
 	}
-	f2 := &filesItem{
+	f2 := &FilesItem{
 		startTxNum: 11,
 		endTxNum:   20,
 	}
-	f3 := &filesItem{
+	f3 := &FilesItem{
 		startTxNum: 31,
 		endTxNum:   40,
 	}
@@ -51,7 +51,7 @@ func TestFileItemWithMissingAccessor(t *testing.T) {
 		defer os.Remove(fname)
 	}
 
-	fileItems := fileItemsWithMissingAccessors(btree, aggStep, accessorFor)
-	require.Equal(t, 1, len(fileItems))
+	fileItems := fileItemsWithMissedAccessors(btree.Items(), aggStep, accessorFor)
+	require.Len(t, fileItems, 1)
 	require.Equal(t, f3, fileItems[0])
 }

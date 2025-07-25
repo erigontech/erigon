@@ -17,17 +17,17 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
-	"net/http"
 	"os"
 
+	"github.com/anacrolix/envpprof"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/params"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
@@ -37,40 +37,30 @@ import (
 )
 
 func main() {
-	defer func() {
-		panicResult := recover()
-		if panicResult == nil {
-			return
-		}
-
-		log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
-		os.Exit(1)
-	}()
-
+	defer envpprof.Stop()
 	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
 			log.Warn("Fprintln error", "err", printErr)
 		}
+		envpprof.Stop()
 		os.Exit(1)
 	}
 }
 
-func runErigon(cliCtx *cli.Context) error {
-	var logger log.Logger
-	var err error
-	var metricsMux *http.ServeMux
-	var pprofMux *http.ServeMux
-
-	if logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
-		return err
+func runErigon(cliCtx *cli.Context) (err error) {
+	logger, tracer, metricsMux, pprofMux, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return
 	}
+
+	debugMux := cmp.Or(metricsMux, pprofMux)
 
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
-	if params.VersionMajor == 3 {
+	if version.Major == 3 {
 		logger.Info(`
 	########b          oo                               d####b. 
 	##                                                      '## 
@@ -85,7 +75,7 @@ func runErigon(cliCtx *cli.Context) error {
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)
 	if err != nil {
 		return err
 	}
@@ -95,7 +85,7 @@ func runErigon(cliCtx *cli.Context) error {
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err

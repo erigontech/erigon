@@ -34,6 +34,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
 	"golang.org/x/sync/semaphore"
@@ -92,7 +93,7 @@ const DefaultGrowthStep = 1 * datasize.GB
 func New(label kv.Label, log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
-		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
+		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
 		pageSize:   kv.DefaultPageSize(),
 
@@ -156,7 +157,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.inMem = true
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
-	opts.mapSize = 512 * datasize.MB
+	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(32 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
@@ -218,7 +219,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 
-	env, err := mdbx.NewEnv()
+	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +398,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 				continue
 			}
 			cnfCopy := db.buckets[name]
-			dbi, createErr := tx.OpenDBI(name, mdbx.DBAccede, nil, nil)
+			dbi, createErr := tx.OpenDBISimple(name, mdbx.DBAccede)
 			if createErr != nil {
 				if mdbx.IsNotFound(createErr) {
 					cnfCopy.DBI = NonExistingDBI
@@ -497,7 +498,7 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 				if db.buckets[name].IsDeprecated {
 					continue
 				}
-				if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
+				if err := tx.(kv.BucketMigrator).CreateTable(name); err != nil {
 					return err
 				}
 			}
@@ -510,7 +511,7 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 			if db.buckets[name].IsDeprecated {
 				continue
 			}
-			if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
+			if err := tx.(kv.BucketMigrator).CreateTable(name); err != nil {
 				return err
 			}
 		}
@@ -677,9 +678,9 @@ func (db *MdbxKV) Env() *mdbx.Env { return db.env }
 func (db *MdbxKV) AllTables() kv.TableCfg {
 	return db.buckets
 }
-func (tx *MdbxTx) IsRo() bool                     { return tx.readOnly }
-func (tx *MdbxTx) ViewID() uint64                 { return tx.tx.ID() }
-func (tx *MdbxTx) ListBuckets() ([]string, error) { return tx.tx.ListDBI() }
+func (tx *MdbxTx) IsRo() bool                    { return tx.readOnly }
+func (tx *MdbxTx) ViewID() uint64                { return tx.tx.ID() }
+func (tx *MdbxTx) ListTables() ([]string, error) { return tx.tx.ListDBI() }
 
 func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 	res := map[string]kv.DBI{}
@@ -766,6 +767,115 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	return f(tx)
 }
 
+func (tx *MdbxTx) Apply(_ context.Context, f func(tx kv.Tx) error) (err error) {
+	return f(tx)
+}
+
+func (tx *MdbxTx) ApplyRw(_ context.Context, f func(tx kv.RwTx) error) (err error) {
+	return f(tx)
+}
+
+type TxApplySource interface {
+	ApplyChan() TxApplyChan
+}
+
+type TxApplyChan chan apply
+
+type apply interface {
+	Apply()
+}
+
+type applyTx struct {
+	err chan error
+	tx  kv.Tx
+	f   func(kv.Tx) error
+}
+
+func (a *applyTx) Apply() {
+	defer func() { // Would prefer this not to crash but rather log the error
+		r := recover()
+		if r != nil {
+			a.err <- fmt.Errorf("apply paniced: %s", r)
+		}
+	}()
+	a.err <- a.f(a.tx)
+}
+
+type applyRwTx struct {
+	err chan error
+	tx  kv.RwTx
+	f   func(kv.RwTx) error
+}
+
+func (a *applyRwTx) Apply() {
+	defer func() { // Would prefer this not to crash but rather log the error
+		r := recover()
+		if r != nil {
+			a.err <- fmt.Errorf("apply paniced: %s", r)
+		}
+	}()
+	a.err <- a.f(a.tx)
+}
+
+type asyncTx struct {
+	kv.Tx
+	requests chan apply
+}
+
+func NewAsyncTx(tx kv.Tx, queueSize int) *asyncTx {
+	return &asyncTx{tx, make(chan apply, queueSize)}
+}
+
+func (a *asyncTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
+	rc := make(chan error)
+	a.requests <- &applyTx{rc, a.Tx, f}
+	select {
+	case err := <-rc:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *asyncTx) ApplyChan() TxApplyChan {
+	return a.requests
+}
+
+type asyncRwTx struct {
+	kv.RwTx
+	requests chan apply
+}
+
+func NewAsyncRwTx(tx kv.RwTx, queueSize int) *asyncRwTx {
+	return &asyncRwTx{tx, make(chan apply, queueSize)}
+}
+
+func (a *asyncRwTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
+	rc := make(chan error)
+	a.requests <- &applyTx{rc, a.RwTx, f}
+	select {
+	case err := <-rc:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *asyncRwTx) ApplyRw(ctx context.Context, f func(kv.RwTx) error) error {
+	rc := make(chan error)
+	a.requests <- &applyRwTx{rc, a.RwTx, f}
+	select {
+	case err := <-rc:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *asyncRwTx) ApplyChan() TxApplyChan {
+	return a.requests
+}
+
 func (db *MdbxKV) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	tx, err := db.BeginRwNosync(ctx)
 	if err != nil {
@@ -800,9 +910,9 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err err
 	return nil
 }
 
-func (tx *MdbxTx) CreateBucket(name string) error {
+func (tx *MdbxTx) CreateTable(name string) error {
 	cnfCopy := tx.db.buckets[name]
-	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, nil)
+	dbi, err := tx.tx.OpenDBISimple(name, mdbx.DBAccede)
 	if err != nil && !mdbx.IsNotFound(err) {
 		return fmt.Errorf("create table: %s, %w", name, err)
 	}
@@ -835,10 +945,10 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return errors.New("some not supported flag provided for bucket")
 	}
 
-	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
+	dbi, err = tx.tx.OpenDBISimple(name, nativeFlags)
 
 	if err != nil {
-		return fmt.Errorf("db-talbe doesn't exists: %s, lable: %s, %w. Tip: try run `integration run_migrations` to create non-existing tables", name, tx.db.opts.label, err)
+		return fmt.Errorf("db-table doesn't exists: %s, label: %s, %w. Tip: try run `integration run_migrations` to create non-existing tables", name, tx.db.opts.label, err)
 	}
 	cnfCopy.DBI = kv.DBI(dbi)
 
@@ -851,7 +961,7 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	// if bucket was not open on db start, then it's may be deprecated
 	// try to open it now without `Create` flag, and if fail then nothing to drop
 	if dbi == NonExistingDBI {
-		nativeDBI, err := tx.tx.OpenDBI(name, 0, nil, nil)
+		nativeDBI, err := tx.tx.OpenDBISimple(name, 0)
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil // DBI doesn't exists means no drop needed
@@ -870,7 +980,7 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	return nil
 }
 
-func (tx *MdbxTx) ClearBucket(bucket string) error {
+func (tx *MdbxTx) ClearTable(bucket string) error {
 	dbi := tx.db.buckets[bucket].DBI
 	if dbi == NonExistingDBI {
 		return nil
@@ -878,7 +988,7 @@ func (tx *MdbxTx) ClearBucket(bucket string) error {
 	return tx.tx.Drop(mdbx.DBI(dbi), false)
 }
 
-func (tx *MdbxTx) DropBucket(bucket string) error {
+func (tx *MdbxTx) DropTable(bucket string) error {
 	if cfg, ok := tx.db.buckets[bucket]; !(ok && cfg.IsDeprecated) {
 		return fmt.Errorf("%w, bucket: %s", kv.ErrAttemptToDeleteNonDeprecatedBucket, bucket)
 	}
@@ -886,7 +996,7 @@ func (tx *MdbxTx) DropBucket(bucket string) error {
 	return tx.dropEvenIfBucketIsNotDeprecated(bucket)
 }
 
-func (tx *MdbxTx) ExistsBucket(bucket string) (bool, error) {
+func (tx *MdbxTx) ExistsTable(bucket string) (bool, error) {
 	if cfg, ok := tx.db.buckets[bucket]; ok {
 		return cfg.DBI != NonExistingDBI, nil
 	}
@@ -958,7 +1068,6 @@ func (tx *MdbxTx) Rollback() {
 		tx.db.leakDetector.Del(tx.traceID)
 	}()
 	tx.closeCursors()
-	//tx.printDebugInfo()
 	tx.tx.Abort()
 }
 
@@ -1508,6 +1617,9 @@ func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By,
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
+	if !s.tx.readOnly {
+		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
+	}
 	return s, nil
 }
 
@@ -1657,6 +1769,9 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	if err = s.advance(); err != nil {
 		return nil, nil, err
 	}
+	if !s.tx.readOnly {
+		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
+	}
 	return k, v, nil
 }
 
@@ -1670,6 +1785,9 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 	if err := s.init(table, tx); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
+	}
+	if !s.tx.readOnly {
+		s.nextV = common.Copy(s.nextV)
 	}
 	return s, nil
 }
@@ -1817,6 +1935,9 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	v = s.nextV
 	if err = s.advance(); err != nil {
 		return nil, nil, err
+	}
+	if !s.tx.readOnly {
+		s.nextV = common.Copy(s.nextV)
 	}
 	return s.key, v, nil
 }

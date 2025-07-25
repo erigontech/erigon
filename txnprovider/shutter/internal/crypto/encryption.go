@@ -96,7 +96,6 @@ func fp12Exp(base *blst.Fp12, exp *big.Int) *blst.Fp12 {
 	result := &resultValue
 
 	zero := big.NewInt(0)
-	two := big.NewInt(2)
 
 	baseCopyValue := blst.Fp12One()
 	baseCopy := &baseCopyValue
@@ -108,7 +107,7 @@ func fp12Exp(base *blst.Fp12, exp *big.Int) *blst.Fp12 {
 			result.MulAssign(baseCopy)
 		}
 		baseCopy.MulAssign(baseCopy)
-		expCopy.Div(expCopy, two)
+		expCopy.Rsh(expCopy, 1) // ÷2
 	}
 
 	return result

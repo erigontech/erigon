@@ -16,53 +16,11 @@
 
 package seg
 
-import (
-	"fmt"
-)
-
 //Reader and Writer - decorators on Getter and Compressor - which
-//can auto-use Next/NextUncompressed and AddWord/AddUncompressedWord - based on `FileCompression` passed to constructor
+//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
 
 // Maybe in future will add support of io.Reader/Writer interfaces to this decorators
 // Maybe in future will merge decorators into it's parents
-
-type FileCompression uint8
-
-const (
-	CompressNone FileCompression = 0b0  // no compression
-	CompressKeys FileCompression = 0b1  // compress keys only
-	CompressVals FileCompression = 0b10 // compress values only
-)
-
-func ParseFileCompression(s string) (FileCompression, error) {
-	switch s {
-	case "none", "":
-		return CompressNone, nil
-	case "k":
-		return CompressKeys, nil
-	case "v":
-		return CompressVals, nil
-	case "kv":
-		return CompressKeys | CompressVals, nil
-	default:
-		return 0, fmt.Errorf("invalid file compression type: %s", s)
-	}
-}
-
-func (c FileCompression) String() string {
-	switch c {
-	case CompressNone:
-		return "none"
-	case CompressKeys:
-		return "k"
-	case CompressVals:
-		return "v"
-	case CompressKeys | CompressVals:
-		return "kv"
-	default:
-		return ""
-	}
-}
 
 type Reader struct {
 	*Getter
@@ -75,19 +33,25 @@ func NewReader(g *Getter, c FileCompression) *Reader {
 }
 
 func (g *Reader) MatchPrefix(prefix []byte) bool {
-	if g.c&CompressKeys != 0 {
+	if g.c.Has(CompressKeys) {
 		return g.Getter.MatchPrefix(prefix)
 	}
 	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
 func (g *Reader) MatchCmp(prefix []byte) int {
-	if g.c&CompressKeys != 0 {
+	if g.c.Has(CompressKeys) {
 		return g.Getter.MatchCmp(prefix)
 	}
 	return g.Getter.MatchCmpUncompressed(prefix)
 }
 
+func (g *Reader) MadvNormal() MadvDisabler {
+	g.d.MadvNormal()
+	return g
+}
+func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
+func (g *Reader) FileName() string  { return g.Getter.FileName() }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	fl := CompressKeys
 	if g.nextValue {
@@ -97,7 +61,7 @@ func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 		g.nextValue = true
 	}
 
-	if g.c&fl != 0 {
+	if g.c.Has(fl) {
 		return g.Getter.Next(buf)
 	}
 	return g.Getter.NextUncompressed()
@@ -116,7 +80,7 @@ func (g *Reader) Skip() (uint64, int) {
 		g.nextValue = true
 	}
 
-	if g.c&fl != 0 {
+	if g.c.Has(fl) {
 		return g.Getter.Skip()
 	}
 	return g.Getter.SkipUncompressed()
@@ -133,7 +97,7 @@ func NewWriter(kv *Compressor, compress FileCompression) *Writer {
 	return &Writer{kv, false, compress}
 }
 
-func (c *Writer) AddWord(word []byte) error {
+func (c *Writer) Write(word []byte) (n int, err error) {
 	fl := CompressKeys
 	if c.keyWritten {
 		fl = CompressVals
@@ -143,16 +107,16 @@ func (c *Writer) AddWord(word []byte) error {
 	}
 
 	if c.c&fl != 0 {
-		return c.Compressor.AddWord(word)
+		return len(word), c.Compressor.AddWord(word)
 	}
-	return c.Compressor.AddUncompressedWord(word)
+	return len(word), c.Compressor.AddUncompressedWord(word)
 }
 
 func (c *Writer) ReadFrom(r *Reader) error {
 	var v []byte
 	for r.HasNext() {
 		v, _ = r.Next(v[:0])
-		if err := c.AddWord(v); err != nil {
+		if _, err := c.Write(v); err != nil {
 			return err
 		}
 	}

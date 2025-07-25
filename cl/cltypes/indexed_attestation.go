@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -38,7 +38,7 @@ const (
 type IndexedAttestation struct {
 	AttestingIndices *solid.RawUint64List   `json:"attesting_indices"`
 	Data             *solid.AttestationData `json:"data"`
-	Signature        libcommon.Bytes96      `json:"signature"`
+	Signature        common.Bytes96         `json:"signature"`
 }
 
 func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
@@ -70,7 +70,7 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
 		AttestingIndices []string               `json:"attesting_indices"`
 		Data             *solid.AttestationData `json:"data"`
-		Signature        libcommon.Bytes96      `json:"signature"`
+		Signature        common.Bytes96         `json:"signature"`
 	}
 	tmp.Data = &solid.AttestationData{}
 	if err := json.Unmarshal(buf, &tmp); err != nil {

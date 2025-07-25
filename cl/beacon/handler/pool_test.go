@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
@@ -84,7 +84,7 @@ func TestPoolAttesterSlashings(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(out.Data))
+	require.Len(t, out.Data, 1)
 	require.Equal(t, attesterSlashing, out.Data[0])
 }
 
@@ -138,7 +138,7 @@ func TestPoolProposerSlashings(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(out.Data))
+	require.Len(t, out.Data, 1)
 	require.Equal(t, proposerSlashing, out.Data[0])
 }
 
@@ -183,7 +183,7 @@ func TestPoolVoluntaryExits(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(out.Data))
+	require.Len(t, out.Data, 1)
 	require.Equal(t, voluntaryExit, out.Data[0])
 }
 
@@ -193,7 +193,7 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 			Message: &cltypes.BLSToExecutionChange{
 				ValidatorIndex: 45,
 			},
-			Signature: libcommon.Bytes96{2},
+			Signature: common.Bytes96{2},
 		},
 		{
 			Message: &cltypes.BLSToExecutionChange{
@@ -236,7 +236,7 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 2, len(out.Data))
+	require.Len(t, out.Data, 2)
 	require.Equal(t, msg[0], out.Data[0])
 	require.Equal(t, msg[1], out.Data[1])
 }
@@ -248,21 +248,21 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 				Aggregate: &solid.Attestation{
 					AggregationBits: solid.BitlistFromBytes([]byte{1, 2}, 2048),
 					Data:            &solid.AttestationData{},
-					Signature:       libcommon.Bytes96{3, 45, 6},
+					Signature:       common.Bytes96{3, 45, 6},
 				},
 			},
-			Signature: libcommon.Bytes96{2},
+			Signature: common.Bytes96{2},
 		},
 		{
 			Message: &cltypes.AggregateAndProof{
-				//Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), libcommon.Bytes96{3, 0, 6}),
+				//Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), common.Bytes96{3, 0, 6}),
 				Aggregate: &solid.Attestation{
 					AggregationBits: solid.BitlistFromBytes([]byte{1, 2, 5, 6}, 2048),
 					Data:            &solid.AttestationData{},
-					Signature:       libcommon.Bytes96{3, 0, 6},
+					Signature:       common.Bytes96{3, 0, 6},
 				},
 			},
-			Signature: libcommon.Bytes96{2, 3, 5},
+			Signature: common.Bytes96{2, 3, 5},
 		},
 	}
 	// find server
@@ -300,7 +300,7 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 2, len(out.Data))
+	require.Len(t, out.Data, 2)
 	require.Equal(t, msg[0].Message.Aggregate, out.Data[0])
 	require.Equal(t, msg[1].Message.Aggregate, out.Data[1])
 }
@@ -309,7 +309,7 @@ func TestPoolSyncCommittees(t *testing.T) {
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
-			BeaconBlockRoot: libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
 			ValidatorIndex:  3,
 		},
 	}
@@ -340,12 +340,12 @@ func TestPoolSyncCommittees(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, out.Data, &cltypes.Contribution{
+	require.Equal(t, &cltypes.Contribution{
 		Slot:              1,
-		BeaconBlockRoot:   libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+		BeaconBlockRoot:   common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
 		SubcommitteeIndex: 0,
 		AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
-	})
+	}, out.Data)
 }
 
 func TestPoolSyncContributionAndProofs(t *testing.T) {
@@ -356,7 +356,7 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 			Message: &cltypes.ContributionAndProof{
 				Contribution: &cltypes.Contribution{
 					Slot:            1,
-					BeaconBlockRoot: libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+					BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
 					AggregationBits: aggrBits,
 				},
 			},
@@ -389,10 +389,10 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, out.Data, &cltypes.Contribution{
+	require.Equal(t, &cltypes.Contribution{
 		Slot:              1,
-		BeaconBlockRoot:   libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+		BeaconBlockRoot:   common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
 		SubcommitteeIndex: 0,
 		AggregationBits:   aggrBits,
-	})
+	}, out.Data)
 }

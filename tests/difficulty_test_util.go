@@ -24,11 +24,11 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
-
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 )
 
 //go:generate gencodec -type DifficultyTest -field-override difficultyTestMarshaling -out gen_difficultytest.go
@@ -60,9 +60,9 @@ func (test *DifficultyTest) Run(config *chain.Config) error {
 	}
 
 	if test.ParentUncles == 0 {
-		parent.UncleHash = types.EmptyUncleHash
+		parent.UncleHash = empty.UncleHash
 	} else {
-		parent.UncleHash = libcommon.HexToHash("ab") // some dummy != EmptyUncleHash
+		parent.UncleHash = common.HexToHash("ab") // some dummy != EmptyUncleHash
 	}
 
 	actual := ethash.CalcDifficulty(config, test.CurrentTimestamp, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.UncleHash)

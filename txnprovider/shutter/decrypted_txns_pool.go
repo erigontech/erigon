@@ -20,7 +20,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type DecryptionMark struct {
@@ -31,18 +31,17 @@ type DecryptionMark struct {
 type TxnBatch struct {
 	Transactions  []types.Transaction
 	TotalGasLimit uint64
+	TotalBytes    int64
 }
 
 type DecryptedTxnsPool struct {
-	mu             *sync.Mutex
 	decryptedTxns  map[DecryptionMark]TxnBatch
 	decryptionCond *sync.Cond
 }
 
 func NewDecryptedTxnsPool() *DecryptedTxnsPool {
-	mu := sync.Mutex{}
+	var mu sync.Mutex
 	return &DecryptedTxnsPool{
-		mu:             &mu,
 		decryptedTxns:  make(map[DecryptionMark]TxnBatch),
 		decryptionCond: sync.NewCond(&mu),
 	}
@@ -53,8 +52,8 @@ func (p *DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error
 	go func() {
 		defer close(done)
 
-		p.mu.Lock()
-		defer p.mu.Unlock()
+		p.decryptionCond.L.Lock()
+		defer p.decryptionCond.L.Unlock()
 
 		for _, ok := p.decryptedTxns[mark]; !ok && ctx.Err() == nil; _, ok = p.decryptedTxns[mark] {
 			p.decryptionCond.Wait()
@@ -74,30 +73,39 @@ func (p *DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error
 }
 
 func (p *DecryptedTxnsPool) DecryptedTxns(mark DecryptionMark) (TxnBatch, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.decryptionCond.L.Lock()
+	defer p.decryptionCond.L.Unlock()
 	txnBatch, ok := p.decryptedTxns[mark]
 	return txnBatch, ok
 }
 
 func (p *DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txnBatch TxnBatch) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.decryptionCond.L.Lock()
+	defer p.decryptionCond.L.Unlock()
 	p.decryptedTxns[mark] = txnBatch
 	p.decryptionCond.Broadcast()
+	txnsLen := float64(len(txnBatch.Transactions))
+	decryptedTxnsPoolAdded.Add(txnsLen)
+	decryptedTxnsPoolTotalCount.Add(txnsLen)
+	decryptedTxnsPoolTotalBytes.Add(float64(txnBatch.TotalBytes))
 }
 
-func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) uint64 {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) (markDeletions, txnDeletions uint64) {
+	p.decryptionCond.L.Lock()
+	defer p.decryptionCond.L.Unlock()
 
-	var deletions uint64
-	for mark := range p.decryptedTxns {
+	var totalBytes int64
+	for mark, txnBatch := range p.decryptedTxns {
 		if mark.Slot <= slot {
-			deletions++
+			markDeletions++
+			txnDeletions += uint64(len(txnBatch.Transactions))
+			totalBytes += txnBatch.TotalBytes
 			delete(p.decryptedTxns, mark)
 		}
 	}
 
-	return deletions
+	decryptedTxnsPoolDeleted.Add(float64(txnDeletions))
+	decryptedTxnsPoolTotalCount.Sub(float64(txnDeletions))
+	decryptedTxnsPoolTotalBytes.Sub(float64(totalBytes))
+	return markDeletions, txnDeletions
 }

@@ -29,6 +29,7 @@ import (
 
 func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	b.SetParallelism(1)
+	metricsFile = "./ericom"
 
 	rnd := rand.New(rand.NewSource(133777))
 	keysCount := rnd.Intn(100_0000)
@@ -48,7 +49,7 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	err := ms.applyPlainUpdates(pk, updates)
 	require.NoError(b, err)
 
-	hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
+	hph := NewHexPatriciaHashed(length.Addr, ms)
 	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
 	defer upds.Close()
 

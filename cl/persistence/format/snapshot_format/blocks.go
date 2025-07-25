@@ -22,16 +22,15 @@ import (
 	"io"
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 type ExecutionBlockReaderByNumber interface {
-	Transactions(number uint64, hash libcommon.Hash) (*solid.TransactionsSSZ, error)
-	Withdrawals(number uint64, hash libcommon.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error)
+	Transactions(number uint64, hash common.Hash) (*solid.TransactionsSSZ, error)
+	Withdrawals(number uint64, hash common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error)
 	SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig)
 }
 
@@ -79,11 +78,11 @@ func WriteBlockForSnapshot(w io.Writer, block *cltypes.SignedBeaconBlock, reusab
 	return reusable, nil
 }
 
-func readMetadataForBlock(r io.Reader, b []byte) (clparams.StateVersion, libcommon.Hash, error) {
+func readMetadataForBlock(r io.Reader, b []byte) (clparams.StateVersion, common.Hash, error) {
 	if _, err := r.Read(b); err != nil {
-		return 0, libcommon.Hash{}, err
+		return 0, common.Hash{}, err
 	}
-	return clparams.StateVersion(b[0]), libcommon.BytesToHash(b[1:]), nil
+	return clparams.StateVersion(b[0]), common.BytesToHash(b[1:]), nil
 }
 
 func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
@@ -129,7 +128,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 }
 
 // ReadBlockHeaderFromSnapshotWithExecutionData reads the beacon block header and the EL block number and block hash.
-func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
+func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
@@ -138,22 +137,22 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 	metadataSlab := make([]byte, 33)
 	v, bodyRoot, err := readMetadataForBlock(r, metadataSlab)
 	if err != nil {
-		return nil, 0, libcommon.Hash{}, err
+		return nil, 0, common.Hash{}, err
 	}
 	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {
-		return nil, 0, libcommon.Hash{}, err
+		return nil, 0, common.Hash{}, err
 	}
 	// Read the block
 	if _, err := io.CopyN(buffer, r, int64(binary.BigEndian.Uint64(length))); err != nil {
-		return nil, 0, libcommon.Hash{}, err
+		return nil, 0, common.Hash{}, err
 	}
 	// Decode the block in blinded
 	if err := blindedBlock.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
-		return nil, 0, libcommon.Hash{}, err
+		return nil, 0, common.Hash{}, err
 	}
 	blockHeader := &cltypes.SignedBeaconBlockHeader{
 		Signature: blindedBlock.Signature,
@@ -167,7 +166,7 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 	}
 	// No execution data for pre-altair blocks
 	if v <= clparams.AltairVersion {
-		return blockHeader, 0, libcommon.Hash{}, nil
+		return blockHeader, 0, common.Hash{}, nil
 	}
 	blockNumber := blindedBlock.Block.Body.ExecutionPayload.BlockNumber
 	blockHash := blindedBlock.Block.Body.ExecutionPayload.BlockHash

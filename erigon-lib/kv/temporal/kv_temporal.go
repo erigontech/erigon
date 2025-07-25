@@ -18,12 +18,22 @@ package temporal
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/version"
+)
+
+var ( // Compile time interface checks
+	_ kv.TemporalRwDB    = (*DB)(nil)
+	_ kv.TemporalRwTx    = (*RwTx)(nil)
+	_ kv.TemporalDebugTx = (*Tx)(nil)
 )
 
 //Variables Naming:
@@ -36,7 +46,7 @@ import (
 //  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming friendly - less methods than Cursor, but constructor is powerful as `SELECT key, value FROM table WHERE key BETWEEN x1 AND x2 ORDER DESC LIMIT n`.
 
 //Methods Naming:
-//  Get: exact match of criterias
+//  Get: exact match of criteria
 //  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
 //  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
 
@@ -61,23 +71,44 @@ import (
 
 type DB struct {
 	kv.RwDB
-	agg *state.Aggregator
+	agg             *state.Aggregator
+	forkaggs        []*state.ForkableAgg
+	forkaggsEnabled bool
 }
 
-func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
-	return &DB{RwDB: db, agg: agg}, nil
+func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
+	tdb := &DB{RwDB: db, agg: agg}
+	if len(forkaggs) > 0 {
+		tdb.forkaggs = make([]*state.ForkableAgg, len(forkaggs))
+		for i, forkagg := range forkaggs {
+			if tdb.forkaggs[i] != nil {
+				panic("forkaggs already set")
+			}
+			tdb.forkaggs[i] = forkagg
+		}
+	}
+	return tdb, nil
 }
-func (db *DB) Agg() any            { return db.agg }
-func (db *DB) InternalDB() kv.RwDB { return db.RwDB }
+func (db *DB) EnableForkable()           { db.forkaggsEnabled = true }
+func (db *DB) Agg() any                  { return db.agg }
+func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
+func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
+	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
-	tx.filesTx = db.agg.BeginFilesRo()
+	tx.aggtx = db.agg.BeginFilesRo()
+
+	if db.forkaggsEnabled {
+		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
+		for i, forkagg := range db.forkaggs {
+			tx.forkaggs[i] = forkagg.BeginTemporalTx()
+		}
+	}
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -107,9 +138,9 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
+	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
-	tx.filesTx = db.agg.BeginFilesRo()
+	tx.aggtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -127,14 +158,26 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return tx.Commit()
 }
 
+func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) error) error {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = f(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
+	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
-	tx.filesTx = db.agg.BeginFilesRo()
+	tx.aggtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -153,61 +196,211 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	db.RwDB.Close()
 	db.agg.Close()
+	db.RwDB.Close()
 }
 
-func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
+func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
 
-type Tx struct {
-	*mdbx.MdbxTx
+type tx struct {
 	db               *DB
-	filesTx          *state.AggregatorRoTx
+	aggtx            *state.AggregatorRoTx
+	forkaggs         []*state.ForkableAggTemporalTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
+	mu               sync.RWMutex
 }
 
-func (tx *Tx) ForceReopenAggCtx() {
-	tx.filesTx.Close()
-	tx.filesTx = tx.Agg().BeginFilesRo()
+type Tx struct {
+	kv.Tx
+	tx
 }
-func (tx *Tx) FreezeInfo() kv.FreezeInfo { return tx.filesTx }
 
-func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
-func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggTx() any                { return tx.filesTx }
-func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
-func (tx *Tx) Rollback() {
+type RwTx struct {
+	kv.RwTx
+	tx
+}
+
+func (tx *tx) ForceReopenAggCtx() {
+	tx.aggtx.Close()
+	tx.aggtx = tx.Agg().BeginFilesRo()
+}
+func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
+
+func (tx *tx) AggTx() any             { return tx.aggtx }
+func (tx *tx) Agg() *state.Aggregator { return tx.db.agg }
+func (tx *tx) Rollback() {
 	tx.autoClose()
-	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+}
+func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
+	for i, forkagg := range tx.forkaggs {
+		if forkagg.IsForkablePresent(forkableId) {
+			return i
+		}
+	}
+	panic(fmt.Sprintf("forkable not found: %d", forkableId))
+}
+
+func (tx *Tx) Rollback() {
+	if tx == nil {
 		return
 	}
-	mdbxTx := tx.MdbxTx
-	tx.MdbxTx = nil
-	mdbxTx.Rollback()
+	tx.autoClose()
+	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return
+	}
+	tx.mu.Lock()
+	rb := tx.Tx
+	tx.Tx = nil
+	tx.mu.Unlock()
+	rb.Rollback()
 }
-func (tx *Tx) autoClose() {
+
+func (tx *Tx) WarmupDB(force bool) error {
+	if mdbxTx, ok := tx.Tx.(*mdbx.MdbxTx); ok {
+		return mdbxTx.WarmupDB(force)
+	}
+	return nil
+}
+
+func (tx *Tx) LockDBInRam() error {
+	if mdbxTx, ok := tx.Tx.(*mdbx.MdbxTx); ok {
+		return mdbxTx.LockDBInRam()
+	}
+	return nil
+}
+
+func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+	tx.tx.mu.RLock()
+	applyTx := tx.Tx
+	tx.tx.mu.RUnlock()
+	if applyTx == nil {
+		return fmt.Errorf("can't apply: transaction closed")
+	}
+	return applyTx.Apply(ctx, f)
+}
+
+func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
+	return tx.forkaggs[tx.searchForkableAggIdx(id)]
+}
+
+func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	return newUnmarkedTx(tx.Tx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
+}
+
+func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
+}
+
+func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
+	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
+}
+
+func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
+	return tx.forkaggs[tx.searchForkableAggIdx(id)]
+}
+
+func (tx *RwTx) WarmupDB(force bool) error {
+	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
+		return mdbxTx.WarmupDB(force)
+	}
+	return nil
+}
+
+func (tx *RwTx) LockDBInRam() error {
+	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
+		return mdbxTx.LockDBInRam()
+	}
+	return nil
+}
+
+func (tx *RwTx) Debug() kv.TemporalDebugTx { return tx }
+func (tx *Tx) Debug() kv.TemporalDebugTx   { return tx }
+
+func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+	tx.tx.mu.RLock()
+	applyTx := tx.RwTx
+	tx.tx.mu.RUnlock()
+	if applyTx == nil {
+		return fmt.Errorf("can't apply: transaction closed")
+	}
+	return applyTx.Apply(ctx, f)
+}
+
+func (tx *RwTx) ApplyRW(ctx context.Context, f func(tx kv.RwTx) error) error {
+	tx.tx.mu.RLock()
+	applyTx := tx.RwTx
+	tx.tx.mu.RUnlock()
+	if applyTx == nil {
+		return fmt.Errorf("can't apply: transaction closed")
+	}
+	return applyTx.ApplyRw(ctx, f)
+}
+
+func (tx *RwTx) Rollback() {
+	if tx == nil {
+		return
+	}
+	tx.autoClose()
+	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return
+	}
+	rb := tx.RwTx
+	tx.RwTx = nil
+	rb.Rollback()
+}
+
+type asyncClone struct {
+	RwTx
+}
+
+// this is needed to create a clone that can be passed
+// to external go rooutines - they are intended as slaves
+// so should never commit or rollback the master transaction
+func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
+	return &asyncClone{
+		RwTx{
+			RwTx: asyncTx,
+			tx: tx{
+				db:               rwtx.db,
+				aggtx:            rwtx.aggtx,
+				resourcesToClose: nil,
+				ctx:              rwtx.ctx,
+			}}}
+}
+
+func (tx *asyncClone) ApplyChan() mdbx.TxApplyChan {
+	return tx.RwTx.RwTx.(mdbx.TxApplySource).ApplyChan()
+}
+
+func (tx *asyncClone) Commit() error {
+	return fmt.Errorf("can't commit cloned tx")
+}
+func (tx *asyncClone) Rollback() {
+}
+
+func (tx *tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	tx.filesTx.Close()
+	tx.aggtx.Close()
 }
-func (tx *Tx) Commit() error {
-	tx.autoClose()
-	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+
+func (tx *RwTx) Commit() error {
+	if tx == nil {
 		return nil
 	}
-	mdbxTx := tx.MdbxTx
-	tx.MdbxTx = nil
-	return mdbxTx.Commit()
+	tx.autoClose()
+	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return nil
+	}
+	t := tx.RwTx
+	tx.RwTx = nil
+	return t.Commit()
 }
 
-func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.filesTx.HistoryStartFrom(name)
-}
-
-func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.filesTx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
+func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	it, err := tx.aggtx.RangeAsOf(tx.ctx, rtx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -215,26 +408,91 @@ func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, as
 	return it, nil
 }
 
-func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
-	v, step, ok, err := tx.filesTx.GetLatest(name, k, tx.MdbxTx)
+func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	return tx.rangeAsOf(name, tx.Tx, fromKey, toKey, asOfTs, asc, limit)
+}
+
+func (tx *RwTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	return tx.rangeAsOf(name, tx.RwTx, fromKey, toKey, asOfTs, asc, limit)
+}
+
+func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step uint64, err error) {
+	v, step, ok, err := tx.aggtx.GetLatest(name, k, dbTx)
 	if err != nil {
 		return nil, step, err
 	}
 	if !ok {
 		return nil, step, nil
 	}
-	return v, step, nil
+	return v, step, err
 }
-func (tx *Tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.filesTx.GetAsOf(name, k, ts, tx.MdbxTx)
+
+func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	return tx.hasPrefix(name, tx.Tx, prefix)
+}
+
+func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	return tx.hasPrefix(name, tx.RwTx, prefix)
+}
+
+func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []byte, bool, error) {
+	to, ok := kv.NextSubtree(prefix)
+	if !ok {
+		to = nil
+	}
+
+	it, err := tx.rangeLatest(name, dbTx, prefix, to, 1)
+	if err != nil {
+		return nil, nil, false, err
+	}
+
+	defer it.Close()
+	if !it.HasNext() {
+		return nil, nil, false, nil
+	}
+
+	k, v, err := it.Next()
+	if err != nil {
+		return nil, nil, false, err
+	}
+
+	return k, v, true, nil
+}
+
+func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+	return tx.getLatest(name, tx.Tx, k)
+}
+
+func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+	return tx.getLatest(name, tx.RwTx, k)
+}
+
+func (tx *tx) getAsOf(name kv.Domain, gtx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.aggtx.GetAsOf(name, key, ts, gtx)
+}
+
+func (tx *Tx) GetAsOf(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.getAsOf(name, tx.Tx, key, ts)
+}
+
+func (tx *RwTx) GetAsOf(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.getAsOf(name, tx.RwTx, key, ts)
+}
+
+func (tx *tx) historySeek(name kv.Domain, dbTx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.aggtx.HistorySeek(name, key, ts, dbTx)
 }
 
 func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.filesTx.HistorySeek(name, key, ts, tx.MdbxTx)
+	return tx.historySeek(name, tx.Tx, key, ts)
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
-	timestamps, err = tx.filesTx.IndexRange(name, k, fromTs, toTs, asc, limit, tx.MdbxTx)
+func (tx *RwTx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.historySeek(name, tx.RwTx, key, ts)
+}
+
+func (tx *tx) indexRange(name kv.InvertedIdx, dbTx kv.Tx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
+	timestamps, err = tx.aggtx.IndexRange(name, k, fromTs, toTs, asc, limit, dbTx)
 	if err != nil {
 		return nil, err
 	}
@@ -242,11 +500,160 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	return timestamps, nil
 }
 
-func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.filesTx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
+func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
+	return tx.indexRange(name, tx.Tx, k, fromTs, toTs, asc, limit)
+}
+
+func (tx *RwTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
+	return tx.indexRange(name, tx.RwTx, k, fromTs, toTs, asc, limit)
+}
+
+func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	it, err := tx.aggtx.HistoryRange(name, fromTs, toTs, asc, limit, dbTx)
 	if err != nil {
 		return nil, err
 	}
 	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
+}
+
+func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	return tx.historyRange(name, tx.Tx, fromTs, toTs, asc, limit)
+}
+
+func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	return tx.historyRange(name, tx.RwTx, fromTs, toTs, asc, limit)
+}
+
+// Write methods
+
+func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
+	panic("implement me pls. or use SharedDomains")
+}
+func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
+	panic("implement me pls. or use SharedDomains")
+}
+func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	panic("implement me pls. or use SharedDomains")
+}
+
+// Debug methods
+
+func (tx *Tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return tx.rangeLatest(domain, tx.Tx, from, to, limit)
+}
+
+func (tx *RwTx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return tx.rangeLatest(domain, tx.RwTx, from, to, limit)
+}
+
+func (tx *tx) rangeLatest(domain kv.Domain, dbTx kv.Tx, from, to []byte, limit int) (stream.KV, error) {
+	return tx.aggtx.DebugRangeLatest(dbTx, domain, from, to, limit)
+}
+
+func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
+	return tx.getLatestFromDB(domain, tx.Tx, k)
+}
+
+func (tx *RwTx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
+	return tx.getLatestFromDB(domain, tx.RwTx, k)
+}
+
+func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step uint64, found bool, err error) {
+	return tx.aggtx.DebugGetLatestFromDB(domain, k, dbTx)
+}
+
+func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
+}
+
+func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
+func (db *DB) ReloadSalt() error                         { return db.agg.ReloadSalt() }
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
+	return db.agg.InvertedIdxTables(domain...)
+}
+func (db *DB) ReloadFiles() error { return db.agg.ReloadFiles() }
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
+	return db.agg.BuildMissedAccessors(ctx, workers)
+}
+func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
+	db.agg.MadvNormal()
+	return db
+}
+
+func (db *DB) DisableReadAhead() {
+	db.agg.DisableReadAhead()
+}
+
+func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
+	return tx.aggtx.DomainFiles(domain...)
+}
+func (tx *Tx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
+}
+func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
+	return tx.aggtx.TxNumsInFiles(domains...)
+}
+
+func (tx *RwTx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
+	return tx.aggtx.DomainFiles(domain...)
+}
+func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
+}
+func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
+	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
+}
+func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
+	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.RwTx)
+}
+func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
+}
+
+func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
+	return tx.forkaggs[tx.searchForkableAggIdx(id)]
+}
+func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
+	return tx.aggtx.HistoryStartFrom(name)
+}
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
+}
+func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
+}
+func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.Tx)
+}
+func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.RwTx)
+}
+func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.Tx)
+}
+func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.RwTx)
+}
+func (tx *tx) stepSize() uint64 {
+	return tx.aggtx.StepSize()
+}
+func (tx *Tx) StepSize() uint64 {
+	return tx.stepSize()
+}
+func (tx *RwTx) StepSize() uint64 {
+	return tx.stepSize()
+}
+
+func (tx *Tx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.Tx)
+}
+func (tx *RwTx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.RwTx)
+}
+func (tx *Tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.Tx)
+}
+func (tx *RwTx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.RwTx)
 }

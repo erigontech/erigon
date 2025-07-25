@@ -23,18 +23,23 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 type proposerDuties struct {
-	Pubkey         libcommon.Bytes48 `json:"pubkey"`
-	ValidatorIndex uint64            `json:"validator_index,string"`
-	Slot           uint64            `json:"slot,string"`
+	Pubkey         common.Bytes48 `json:"pubkey"`
+	ValidatorIndex uint64         `json:"validator_index,string"`
+	Slot           uint64         `json:"slot,string"`
+}
+
+// isProposerDutyInLookaheadVector checks if the proposer duty is within the lookahead vector.
+func (a *ApiHandler) isProposerDutyInLookaheadVector(s *state.CachingBeaconState, epoch uint64) bool {
+	return s.Version() >= clparams.FuluVersion && epoch >= state.Epoch(s) && epoch <= state.Epoch(s)+a.beaconChainCfg.MinSeedLookahead
 }
 
 func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -60,7 +65,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
 			a.beaconChainCfg.EpochsPerHistoricalVector
 
-		var mix libcommon.Hash
+		var mix common.Hash
 		if epoch+marginEpochs > a.forkchoiceStore.FinalizedCheckpoint().Epoch {
 			// Input for the seed hash.
 			mix = s.GetRandaoMix(int(mixPosition))
@@ -78,9 +83,30 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 			if err != nil {
 				return err
 			}
-			if mix == (libcommon.Hash{}) {
+			if mix == (common.Hash{}) {
 				return beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("mix not found for slot %d and index %d. maybe block was not backfilled or range was pruned", expectedSlot, mixPosition))
 			}
+		}
+
+		// if the proposer duties are in the lookahead vector, we can use the lookahead vector to fetch the proposers
+		if a.isProposerDutyInLookaheadVector(s, epoch) {
+			lookaheadVector := s.GetProposerLookahead()
+			stateEpoch := state.Epoch(s)
+			startLookAheadIndex := (epoch - stateEpoch) * a.beaconChainCfg.SlotsPerEpoch
+			for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
+				proposerIndex := lookaheadVector.Get(int(startLookAheadIndex + i))
+				var pk common.Bytes48
+				pk, err = s.ValidatorPublicKey(int(proposerIndex))
+				if err != nil {
+					panic(err)
+				}
+				duties[i] = proposerDuties{
+					Pubkey:         pk,
+					ValidatorIndex: proposerIndex,
+					Slot:           (epoch * a.beaconChainCfg.SlotsPerEpoch) + i,
+				}
+			}
+			return nil
 		}
 
 		for slot := expectedSlot; slot < expectedSlot+a.beaconChainCfg.SlotsPerEpoch; slot++ {
@@ -111,7 +137,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 				if err != nil {
 					panic(err)
 				}
-				var pk libcommon.Bytes48
+				var pk common.Bytes48
 				pk, err = s.ValidatorPublicKey(int(proposerIndex))
 				if err != nil {
 					panic(err)

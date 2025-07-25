@@ -20,12 +20,11 @@ import (
 	"errors"
 	"reflect"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/consensus"
 )
 
 var (
@@ -40,7 +39,7 @@ var (
 //
 // We regard two types of accounts as local miner account: etherbase
 // and accounts specified via `txpool.locals` flag.
-func IsLocalBlock(engine consensus.Engine, etherbase libcommon.Address, txPoolLocals []libcommon.Address, header *types.Header) bool {
+func IsLocalBlock(engine consensus.Engine, etherbase common.Address, txPoolLocals []common.Address, header *types.Header) bool {
 	author, err := engine.Author(header)
 	if err != nil {
 		log.Warn("Failed to retrieve block author", "number", header.Number, "header_hash", header.Hash(), "err", err)
@@ -60,11 +59,11 @@ func IsLocalBlock(engine consensus.Engine, etherbase libcommon.Address, txPoolLo
 	return false
 }
 
-func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []libcommon.Hash, transactions *[]types.Transaction) error {
+func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []common.Hash, transactions *[]types.Transaction) error {
 	if expectedBlobHashes == nil {
 		return ErrNilBlobHashes
 	}
-	actualBlobHashes := []libcommon.Hash{}
+	actualBlobHashes := []common.Hash{}
 	for _, txn := range *transactions {
 		if txn.Type() == types.BlobTxType {
 			for _, h := range txn.GetBlobHashes() {
