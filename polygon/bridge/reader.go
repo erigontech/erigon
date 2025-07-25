@@ -112,25 +112,17 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 }
 
 // Events returns all sync events at blockNum
-func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, ok, err := r.store.BlockEventIdsRange(ctx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, nil
-	}
-
-	eventsRaw := make([]*types.Message, 0, end-start+1)
-
-	events, err := r.store.Events(ctx, start, end+1)
+func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error) {
+	events, err := r.store.EventsByBlock(ctx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(events) > 0 && dbg.Enabled(ctx) {
-		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "start", start, "end", end, "len", len(events))
+		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "len", len(events))
 	}
+
+	eventsRaw := make([]*types.Message, 0, len(events))
 
 	// convert to message
 	for _, event := range events {
@@ -174,8 +166,10 @@ func NewRemoteReader(client remote.BridgeBackendClient) *RemoteReader {
 	}
 }
 
-func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockNum: blockNum})
+func (r *RemoteReader) Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error) {
+	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{
+		BlockNum:  blockNum,
+		BlockHash: gointerfaces.ConvertHashToH256(blockHash)})
 	if err != nil {
 		return nil, err
 	}

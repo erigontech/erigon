@@ -19,26 +19,33 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
+	"math"
 	"testing"
 
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
 )
@@ -81,7 +88,27 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEventEmitter()
-	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters), emitters, sd, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
+
+	// Create required components
+	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
+	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, kv.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	localValidators := validator_params.NewValidatorParams()
+
+	store, err := forkchoice.NewForkChoiceStore(
+		ethClock,
+		anchorState,
+		nil, // execution engine
+		pool,
+		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
+		emitters,
+		sd,
+		blobStorage,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		localValidators,
+		false, // probabilisticHeadGetter
+	)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -149,9 +176,29 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEventEmitter()
 	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
-		Beacon: true,
-	}, emitters), emitters, sd, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
+
+	// Create required components
+	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
+	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, kv.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	localValidators := validator_params.NewValidatorParams()
+
+	store, err := forkchoice.NewForkChoiceStore(
+		ethClock,
+		anchorState,
+		nil, // execution engine
+		pool,
+		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+			Beacon: true,
+		}, emitters),
+		emitters,
+		sd,
+		blobStorage,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		localValidators,
+		false, // probabilisticHeadGetter
+	)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {

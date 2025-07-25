@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type Aggregator struct {
@@ -525,22 +526,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
 	}
 
-	err := func() error {
-		defer func() {
-			r := recover()
-			if err, ok := r.(error); ok {
-				var pe errgroup.PanicError
-				if errors.As(err, &pe) {
-					a.logger.Crit("panic error in Aggregator errgroup", "err", pe, "stack", string(pe.Stack))
-					os.Stderr.Write(pe.Stack)
-				}
-			}
-			if r != nil {
-				panic(r)
-			}
-		}()
-		return g.Wait()
-	}()
+	err := g.Wait()
 	if err != nil {
 		return err
 	}
@@ -767,26 +753,30 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
-	defer a.buildingFiles.Store(false)
-	if toStep > fromStep {
-		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
-	}
-	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-		if err := a.buildFiles(ctx, step); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer a.buildingFiles.Store(false)
+		if toStep > fromStep {
+			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+		}
+		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+			if err := a.buildFiles(ctx, step); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+					panic(err)
+				}
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				panic(err)
 			}
-			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-			panic(err)
+			a.onFilesChange(nil)
 		}
-		a.onFilesChange(nil)
-	}
 
-	go func() {
-		if err := a.MergeLoop(ctx); err != nil {
-			panic(err)
-		}
-		a.onFilesChange(nil)
+		go func() {
+			if err := a.MergeLoop(ctx); err != nil {
+				panic(err)
+			}
+			a.onFilesChange(nil)
+		}()
 	}()
 	return nil
 }
@@ -881,6 +871,9 @@ func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles)
 		files = append(files, at.d[domain].Files()...)
 	}
 	return files
+}
+func (at *AggregatorRoTx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return at.d[domain].d.version.DataKV.Current
 }
 func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {
@@ -987,7 +980,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	furiousPrune := timeout > 5*time.Hour
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
 
-	var pruneLimit uint64 = 1_000
+	var pruneLimit uint64 = 100
 	if furiousPrune {
 		pruneLimit = 1_000_000
 	}
@@ -1651,11 +1644,7 @@ func (at *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, t
 }
 
 func (at *AggregatorRoTx) HistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
-	hr, err := at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
-	if err != nil {
-		return nil, err
-	}
-	return stream.WrapKV(hr), nil
+	return at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
 }
 
 func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (totalKeys uint64) {

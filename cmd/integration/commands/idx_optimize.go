@@ -185,6 +185,7 @@ var idxOptimize = &cobra.Command{
 			}
 			idxPath := dirs.SnapAccessors + file.Name() + "i.new"
 			cfg := recsplit.RecSplitArgs{
+				Version:            1,
 				Enums:              true,
 				LessFalsePositives: true,
 

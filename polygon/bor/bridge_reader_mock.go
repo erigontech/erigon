@@ -84,18 +84,18 @@ func (c *MockbridgeReaderEventTxnLookupCall) DoAndReturn(f func(context.Context,
 }
 
 // Events mocks base method.
-func (m *MockbridgeReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
+func (m *MockbridgeReader) Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Events", ctx, blockNum)
+	ret := m.ctrl.Call(m, "Events", ctx, blockHash, blockNum)
 	ret0, _ := ret[0].([]*types.Message)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Events indicates an expected call of Events.
-func (mr *MockbridgeReaderMockRecorder) Events(ctx, blockNum any) *MockbridgeReaderEventsCall {
+func (mr *MockbridgeReaderMockRecorder) Events(ctx, blockHash, blockNum any) *MockbridgeReaderEventsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Events", reflect.TypeOf((*MockbridgeReader)(nil).Events), ctx, blockNum)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Events", reflect.TypeOf((*MockbridgeReader)(nil).Events), ctx, blockHash, blockNum)
 	return &MockbridgeReaderEventsCall{Call: call}
 }
 

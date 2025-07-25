@@ -127,7 +127,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 			header, err = api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNr))
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+				header, err = api._blockReader.HeaderByHash(ctx, tx, blockHash)
 			}
 		}
 	}

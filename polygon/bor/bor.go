@@ -260,7 +260,7 @@ type spanReader interface {
 
 //go:generate mockgen -typed=true -destination=./bridge_reader_mock.go -package=bor . bridgeReader
 type bridgeReader interface {
-	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error)
 	EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
 }
@@ -1666,7 +1666,7 @@ func (c *Bor) CommitStates(
 				return err
 			}
 		} else {
-			events, err = c.bridgeReader.Events(ctx, blockNum)
+			events, err = c.bridgeReader.Events(ctx, header.Hash(), blockNum)
 			if err != nil {
 				return err
 			}

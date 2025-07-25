@@ -17,6 +17,7 @@
 package devnet
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math/big"
@@ -175,9 +176,11 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 		return err
 	}
 
+	debugMux := cmp.Or(metricsMux, pprofMux)
+
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
-	nodeConf, err := enode.NewNodConfigUrfave(ctx, logger)
+	nodeConf, err := enode.NewNodConfigUrfave(ctx, debugMux, logger)
 	if err != nil {
 		return err
 	}

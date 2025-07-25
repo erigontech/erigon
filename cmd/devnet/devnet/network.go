@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	devnet_args "github.com/erigontech/erigon/cmd/devnet/args"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/rpc/requests"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
@@ -54,7 +53,6 @@ type Network struct {
 	BorStateSyncDelay  time.Duration
 	BorPeriod          time.Duration
 	BorMinBlockSize    int
-	BorWithMilestones  *bool
 	wg                 sync.WaitGroup
 	peers              []string
 	namedNodes         map[string]Node
@@ -87,12 +85,6 @@ func (nw *Network) Start(ctx context.Context) error {
 		HttpPort:       nw.BaseRPCPort,
 		PrivateApiAddr: nw.BasePrivateApiAddr,
 		Snapshots:      nw.Snapshots,
-	}
-
-	if nw.BorWithMilestones != nil {
-		baseNode.WithHeimdallMilestones = *nw.BorWithMilestones
-	} else {
-		baseNode.WithHeimdallMilestones = utils.WithHeimdallMilestones.Value
 	}
 
 	nw.namedNodes = map[string]Node{}

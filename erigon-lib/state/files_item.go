@@ -101,6 +101,10 @@ func (i *FilesItem) MadvNormal() {
 	//i.bindex.MadvNormal()
 	//i.existence.MadvNormal()
 }
+func (i *FilesItem) EnableReadAhead() {
+	i.decompressor.MadvSequential()
+	i.index.MadvSequential()
+}
 func (i *FilesItem) DisableReadAhead() {
 	i.decompressor.DisableReadAhead()
 	i.index.DisableReadAhead()

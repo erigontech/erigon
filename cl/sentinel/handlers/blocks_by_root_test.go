@@ -86,7 +86,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
 	)
 	c.Start()
 	var req solid.HashListSSZ = solid.NewHashList(len(expBlocks))

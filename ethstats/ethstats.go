@@ -55,6 +55,11 @@ const (
 	historyUpdateRange = 50
 )
 
+var (
+	// urlRegex is a regular expression for parsing netstats connection URL
+	urlRegex = regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
+)
+
 // Service implements an Ethereum netstats reporting daemon that pushes local
 // chain statistics up to a monitoring server.
 type Service struct {
@@ -130,8 +135,7 @@ func (w *connWrapper) Close() error {
 func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader services.FullBlockReader,
 	engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpool.TxpoolClient) error {
 	// Parse the netstats connection url
-	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
-	parts := re.FindStringSubmatch(url)
+	parts := urlRegex.FindStringSubmatch(url)
 	if len(parts) != 5 {
 		return fmt.Errorf("invalid netstats url: \"%s\", should be nodename:secret@host:port", url)
 	}

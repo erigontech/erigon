@@ -67,6 +67,6 @@
         }
       }
     },
-    "defaultBlockGasLimit" : 45000000
+  "defaultBlockGasLimit": 45000000
   }
   

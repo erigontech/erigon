@@ -71,9 +71,8 @@ func (r *IndexReader) Close() {
 	r.index.readers.Put(r)
 }
 
-func (r *IndexReader) LookupHash(hi, lo uint64) (uint64, bool) { return r.index.Lookup(hi, lo) }
-func (r *IndexReader) OrdinalLookup(id uint64) uint64          { return r.index.OrdinalLookup(id) }
-func (r *IndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
+func (r *IndexReader) OrdinalLookup(id uint64) uint64 { return r.index.OrdinalLookup(id) }
+func (r *IndexReader) twoLayerLookup(key []byte) (uint64, bool) {
 	if r.index.Empty() {
 		return 0, false
 	}
@@ -84,7 +83,7 @@ func (r *IndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
 	}
 	return r.OrdinalLookup(id), true
 }
-func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
+func (r *IndexReader) twoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
 	if r.index.Empty() {
 		return 0, false
 	}
@@ -95,3 +94,21 @@ func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
 	return r.index.OrdinalLookup(id), true
 }
 func (r *IndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
+
+// TwoLayerLookupByHash high-level methods. allow to turn-off `enum` in future
+func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
+	enums := r.index.Enums()
+	if enums {
+		return r.twoLayerLookupByHash(hi, lo)
+	}
+	return r.index.Lookup(hi, lo)
+}
+
+// TwoLayerLookup high-level methods. allow to turn-off `enum` in future
+func (r *IndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
+	enums := r.index.Enums()
+	if enums {
+		return r.twoLayerLookup(key)
+	}
+	return r.Lookup(key)
+}

@@ -23,10 +23,10 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/anacrolix/missinggo/v2/panicif"
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
@@ -70,22 +70,39 @@ type PreverifiedItems []PreverifiedItem
 
 type Preverified struct {
 	Local bool
+	// These should be sorted by Name.
 	Items PreverifiedItems
 }
 
-func (p Preverified) Get(name string) (PreverifiedItem, bool) {
-	i := sort.Search(len(p.Items), func(i int) bool { return p.Items[i].Name >= name })
-	if i >= len(p.Items) || p.Items[i].Name != name {
-		return PreverifiedItem{}, false
-	}
-
-	return p.Items[i], true
+func (p PreverifiedItems) searchName(name string) (int, bool) {
+	p.assertSorted()
+	return slices.BinarySearchFunc(p, name, func(l PreverifiedItem, target string) int {
+		return strings.Compare(l.Name, target)
+	})
 }
 
-func (p PreverifiedItems) Contains(name string, ignoreVersion ...bool) bool {
+// Preverified.Typed was breaking sort invariance.
+func (me PreverifiedItems) assertSorted() {
+	panicif.False(slices.IsSortedFunc(me, preverifiedItemCompare))
+}
+
+func preverifiedItemCompare(a, b PreverifiedItem) int {
+	return strings.Compare(a.Name, b.Name)
+}
+
+func (me PreverifiedItems) Get(name string) (item PreverifiedItem, found bool) {
+	me.assertSorted()
+	i, found := me.searchName(name)
+	if found {
+		item = me[i]
+	}
+	return
+}
+
+func (me PreverifiedItems) Contains(name string, ignoreVersion ...bool) bool {
 	if len(ignoreVersion) > 0 && ignoreVersion[0] {
 		_, name, _ := strings.Cut(name, "-")
-		for _, item := range p {
+		for _, item := range me {
 			_, noVersion, _ := strings.Cut(item.Name, "-")
 			if noVersion == name {
 				return true
@@ -93,9 +110,8 @@ func (p PreverifiedItems) Contains(name string, ignoreVersion ...bool) bool {
 		}
 		return false
 	}
-
-	i := sort.Search(len(p), func(i int) bool { return p[i].Name >= name })
-	return i < len(p) && p[i].Name == name
+	_, found := me.searchName(name)
+	return found
 }
 
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
@@ -186,86 +202,17 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 	var versioned []PreverifiedItem
 
+	// Scanning this can introduce an unexpected order to preverified items as it's not keyed on the
+	// item name.
 	bestVersions.Scan(func(key string, value PreverifiedItem) bool {
 		versioned = append(versioned, value)
 		return true
 	})
-
+	slices.SortFunc(versioned, func(i, j PreverifiedItem) int {
+		return strings.Compare(i.Name, j.Name)
+	})
 	p.Items = versioned
 	return p
-}
-
-func (p Preverified) Versioned(preferredVersion ver.Version, minVersion ver.Version, types ...snaptype.Enum) []PreverifiedItem {
-	var bestVersions btree.Map[string, PreverifiedItem]
-
-	for _, p := range p.Items {
-		v, name, ok := strings.Cut(p.Name, "-")
-		if !ok {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
-				bestVersions.Set(p.Name, p)
-				continue
-			}
-			continue
-		}
-
-		parts := strings.Split(name, "-")
-		if len(parts) < 3 {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
-				bestVersions.Set(p.Name, p)
-				continue
-			}
-			continue
-		}
-		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
-		include := false
-
-		if len(types) > 0 {
-			for _, typ := range types {
-				if typeName == typ.String() {
-					include = true
-					break
-				}
-			}
-
-			if !include {
-				continue
-			}
-		}
-
-		version, err := ver.ParseVersion(v)
-
-		if err != nil {
-			continue
-		}
-
-		if version.Less(minVersion) {
-			continue
-		}
-
-		if preferredVersion.Less(version) {
-			continue
-		}
-
-		if current, ok := bestVersions.Get(name); ok {
-			v, _, _ := strings.Cut(current.Name, "-")
-			cv, _ := ver.ParseVersion(v)
-
-			if cv.Less(version) {
-				bestVersions.Set(name, p)
-			}
-		} else {
-			bestVersions.Set(name, p)
-		}
-	}
-
-	var versioned []PreverifiedItem
-
-	bestVersions.Scan(func(key string, value PreverifiedItem) bool {
-		versioned = append(versioned, value)
-		return true
-	})
-
-	return versioned
 }
 
 func (p Preverified) MaxBlock(version ver.Version) (uint64, error) {
@@ -378,7 +325,7 @@ func doSort(in map[string]string) []PreverifiedItem {
 	for k, v := range in {
 		out = append(out, PreverifiedItem{k, v})
 	}
-	slices.SortFunc(out, func(i, j PreverifiedItem) int { return strings.Compare(i.Name, j.Name) })
+	slices.SortFunc(out, preverifiedItemCompare)
 	return out
 }
 
@@ -392,6 +339,7 @@ func newCfg(networkName string, preverified Preverified) *Cfg {
 	}
 	cfg.PreverifiedParsed = make([]*snaptype.FileInfo, len(preverified.Items))
 	for i, p := range cfg.Preverified.Items {
+		// TODO: Pack these into a single array, or consider inlining them into PreverifiedParsed?
 		info, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
 			continue
@@ -494,7 +442,8 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 	if networkName == "" {
 		return false
 	}
-	return KnownCfg(networkName).Seedable(info)
+	snapCfg, _ := KnownCfg(networkName)
+	return snapCfg.Seedable(info)
 }
 
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
@@ -503,7 +452,7 @@ func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint6
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
 	var _max uint64
-	segConfig := KnownCfg(chain)
+	segConfig, _ := KnownCfg(chain)
 	if list, err := snaptype.Segments(dir); err == nil {
 		for _, info := range list {
 			if segConfig.Seedable(info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > _max {
@@ -528,12 +477,12 @@ func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uin
 }
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
-func KnownCfg(networkName string) *Cfg {
+func KnownCfg(networkName string) (*Cfg, bool) {
 	c, ok := knownPreverified[networkName]
 	if !ok {
-		return newCfg(networkName, Preverified{})
+		return newCfg(networkName, Preverified{}), false
 	}
-	return newCfg(networkName, c.Typed(knownTypes[networkName]))
+	return newCfg(networkName, c.Typed(knownTypes[networkName])), true
 }
 
 var KnownWebseeds = map[string][]string{
@@ -559,15 +508,17 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
-func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
-	loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
+func LoadRemotePreverified(ctx context.Context) (err error) {
+	// Can't log in erigon-snapshot repo due to erigon-lib module import path.
+	log.Info("Loading remote snapshot hashes")
+	err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
 	if err != nil {
 		log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
 
-		// Fallback to github if R2 fails
-		loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+		// Fallback to GitHub if R2 fails
+		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
 		if err != nil {
-			return false, err
+			return err
 		}
 	}
 
@@ -603,7 +554,7 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 		networkname.Chiado:     Chiado,
 		networkname.Hoodi:      Hoodi,
 	}
-	return loaded, nil
+	return
 }
 
 func SetToml(networkName string, toml []byte, local bool) {

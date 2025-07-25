@@ -5,6 +5,7 @@ import "strings"
 type Accessors int
 
 func (l Accessors) Has(target Accessors) bool { return l&target != 0 }
+func (l Accessors) Add(a Accessors) Accessors { return l | a }
 
 const (
 	AccessorBTree     Accessors = 0b1

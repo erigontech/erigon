@@ -212,13 +212,9 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	if r.CumulativeGasUsed, err = s.Uint(); err != nil {
 		return fmt.Errorf("read CumulativeGasUsed: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(r.Bloom[:]); err != nil {
 		return fmt.Errorf("read Bloom: %w", err)
 	}
-	if len(b) != 256 {
-		return fmt.Errorf("wrong size for Bloom: %d", len(b))
-	}
-	copy(r.Bloom[:], b)
 	// decode logs
 	if _, err = s.List(); err != nil {
 		return fmt.Errorf("open Logs: %w", err)
@@ -229,13 +225,9 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		r.Logs = append(r.Logs, &Log{})
 		log := r.Logs[len(r.Logs)-1]
-		if b, err = s.Bytes(); err != nil {
+		if err = s.ReadBytes(log.Address[:]); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if len(b) != 20 {
-			return fmt.Errorf("wrong size for Log address: %d", len(b))
-		}
-		copy(log.Address[:], b)
 		if _, err = s.List(); err != nil {
 			return fmt.Errorf("open Topics: %w", err)
 		}
@@ -349,12 +341,12 @@ func (r *Receipt) Copy() *Receipt {
 		PostState:         slices.Clone(r.PostState),
 		Status:            r.Status,
 		CumulativeGasUsed: r.CumulativeGasUsed,
-		Bloom:             BytesToBloom(r.Bloom.Bytes()),
+		Bloom:             r.Bloom,
 		Logs:              r.Logs.Copy(),
-		TxHash:            common.BytesToHash(r.TxHash.Bytes()),
-		ContractAddress:   common.BytesToAddress(r.ContractAddress.Bytes()),
+		TxHash:            r.TxHash,
+		ContractAddress:   r.ContractAddress,
 		GasUsed:           r.GasUsed,
-		BlockHash:         common.BytesToHash(r.BlockHash.Bytes()),
+		BlockHash:         r.BlockHash,
 		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,
 
@@ -596,7 +588,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 
 // DeriveFieldsV4ForCachedReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum uint64, txnHash common.Hash) {
+func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum uint64, txnHash common.Hash, calcBloom bool) {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	r.BlockHash = blockHash
@@ -612,7 +604,9 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
-	r.Bloom = CreateBloom(Receipts{r})
+	if calcBloom {
+		r.Bloom = CreateBloom(Receipts{r})
+	}
 }
 
 // TODO: maybe make it more prettier (only for debug purposes)

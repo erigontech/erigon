@@ -54,8 +54,13 @@ func LogDirPath(ctx *cli.Context) string {
 // This function which is used in Erigon itself.
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
-func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
-	consoleDefaultLevel log.Lvl, dirDefaultLevel log.Lvl, rootHandler bool) log.Logger {
+func SetupLoggerCtx(
+	filePrefix string,
+	ctx *cli.Context,
+	consoleDefaultLevel log.Lvl,
+	dirDefaultLevel log.Lvl,
+	rootHandler bool,
+) log.Logger {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
 

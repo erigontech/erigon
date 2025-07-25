@@ -76,8 +76,14 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 		}
 		g.Reset(offset)
 		if g.HasNext() {
-			key, offset := g.Next(nil)
-			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+			wrapper := NewSegReaderWrapper(g)
+			if wrapper.HasNext() {
+				key, val, err := wrapper.Next()
+				if err != nil {
+					return err
+				}
+				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			}
 		}
 	}
 	binary.BigEndian.PutUint64(hi.startTxKey[:], hi.startTxNum)
@@ -92,18 +98,15 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
 		key := top.key
-		var idxVal []byte
-		//if hi.compressVals {
-		idxVal, _ = top.g.Next(nil)
-		//} else {
-		//	idxVal, _ = top.g.NextUncompressed()
-		//}
+		idxVal := top.val
+
+		// Get the next key-value pair for the next iteration
 		if top.g.HasNext() {
-			//if hi.compressVals {
-			top.key, _ = top.g.Next(nil)
-			//} else {
-			//	top.key, _ = top.g.NextUncompressed()
-			//}
+			var err error
+			top.key, top.val, err = top.g.Next()
+			if err != nil {
+				return err
+			}
 			if hi.toPrefix == nil || bytes.Compare(top.key, hi.toPrefix) < 0 {
 				heap.Push(&hi.h, top)
 			}
@@ -116,6 +119,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
+
 		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
@@ -391,19 +395,13 @@ func (hi *HistoryChangesIterFiles) Close() {
 func (hi *HistoryChangesIterFiles) advance() error {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
-		key := top.key
-		var idxVal []byte
-		//if hi.compressVals {
-		idxVal, _ = top.g.Next(nil)
-		//} else {
-		//	idxVal, _ = top.g.NextUncompressed()
-		//}
+		key, idxVal := top.key, top.val
 		if top.g.HasNext() {
-			//if hi.compressVals {
-			top.key, _ = top.g.Next(nil)
-			//} else {
-			//	top.key, _ = top.g.NextUncompressed()
-			//}
+			var err error
+			top.key, top.val, err = top.g.Next()
+			if err != nil {
+				return err
+			}
 			heap.Push(&hi.h, top)
 		}
 
@@ -490,9 +488,7 @@ type HistoryChangesIterDB struct {
 	startTxKey      [8]byte
 
 	nextKey, nextVal []byte
-	nextStep         uint64
 	k, v             []byte
-	step             uint64
 	err              error
 }
 
@@ -647,15 +643,15 @@ func (hi *HistoryChangesIterDB) HasNext() bool {
 	return true
 }
 
-func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, uint64, error) {
+func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	if hi.err != nil {
-		return nil, nil, 0, hi.err
+		return nil, nil, hi.err
 	}
 	hi.limit--
-	hi.k, hi.v, hi.step = hi.nextKey, hi.nextVal, hi.nextStep
+	hi.k, hi.v = hi.nextKey, hi.nextVal
 	if err := hi.advance(); err != nil {
-		return nil, nil, 0, err
+		return nil, nil, err
 	}
 	order.Asc.Assert(hi.k, hi.nextKey)
-	return hi.k, hi.v, hi.step, nil
+	return hi.k, hi.v, nil
 }

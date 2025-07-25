@@ -37,7 +37,7 @@ func TestGetForkDigests(t *testing.T) {
 	clock := NewEthereumClock(0, common.Hash{}, &clparams.MainnetBeaconConfig)
 	currDigest, err := clock.CurrentForkDigest()
 	require.NoError(t, err)
-	require.Equal(t, common.Bytes4{0xf5, 0xa5, 0xfd, 0x42}, currDigest)
+	require.Equal(t, common.Bytes4{0xc8, 0xb9, 0xe6, 0xac}, currDigest)
 	nextDigest, err := clock.NextForkDigest()
 	require.NoError(t, err)
 	lastFork, err := clock.LastFork()

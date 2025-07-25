@@ -31,6 +31,7 @@ const (
 	Sentinel_PublishGossip_FullMethodName      = "/sentinel.Sentinel/PublishGossip"
 	Sentinel_Identity_FullMethodName           = "/sentinel.Sentinel/Identity"
 	Sentinel_PeersInfo_FullMethodName          = "/sentinel.Sentinel/PeersInfo"
+	Sentinel_SendPeerRequest_FullMethodName    = "/sentinel.Sentinel/SendPeerRequest"
 )
 
 // SentinelClient is the client API for Sentinel service.
@@ -49,6 +50,7 @@ type SentinelClient interface {
 	PublishGossip(ctx context.Context, in *GossipData, opts ...grpc.CallOption) (*EmptyMessage, error)
 	Identity(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*IdentityResponse, error)
 	PeersInfo(ctx context.Context, in *PeersInfoRequest, opts ...grpc.CallOption) (*PeersInfoResponse, error)
+	SendPeerRequest(ctx context.Context, in *RequestDataWithPeer, opts ...grpc.CallOption) (*ResponseData, error)
 }
 
 type sentinelClient struct {
@@ -188,6 +190,16 @@ func (c *sentinelClient) PeersInfo(ctx context.Context, in *PeersInfoRequest, op
 	return out, nil
 }
 
+func (c *sentinelClient) SendPeerRequest(ctx context.Context, in *RequestDataWithPeer, opts ...grpc.CallOption) (*ResponseData, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResponseData)
+	err := c.cc.Invoke(ctx, Sentinel_SendPeerRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SentinelServer is the server API for Sentinel service.
 // All implementations must embed UnimplementedSentinelServer
 // for forward compatibility.
@@ -204,6 +216,7 @@ type SentinelServer interface {
 	PublishGossip(context.Context, *GossipData) (*EmptyMessage, error)
 	Identity(context.Context, *EmptyMessage) (*IdentityResponse, error)
 	PeersInfo(context.Context, *PeersInfoRequest) (*PeersInfoResponse, error)
+	SendPeerRequest(context.Context, *RequestDataWithPeer) (*ResponseData, error)
 	mustEmbedUnimplementedSentinelServer()
 }
 
@@ -249,6 +262,9 @@ func (UnimplementedSentinelServer) Identity(context.Context, *EmptyMessage) (*Id
 }
 func (UnimplementedSentinelServer) PeersInfo(context.Context, *PeersInfoRequest) (*PeersInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PeersInfo not implemented")
+}
+func (UnimplementedSentinelServer) SendPeerRequest(context.Context, *RequestDataWithPeer) (*ResponseData, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SendPeerRequest not implemented")
 }
 func (UnimplementedSentinelServer) mustEmbedUnimplementedSentinelServer() {}
 func (UnimplementedSentinelServer) testEmbeddedByValue()                  {}
@@ -480,6 +496,24 @@ func _Sentinel_PeersInfo_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Sentinel_SendPeerRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestDataWithPeer)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentinelServer).SendPeerRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentinel_SendPeerRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentinelServer).SendPeerRequest(ctx, req.(*RequestDataWithPeer))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Sentinel_ServiceDesc is the grpc.ServiceDesc for Sentinel service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -530,6 +564,10 @@ var Sentinel_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PeersInfo",
 			Handler:    _Sentinel_PeersInfo_Handler,
+		},
+		{
+			MethodName: "SendPeerRequest",
+			Handler:    _Sentinel_SendPeerRequest_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

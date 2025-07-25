@@ -44,8 +44,8 @@ import (
 const foreseenProposers = 16
 
 var (
-	ErrEIP4844DataNotAvailable = errors.New("EIP-4844 blob data is not available")
-	ErrEIP7594DataNotAvailable = errors.New("EIP-7594 column data is not available")
+	ErrEIP4844DataNotAvailable       = errors.New("EIP-4844 blob data is not available")
+	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -116,14 +116,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check if blob data is available
-	if checkDataAvaiability && !clparams.IsDevnet() && block.Block.Body.BlobKzgCommitments.Len() > 0 {
+	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 {
 		if block.Version() >= clparams.FuluVersion {
-			available, err := f.peerDas.IsDataAvailable(ctx, blockRoot)
+			available, err := f.peerDas.IsDataAvailable(blockRoot)
 			if err != nil {
 				return err
 			}
 			if !available {
-				return fmt.Errorf("OnBlock: some column data is not available for block %x, err: %v", common.Hash(blockRoot), ErrEIP7594DataNotAvailable)
+				return ErrEIP7594ColumnDataNotAvailable
 			}
 		} else if block.Version() >= clparams.DenebVersion {
 			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
@@ -285,6 +285,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
+	}
+
+	if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
+		// update the custody requirement whenever we see a new block
+		custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
+		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
 	}
 	return nil
 }

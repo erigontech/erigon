@@ -21,9 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"runtime/debug"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/debug"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -204,12 +204,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 }
 
 func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			debug.PrintStack()
-			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
-		}
-	}() // avoid crash because Erigon's core does many things
+	// avoid crash because Erigon's core does many things
+	defer debug.RecoverPanicIntoError(logger, &err)
 
 	externalTx := txc.Tx != nil
 	finishProgressBefore, borProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(db, txc.Tx)
@@ -221,7 +217,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	if blockReader.BorSnapshots() != nil {
-		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks()
+		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks(false)
 	}
 	canRunCycleInOneTransaction := isSynced
 	if externalTx {

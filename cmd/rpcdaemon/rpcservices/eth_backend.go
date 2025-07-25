@@ -120,9 +120,11 @@ func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 	return back.blockReader.Ready(ctx)
 }
 
-func (back *RemoteBackend) AllTypes() []snaptype.Type    { panic("not implemented") }
-func (back *RemoteBackend) FrozenBlocks() uint64         { return back.blockReader.FrozenBlocks() }
-func (back *RemoteBackend) FrozenBorBlocks() uint64      { return back.blockReader.FrozenBorBlocks() }
+func (back *RemoteBackend) AllTypes() []snaptype.Type { panic("not implemented") }
+func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.FrozenBlocks() }
+func (back *RemoteBackend) FrozenBorBlocks(align bool) uint64 {
+	return back.blockReader.FrozenBorBlocks(align)
+}
 func (back *RemoteBackend) FrozenFiles() (list []string) { return back.blockReader.FrozenFiles() }
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)

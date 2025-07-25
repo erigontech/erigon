@@ -107,16 +107,9 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 	if obj.Validator, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Validator: %w", err)
 	}
-
-	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(obj.Address[:]); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	if len(b) != 20 {
-		return fmt.Errorf("wrong size for Address: %d", len(b))
-	}
-	copy(obj.Address[:], b)
-
 	if obj.Amount, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Amount: %w", err)
 	}
