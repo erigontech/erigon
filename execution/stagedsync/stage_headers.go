@@ -195,9 +195,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
 				return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 			}
-			//if err = cfg.blockWriter.MakeBodiesCanonical(tx, blockNum); err != nil {
-			//	return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
-			//}
+			if err = cfg.blockWriter.MakeBodiesCanonical(tx, blockNum); err != nil {
+				return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+			}
 			rawdb.WriteHeadBlockHash(tx, blk.Hash())
 			if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
 				return err
@@ -245,9 +245,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return err
 		}
 	}
-	// TODO need tor ead progress and fill header number index?
-	cfg.hd.ReadProgressFromDb(tx)
-
+	//// TODO need tor ead progress and fill header number index?
+	//cfg.hd.ReadProgressFromDb(tx)
+	//
 	if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), firstBlock+1, latestProcessedBlock, ctx, logger); err != nil {
 		return err
 	}
@@ -260,6 +260,8 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	if err := cfg.blockWriter.MakeBodiesCanonical(tx, prev); err != nil {
 		return fmt.Errorf("failed to make bodies canonical %d: %w", prev, err)
 	}
+	ethdb.InitialiazeLocalWasmTarget()
+
 	if !useExternalTx {
 		cfg.hd.SetSynced()
 		err = tx.Commit()
@@ -268,8 +270,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 		log.Info("Committed transaction", "block", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
-
-	ethdb.InitialiazeLocalWasmTarget()
 
 	log.Info("Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "extTx", useExternalTx)
 	return nil
