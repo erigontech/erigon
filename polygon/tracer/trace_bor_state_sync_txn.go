@@ -21,10 +21,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -46,7 +46,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	blockNum uint64,
 	blockTime uint64,
 	blockCtx evmtypes.BlockContext,
-	stream *jsoniter.Stream,
+	stream jsonstream.Stream,
 	callTimeout time.Duration,
 	msgs []*types.Message,
 	txIndex int,

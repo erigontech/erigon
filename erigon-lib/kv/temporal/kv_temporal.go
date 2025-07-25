@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var ( // Compile time interface checks
@@ -45,7 +46,7 @@ var ( // Compile time interface checks
 //  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming friendly - less methods than Cursor, but constructor is powerful as `SELECT key, value FROM table WHERE key BETWEEN x1 AND x2 ORDER DESC LIMIT n`.
 
 //Methods Naming:
-//  Get: exact match of criterias
+//  Get: exact match of criteria
 //  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
 //  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
 
@@ -70,12 +71,25 @@ var ( // Compile time interface checks
 
 type DB struct {
 	kv.RwDB
-	agg *state.Aggregator
+	agg             *state.Aggregator
+	forkaggs        []*state.ForkableAgg
+	forkaggsEnabled bool
 }
 
-func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
-	return &DB{RwDB: db, agg: agg}, nil
+func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
+	tdb := &DB{RwDB: db, agg: agg}
+	if len(forkaggs) > 0 {
+		tdb.forkaggs = make([]*state.ForkableAgg, len(forkaggs))
+		for i, forkagg := range forkaggs {
+			if tdb.forkaggs[i] != nil {
+				panic("forkaggs already set")
+			}
+			tdb.forkaggs[i] = forkagg
+		}
+	}
+	return tdb, nil
 }
+func (db *DB) EnableForkable()           { db.forkaggsEnabled = true }
 func (db *DB) Agg() any                  { return db.agg }
 func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
@@ -88,6 +102,13 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.agg.BeginFilesRo()
+
+	if db.forkaggsEnabled {
+		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
+		for i, forkagg := range db.forkaggs {
+			tx.forkaggs[i] = forkagg.BeginTemporalTx()
+		}
+	}
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -175,8 +196,8 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	db.RwDB.Close()
 	db.agg.Close()
+	db.RwDB.Close()
 }
 
 func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
@@ -184,6 +205,7 @@ func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
 type tx struct {
 	db               *DB
 	aggtx            *state.AggregatorRoTx
+	forkaggs         []*state.ForkableAggTemporalTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 	mu               sync.RWMutex
@@ -209,6 +231,14 @@ func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.agg }
 func (tx *tx) Rollback() {
 	tx.autoClose()
+}
+func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
+	for i, forkagg := range tx.forkaggs {
+		if forkagg.IsForkablePresent(forkableId) {
+			return i
+		}
+	}
+	panic(fmt.Sprintf("forkable not found: %d", forkableId))
 }
 
 func (tx *Tx) Rollback() {
@@ -248,6 +278,26 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 		return fmt.Errorf("can't apply: transaction closed")
 	}
 	return applyTx.Apply(ctx, f)
+}
+
+func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
+	return tx.forkaggs[tx.searchForkableAggIdx(id)]
+}
+
+func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	return newUnmarkedTx(tx.Tx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
+}
+
+func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
+}
+
+func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
+	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
+}
+
+func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
+	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
 
 func (tx *RwTx) WarmupDB(force bool) error {
@@ -349,18 +399,6 @@ func (tx *RwTx) Commit() error {
 	return t.Commit()
 }
 
-func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryStartFrom(name)
-}
-
-func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
-}
-
-func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
-}
-
 func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.aggtx.RangeAsOf(tx.ctx, rtx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
@@ -389,31 +427,36 @@ func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step ui
 	return v, step, err
 }
 
-func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
+func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return tx.hasPrefix(name, tx.Tx, prefix)
 }
 
-func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
+func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return tx.hasPrefix(name, tx.RwTx, prefix)
 }
 
-func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, bool, error) {
-	it, err := tx.rangeLatest(name, dbTx, prefix, nil, 1)
+func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []byte, bool, error) {
+	to, ok := kv.NextSubtree(prefix)
+	if !ok {
+		to = nil
+	}
+
+	it, err := tx.rangeLatest(name, dbTx, prefix, to, 1)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
 	defer it.Close()
 	if !it.HasNext() {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 
-	k, _, err := it.Next()
+	k, v, err := it.Next()
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
-	return k, true, nil
+	return k, v, true, nil
 }
 
 func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
@@ -529,9 +572,24 @@ func (db *DB) ReloadSalt() error                         { return db.agg.ReloadS
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.agg.InvertedIdxTables(domain...)
 }
+func (db *DB) ReloadFiles() error { return db.agg.ReloadFiles() }
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
+	return db.agg.BuildMissedAccessors(ctx, workers)
+}
+func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
+	db.agg.MadvNormal()
+	return db
+}
+
+func (db *DB) DisableReadAhead() {
+	db.agg.DisableReadAhead()
+}
 
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
+}
+func (tx *Tx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
 }
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 	return tx.aggtx.TxNumsInFiles(domains...)
@@ -539,6 +597,9 @@ func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 
 func (tx *RwTx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
+}
+func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
 }
 func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
@@ -548,4 +609,51 @@ func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error 
 }
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
+}
+
+func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
+	return tx.forkaggs[tx.searchForkableAggIdx(id)]
+}
+func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
+	return tx.aggtx.HistoryStartFrom(name)
+}
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
+}
+func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
+}
+func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.Tx)
+}
+func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.RwTx)
+}
+func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.Tx)
+}
+func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.RwTx)
+}
+func (tx *tx) stepSize() uint64 {
+	return tx.aggtx.StepSize()
+}
+func (tx *Tx) StepSize() uint64 {
+	return tx.stepSize()
+}
+func (tx *RwTx) StepSize() uint64 {
+	return tx.stepSize()
+}
+
+func (tx *Tx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.Tx)
+}
+func (tx *RwTx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.RwTx)
+}
+func (tx *Tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.Tx)
+}
+func (tx *RwTx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.RwTx)
 }

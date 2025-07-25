@@ -43,10 +43,10 @@ import (
 	"github.com/erigontech/erigon/eth/tracers"
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/tests"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type callContext struct {
@@ -60,10 +60,11 @@ type callContext struct {
 
 // callLog is the result of LOG opCode
 type callLog struct {
-	Index   uint64         `json:"index"`
-	Address common.Address `json:"address"`
-	Topics  []common.Hash  `json:"topics"`
-	Data    hexutil.Bytes  `json:"data"`
+	Index    uint64         `json:"index"`
+	Address  common.Address `json:"address"`
+	Topics   []common.Hash  `json:"topics"`
+	Data     hexutil.Bytes  `json:"data"`
+	Position hexutil.Uint   `json:"position"`
 }
 
 // callTrace is the result of a callTracer run.
@@ -150,7 +151,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
+			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
@@ -262,7 +263,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
 	m := mock.Mock(b)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(b, err)
 	defer dbTx.Rollback()
 	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
@@ -283,7 +284,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		if _, err = tracer.GetResult(); err != nil {
 			b.Fatal(err)
 		}
-		statedb.RevertToSnapshot(snap)
+		statedb.RevertToSnapshot(snap, nil)
 	}
 }
 
@@ -296,7 +297,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
-	signer := types.LatestSigner(params.MainnetChainConfig)
+	signer := types.LatestSigner(chainspec.MainnetChainConfig)
 	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
 		GasPrice: uint256.NewInt(0),
 		CommonTx: types.CommonTx{
@@ -336,9 +337,9 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 			Balance: big.NewInt(500000000000000),
 		},
 	}
-	rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
+	rules := chainspec.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
 	m := mock.Mock(t)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()
 
@@ -349,7 +350,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		t.Fatalf("failed to create call tracer: %v", err)
 	}
 	statedb.SetHooks(tracer.Hooks)
-	evm := vm.NewEVM(context, txContext, statedb, params.MainnetChainConfig, vm.Config{Tracer: tracer.Hooks})
+	evm := vm.NewEVM(context, txContext, statedb, chainspec.MainnetChainConfig, vm.Config{Tracer: tracer.Hooks})
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)

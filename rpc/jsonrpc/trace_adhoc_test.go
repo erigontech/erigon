@@ -41,9 +41,9 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/tests"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestEmptyQuery(t *testing.T) {
@@ -406,7 +406,7 @@ func TestOeTracer(t *testing.T) {
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
+			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 

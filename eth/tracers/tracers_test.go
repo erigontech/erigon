@@ -39,8 +39,8 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/tests"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/erigontech/erigon/eth/tracers/js"
@@ -101,7 +101,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 
 	m := mock.Mock(t)
-	tx, err := m.DB.BeginRw(m.Ctx)
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	rules := chain.AllProtocolChanges.Rules(context.BlockNumber, context.Time)

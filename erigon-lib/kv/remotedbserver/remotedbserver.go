@@ -560,6 +560,30 @@ func (s *KvServer) GetLatest(_ context.Context, req *remote.GetLatestReq) (reply
 	}
 	return reply, nil
 }
+
+func (s *KvServer) HasPrefix(_ context.Context, req *remote.HasPrefixReq) (*remote.HasPrefixReply, error) {
+	domain, err := kv.String2Domain(req.Table)
+	if err != nil {
+		return nil, err
+	}
+
+	reply := &remote.HasPrefixReply{}
+	err = s.with(req.TxId, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("server DB doesn't implement kv.Temporal interface")
+		}
+
+		reply.FirstKey, reply.FirstVal, reply.HasPrefix, err = ttx.HasPrefix(domain, req.Prefix)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return reply, nil
+}
+
 func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (reply *remote.HistorySeekReply, err error) {
 	reply = &remote.HistorySeekReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
@@ -767,6 +791,22 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 	}); err != nil {
 		return nil, err
 	}
+	return reply, nil
+}
+
+func (s *KvServer) HistoryStartFrom(_ context.Context, req *remote.HistoryStartFromReq) (reply *remote.HistoryStartFromReply, err error) {
+	reply = &remote.HistoryStartFromReply{}
+	if err := s.with(req.TxId, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("server DB doesn't implement kv.Temporal interface")
+		}
+		reply.StartFrom = ttx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
 	return reply, nil
 }
 

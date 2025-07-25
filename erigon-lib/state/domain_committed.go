@@ -96,44 +96,55 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 // Requires separate function because commitment values have references inside and we need to properly dereference them using
 // replaceShortenedKeysInBranch method on each read. Data stored in DB is not referenced (so as in history).
 // Values from domain files with ranges > 2 steps are referenced.
-func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.TemporalTx) ([]byte, uint64, error) {
+func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint64, error) {
+	v, step, fromRam, err := sd.latestCommitment(prefix, tx)
+	if err != nil {
+		return v, step, err
+	}
+	if fromRam {
+		return v, step, nil
+	}
+
+	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v, sd.txNum)
+	return v, step, nil
+}
+
+func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, step uint64, fromRam bool, err error) {
 	aggTx := AggTx(tx)
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
-		return v, prevStep, nil
+		return v, prevStep, true, nil
 	}
-	v, step, found, err := tx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
+	v, step, found, err := tx.(kv.TemporalTx).Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
 	if err != nil {
-		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+		return nil, 0, false, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 	if found {
 		// db store values as is (without transformation) so safe to return
-		return v, step, nil
+		return v, step, true, nil
 	}
 
 	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
+	v, _, startTx, endTx, err := tx.(kv.TemporalTx).Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
 	if err != nil {
-		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+		return nil, 0, false, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
-		return v, endTx / sd.StepSize(), nil
+		return v, endTx / sd.StepSize(), false, nil
 	}
 
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
 	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx, aggTx)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
 	}
-	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv) // keep dereferenced value in cache (to avoid waste on another dereference)
-	return rv, endTx / sd.StepSize(), nil
+	return rv, endTx / sd.StepSize(), false, nil
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix, sd.txNum)
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix)
 	return
 }
 
@@ -166,8 +177,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.Compression)
-	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.Compression)
+	storageGetter := sto.dataReader(storageItem.decompressor)
+	accountGetter := acc.dataReader(accountItem.decompressor)
 	metricI := 0
 	for i, f := range aggTx.d[kv.CommitmentDomain].files {
 		if i > 5 {
@@ -234,7 +245,7 @@ func encodeShorterKey(buf []byte, offset uint64) []byte {
 
 // Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.
 // If item is nil, or shorter key was not found, or anything else goes wrong, nil key and false returned.
-func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, item *filesItem) (shortened []byte, found bool) {
+func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, item *FilesItem) (shortened []byte, found bool) {
 	if item == nil {
 		return nil, false
 	}
@@ -299,7 +310,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 // Given range should exactly match the range of some file, so expected to be multiple of aggregationStep.
 // At first it checks range among visible files, then among dirty files.
 // If file is not found anywhere, returns nil
-func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*filesItem, error) {
+func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesItem, error) {
 	for _, f := range dt.files {
 		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil {
 			return f.src, nil // found in visible files
@@ -308,13 +319,13 @@ func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*filesIt
 	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
 		return dirty, nil
 	}
-	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.version.DataKV.String(), dt.d.filenameBase, txFrom/dt.d.aggregationStep, txFrom/dt.d.aggregationStep)
+	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.version.DataKV.String(), dt.d.filenameBase, txFrom/dt.d.aggregationStep, txTo/dt.d.aggregationStep)
 }
 
-func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
-	var item *filesItem
+func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {
+	var item *FilesItem
 	if item == nil {
-		dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
+		dt.d.dirtyFiles.Walk(func(files []*FilesItem) bool {
 			for _, f := range files {
 				if f.startTxNum == txFrom && f.endTxNum == txTo {
 					item = f
@@ -374,8 +385,10 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
-func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) (valueTransformer, error) {
+func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *FilesItem) (valueTransformer, error) {
+	var keyBuf [60]byte // 52b key and 8b for inverted step
 	var err error
+
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
 		if mergedStorage, err = storage.rawLookupFileByRange(rng.from, rng.to); err != nil {
@@ -398,7 +411,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if _, ok := accountFileMap[f.startTxNum]; !ok {
 				accountFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
 			}
-			accountFileMap[f.startTxNum][f.endTxNum] = seg.NewReader(f.decompressor.MakeGetter(), accounts.d.Compression)
+			accountFileMap[f.startTxNum][f.endTxNum] = accounts.dataReader(f.decompressor)
 		}
 	}
 	storageFileMap := make(map[uint64]map[uint64]*seg.Reader)
@@ -407,12 +420,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if _, ok := storageFileMap[f.startTxNum]; !ok {
 				storageFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
 			}
-			storageFileMap[f.startTxNum][f.endTxNum] = seg.NewReader(f.decompressor.MakeGetter(), storage.d.Compression)
+			storageFileMap[f.startTxNum][f.endTxNum] = storage.dataReader(f.decompressor)
 		}
 	}
 
-	ms := seg.NewReader(mergedStorage.decompressor.MakeGetter(), storage.d.Compression)
-	ma := seg.NewReader(mergedAccount.decompressor.MakeGetter(), accounts.d.Compression)
+	ms := storage.dataReader(mergedStorage.decompressor)
+	ma := accounts.dataReader(mergedAccount.decompressor)
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.aggregationStep), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
@@ -428,7 +441,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
-			sig = seg.NewReader(dirty.decompressor.MakeGetter(), storage.d.Compression)
+			sig = storage.dataReader(dirty.decompressor)
 			storageFileMap[keyFromTxNum][keyEndTxNum] = sig
 		}
 
@@ -441,13 +454,13 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
-			aig = seg.NewReader(dirty.decompressor.MakeGetter(), accounts.d.Compression)
+			aig = accounts.dataReader(dirty.decompressor)
 			accountFileMap[keyFromTxNum][keyEndTxNum] = aig
 		}
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
 			var found bool
-			auxBuf := dt.keyBuf[:0]
+			auxBuf := keyBuf[:0]
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
 					// Non-optimised key originating from a database record

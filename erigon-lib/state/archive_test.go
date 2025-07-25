@@ -39,7 +39,7 @@ func TestArchiveWriter(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
 
-	td := generateTestData(t, 20, 52, 1, 1, 100000)
+	td := generateTestData(t, 4, 8, 1, 1, 10_000)
 
 	openWriter := func(tb testing.TB, tmp, name string, compFlags seg.FileCompression) *seg.Writer {
 		tb.Helper()

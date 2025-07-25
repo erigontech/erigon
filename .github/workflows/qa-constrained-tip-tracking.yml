@@ -20,7 +20,7 @@ jobs:
             backend: Polygon
             cgroup_name: constrained_res_64G
             prune_mode: full_node
-    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
+    runs-on: [ self-hosted, qa, "${{ matrix.backend }}", tip-tracking ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -83,6 +83,13 @@ jobs:
           echo "Error detected during tests"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Upload Downloader Torrent Client Status
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: torrent-client-status-${{ env.CHAIN }}
+        path: torrent-client-status.txt
 
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'

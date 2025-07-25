@@ -256,3 +256,7 @@ func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remote.BorEv
 func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remote.AAValidationRequest, opts ...grpc.CallOption) (*remote.AAValidationReply, error) {
 	return s.server.AAValidation(ctx, in)
 }
+
+func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remote.BlockForTxNumRequest, opts ...grpc.CallOption) (*remote.BlockForTxNumResponse, error) {
+	return s.server.BlockForTxNum(ctx, in)
+}

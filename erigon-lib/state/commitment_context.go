@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
 )
 
 type SharedDomainsCommitmentContext struct {
@@ -42,16 +43,16 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, d
 	sdc.mainTtx.SetLimitReadAsOfTxNum(txNum, domainOnly)
 }
 
-func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 	}
 
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.AggTx().a.tmpdir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	trieCtx := &TrieContext{
-		roTtx:  sd.roTtx,
-		getter: sd, // to read from sd cache as well
-		sd:     sd,
+		roTtx:  tx,
+		getter: sd.AsGetter(tx),
+		putter: sd.AsPutDel(tx),
 
 		stepSize: sd.StepSize(),
 	}
@@ -98,17 +99,17 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if ok {
-		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
+		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, codeReads, expectedRoot, logPrefix)
 	}
 
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
 // Evaluates commitment for gathered updates.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string, txNum uint64) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, txNum uint64, logPrefix string) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -381,17 +382,18 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 	}
 
 	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, true, blockNum, "rebuild commit", txNum)
+	return sdc.ComputeCommitment(ctx, true, blockNum, txNum, "rebuild commit")
 }
 
 type TrieContext struct {
 	roTtx  kv.TemporalTx
 	getter kv.TemporalGetter
-	sd     *SharedDomains
+	putter kv.TemporalPutDel
+	txNum  uint64
 
 	limitReadAsOfTxNum uint64
 	stepSize           uint64
-	domainsOnly        bool // if true, do not use history reader and limit to domain files only
+	withHistory        bool // if true, do not use history reader and limit to domain files only
 	trace              bool
 }
 
@@ -402,15 +404,21 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 	//}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
 	// Keep dereferenced version inside sd commitmentDomain map ready to read again
-	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
-		branch, _, err := sdc.roTtx.GetAsOf(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
-		if sdc.trace {
-			fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, branch, commitment.BranchData(branch).String())
-		}
+	if sdc.withHistory && sdc.limitReadAsOfTxNum > 0 {
+		v, hOk, err := sdc.roTtx.HistorySeek(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
 		if err != nil {
-			return nil, 0, fmt.Errorf("branch history read failed: %w", err)
+			return nil, 0, fmt.Errorf("branch failed: %w", err)
 		}
-		return branch, sdc.limitReadAsOfTxNum / sdc.stepSize, nil
+		if hOk {
+			if len(v) == 0 { // if history successfuly found marker of key creation
+				return nil, 0, nil
+			}
+			if sdc.trace {
+				fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, v, commitment.BranchData(v).String())
+			}
+			return v, 0, nil
+		}
+		return nil, 0, nil // no history found, so no branch
 	}
 
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
@@ -429,7 +437,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
-	if sdc.limitReadAsOfTxNum > 0 && !sdc.domainsOnly { // do not store branches if explicitly operate on history
+	if sdc.limitReadAsOfTxNum > 0 && sdc.withHistory { // do not store branches if explicitly operate on history
 		return nil
 	}
 	if sdc.trace {
@@ -440,7 +448,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//	defer sdc.mu.Unlock()
 	//}
 
-	return sdc.sd.DomainPut(kv.CommitmentDomain, prefix, data, sdc.sd.txNum, prevData, prevStep)
+	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
 }
 
 func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, err error) {
@@ -450,7 +458,7 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, er
 	//}
 
 	if sdc.limitReadAsOfTxNum > 0 {
-		if sdc.domainsOnly {
+		if sdc.withHistory {
 			var ok bool
 			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 			if !ok {
@@ -535,5 +543,5 @@ func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err erro
 // If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
 func (sdc *TrieContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
 	sdc.limitReadAsOfTxNum = txNum
-	sdc.domainsOnly = domainOnly
+	sdc.withHistory = !domainOnly
 }

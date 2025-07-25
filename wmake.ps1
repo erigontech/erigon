@@ -35,7 +35,7 @@ Param(
         "rpctest",
         "sentry",
         "state",
-        "test",
+        "test-short",
         "test-all",
         "txpool",
         "all"
@@ -397,7 +397,7 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
   Error !
   Directory $MyContext.Directory does not seem to be a properly cloned Erigon repository
   Please clone it using 
-  git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
+  git clone -j8 https://github.com/erigontech/erigon.git
 
 "@
     exit 1
@@ -519,10 +519,10 @@ if ($BuildTarget -eq "db-tools") {
     # Clear go cache
     go.exe clean -cache
 
-} elseif ($BuildTarget -eq "test") {
+} elseif ($BuildTarget -eq "test-short") {
     Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./... | Where-Object { $_ -notmatch 'PASS: ' } | Where-Object { $_ -notmatch '=== CONT' } | Where-Object { $_ -notmatch '=== RUN' } | Where-Object { $_ -notmatch '=== PAUSE' }"
+    $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
@@ -536,7 +536,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-all") {
     Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./... | Where-Object { $_ -notmatch 'PASS: ' } | Where-Object { $_ -notmatch '=== CONT' } | Where-Object { $_ -notmatch '=== RUN' } | Where-Object { $_ -notmatch '=== PAUSE' }"
+    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
@@ -547,7 +547,7 @@ if ($BuildTarget -eq "db-tools") {
 
 } else {
 
-    # This has a naive assumption every target has a compilation unit wih same name
+    # This has a naive assumption every target has a compilation unit with the same name
 
     Write-Host "`n Building $BuildTarget"
     $outExecutable = [string](Join-Path $Erigon.BinPath "$BuildTarget.exe")

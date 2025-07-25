@@ -15,19 +15,19 @@ type aggDirtyFilesRoTx struct {
 
 type domainDirtyFilesRoTx struct {
 	d       *Domain
-	files   []*filesItem
+	files   []*FilesItem
 	history *historyDirtyFilesRoTx
 }
 
 type historyDirtyFilesRoTx struct {
 	h     *History
-	files []*filesItem
+	files []*FilesItem
 	ii    *iiDirtyFilesRoTx
 }
 
 type iiDirtyFilesRoTx struct {
 	ii    *InvertedIndex
-	files []*filesItem
+	files []*FilesItem
 }
 
 func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
@@ -48,6 +48,44 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 	}
 
 	return ac
+}
+
+func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
+	for _, d := range ac.domain {
+		for _, f := range d.files {
+			f.MadvNormal()
+		}
+		for _, f := range d.history.files {
+			f.MadvNormal()
+		}
+		for _, f := range d.history.ii.files {
+			f.MadvNormal()
+		}
+	}
+	for _, ii := range ac.ii {
+		for _, f := range ii.files {
+			f.MadvNormal()
+		}
+	}
+	return ac
+}
+func (ac *aggDirtyFilesRoTx) DisableReadAhead() {
+	for _, d := range ac.domain {
+		for _, f := range d.files {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.history.files {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.history.ii.files {
+			f.DisableReadAhead()
+		}
+	}
+	for _, ii := range ac.ii {
+		for _, f := range ii.files {
+			f.DisableReadAhead()
+		}
+	}
 }
 
 func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFiles) {
@@ -86,8 +124,8 @@ func (ac *aggDirtyFilesRoTx) Close() {
 }
 
 func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
-	var files []*filesItem
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
+	var files []*FilesItem
+	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		files = append(files, items...)
 		for _, item := range items {
 			item.refcount.Add(1)
@@ -103,7 +141,7 @@ func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
 
 func (d *domainDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorDomainFiles) {
 	return &MissedAccessorDomainFiles{
-		files: map[Accessors][]*filesItem{
+		files: map[Accessors][]*FilesItem{
 			AccessorBTree:   d.d.missedBtreeAccessors(d.files),
 			AccessorHashMap: d.d.missedMapAccessors(d.files),
 		},
@@ -124,8 +162,8 @@ func (d *domainDirtyFilesRoTx) Close() {
 }
 
 func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
-	var files []*filesItem
-	h.dirtyFiles.Walk(func(items []*filesItem) bool {
+	var files []*FilesItem
+	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		files = append(files, items...)
 		for _, item := range items {
 			item.refcount.Add(1)
@@ -142,7 +180,7 @@ func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
 func (f *historyDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorHistoryFiles) {
 	return &MissedAccessorHistoryFiles{
 		ii: f.ii.FilesWithMissedAccessors(),
-		files: map[Accessors][]*filesItem{
+		files: map[Accessors][]*FilesItem{
 			AccessorHashMap: f.h.missedMapAccessors(f.files),
 		},
 	}
@@ -161,8 +199,8 @@ func (f *historyDirtyFilesRoTx) Close() {
 }
 
 func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
-	var files []*filesItem
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	var files []*FilesItem
+	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		files = append(files, items...)
 		for _, item := range items {
 			item.refcount.Add(1)
@@ -177,7 +215,7 @@ func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 
 func (f *iiDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorIIFiles) {
 	return &MissedAccessorIIFiles{
-		files: map[Accessors][]*filesItem{
+		files: map[Accessors][]*FilesItem{
 			AccessorHashMap: f.ii.missedMapAccessors(f.files),
 		},
 	}
@@ -212,7 +250,7 @@ func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
 }
 
 // fileItems collection of missed files
-type MissedFilesMap map[Accessors][]*filesItem
+type MissedFilesMap map[Accessors][]*FilesItem
 type MissedAccessorAggFiles struct {
 	domain map[kv.Domain]*MissedAccessorDomainFiles
 	ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
@@ -241,11 +279,11 @@ type MissedAccessorDomainFiles struct {
 	files   MissedFilesMap
 }
 
-func (m *MissedAccessorDomainFiles) missedBtreeAccessors() []*filesItem {
+func (m *MissedAccessorDomainFiles) missedBtreeAccessors() []*FilesItem {
 	return m.files[AccessorBTree]
 }
 
-func (m *MissedAccessorDomainFiles) missedMapAccessors() []*filesItem {
+func (m *MissedAccessorDomainFiles) missedMapAccessors() []*FilesItem {
 	return m.files[AccessorHashMap]
 }
 
@@ -266,7 +304,7 @@ type MissedAccessorHistoryFiles struct {
 	files MissedFilesMap
 }
 
-func (m *MissedAccessorHistoryFiles) missedMapAccessors() []*filesItem {
+func (m *MissedAccessorHistoryFiles) missedMapAccessors() []*FilesItem {
 	return m.files[AccessorHashMap]
 }
 
@@ -286,7 +324,7 @@ type MissedAccessorIIFiles struct {
 	files MissedFilesMap
 }
 
-func (m *MissedAccessorIIFiles) missedMapAccessors() []*filesItem {
+func (m *MissedAccessorIIFiles) missedMapAccessors() []*FilesItem {
 	return m.files[AccessorHashMap]
 }
 

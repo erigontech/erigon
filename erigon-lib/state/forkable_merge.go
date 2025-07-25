@@ -24,13 +24,21 @@ import (
 // }
 
 type ForkableMergeFiles struct {
-	marked   []*filesItem
-	unmarked []*filesItem
-	buffered []*filesItem
+	marked   []*FilesItem
+	unmarked []*FilesItem
+	buffered []*FilesItem
+}
+
+func NewForkableMergeFiles(markedSize, unmarkedSize, bufferedSize int) *ForkableMergeFiles {
+	return &ForkableMergeFiles{
+		marked:   make([]*FilesItem, markedSize),
+		unmarked: make([]*FilesItem, unmarkedSize),
+		buffered: make([]*FilesItem, bufferedSize),
+	}
 }
 
 func (f ForkableMergeFiles) Close() {
-	fn := func(items []*filesItem) {
+	fn := func(items []*FilesItem) {
 		for _, item := range items {
 			item.closeFiles()
 		}
@@ -40,7 +48,20 @@ func (f ForkableMergeFiles) Close() {
 	fn(f.buffered)
 }
 
-func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleFile, compressWorkers int, ps *background.ProgressSet) (mergedFile *filesItem, err error) {
+func (f ForkableMergeFiles) MergedFilePresent() bool {
+	fn := func(items []*FilesItem) bool {
+		for _, item := range items {
+			if item != nil {
+				return true
+			}
+		}
+		return false
+	}
+
+	return fn(f.marked) || fn(f.unmarked) || fn(f.buffered)
+}
+
+func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleFile, compressWorkers int, ps *background.ProgressSet) (mergedFile *FilesItem, err error) {
 	// expected sorted order if filesToMerge...
 	filesToMerge := visibleFiles(_filesToMerge)
 	if filesToMerge.Len() < 2 {
@@ -53,7 +74,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 			mergedFile.closeFilesAndRemove()
 		}
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("[forkable] merging panic for forkable_%s: %s", f.a, filesToMerge.String(f.snaps.stepSize))
+			err = fmt.Errorf("[forkable] merging panic for forkable_%s: %s", Registry.Name(f.a), filesToMerge.String(f.snaps.stepSize))
 		}
 	}()
 
@@ -62,7 +83,8 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	segPath := f.snaps.schema.DataFile(version.V1_0, from, to)
 	cfg := seg.DefaultCfg
 	cfg.Workers = compressWorkers
-	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+f.a.String(), segPath, f.a.Dirs().Tmp, cfg, log.LvlTrace, f.logger)
+	r := Registry
+	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+r.String(f.a), segPath, r.Dirs(f.a).Tmp, cfg, log.LvlTrace, f.logger)
 	if err != nil {
 		return
 	}

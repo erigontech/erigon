@@ -54,18 +54,13 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNumber), tx, api._blockReader, api.filters)
-	if err != nil {
-		return nil, err
-	}
-
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	header, err := api.headerByRPCNumber(ctx, blockNumber, tx)
 	if err != nil {
 		return nil, err
 	}
 
 	if header == nil {
-		return nil, fmt.Errorf("block header not found: %d", blockNum)
+		return nil, fmt.Errorf("block header not found: %d", blockNumber)
 	}
 
 	return header, nil
@@ -79,7 +74,7 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 	}
 	defer tx.Rollback()
 
-	header, err := api._blockReader.HeaderByHash(ctx, tx, hash)
+	header, err := api.headerByHash(ctx, hash, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +101,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	currentHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 
-	firstHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
+	firstHeader, err := api.headerByRPCNumber(ctx, 0, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +143,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return currentHeader.Time >= uintTimestamp
 	})
 
-	resultingHeader, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNum))
+	resultingHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +153,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	for resultingHeader.Time > uintTimestamp {
-		beforeHeader, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNum)-1)
+		beforeHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum)-1, tx)
 		if err != nil {
 			return nil, err
 		}
@@ -217,7 +212,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 	defer tx.Rollback()
 
 	balancesMapping := make(map[common.Address]*hexutil.Big)
-	latestState, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
+	latestState, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}

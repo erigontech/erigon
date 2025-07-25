@@ -34,10 +34,13 @@ import (
 	eth1utils "github.com/erigontech/erigon/execution/eth1/eth1_utils"
 )
 
-var ErrForkChoiceUpdateFailure = errors.New("fork choice update failure")
-var ErrForkChoiceUpdateBadBlock = errors.New("fork choice update bad block")
-var ErrExecutionClientBusy = errors.New("execution client busy")
-var ErrUfcTooFarBehind = errors.New("ufc too far behind")
+var (
+	ErrForkChoiceUpdateFailure      = errors.New("fork choice update failure")
+	ErrForkChoiceUpdateBadBlock     = errors.New("fork choice update bad block")
+	ErrForkChoiceUpdateTooFarBehind = errors.New("fork choice update is too far behind")
+
+	ErrExecutionClientBusy = errors.New("execution client busy")
+)
 
 type ExecutionClient interface {
 	Prepare(ctx context.Context) error
@@ -61,17 +64,18 @@ type executionClient struct {
 }
 
 func (e *executionClient) Prepare(ctx context.Context) error {
-	ready, err := e.client.Ready(ctx, &emptypb.Empty{})
+	return e.retryBusy(ctx, "ready", func() error {
+		ready, err := e.client.Ready(ctx, &emptypb.Empty{})
+		if err != nil {
+			return err
+		}
 
-	if err != nil {
-		return err
-	}
+		if !ready.Ready {
+			return ErrExecutionClientBusy // gets retried
+		}
 
-	if !ready.Ready {
-		return errors.New("excecution client not ready")
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
@@ -126,7 +130,7 @@ func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Heade
 		case executionproto.ExecutionStatus_Busy:
 			return ErrExecutionClientBusy // gets retried
 		case executionproto.ExecutionStatus_TooFarAway:
-			return ErrUfcTooFarBehind
+			return ErrForkChoiceUpdateTooFarBehind
 		default:
 			return fmt.Errorf("%w: status=%d, validationErr='%s'", ErrForkChoiceUpdateFailure, r.Status, r.ValidationError)
 		}

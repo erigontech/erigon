@@ -3,41 +3,30 @@ package rawtemporaldb
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (
 	CumulativeGasUsedInBlockKey     = []byte{0x0}
 	CumulativeBlobGasUsedInBlockKey = []byte{0x1}
-	FirstLogIndexKey                = []byte{0x2}
+	LogIndexAfterTxKey              = []byte{0x2}
 )
 
-// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (*types.Receipt, error) {
-	cumulativeGasUsedBeforeTxn, cumulativeBlobGasUsed, firstLogIndexWithinBlock, err := ReceiptAsOf(tx, txNum+1)
-	if err != nil {
-		return nil, err
-	}
-	//if txnIdx == 0 {
-	//logIndex always 0
-	//}
+/**
+logIndexAfterTx- log index to be used by next transaction's first log.
 
-	r := &types.Receipt{
-		Logs:                     rawLogs,
-		CumulativeGasUsed:        cumulativeGasUsedBeforeTxn,
-		FirstLogIndexWithinBlock: firstLogIndexWithinBlock,
-	}
-	_ = cumulativeBlobGasUsed
+rationale:
 
-	if err := r.DeriveFieldsV3ForSingleReceipt(txnIdx, blockHash, blockNum, txn, cumulativeGasUsedBeforeTxn); err != nil {
-		return nil, err
-	}
-	return r, nil
-}
+1. before this firstLogIdx was used -- but for scenario where execution begins from middle of a block,
+   it was difficult to find the logIdx to use for the first executing tx. (ReceiptDomain doesn't have logs,
+   so can't find prevTx.FirstLogIdx + len(logs)).
 
-func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasused uint64, firstLogIndexWithinBlock uint32, err error) {
+2. lastLogIndex (of current tx) was considered -- but it's tricky to handle the case where tx has no logs.
+   i.e. should the next tx's first log be lastLogIdx+1 or lastLogIdx?
+**/
+
+func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasused uint64, logIndexAfterTx uint32, err error) {
 	var v []byte
 	var ok bool
 
@@ -57,28 +46,17 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 		cumBlobGasused = uvarint(v)
 	}
 
-	//if txnIdx == 0 {
-	//logIndex always 0
-	//}
-
-	v, ok, err = tx.GetAsOf(kv.ReceiptDomain, FirstLogIndexKey, txNum)
+	v, ok, err = tx.GetAsOf(kv.ReceiptDomain, LogIndexAfterTxKey, txNum)
 	if err != nil {
 		return
 	}
 	if ok && v != nil {
-		firstLogIndexWithinBlock = uint32(uvarint(v))
+		logIndexAfterTx = uint32(uvarint(v))
 	}
 	return
 }
 
-func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed uint64, txNum uint64) error {
-	var cumGasUsedInBlock uint64
-	var firstLogIndexWithinBlock uint32
-	if receipt != nil {
-		cumGasUsedInBlock = receipt.CumulativeGasUsed
-		firstLogIndexWithinBlock = receipt.FirstLogIndexWithinBlock
-	}
-
+func AppendReceipt(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
 	{
 		var buf [binary.MaxVarintLen64]byte
 		i := binary.PutUvarint(buf[:], cumGasUsedInBlock)
@@ -97,8 +75,8 @@ func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed 
 
 	{
 		var buf [binary.MaxVarintLen64]byte
-		i := binary.PutUvarint(buf[:], uint64(firstLogIndexWithinBlock))
-		if err := tx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, buf[:i], txNum, nil, 0); err != nil {
+		i := binary.PutUvarint(buf[:], uint64(logIndexAfterTx))
+		if err := tx.DomainPut(kv.ReceiptDomain, LogIndexAfterTxKey, buf[:i], txNum, nil, 0); err != nil {
 			return err
 		}
 	}
@@ -108,4 +86,13 @@ func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed 
 func uvarint(in []byte) (res uint64) {
 	res, _ = binary.Uvarint(in)
 	return res
+}
+
+func ReceiptStoresFirstLogIdx(tx kv.TemporalTx) bool {
+	// this stored firstLogIdx;
+	// latter versions (v1_1 onwards) stores lastLogIdx
+	// this check allows to put some ifchecks to handle
+	// both cases and maintain backward compatibility of
+	// snapshots.
+	return tx.Debug().CurrentDomainVersion(kv.ReceiptDomain).Eq(version.V1_0)
 }

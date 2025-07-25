@@ -20,10 +20,9 @@ import (
 	"context"
 	"encoding/json"
 
-	jsoniter "github.com/json-iterator/go"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/eth/tracers/config"
@@ -45,7 +44,7 @@ type TraceAPI interface {
 	Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error)
 	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error)
 	Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error)
-	Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream *jsoniter.Stream) error
+	Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream jsonstream.Stream) error
 }
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access

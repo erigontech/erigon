@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -46,7 +45,7 @@ import (
 // list of filesItem must be represented as Tree - because they may overlap
 
 // visibleFile - class is used for good/visible files
-type filesItem struct {
+type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
 	bindex               *BtIndex
@@ -64,69 +63,73 @@ type filesItem struct {
 	canDelete atomic.Bool
 }
 
-type FilesItem interface {
-	Segment() *seg.Decompressor
-	AccessorIndex() *recsplit.Index
-	BtIndex() *BtIndex
-	ExistenceFilter() *existence.Filter
-	Range() (startTxNum, endTxNum uint64)
-}
+// type FilesItem interface {
+// 	Segment() *seg.Decompressor
+// 	AccessorIndex() *recsplit.Index
+// 	BtIndex() *BtIndex
+// 	ExistenceFilter() *existence.Filter
+// 	Range() (startTxNum, endTxNum uint64)
+// }
 
-var _ FilesItem = (*filesItem)(nil)
+//var _ FilesItem = (*filesItem)(nil)
 
-func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
+func newFilesItem(startTxNum, endTxNum, stepSize uint64) *FilesItem {
 	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize, config3.StepsInFrozenFile)
 }
 
-func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *ee.SnapshotConfig) *filesItem {
+func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
 	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
 }
 
-func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *filesItem {
+func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *FilesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
 	frozen := endStep-startStep >= stepsInFrozenFile
-	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 
-func (i *filesItem) Segment() *seg.Decompressor { return i.decompressor }
+func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
 
-func (i *filesItem) AccessorIndex() *recsplit.Index { return i.index }
+func (i *FilesItem) AccessorIndex() *recsplit.Index { return i.index }
 
-func (i *filesItem) BtIndex() *BtIndex { return i.bindex }
+func (i *FilesItem) BtIndex() *BtIndex { return i.bindex }
 
-func (i *filesItem) ExistenceFilter() *existence.Filter { return i.existence }
-func (i *filesItem) MadvNormal() {
+func (i *FilesItem) ExistenceFilter() *existence.Filter { return i.existence }
+func (i *FilesItem) MadvNormal() {
 	i.decompressor.MadvNormal()
 	i.index.MadvNormal()
 	//i.bindex.MadvNormal()
 	//i.existence.MadvNormal()
 }
-func (i *filesItem) DisableReadAhead() {
+func (i *FilesItem) EnableReadAhead() {
+	i.decompressor.MadvSequential()
+	i.index.MadvSequential()
+}
+func (i *FilesItem) DisableReadAhead() {
 	i.decompressor.DisableReadAhead()
 	i.index.DisableReadAhead()
 	//i.bindex.DisableReadAhead()
 	//i.existence.DisableReadAhead()
 }
 
-func (i *filesItem) Range() (startTxNum, endTxNum uint64) {
+func (i *FilesItem) Range() (startTxNum, endTxNum uint64) {
 	return i.startTxNum, i.endTxNum
 }
 
 // isProperSubsetOf - when `j` covers `i` but not equal `i`
-func (i *filesItem) isProperSubsetOf(j *filesItem) bool {
+func (i *FilesItem) isProperSubsetOf(j *FilesItem) bool {
 	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
 }
-func (i *filesItem) isBefore(j *filesItem) bool { return i.endTxNum <= j.startTxNum }
+func (i *FilesItem) isBefore(j *FilesItem) bool { return i.endTxNum <= j.startTxNum }
 
-func filesItemLess(i, j *filesItem) bool {
+func filesItemLess(i, j *FilesItem) bool {
 	if i.endTxNum == j.endTxNum {
 		return i.startTxNum > j.startTxNum
 	}
 	return i.endTxNum < j.endTxNum
 }
 
-func (i *filesItem) closeFiles() {
+func (i *FilesItem) closeFiles() {
 	if i.decompressor != nil {
 		i.decompressor.Close()
 		i.decompressor = nil
@@ -145,7 +148,7 @@ func (i *filesItem) closeFiles() {
 	}
 }
 
-func (i *filesItem) closeFilesAndRemove() {
+func (i *FilesItem) closeFilesAndRemove() {
 	if i.decompressor != nil {
 		i.decompressor.Close()
 		// paranoic-mode on: don't delete frozen files
@@ -194,7 +197,7 @@ func (i *filesItem) closeFilesAndRemove() {
 	}
 }
 
-func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
+func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
 	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
 	var err error
 
@@ -234,7 +237,7 @@ func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext strin
 	return res
 }
 
-func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string, logger log.Logger) {
+func deleteMergeFile(dirtyFiles *btree2.BTreeG[*FilesItem], outs []*FilesItem, filenameBase string, logger log.Logger) {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
@@ -267,10 +270,10 @@ type visibleFile struct {
 	endTxNum   uint64
 
 	i   int
-	src *filesItem
+	src *FilesItem
 }
 
-func (i visibleFile) Filename() string {
+func (i visibleFile) Fullpath() string {
 	return i.src.decompressor.FilePath()
 }
 
@@ -282,13 +285,13 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
+func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", toTxNum)
 	}
-	files.Walk(func(items []*filesItem) bool {
+	files.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.endTxNum > toTxNum {
 				if trace {
@@ -296,39 +299,10 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 				}
 				continue
 			}
-			if item.canDelete.Load() {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: canDelete=true", "f", item.decompressor.FileName())
-				}
+			if !checkForVisibility(item, l, trace) {
 				continue
 			}
-
-			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
-			if item.decompressor == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
-				}
-				continue
-			}
-			if l.Has(AccessorBTree) && item.bindex == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if l.Has(AccessorHashMap) && item.index == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if l.Has(AccessorExistence) && item.existence == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+			if checker != nil && !checker(item.startTxNum, item.endTxNum) {
 				continue
 			}
 
@@ -357,6 +331,43 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 		newVisibleFiles = []visibleFile{}
 	}
 	return newVisibleFiles
+}
+
+func checkForVisibility(item *FilesItem, l Accessors, trace bool) (canBeVisible bool) {
+	if item.canDelete.Load() {
+		if trace {
+			log.Warn("[dbg] canDelete=true", "f", item.decompressor.FileName())
+		}
+		return false
+	}
+	if item.decompressor == nil {
+		if trace {
+			log.Warn("[dbg] decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
+		}
+		return false
+	}
+	if l.Has(AccessorBTree) && item.bindex == nil {
+		if trace {
+			log.Warn("[dbg] checkForVisibility: BTindex not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	if l.Has(AccessorHashMap) && item.index == nil {
+		if trace {
+			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	if l.Has(AccessorExistence) && item.existence == nil {
+		if trace {
+			log.Warn("[dbg] checkForVisibility: Existence not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	return true
 }
 
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
@@ -410,7 +421,7 @@ func (files visibleFiles) VisibleFiles() []VisibleFile {
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors
 // here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissedAccessors(dirtyFiles []*filesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
+func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*FilesItem) {
 	for _, item := range dirtyFiles {
 		fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
 		for _, fName := range accessorsFor(fromStep, toStep) {

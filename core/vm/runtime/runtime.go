@@ -62,7 +62,7 @@ type Config struct {
 	State *state.IntraBlockState
 
 	evm       *vm.EVM
-	GetHashFn func(n uint64) common.Hash
+	GetHashFn func(n uint64) (common.Hash, error)
 }
 
 // sets defaults on the config
@@ -108,8 +108,8 @@ func setDefaults(cfg *Config) {
 		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
-		cfg.GetHashFn = func(n uint64) common.Hash {
-			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
+		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
+			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 		}
 	}
 }
@@ -155,7 +155,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd))
+		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	}
 	var (
 		address = common.BytesToAddress([]byte("contract"))
@@ -220,7 +220,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd))
+		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	}
 	var (
 		vmenv  = NewEnv(cfg)

@@ -40,12 +40,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
 type SortedRange interface {
@@ -202,7 +202,8 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Confi
 		chainName = chainConfig.ChainName
 	}
 
-	mergeLimit := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, blockFrom)
+	snapCfg, _ := snapcfg.KnownCfg(chainName)
+	mergeLimit := snapcfg.MergeLimitFromCfg(snapCfg, snapType, blockFrom)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
@@ -495,7 +496,7 @@ func (s *RoTx) Close() {
 type BlockSnapshots interface {
 	LogStat(label string)
 	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps bool) error
+	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
 	Delete(fileName string) error
@@ -532,11 +533,11 @@ type RoSnapshots struct {
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
 
-	// allows for pruning segments - this is the min availible segment
+	// allows for pruning segments - this is the minimum available segment
 	segmentsMin atomic.Uint64
 	ready       ready
 	operators   map[snaptype.Enum]*retireOperators
-	alignMin    bool // do we want to align all visible segments to min availible
+	alignMin    bool // do we want to align all visible segments to the minimum available
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -567,7 +568,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 
 	s.segmentsMin.Store(segmentsMin)
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 
 	if cfg.NoDownloader {
 		s.DownloadComplete()
@@ -811,7 +812,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 	return newVisibleSegments
 }
 
-func (s *RoSnapshots) recalcVisibleFiles() {
+func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
@@ -832,13 +833,13 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		if len(newVisibleSegments) > 0 {
 			to = newVisibleSegments[len(newVisibleSegments)-1].to - 1
 		}
-		if s.alignMin {
+		if alignMin {
 			maxVisibleBlocks = append(maxVisibleBlocks, to)
 		}
 	}
 
-	if s.alignMin {
-		// all types must have same hight
+	if alignMin {
+		// all types must have the same height
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
 			if minMaxVisibleBlock == 0 {
@@ -907,21 +908,16 @@ func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	return _max
 }
 
-func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) uint64 {
-	tx := s.ViewType(segtype.Type())
-	defer tx.Close()
+func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
 
-	var _max uint64
-
-	for _, seg := range tx.Segments {
-		if !seg.IsIndexed() {
-			break
-		}
-
-		_max = seg.to - 1
+	visibleFiles := s.visible[segtype]
+	if len(visibleFiles) > 0 {
+		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
 	}
 
-	return _max
+	return
 }
 
 func (s *RoSnapshots) Ls() {
@@ -941,9 +937,8 @@ func (s *RoSnapshots) Ls() {
 func (s *RoSnapshots) Files() (list []string) {
 	view := s.View()
 	defer view.Close()
-
 	for _, t := range s.enums {
-		for _, seg := range s.visible[t] {
+		for _, seg := range view.segments[t].Segments {
 			list = append(list, seg.src.FileName())
 		}
 	}
@@ -974,7 +969,7 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -997,7 +992,7 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 		return err
 	}
 
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
@@ -1053,7 +1048,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
 
-	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
+	snConfig, _ := snapcfg.KnownCfg(s.cfg.ChainName)
 
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
@@ -1167,7 +1162,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		return err
 	}
 
-	s.recalcVisibleFiles()
+	s.recalcVisibleFiles(s.alignMin)
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
@@ -1177,8 +1172,8 @@ func (s *RoSnapshots) OpenFolder() error {
 	return nil
 }
 
-func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps bool) error {
-	defer s.recalcVisibleFiles()
+func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error {
+	defer s.recalcVisibleFiles(alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -1204,7 +1199,7 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
@@ -1359,7 +1354,7 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	v := s.View()
 	defer v.Close()
 
-	defer s.recalcVisibleFiles()
+	defer s.recalcVisibleFiles(s.alignMin)
 	if err := s.delete(fileName); err != nil {
 		return fmt.Errorf("can't delete file: %w", err)
 	}
@@ -1600,9 +1595,11 @@ func removeOldFiles(toDel []string, snapDir string) {
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
+		_ = os.Remove(withoutExt + ".idx.torrent")
 		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 		if isTxnType {
 			_ = os.Remove(withoutExt + "-to-block.idx")
+			_ = os.Remove(withoutExt + "-to-block.idx.torrent")
 		}
 	}
 	tmpFiles, err := snaptype.TmpFiles(snapDir)

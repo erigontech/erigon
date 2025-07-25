@@ -81,15 +81,15 @@ func averageProceses(procs []*process.Process) []*ProcessInfo {
 	return averageProcs
 }
 
-func RemoveProcessesBelowThreshold(processes []*ProcessInfo, treshold float64) []*ProcessInfo {
-	return removeProcessesBelowThreshold(processes, treshold)
+func RemoveProcessesBelowThreshold(processes []*ProcessInfo, threshold float64) []*ProcessInfo {
+	return removeProcessesBelowThreshold(processes, threshold)
 }
 
-func removeProcessesBelowThreshold(processes []*ProcessInfo, treshold float64) []*ProcessInfo {
+func removeProcessesBelowThreshold(processes []*ProcessInfo, threshold float64) []*ProcessInfo {
 	// remove processes with CPU or Memory usage less than threshold
 	filtered := make([]*ProcessInfo, 0, len(processes))
 	for _, p := range processes {
-		if p.CPUUsage >= treshold || p.Memory >= float32(treshold) {
+		if p.CPUUsage >= threshold || p.Memory >= float32(threshold) {
 			filtered = append(filtered, p)
 		}
 	}

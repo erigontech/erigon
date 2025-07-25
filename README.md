@@ -121,9 +121,6 @@ make erigon
 ./build/bin/erigon
 ```
 
-Increase download speed by `--torrent.download.rate=20mb`. <code>🔬
-See [Downloader docs](./cmd/downloader/readme.md)</code>
-
 Use `--datadir` to choose where to store data.
 
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
@@ -132,6 +129,14 @@ For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) cli
 Erigon (https://docs.gnosischain.com/category/step--3---run-consensus-client).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
+
+### Upgrading from 3.0 to 3.1
+
+When running Erigon 3.1+, your snapshot files will be upgraded automatically to a new file naming scheme. It's recommended that you take a backup or filesystem snapshot of your datadir before upgrading.
+
+The downloader component in Erigon 3.1 will check the file data of snapshots when `--downloader.verify` is provided. Incorrect data will be repaired.
+
+A new `snapshots reset` subcommand is added, that lets you trigger Erigon to perform an initial sync on the next run, reusing existing files where possible. Use this if your datadir is corrupted, or your client is unable to obtain missing snapshot data due to having committed to a snapshot that is no longer available. It will remove any locally generated files, and your chain data. 
 
 ### Datadir structure
 
@@ -149,6 +154,8 @@ datadir
    
 # There is 4 domains: account, storage, code, commitment 
 ```
+
+See the [lib](erigon-db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
 
 ### History on cheap disk
 
@@ -400,7 +407,7 @@ DB. That reduces write amplification and DB inserts are orders of magnitude quic
 
 **Single accounts/state trie**. Erigon uses a single Merkle trie for both accounts and the storage.
 
-<code> 🔬 [Staged Sync Readme](/eth/stagedsync/README.md)</code>
+<code> 🔬 [Staged Sync Readme](/docs/readthedocs/source/stagedsync.rst)</code>
 
 ### JSON-RPC daemon
 
@@ -769,7 +776,6 @@ What can do:
 - increase RAM
 - if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 - Use `--db.pagesize=64kb` (less fragmentation, more IO)
-- Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
 - Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
 ### Filesystem's background features are expensive
@@ -790,12 +796,12 @@ XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=
 
 ### Erigon crashes due to kernel allocation limits
 
-Erigon will crash with `cannot allocate memory`.
+Error message: `cannot allocate memory`.
 
-to fix this add the following to `/etc/sysctl.conf` or a .conf file in `/etc/sysctl.d/`
+Add to `/etc/sysctl.conf` (or add .conf file in `/etc/sysctl.d/`)
 
 ```
-vm.overcommit_memory = 1 (it is 0 by default)
-vm.max_map_count = 8388608 (it is 1048576 by default)
+vm.overcommit_memory = 1 
+vm.max_map_count = 8388608 
 ```
 ---------

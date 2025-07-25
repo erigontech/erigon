@@ -276,17 +276,20 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 
 	// attach nodes for the new headers
 	for i, header := range headers {
+		// IMPORTANT: in case of errors, remember to return the connected headers so far in the loop for insertion
+		// by the caller because we've already mutated the in-mem tree within the previous loop iterations
+		processed := headers[:i]
 		if (header.Number == nil) || (header.Number.Uint64() != parent.header.Number.Uint64()+1) {
-			return nil, fmt.Errorf("can't connect %s: invalid number: expected %d", header.Number, parent.header.Number.Uint64()+1)
+			return processed, fmt.Errorf("can't connect %s: invalid number: expected %d", header.Number, parent.header.Number.Uint64()+1)
 		}
 
 		if err := ccb.headerValidator.ValidateHeader(ctx, header, parent.header, time.Now()); err != nil {
-			return nil, fmt.Errorf("can't connect %s: invalid header: error %w", header.Number, err)
+			return processed, fmt.Errorf("can't connect %s: invalid header: error %w", header.Number, err)
 		}
 
 		difficulty, err := ccb.difficultyCalc.HeaderDifficulty(ctx, header)
 		if err != nil {
-			return nil, fmt.Errorf("can't connect %s: header difficulty error %w", header.Number, err)
+			return processed, fmt.Errorf("can't connect %s: header difficulty error %w", header.Number, err)
 		}
 		if (header.Difficulty == nil) || (header.Difficulty.Uint64() != difficulty) {
 			err := &bor.WrongDifficultyError{
@@ -295,12 +298,12 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 				Actual:   header.Difficulty.Uint64(),
 				Signer:   []byte{},
 			}
-			return nil, err
+			return processed, err
 		}
 
 		slot := producerSlotIndex(difficulty)
 		if _, ok := parent.children[slot]; ok {
-			return nil, fmt.Errorf("can't connect %s: producer slot is already filled by a different header", header.Number)
+			return processed, fmt.Errorf("can't connect %s: producer slot is already filled by a different header", header.Number)
 		}
 
 		node := &forkTreeNode{

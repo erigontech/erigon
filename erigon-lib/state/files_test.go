@@ -14,15 +14,15 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	tmp := t.TempDir()
 
 	// filesItem
-	f1 := &filesItem{
+	f1 := &FilesItem{
 		startTxNum: 1,
 		endTxNum:   10,
 	}
-	f2 := &filesItem{
+	f2 := &FilesItem{
 		startTxNum: 11,
 		endTxNum:   20,
 	}
-	f3 := &filesItem{
+	f3 := &FilesItem{
 		startTxNum: 31,
 		endTxNum:   40,
 	}
