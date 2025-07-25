@@ -29,7 +29,7 @@ require (
 	github.com/99designs/gqlgen v0.17.66
 	github.com/FastFilter/xorfilter v0.2.1 // indirect
 	github.com/Masterminds/sprig/v3 v3.2.3
-	github.com/RoaringBitmap/roaring/v2 v2.5.0
+	github.com/RoaringBitmap/roaring/v2 v2.6.0
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/torrent v1.58.2-0.20250720014114-dda1d97c6a22
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
@@ -91,7 +91,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.6.0
-	github.com/urfave/cli/v2 v2.27.5
+	github.com/urfave/cli/v2 v2.27.7
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.27
 	github.com/xsleonard/go-merkle v1.1.0
@@ -152,7 +152,7 @@ require (
 	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.3.0 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
