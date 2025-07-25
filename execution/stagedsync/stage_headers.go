@@ -70,7 +70,6 @@ type HeadersCfg struct {
 	blockReader   services.FullBlockReader
 	blockWriter   *blockio.BlockWriter
 	notifications *shards.Notifications
-	blockRetire   services.BlockRetire
 
 	syncConfig ethconfig.Sync
 
@@ -93,7 +92,6 @@ func StageHeadersCfg(
 	tmpdir string,
 	notifications *shards.Notifications,
 	L2RPCAddr string, // L2 RPC address for Arbitrum
-	blockRetire services.BlockRetire,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -111,7 +109,6 @@ func StageHeadersCfg(
 		blockWriter:       blockWriter,
 		notifications:     notifications,
 		L2RPCAddr:         L2RPCAddr,
-		blockRetire:       blockRetire,
 	}
 }
 
@@ -180,24 +177,32 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err != nil {
 			return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 		}
-
 		if err := rawdb.WriteHeader(tx, blk.Header()); err != nil {
 			return fmt.Errorf("error writing header %d: %w", blockNum, err)
 		}
 		if err := rawdb.WriteBlock(tx, blk); err != nil {
 			return fmt.Errorf("error writing block %d: %w", blockNum, err)
 		}
-		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+		ok, err := rawdb.WriteRawBodyIfNotExists(tx, blk.Header().Hash(), blockNum, blk.RawBody())
+		if err != nil {
+			return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 		}
-		if err = cfg.blockWriter.MakeBodiesCanonical(tx, blockNum); err != nil {
-			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+		if ok {
+			if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+				return err
+			}
+			if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+				return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+			}
+			//if err = cfg.blockWriter.MakeBodiesCanonical(tx, blockNum); err != nil {
+			//	return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+			//}
+			rawdb.WriteHeadBlockHash(tx, blk.Hash())
+			if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+				return err
+			}
 		}
 
-		rawdb.WriteHeadBlockHash(tx, blk.Hash())
-		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
-			return err
-		}
 		latestProcessedBlock = blockNum
 
 		select {
@@ -239,11 +244,18 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return err
 		}
 	}
+	// TODO need tor ead progress and fill header number index?
 	cfg.hd.ReadProgressFromDb(tx)
 
-	if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), prev, firstBlock+1, ctx, logger); err != nil {
+	if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), firstBlock+1, latestProcessedBlock, ctx, logger); err != nil {
 		return err
 	}
+	// This will update bd.maxProgress
+	if err = cfg.bodyDownload.UpdateFromDb(tx); err != nil {
+		return err
+	}
+	defer cfg.bodyDownload.ClearBodyCache()
+
 	if err := cfg.blockWriter.MakeBodiesCanonical(tx, prev); err != nil {
 		return fmt.Errorf("failed to make bodies canonical %d: %w", prev, err)
 	}
