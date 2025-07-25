@@ -27,11 +27,16 @@
 
 The downloader maintains the data files in the datadir/snapshots directory. Files in subdirectories are also data files.
 
-The file `preverified.toml` is created when all the snapshots described by a snapshot hashes files are downloaded and verified. The file contains the hashes of the snapshot files that were successfully synced to entirety. This is used as a marker for whether initial sync is/has completed. Removing this file will cause the downloader to sync to the latest published snapshot hashes.
+The file `preverified.toml` is created when all the snapshots described by a snapshot hashes files are downloaded and
+verified. The file contains the hashes of the snapshot files that were successfully synced to entirety. This is used as
+a marker for whether initial sync is/has completed. Removing this file will cause the downloader to sync to the latest
+published snapshot hashes.
 
-`.torrent` files are created for each snapshot file. During initial sync this is only created after the file is completely downloaded to avoid locking to a version of a file that can't be completed.
+`.torrent` files are created for each snapshot file. During initial sync this is only created after the file is
+completely downloaded to avoid locking to a version of a file that can't be completed.
 
-`.part` files are created for snapshot files that haven't finished downloading. This prevents other components accessing data that the downloader hasn't finished downloading.
+`.part` files are created for snapshot files that haven't finished downloading. This prevents other components accessing
+data that the downloader hasn't finished downloading.
 
 # Downloader
 

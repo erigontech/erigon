@@ -42,6 +42,19 @@ import (
 )
 
 type Cfg struct {
+	WordLvlCfg WordLvlCfg
+	WordLvl    WordLevelCompression
+
+	PageLvl PageLvlCfg
+	//PageLvl bool // Enable PageLevel-compression. Good idea to disable for small-hot files and enable for big-old
+}
+type PageLvlCfg struct {
+	PageSize   int // amount of key-value paris per page
+	Compress   bool
+	NoKeysMode bool // if true: means it wrapping `Reader` which doesn't have keys (like History)
+}
+
+type WordLvlCfg struct {
 	MinPatternScore uint64
 
 	// minPatternLen is minimum length of pattern we consider to be included into the dictionary
@@ -75,7 +88,7 @@ type Cfg struct {
 	Workers int
 }
 
-var DefaultCfg = Cfg{
+var DefaultWordLvlCfg = WordLvlCfg{
 	MinPatternScore: 1024,
 	MinPatternLen:   5,
 	MaxPatternLen:   128,
@@ -95,7 +108,7 @@ var DefaultCfg = Cfg{
 // After that, `Compress` function needs to be called to perform the compression
 // and eventually create output file
 type Compressor struct {
-	Cfg
+	WordLvlCfg
 	ctx              context.Context
 	wg               *sync.WaitGroup
 	superstrings     chan []byte
@@ -113,6 +126,7 @@ type Compressor struct {
 	// sorting algorithm
 	superstring      []byte
 	wordsCount       uint64
+	emptyWordsCount  uint64
 	superstringCount uint64
 	Ratio            CompressionRatio
 	lvl              log.Lvl
@@ -121,7 +135,13 @@ type Compressor struct {
 	noFsync          bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
+func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg WordLvlCfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
+	if cfg.SamplingFactor < 1 {
+		cfg.SamplingFactor = 1
+	}
+	if cfg.Workers < 1 {
+		cfg.Workers = 1
+	}
 	workers := cfg.Workers
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
@@ -151,7 +171,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	}
 	_, outputFileName := filepath.Split(outputFile)
 	return &Compressor{
-		Cfg:              cfg,
+		WordLvlCfg:       cfg,
 		uncompressedFile: uncompressedFile,
 		tmpOutFilePath:   tmpOutFilePath,
 		outputFile:       outputFile,
@@ -196,6 +216,9 @@ var superStringsPool = sync.Pool{New: func() any { return make([]byte, 0, supers
 
 func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
+	if len(word) == 0 {
+		c.emptyWordsCount++
+	}
 	if c.wordsCount%1024 == 0 {
 		select {
 		case <-c.ctx.Done():
@@ -237,6 +260,10 @@ func (c *Compressor) AddUncompressedWord(word []byte) error {
 }
 
 func (c *Compressor) Compress() error {
+	return c.CompressWithCustomMetadata(c.wordsCount, c.emptyWordsCount)
+}
+
+func (c *Compressor) CompressWithCustomMetadata(countMetaField, emptyWordsCountMetaField uint64) error {
 	if err := c.uncompressedFile.Flush(); err != nil {
 		return err
 	}
@@ -252,13 +279,12 @@ func (c *Compressor) Compress() error {
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 	}
-	db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+	db, err := DictionaryBuilderFromCollectors(c.ctx, c.WordLvlCfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 	if err != nil {
 		return err
 	}
 	if c.trace {
-		_, fileName := filepath.Split(c.outputFile)
-		if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
+		if err := PersistDictionary(filepath.Join(c.tmpDir, c.outputFileName)+".dictionary.txt", db); err != nil {
 			return err
 		}
 	}
@@ -270,7 +296,7 @@ func (c *Compressor) Compress() error {
 	}
 	defer cf.Close()
 	t := time.Now()
-	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+	if err := c.compressWithPatternCandidates(c.ctx, countMetaField, emptyWordsCountMetaField, cf, c.uncompressedFile, db); err != nil {
 		return err
 	}
 	if err = c.fsync(cf); err != nil {
