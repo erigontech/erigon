@@ -138,6 +138,7 @@ func init() {
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
 	withChaosMonkey(stateStages)
+	withL2RPCaddress(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)
@@ -148,6 +149,7 @@ func init() {
 	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
 	withChaosMonkey(loopExecCmd)
+	withL2RPCaddress(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 

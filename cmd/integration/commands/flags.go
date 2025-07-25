@@ -185,6 +185,10 @@ func withUnwindTypes(cmd *cobra.Command) {
 	cmd.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "types to unwind for polygon sync")
 }
 
+func withL2RPCaddress(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&cli.L2RPCAddrFlag.Name, "l2rpc", "", cli.L2RPCAddrFlag.Usage)
+}
+
 func withChaosMonkey(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
 }
