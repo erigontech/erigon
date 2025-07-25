@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // generate the messages and services
@@ -244,8 +245,9 @@ func (tx *tx) CanUnwindToBlockNum() (uint64, error) { panic("not implemented") }
 func (tx *tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
 	panic("not implemented")
 }
-func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
-func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
+func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
+func (tx *tx) CurrentDomainVersion(domain kv.Domain) version.Version { panic("not implemented") }
+func (tx *tx) DomainProgress(domain kv.Domain) uint64                { panic("not implemented") }
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
 	panic("not implemented")
 }
@@ -678,7 +680,7 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.las
 // Temporal Methods
 
 func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
-	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remote.HistoryStartFromReq{Domain: uint32(name)})
+	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remote.HistoryStartFromReq{TxId: tx.id, Domain: uint32(name)})
 	if err != nil {
 		return 0
 	}

@@ -1057,9 +1057,14 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 			ii1.hasNextInDb = false
 		}
 		g := iit.dataReader(item.src.decompressor)
-		if g.HasNext() {
-			key, _ := g.Next(nil)
-			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key})
+		g.Reset(0)
+		wrapper := NewSegReaderWrapper(g)
+		if wrapper.HasNext() {
+			key, val, err := wrapper.Next()
+			if err != nil {
+				return ii1
+			}
+			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: wrapper, key: key, val: val, txNum: ^item.endTxNum})
 			ii1.hasNextInFiles = true
 		}
 	}

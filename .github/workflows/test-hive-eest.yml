@@ -7,9 +7,15 @@ on:
         - main
   workflow_dispatch:
 
+concurrency:
+  # Dynamic group to fill all available runners
+  group: hive-eest-tests-${{ github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   test-hive-eest:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: hive
     steps:
       - name: Checkout Hive
         uses: actions/checkout@v4
@@ -17,7 +23,7 @@ jobs:
           repository: erigontech/hive
           ref: master
           path: hive
-
+    
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -53,7 +59,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --client erigon --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=10 --client erigon  --docker.nocache=true --sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -96,3 +102,21 @@ jobs:
             echo "One or more tests failed."
             exit 1
           fi
+          echo "All tests passed successfully."
+
+      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
+      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
+      - name: Remove Hive directory
+        run: |
+          echo "Removing the Hive directory..."
+          rm -rf hive
+        if: always()
+
+      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
+      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
+      - name: Prune docker
+        run: |
+          echo "Pruning docker..."
+          docker system prune -af --volumes
+        if: always()
+
