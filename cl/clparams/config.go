@@ -354,7 +354,6 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
 	},
 	chainspec.HoleskyChainID: {
-		"https://holesky.beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
 		"https://beaconstate-holesky.chainsafe.io/eth/v2/debug/beacon/states/finalized",
 		"https://holesky.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint-sync.holesky.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
