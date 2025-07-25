@@ -32,6 +32,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -100,6 +101,8 @@ type Trie interface {
 
 	// Process updates
 	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
+
+	Warmup(ctx PatriciaContext, hashedKey []byte) error
 }
 
 type PatriciaContext interface {
@@ -184,6 +187,8 @@ type BranchEncoder struct {
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
 	metrics   *Metrics
+
+	SkipEncoding bool // if true, does not encode branches, only get hashes and latestNibble used for folding
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -211,6 +216,9 @@ func (be *BranchEncoder) CollectUpdate(
 	update, lastNibble, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {
 		return 0, err
+	}
+	if be.SkipEncoding {
+		return lastNibble, nil
 	}
 
 	if len(prev) > 0 {
@@ -250,11 +258,13 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
-	var encoded [4]byte
-	binary.BigEndian.PutUint16(encoded[:], touchMap)
-	binary.BigEndian.PutUint16(encoded[2:], afterMap)
-	if _, err := be.buf.Write(encoded[:]); err != nil {
-		return nil, 0, err
+	if !be.SkipEncoding {
+		var encoded [4]byte
+		binary.BigEndian.PutUint16(encoded[:], touchMap)
+		binary.BigEndian.PutUint16(encoded[2:], afterMap)
+		if _, err := be.buf.Write(encoded[:]); err != nil {
+			return nil, 0, err
+		}
 	}
 
 	var lastNibble int
@@ -273,7 +283,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			return nil, 0, err
 		}
 
-		if bitmap&bit != 0 {
+		if !be.SkipEncoding && bitmap&bit != 0 {
 			var fields cellFields
 			if cell.extLen > 0 && cell.storageAddrLen == 0 {
 				fields |= fieldExtension
@@ -905,6 +915,9 @@ const (
 	ModeDisabled Mode = 0
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
+
+	ModeUpdateWarmup Mode = 3
+	ModeUpdateMap    Mode = 5
 )
 
 func (m Mode) String() string {
@@ -936,8 +949,10 @@ func ParseCommitmentMode(s string) Mode {
 type Updates struct {
 	hasher keyHasher
 	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
+	Warmup func(key []byte) error    // function to Warmup the key
 	etl    *etl.Collector            // all-in-one collector
 	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
+	ku     map[string]*KeyUpdate
 	mode   Mode
 	tmpdir string
 
@@ -971,10 +986,14 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+	} else if t.mode == ModeUpdateMap {
+		t.ku = make(map[string]*KeyUpdate)
+		t.initCollector()
 	}
 	return t
 }
 
+// Deprecated
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
 	if t.mode == ModeDirect && t.keys == nil {
@@ -1029,6 +1048,28 @@ func (t *Updates) Size() (updates uint64) {
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
+	case ModeUpdateMap:
+		if u, exist := t.ku[key]; exist {
+			fn(u, val)
+		} else {
+			u = &KeyUpdate{plainKey: key, update: new(Update), hashedKey: t.hasher(toBytesZeroCopy(key))}
+			t.ku[key] = u
+			fn(u, val)
+
+			var err error
+			if !t.sortPerNibble {
+				err = t.etl.Collect(u.hashedKey, toBytesZeroCopy(key))
+			} else {
+				err = t.nibbles[u.hashedKey[0]].Collect(u.hashedKey, toBytesZeroCopy(key))
+			}
+			if COM_WARMUP && t.Warmup != nil {
+				go t.Warmup(u.hashedKey)
+			}
+			if err != nil {
+				log.Warn("failed to collect updated key", "key", key, "err", err)
+			}
+		}
+
 	case ModeUpdate:
 		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
 
@@ -1043,6 +1084,9 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			pivot.hashedKey = t.hasher(toBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
+			if COM_WARMUP && t.Warmup != nil {
+				go t.Warmup(pivot.hashedKey)
+			}
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
@@ -1054,6 +1098,9 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 				err = t.etl.Collect(hashedKey, keyBytes)
 			} else {
 				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
+			}
+			if COM_WARMUP && t.Warmup != nil {
+				go t.Warmup(hashedKey)
 			}
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
@@ -1122,6 +1169,9 @@ func (t *Updates) Close() {
 	if t.keys != nil {
 		clear(t.keys)
 	}
+	if t.ku != nil {
+		clear(t.ku)
+	}
 	if t.tree != nil {
 		t.tree.Clear(true)
 		t.tree = nil
@@ -1138,9 +1188,77 @@ func (t *Updates) Close() {
 	}
 }
 
+type fnNextKey func(hashed, plain []byte, update *Update) error
+
+// TODO remove experimental feature
+var COM_WARMUP = dbg.EnvBool("ERIGON_COM_WARMUP", false)
+
+func (t *Updates) WarmupHashSort(ctx context.Context, fn, warmup fnNextKey) error {
+	if !COM_WARMUP {
+		return t.HashSort(ctx, fn)
+	}
+	//if t.mode != ModeUpdateWarmup {
+	//	panic("WarmupHashSort should be called only in ModeUpdateWarmup")
+	//}
+
+	clear(t.keys)
+
+	initialised := false
+	prevHashed := make([]byte, 0, length.Hash*4)
+	prevPlain := make([]byte, 0, length.Addr+length.Hash)
+	//prevUpdate := &Update{}
+
+	err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		// warming up current key, processing previous one
+		if warmup != nil {
+			if err := warmup(k, v, nil); err != nil {
+				return fmt.Errorf("failed to warmup key %x: %w", k, err)
+			}
+		}
+
+		if initialised {
+			// process prev key
+			if err := fn(prevHashed, prevPlain, nil); err != nil {
+				return err
+			}
+		}
+
+		// and update previous keys for next iteration
+		prevHashed = append(prevHashed[:0], k...)
+		prevPlain = append(prevPlain[:0], v...)
+		initialised = true
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return err
+	}
+
+	// dont forget to process latest key pair
+	if len(prevPlain) > 0 {
+		if err := fn(prevHashed, prevPlain, nil); err != nil {
+			return err
+		}
+	}
+
+	t.initCollector()
+
+	return nil
+}
+
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
+	//case ModeUpdateWarmup:
+	//	clear(t.keys)
+	//
+	//	err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	//		return fn(k, v, nil)
+	//	}, etl.TransformArgs{Quit: ctx.Done()})
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	t.initCollector()
 	case ModeDirect:
 		clear(t.keys)
 
@@ -1166,6 +1284,21 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 			return true
 		})
 		t.tree.Clear(true)
+
+	case ModeUpdateMap:
+		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			// ku := t.ku[toStringZeroCopy(v)]
+			// if ku == nil {
+			// 	fmt.Printf("Update was not found for key %x\n", v)
+			// }
+			return fn(k, v, nil) //ku.update)
+		}, etl.TransformArgs{Quit: ctx.Done()})
+		if err != nil {
+			return err
+		}
+		clear(t.ku)
+		t.initCollector()
+
 	default:
 		return nil
 	}
