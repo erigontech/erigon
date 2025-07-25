@@ -17,6 +17,21 @@ jobs:
     runs-on:
       group: hive
     steps:
+      - name: Clean docker system
+        run: |
+          echo "Force stopping and removing all containers..."
+          if [ -n "$(docker ps -aq)" ]; then
+            docker kill $(docker ps -aq) || true
+            docker rm -f $(docker ps -aq) || true
+          fi
+          echo "Pruning all images..."
+          docker image prune -af || true
+          if [ -n "$(docker images -aq)" ]; then
+            echo "Force removing all images..."
+            docker rmi -f $(docker images -aq) || true
+          fi
+          echo "Pruning docker system..."
+          docker system prune -af --volumes
       - name: Checkout Hive
         uses: actions/checkout@v4
         with:
