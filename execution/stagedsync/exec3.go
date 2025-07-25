@@ -774,7 +774,7 @@ Loop:
 				}
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
-				if !initialCycle {
+				if !initialCycle && outputBlockNum.GetValueUint64() >= maxBlockNum {
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
