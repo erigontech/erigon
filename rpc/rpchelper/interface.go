@@ -43,5 +43,6 @@ type ApiBackend interface {
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
+	RemovePeer(ctx context.Context, url *remote.RemovePeerRequest) (*remote.RemovePeerReply, error)
 	PendingBlock(ctx context.Context) (*types.Block, error)
 }
