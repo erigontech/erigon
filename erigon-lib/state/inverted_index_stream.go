@@ -382,7 +382,7 @@ func (it *InvertedIterator1) advanceInDb() {
 			if !ok {
 				break
 			}
-			if k, _, err = it.cursor.Seek(sceek); err != nil {
+			if k, _, err = it.cursor.Seek(seek); err != nil {
 				panic(err)
 			}
 			continue
