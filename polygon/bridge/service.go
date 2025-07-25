@@ -208,6 +208,32 @@ func (s *Service) Run(ctx context.Context) error {
 			continue
 		}
 
+		orderedAndNoGaps := true
+		knownEventID := lastFetchedEventId
+
+		for i := 0; i < len(events); i++ {
+			if events[i].ID == knownEventID+1 {
+				knownEventID = events[i].ID
+				continue
+			}
+
+			orderedAndNoGaps = false
+		}
+
+		if !orderedAndNoGaps {
+			s.logger.Warn(
+				bridgeLogPrefix("fetched new events are not ordered or contain gaps"),
+				"count", len(events),
+				"lastKnownEventId", lastFetchedEventId,
+			)
+
+			if err := common.Sleep(ctx, time.Second); err != nil {
+				return err
+			}
+
+			continue
+		}
+
 		// we've received new events
 		s.reachedTip.Store(false)
 		if err := s.store.PutEvents(ctx, events); err != nil {

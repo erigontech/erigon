@@ -99,8 +99,8 @@ github.com/anacrolix/dht/v2 v2.22.2-0.20250623060212-d7b7d8a52b01/go.mod h1:seXR
 github.com/anacrolix/envpprof v0.0.0-20180404065416-323002cec2fa/go.mod h1:KgHhUaQMc8cC0+cEflSgCFNFbKwi5h54gqtVn8yhP7c=
 github.com/anacrolix/envpprof v1.0.0/go.mod h1:KgHhUaQMc8cC0+cEflSgCFNFbKwi5h54gqtVn8yhP7c=
 github.com/anacrolix/envpprof v1.1.0/go.mod h1:My7T5oSqVfEn4MD4Meczkw/f5lSIndGAKu/0SM/rkf4=
-github.com/anacrolix/envpprof v1.3.0 h1:WJt9bpuT7A/CDCxPOv/eeZqHWlle/Y0keJUvc6tcJDk=
-github.com/anacrolix/envpprof v1.3.0/go.mod h1:7QIG4CaX1uexQ3tqd5+BRa/9e2D02Wcertl6Yh0jCB0=
+github.com/anacrolix/envpprof v1.4.0 h1:QHeIcrgHcRChhnxR8l6rlaLlRQx9zd7Q2NII6Zbt83w=
+github.com/anacrolix/envpprof v1.4.0/go.mod h1:7QIG4CaX1uexQ3tqd5+BRa/9e2D02Wcertl6Yh0jCB0=
 github.com/anacrolix/generics v0.0.0-20230113004304-d6428d516633/go.mod h1:ff2rHB/joTV03aMSSn/AZNnaIpUw0h3njetGsaXcMy8=
 github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647 h1:dDTY2j+pjY0EnF0TIuAxees1FeFpnFVE2dr7BxfWe24=
 github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647/go.mod h1:MN3ve08Z3zSV/rTuX/ouI4lNdlfTxgdafQJiLzyNRB8=
@@ -140,8 +140,8 @@ github.com/anacrolix/sync v0.5.4/go.mod h1:21cUWerw9eiu/3T3kyoChu37AVO+YFue1/H15
 github.com/anacrolix/tagflag v0.0.0-20180109131632-2146c8d41bf0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.0.0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.1.0/go.mod h1:Scxs9CV10NQatSmbyjqmqmeQNwGzlNe0CMUMIxqHIG8=
-github.com/anacrolix/torrent v1.58.2-0.20250714121614-df7052d6b54e h1:ewkzLBRWNvUW+lUmPDutvZmg0Zp0Xkfy0W02GEmOaEA=
-github.com/anacrolix/torrent v1.58.2-0.20250714121614-df7052d6b54e/go.mod h1:tKZnHtdMef8BsqGoRR553+oUJFb014khOp42A73pXe8=
+github.com/anacrolix/torrent v1.58.2-0.20250720014114-dda1d97c6a22 h1:++9jsPVhyk62vOMhGlZKKmWg9iQqbaHyZRGwE72LiDw=
+github.com/anacrolix/torrent v1.58.2-0.20250720014114-dda1d97c6a22/go.mod h1:w1bVf6LdDPybFRpVIghWPnm0flV8i0OtWwGY1dXyObg=
 github.com/anacrolix/upnp v0.1.4 h1:+2t2KA6QOhm/49zeNyeVwDu1ZYS9dB9wfxyVvh/wk7U=
 github.com/anacrolix/upnp v0.1.4/go.mod h1:Qyhbqo69gwNWvEk1xNTXsS5j7hMHef9hdr984+9fIic=
 github.com/anacrolix/utp v0.1.0 h1:FOpQOmIwYsnENnz7tAGohA+r6iXpRjrq8ssKSre2Cp4=

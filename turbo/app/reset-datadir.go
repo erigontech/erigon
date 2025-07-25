@@ -24,18 +24,11 @@ import (
 )
 
 var (
-	removeUnknownFlag = cli.BoolFlag{
-		Name:     "remove-unknown",
-		Usage:    "Remove files not described in snapshot set.",
-		Value:    false,
-		Aliases:  []string{"u"},
-		Category: "Reset",
-	}
-	chaindataFlag = cli.BoolFlag{
-		Name:     "chaindata",
-		Usage:    "Remove chaindata too.",
-		Value:    false,
-		Aliases:  []string{"c"},
+	removeLocalFlag = cli.BoolFlag{
+		Name:     "local",
+		Usage:    "Remove files not described in snapshot set (probably generated locally).",
+		Value:    true,
+		Aliases:  []string{"l"},
 		Category: "Reset",
 	}
 	dryRunFlag = cli.BoolFlag{
@@ -54,9 +47,8 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		err = fmt.Errorf("setting up logging: %w", err)
 		return
 	}
-	removeUnknown := removeUnknownFlag.Get(cliCtx)
+	removeLocal := removeLocalFlag.Get(cliCtx)
 	dryRun := dryRunFlag.Get(cliCtx)
-	removeChainData := chaindataFlag.Get(cliCtx)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 
 	dirs := datadir.Open(dataDirPath)
@@ -109,7 +101,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		removeFunc = dryRunRemove
 	}
 	reset := reset{
-		removeUnknown: removeUnknown,
+		removeUnknown: removeLocal,
 		logger:        logger,
 	}
 	logger.Info("Resetting snapshots directory", "path", dirs.Snap)
@@ -125,7 +117,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		"torrents", reset.stats.removed.torrentFiles,
 		"data", reset.stats.removed.dataFiles)
 	// Remove chaindata last, so that the config is available if there's an error.
-	if removeChainData {
+	if removeLocal {
 		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
 		if !dryRun {
 			err = os.RemoveAll(dirs.Chaindata)

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/anacrolix/envpprof"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -36,12 +37,14 @@ import (
 )
 
 func main() {
+	defer envpprof.Stop()
 	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
 			log.Warn("Fprintln error", "err", printErr)
 		}
+		envpprof.Stop()
 		os.Exit(1)
 	}
 }

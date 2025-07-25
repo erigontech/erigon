@@ -284,8 +284,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&utils.ChainFlag,
 				&dryRunFlag,
-				&removeUnknownFlag,
-				&chaindataFlag,
+				&removeLocalFlag,
 			),
 		},
 		{

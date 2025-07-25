@@ -192,7 +192,7 @@ func New(
 			torrentSloggerHandlers,
 			slog.NewJSONHandler(torrentLogFile, &slog.HandlerOptions{
 				AddSource:   true,
-				Level:       erigonToSlogLevel(verbosity),
+				Level:       min(erigonToSlogLevel(verbosity), slog.LevelWarn),
 				ReplaceAttr: nil,
 			}))
 	} else {
