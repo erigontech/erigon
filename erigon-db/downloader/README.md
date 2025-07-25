@@ -8,7 +8,7 @@ The diagram below shows the components used to manage downloads between torrents
 
 By default, the Downloader will try to use the underlying BitTorrent library to download files from peers and web peers.  
 
-However, this can result in slow or stalled downloads if the selected snapshot becomes unavailable. Use `erigon snapshot reset` or restart the downloader to sync to a different snapshot in this event.
+However, this can result in slow or stalled downloads if the selected snapshot becomes unavailable. Use `erigon snapshot reset` or restart the downloader to sync to a different snapshot in this event. Pass `--local=false` keep files that aren't in the latest snapshot. This means only incomplete files that don't match the latest snapshot will be removed.
 
 # Configuration/Control Files
 

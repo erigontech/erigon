@@ -136,7 +136,7 @@ When running Erigon 3.1+, your snapshot files will be upgraded automatically to 
 
 The downloader component in Erigon 3.1 will check the file data of snapshots when `--downloader.verify` is provided. Incorrect data will be repaired.
 
-A new `snapshots reset` subcommand is added, that lets you trigger Erigon to perform an initial sync on the next run. Use this if your datadir is corrupted, or your client is unable to obtain missing snapshot data due to having committed to a snapshot that is no longer available. It will remove any locally generated files, and your chain data. Pass `--local=false` to force a resync but keep files that aren't in the latest snapshot.
+A new `snapshots reset` subcommand is added, that lets you trigger Erigon to perform an initial sync on the next run, reusing existing files where possible. Use this if your datadir is corrupted, or your client is unable to obtain missing snapshot data due to having committed to a snapshot that is no longer available. It will remove any locally generated files, and your chain data. 
 
 ### Datadir structure
 
