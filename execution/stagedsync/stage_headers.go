@@ -212,8 +212,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			log.Info(fmt.Sprintf("[%s] Header and Block processed", s.LogPrefix()), "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec), "extTx", useExternalTx)
 
 			if !useExternalTx {
-				err := tx.Commit()
-				if err != nil {
+				if err := tx.Commit(); err != nil {
 					log.Warn("Error committing transaction", "err", err)
 					return err
 				}
@@ -224,12 +223,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 				}
 				defer tx.Rollback()
 				cfg.hd.ReadProgressFromDb(tx)
-
 			}
-			if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), prev, blockNum+1, ctx, logger); err != nil {
-				return err
-			}
-
 			prev = blockNum
 		default:
 			// continue processing without waiting
@@ -245,7 +239,14 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return err
 		}
 	}
+	cfg.hd.ReadProgressFromDb(tx)
 
+	if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), prev, firstBlock+1, ctx, logger); err != nil {
+		return err
+	}
+	if err := cfg.blockWriter.MakeBodiesCanonical(tx, prev); err != nil {
+		return fmt.Errorf("failed to make bodies canonical %d: %w", prev, err)
+	}
 	if !useExternalTx {
 		cfg.hd.SetSynced()
 		err = tx.Commit()
@@ -254,10 +255,8 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 		log.Info("Committed transaction", "block", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
+
 	log.Info("Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "extTx", useExternalTx)
-	//if cfg.blockRetire != nil {
-	//	cfg.blockRetire.RetireBlocksInBackground(ctx, firstBlock, latestBlock.Uint64(), log.LvlInfo, nil, nil, nil)
-	//}
 	return nil
 }
 
