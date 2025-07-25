@@ -7,6 +7,7 @@ on:
     branches:
       - "release/3.*"
   schedule:
+    # Every Sunday at 00:00 UTC
     - cron: "0 0 * * 0"
 
 jobs:
@@ -291,20 +292,13 @@ jobs:
             
             throughput_length=$(jq '.tx_pool_throughput_analysis | length' "$output_json")
             for ((i=0; i<throughput_length; i++)); do
-              max_tps=$(jq -r ".tx_pool_throughput_analysis[$i].throughput_measures | if length > 0 then map(.processed_tps) | max else null end" "$output_json")
+              max_tps=$(jq -r ".tx_pool_throughput_analysis[$i].max_tps" "$output_json")
               missed_p2p_event_rate=$(jq -r ".tx_pool_throughput_analysis[$i].missed_p2p_event_rate" "$output_json")
               coordinated_omission_event_rate=$(jq -r ".tx_pool_throughput_analysis[$i].coordinated_omission_event_rate" "$output_json")
               starting_tps=$(jq -r ".tx_pool_throughput_analysis[$i].starting_tps" "$output_json")
               ending_tps=$(jq -r ".tx_pool_throughput_analysis[$i].ending_tps" "$output_json")
               increment_tps=$(jq -r ".tx_pool_throughput_analysis[$i].increment_tps" "$output_json")
               duration_s=$(jq -r ".tx_pool_throughput_analysis[$i].duration_s" "$output_json")
-              
-              # Format Max TPS to 2 decimal places, handle null/invalid values
-              if [ "$max_tps" != "null" ] && [ -n "$max_tps" ] && [[ "$max_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                max_tps_formatted=$(printf "%.2f" "$max_tps")
-              else
-                max_tps_formatted="N/A"
-              fi
               
               # Format percentages from decimal to percentage format
               if [ "$missed_p2p_event_rate" != "null" ] && [ -n "$missed_p2p_event_rate" ] && [[ "$missed_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
@@ -319,7 +313,7 @@ jobs:
                 coordinated_omission_event_count_percentage="N/A"
               fi
               
-              echo "| $max_tps_formatted | $missed_p2p_event_count_percentage | $coordinated_omission_event_count_percentage | $starting_tps | $ending_tps | $increment_tps | $duration_s |" >> $GITHUB_STEP_SUMMARY
+              echo "| $max_tps | $missed_p2p_event_count_percentage | $coordinated_omission_event_count_percentage | $starting_tps | $ending_tps | $increment_tps | $duration_s |" >> $GITHUB_STEP_SUMMARY
             done
           else
             echo "⚠️ No throughput analysis data available" >> $GITHUB_STEP_SUMMARY
