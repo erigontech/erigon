@@ -19,19 +19,13 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 )
 
 func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
 	fmt.Println("BenchTraceTransaction: fromBlock:", blockFrom, ", blockTo:", blockTo)
 
 	setRoutes(erigonUrl, gethUrl)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
-
 	var rec *bufio.Writer
 	if recordFileName != "" {
 		f, err := os.Create(recordFileName)
@@ -60,9 +54,7 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 		go vegetaWrite(true, []string{"trace_transaction"}, resultsCh)
 	}
 
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
 	var res CallResult
 	var nBlocks = 0
@@ -75,7 +67,6 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 		nBlocks++
 		var erigonBlock EthBlockByNumber
 
-		reqGen.reqID++
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &erigonBlock)
 		if res.Err != nil {
 			return fmt.Errorf("retrieve block (Erigon) %d: %v", blockFrom, res.Err)
@@ -87,7 +78,6 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 		if needCompare {
 			var otherBlock EthBlockByNumber
 
-			reqGen.reqID++
 			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &otherBlock)
 			if res.Err != nil {
 				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
@@ -112,7 +102,6 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 			}
 			nTransactions++
 
-			reqGen.reqID++
 			request := reqGen.traceTransaction(txn.Hash)
 			errCtx := fmt.Sprintf("block %d, txn %s", bn, txn.Hash)
 			if err := requestAndCompare(request, "trace_transaction", errCtx, reqGen, needCompare, rec, errs, resultsCh,
