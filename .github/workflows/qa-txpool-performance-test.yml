@@ -7,6 +7,7 @@ on:
     branches:
       - "release/3.*"
   schedule:
+    # Every Sunday at 00:00 UTC
     - cron: "0 0 * * 0"
 
 jobs:
@@ -199,9 +200,9 @@ jobs:
               csv_file="tx_pool_throughput_analysis_${i}.csv"
 
               # Extract the throughput_measures array and convert to CSV format
-              # Each measure contains load_tps, processed_tps, not_received_p2p_event_count and coordinated_omission_event_count
-              echo "load_tps,processed_tps,not_received_p2p_event_count,coordinated_omission_event_count" > "$csv_file"
-              jq -r ".tx_pool_throughput_analysis[$i].throughput_measures[] | [.load_tps, .processed_tps, .not_received_p2p_event_count, .coordinated_omission_event_count] | @csv" "$output_json" >> "$csv_file"
+              # Each measure contains load_tps, processed_tps, not_received_p2p_event_rate and coordinated_omission_event_rate
+              echo "load_tps,processed_tps,not_received_p2p_event_rate,coordinated_omission_event_rate" > "$csv_file"
+              jq -r ".tx_pool_throughput_analysis[$i].throughput_measures[] | [.load_tps, .processed_tps, .not_received_p2p_event_rate, .coordinated_omission_event_rate] | @csv" "$output_json" >> "$csv_file"
 
               # Call the Python script to process the CSV file
               python3 $ERIGON_QA_PATH/test_system/qa-tests/tx-pool/throughput_plot.py \
@@ -286,27 +287,33 @@ jobs:
           echo "## 📊 Throughput Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if jq -e '.tx_pool_throughput_analysis' "$output_json" > /dev/null 2>&1; then
-            echo "| Max TPS | Total Missed Events | Total Coordinated Omission Events | Starting TPS | Ending TPS | Increment TPS | Duration (s) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Max TPS | Missed Events % | Coordinated Omission Events % | Starting TPS | Ending TPS | Increment TPS | Duration (s) |" >> $GITHUB_STEP_SUMMARY
             echo "|---------|---------------------|-----------------------------------|--------------|------------|---------------|--------------|" >> $GITHUB_STEP_SUMMARY
             
             throughput_length=$(jq '.tx_pool_throughput_analysis | length' "$output_json")
             for ((i=0; i<throughput_length; i++)); do
-              max_tps=$(jq -r ".tx_pool_throughput_analysis[$i].throughput_measures | if length > 0 then map(.processed_tps) | max else null end" "$output_json")
-              missed_p2p_event_count=$(jq -r ".tx_pool_throughput_analysis[$i].missed_p2p_event_count" "$output_json")
-              coordinated_omission_event_count=$(jq -r ".tx_pool_throughput_analysis[$i].coordinated_omission_event_count" "$output_json")
+              max_tps=$(jq -r ".tx_pool_throughput_analysis[$i].max_tps" "$output_json")
+              missed_p2p_event_rate=$(jq -r ".tx_pool_throughput_analysis[$i].missed_p2p_event_rate" "$output_json")
+              coordinated_omission_event_rate=$(jq -r ".tx_pool_throughput_analysis[$i].coordinated_omission_event_rate" "$output_json")
               starting_tps=$(jq -r ".tx_pool_throughput_analysis[$i].starting_tps" "$output_json")
               ending_tps=$(jq -r ".tx_pool_throughput_analysis[$i].ending_tps" "$output_json")
               increment_tps=$(jq -r ".tx_pool_throughput_analysis[$i].increment_tps" "$output_json")
               duration_s=$(jq -r ".tx_pool_throughput_analysis[$i].duration_s" "$output_json")
               
-              # Format Max TPS to 2 decimal places, handle null/invalid values
-              if [ "$max_tps" != "null" ] && [ -n "$max_tps" ] && [[ "$max_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                max_tps_formatted=$(printf "%.2f" "$max_tps")
+              # Format percentages from decimal to percentage format
+              if [ "$missed_p2p_event_rate" != "null" ] && [ -n "$missed_p2p_event_rate" ] && [[ "$missed_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                missed_p2p_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $missed_p2p_event_rate * 100" | bc -l))
               else
-                max_tps_formatted="N/A"
+                missed_p2p_event_count_percentage="N/A"
               fi
               
-              echo "| $max_tps_formatted | $missed_p2p_event_count | $coordinated_omission_event_count | $starting_tps | $ending_tps | $increment_tps | $duration_s |" >> $GITHUB_STEP_SUMMARY
+              if [ "$coordinated_omission_event_rate" != "null" ] && [ -n "$coordinated_omission_event_rate" ] && [[ "$coordinated_omission_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                coordinated_omission_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $coordinated_omission_event_rate * 100" | bc -l))
+              else
+                coordinated_omission_event_count_percentage="N/A"
+              fi
+              
+              echo "| $max_tps | $missed_p2p_event_count_percentage | $coordinated_omission_event_count_percentage | $starting_tps | $ending_tps | $increment_tps | $duration_s |" >> $GITHUB_STEP_SUMMARY
             done
           else
             echo "⚠️ No throughput analysis data available" >> $GITHUB_STEP_SUMMARY
@@ -317,16 +324,16 @@ jobs:
           echo "## 🕐 Latency Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if jq -e '.tx_pool_latency_analysis' "$output_json" > /dev/null 2>&1; then
-            echo "| TX Count | Min (μs) | Max (ms) | Missed Events | Duplicated Events |" >> $GITHUB_STEP_SUMMARY
-            echo "|----------|----------|----------|---------------|-------------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| TX Count | Min (μs) | Max (ms) | Missed Events % | Duplicated Events % |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|----------|----------|-----------------|-------------------|" >> $GITHUB_STEP_SUMMARY
             
             latency_length=$(jq '.tx_pool_latency_analysis | length' "$output_json")
             for ((i=0; i<latency_length; i++)); do
               tx_count=$(jq -r ".tx_pool_latency_analysis[$i].tx_count" "$output_json")
               min_us=$(jq -r ".tx_pool_latency_analysis[$i].min_latency_mus" "$output_json")
               max_us=$(jq -r ".tx_pool_latency_analysis[$i].max_latency_mus" "$output_json")
-              missed=$(jq -r ".tx_pool_latency_analysis[$i].missed_p2p_event_count" "$output_json")
-              duplicated=$(jq -r ".tx_pool_latency_analysis[$i].duplicated_p2p_event_count" "$output_json")
+              missed_p2p_event_rate=$(jq -r ".tx_pool_latency_analysis[$i].missed_p2p_event_rate" "$output_json")
+              duplicated_p2p_event_rate=$(jq -r ".tx_pool_latency_analysis[$i].duplicated_p2p_event_rate" "$output_json")
               
               # Convert max from microseconds to milliseconds, handle null/invalid values
               if [ "$max_us" != "null" ] && [ -n "$max_us" ] && [[ "$max_us" =~ ^[0-9]+\.?[0-9]*$ ]]; then
@@ -335,7 +342,20 @@ jobs:
                 max_ms="N/A"
               fi
               
-              echo "| $tx_count | $min_us | $max_ms | $missed | $duplicated |" >> $GITHUB_STEP_SUMMARY
+              # Format percentages from decimal to percentage format
+              if [ "$missed_p2p_event_rate" != "null" ] && [ -n "$missed_p2p_event_rate" ] && [[ "$missed_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                missed_p2p_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $missed_p2p_event_rate * 100" | bc -l))
+              else
+                missed_p2p_event_count_percentage="N/A"
+              fi
+              
+              if [ "$duplicated_p2p_event_rate" != "null" ] && [ -n "$duplicated_p2p_event_rate" ] && [[ "$duplicated_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                duplicated_p2p_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $duplicated_p2p_event_rate * 100" | bc -l))
+              else
+                duplicated_p2p_event_count_percentage="N/A"
+              fi
+              
+              echo "| $tx_count | $min_us | $max_ms | $missed_p2p_event_count_percentage | $duplicated_p2p_event_count_percentage |" >> $GITHUB_STEP_SUMMARY
             done
           else
             echo "⚠️ No latency analysis data available" >> $GITHUB_STEP_SUMMARY
