@@ -319,8 +319,8 @@ func validateRequest(r *http.Request) (int, error) {
 func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bool {
 	var tokenStr string
 	// Check if JWT signature is correct
-	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-		tokenStr = strings.TrimPrefix(auth, "Bearer ")
+	if auth := r.Header.Get("Authorization"); after, ok :=strings.CutPrefix(auth, "Bearer "); ok  {
+		tokenStr = after
 	}
 
 	if len(tokenStr) == 0 {
