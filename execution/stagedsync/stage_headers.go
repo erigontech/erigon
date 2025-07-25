@@ -164,7 +164,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		curBlock++
 	}
 	firstBlock := curBlock
-	fmt.Printf("requesting headers from %d to %d\n", curBlock, latestBlock.Uint64())
+	log.Info("[Arbitrum] Headers stage started", "firstBlock", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
 
 	var blockNumber big.Int
 	// Process blocks from the starting block up to the latest.
@@ -271,7 +271,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Info("Committed transaction", "block", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
 
-	log.Info("Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "extTx", useExternalTx)
+	log.Info("Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "wasTxCommitted", !useExternalTx)
 	return nil
 }
 
