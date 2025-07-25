@@ -81,6 +81,7 @@ type Client struct {
 	isHTTP          bool
 	services        *serviceRegistry
 	methodAllowList AllowList
+	batchLimit      int // batch size limit
 
 	idCounter uint32
 
@@ -202,17 +203,18 @@ func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, randomIDGenerator(), &serviceRegistry{logger: logger}, logger)
+	c := initClient(conn, randomIDGenerator(), &serviceRegistry{logger: logger}, 0, logger)
 	c.reconnectFunc = connect
 	return c, nil
 }
 
-func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, logger log.Logger) *Client {
+func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
 		idgen:       idgen,
 		isHTTP:      isHTTP,
 		services:    services,
+		batchLimit:  batchLimit,
 		writeConn:   conn,
 		close:       make(chan struct{}),
 		closing:     make(chan struct{}),
@@ -565,6 +567,20 @@ func (c *Client) dispatch(codec ServerCodec) {
 		// Read path:
 		case op := <-c.readOp:
 			if op.batch {
+				if c.batchLimit > 0 && len(op.msgs) > c.batchLimit {
+					batchErr := &invalidRequestError{
+						fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested: %d",
+							c.batchLimit, len(op.msgs)),
+					}
+					// Log the error
+					conn.handler.logger.Warn("[rpc] batch limit exceeded", "limit", c.batchLimit, "requested", len(op.msgs))
+					// Send error response
+					errMsg := errorMessage(batchErr)
+					_ = conn.codec.WriteJSON(context.Background(), errMsg)
+					// Then close the connection
+					conn.close(batchErr, lastOp)
+					continue
+				}
 				conn.handler.handleBatch(op.msgs)
 			} else {
 				conn.handler.handleMsg(op.msgs[0], nil)
