@@ -17,13 +17,17 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/version"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -259,6 +263,321 @@ func deleteMergeFile(dirtyFiles *btree2.BTreeG[*FilesItem], outs []*FilesItem, f
 			}
 		}
 	}
+}
+
+func (d *Domain) openDirtyFiles() (err error) {
+	invalidFileItems := make([]*FilesItem, 0)
+	invalidFileItemsLock := sync.Mutex{}
+	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		for _, item := range items {
+			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+			if item.decompressor == nil {
+				fPathMask := d.kvFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					d.logger.Debug("[agg] Domain.openDirtyFiles: FileExist err", "f", fName, "err", err)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+				if !ok {
+					_, fName := filepath.Split(fPath)
+					d.logger.Debug("[agg] Domain.openDirtyFiles: file does not exists", "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+
+				if !fileVer.Eq(d.version.DataKV.Current) {
+					if !fileVer.Less(d.version.DataKV.MinSupported) {
+						d.version.DataKV.Current = fileVer
+					} else {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.version.DataKV)
+					}
+				}
+
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+					_, fName := filepath.Split(fPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+					} else {
+						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+					}
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					// don't interrupt on error. other files may be good. but skip indices open.
+					continue
+				}
+			}
+
+			if item.index == nil && d.Accessors.Has(AccessorHashMap) {
+				fPathMask := d.kviAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+				}
+				if ok {
+					if !fileVer.Eq(d.version.AccessorKVI.Current) {
+						if !fileVer.Less(d.version.AccessorKVI.MinSupported) {
+							d.version.AccessorKVI.Current = fileVer
+						} else {
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, d.version.AccessorKVI)
+						}
+					}
+					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+			if item.bindex == nil && d.Accessors.Has(AccessorBTree) {
+				fPathMask := d.kvBtAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+				}
+				if ok {
+					if !fileVer.Eq(d.version.AccessorBT.Current) {
+						if !fileVer.Less(d.version.AccessorBT.MinSupported) {
+							d.version.AccessorBT.Current = fileVer
+						} else {
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, d.version.AccessorBT)
+						}
+					}
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
+						_, fName := filepath.Split(fPath)
+						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+			if item.existence == nil && d.Accessors.Has(AccessorExistence) {
+				fPathMask := d.kvExistenceIdxFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+				}
+				if ok {
+					if !fileVer.Eq(d.version.AccessorKVEI.Current) {
+						if !fileVer.Less(d.version.AccessorKVEI.MinSupported) {
+							d.version.AccessorKVEI.Current = fileVer
+						} else {
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, d.version.AccessorKVEI)
+						}
+					}
+					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+						_, fName := filepath.Split(fPath)
+						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+		}
+		return true
+	})
+
+	for _, item := range invalidFileItems {
+		item.closeFiles() // just close, not remove from disk
+		d.dirtyFiles.Delete(item)
+	}
+
+	return nil
+}
+
+func (h *History) openDirtyFiles() error {
+	invalidFilesMu := sync.Mutex{}
+	invalidFileItems := make([]*FilesItem, 0)
+	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		for _, item := range items {
+			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
+			if item.decompressor == nil {
+				fPathMask := h.vFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					continue
+				}
+				if !ok {
+					_, fName := filepath.Split(fPath)
+					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					continue
+				}
+				if !fileVer.Eq(h.version.DataV.Current) {
+					if !fileVer.Less(h.version.DataV.MinSupported) {
+						h.version.DataV.Current = fileVer
+					} else {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, h.version.DataV)
+					}
+				}
+
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+					_, fName := filepath.Split(fPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
+						// TODO we do not restore those files so we could just remove them along with indices. Same for domains/indices.
+						//      Those files will keep space on disk and closed automatically as corrupted. So better to remove them, and maybe remove downloading prohibiter to allow downloading them again?
+						//
+						// itemPaths := []string{
+						// 	fPath,
+						// 	h.vAccessorFilePath(fromStep, toStep),
+						// }
+						// for _, fp := range itemPaths {
+						// 	err = os.Remove(fp)
+						// 	if err != nil {
+						// 		h.logger.Warn("[agg] History.openDirtyFiles cannot remove corrupted file", "err", err, "f", fp)
+						// 	}
+						// }
+					} else {
+						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+					}
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					// don't interrupt on error. other files may be good. but skip indices open.
+					continue
+				}
+			}
+
+			if item.index == nil {
+				fPathMask := h.vAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+				}
+				if ok {
+					if !fileVer.Eq(h.version.AccessorVI.Current) {
+						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
+							h.version.AccessorVI.Current = fileVer
+						} else {
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, h.version.AccessorVI)
+						}
+					}
+					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+		}
+		return true
+	})
+	for _, item := range invalidFileItems {
+		item.closeFiles()
+		h.dirtyFiles.Delete(item)
+	}
+
+	return nil
+}
+
+func (ii *InvertedIndex) openDirtyFiles() error {
+	var invalidFileItems []*FilesItem
+	invalidFileItemsLock := sync.Mutex{}
+	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		for _, item := range items {
+			item := item
+			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+			if item.decompressor == nil {
+				fPathPattern := ii.efFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+
+				if !ok {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+
+				if !fileVer.Eq(ii.version.DataEF.Current) {
+					if !fileVer.Less(ii.version.DataEF.MinSupported) {
+						ii.version.DataEF.Current = fileVer
+					} else {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, ii.version.DataEF)
+					}
+				}
+
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+					_, fName := filepath.Split(fPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					} else {
+						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					}
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					// don't interrupt on error. other files may be good. but skip indices open.
+					continue
+				}
+			}
+
+			if item.index == nil {
+				fPathPattern := ii.efAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+				if ok {
+					if !fileVer.Eq(ii.version.AccessorEFI.Current) {
+						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
+							ii.version.AccessorEFI.Current = fileVer
+						} else {
+							_, fName := filepath.Split(fPath)
+							versionTooLowPanic(fName, ii.version.AccessorEFI)
+						}
+					}
+					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+		}
+
+		return true
+	})
+	for _, item := range invalidFileItems {
+		item.closeFiles()
+		ii.dirtyFiles.Delete(item)
+	}
+
+	return nil
 }
 
 // visibleFile is like filesItem but only for good/visible files (indexed, not overlaped, not marked for deletion, etc...)
