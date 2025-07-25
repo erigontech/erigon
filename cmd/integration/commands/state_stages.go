@@ -137,7 +137,7 @@ func init() {
 	withChain(stateStages)
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
-	withChaosMonkey(stateStages)
+	//withChaosMonkey(stateStages)
 	withL2RPCaddress(stateStages)
 	rootCmd.AddCommand(stateStages)
 
