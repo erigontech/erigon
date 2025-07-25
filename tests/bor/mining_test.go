@@ -67,9 +67,9 @@ var (
 )
 
 // CGO_CFLAGS="-D__BLST_PORTABLE__" : flag required for go test.
-// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/erigontech/erigon/tests/bor -v -count=1
-// In TestMiningBenchmark, we will test the mining performance. We will initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advcanced by increasing blockLimit and txsInTxpool.
-func TestMiningBenchmark(t *testing.T) {
+// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run @ -bench /BenchmarkMining github.com/erigontech/erigon/tests/bor -v -count 1
+// Initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advanced by increasing blockLimit and txsInTxpool.
+func BenchmarkMining(t *testing.B) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -80,7 +80,7 @@ func TestMiningBenchmark(t *testing.T) {
 	}
 
 	//usually 15sec is enough
-	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
+	ctx, clean := context.WithTimeout(t.Context(), time.Minute)
 	defer clean()
 
 	logger := testlog.Logger(t, log.LvlInfo)
