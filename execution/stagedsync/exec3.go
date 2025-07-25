@@ -777,7 +777,7 @@ Loop:
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
 				if !initialCycle && isBatchFull {
-					break Loop
+					maxBlockNum = min(maxBlockNum, blockNum+changesetSafeRange) // allow for some changesets to be generated.
 				}
 				if initialCycle {
 					logger.Info("Committed", "time", time.Since(commitStart),
