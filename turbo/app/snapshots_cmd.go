@@ -270,7 +270,7 @@ var snapshotCommand = cli.Command{
 					return err
 				}
 				defer l.Unlock()
-				return dirs.RenameOldVersions()
+				return dirs.RenameOldVersions(true)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
