@@ -70,6 +70,7 @@ jobs:
       - name: Run hive tests and parse output
         run: |
           cd hive
+          docker ps
           run_suite() {
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
