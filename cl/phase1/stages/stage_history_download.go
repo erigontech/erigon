@@ -350,7 +350,6 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	if !cfg.caplinConfig.ArchiveBlobs && cfg.caplinConfig.ImmediateBlobsBackfilling {
 		targetSlot = currentSlot - min(currentSlot, cfg.beaconCfg.MinSlotsForBlobsSidecarsRequest())
 	}
-	time.Sleep(1000 * time.Hour)
 	logger.Info("[Blobs-Downloader] Downloading blobs backwards", "slot", currentSlot)
 
 	for currentSlot >= targetSlot {
