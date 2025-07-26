@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"io/fs"
 	"math/big"
 	"net"
@@ -884,7 +885,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				config.Genesis,
 				config.Sync,
 				stages2.SilkwormForExecutionStage(backend.silkworm, config),
-				nil,
+				wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm),
 			),
 			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, txnProvider, blockReader),

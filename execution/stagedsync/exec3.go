@@ -817,6 +817,7 @@ Loop:
 		if err = executor.tx().Commit(); err != nil {
 			return err
 		}
+		logger.Info("Committed", "blocks", inputBlockNum.Load())
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())

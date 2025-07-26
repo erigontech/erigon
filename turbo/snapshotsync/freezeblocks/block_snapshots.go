@@ -212,12 +212,12 @@ func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
-	if curBlockNum <= keep {
-		return
-	}
+	// var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
+	// if curBlockNum <= keep {
+	// 	return
+	// }
 	blockFrom = blocksInSnapshots + 1
-	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, chainConfig)
+	return snapshotsync.CanRetire(blockFrom, curBlockNum, snapType, chainConfig)
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
@@ -225,7 +225,7 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 		return 0
 	}
 
-	var keep uint64 = 1024 // params.FullImmutabilityThreshold //TODO: we will increase this value after db optimizations - about on-chain-tip prune speed
+	var keep uint64 = 0 //1024 // params.FullImmutabilityThreshold //TODO: we will increase this value after db optimizations - about on-chain-tip prune speed
 	if curBlockNum+999 < keep {
 		// To prevent overflow of uint64 below
 		return blocksInSnapshots + 1
@@ -633,8 +633,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			txn2.SetSender(senders[j])
 			sender = senders[j]
 		} else {
-			signer := types.LatestSignerForChainID(chainConfig.ChainID)
-			sender, err = txn2.Sender(*signer)
+			signerEth := types.LatestSignerForChainID(chainConfig.ChainID)
+			signerArb := types.NewArbitrumSigner(*signerEth)
+
+			sender, err = signerArb.Sender(txn2)
 			if err != nil {
 				return nil, err
 			}
