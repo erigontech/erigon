@@ -17,6 +17,7 @@
 package handlers
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -119,7 +120,11 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 	}, SuccessfulResponsePrefix)
 }
 
-// TODO: Actually respond with proper status
+func (c *ConsensusHandlers) statusHandler2(s network.Stream) error {
+	fmt.Println("statusHandler2 called")
+	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
+}
+
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
 }
