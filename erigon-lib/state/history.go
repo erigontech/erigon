@@ -21,12 +21,10 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	btree2 "github.com/tidwall/btree"
@@ -44,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/version"
 )
 
 type History struct {
@@ -196,102 +193,6 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 			h.dirtyFiles.Set(dirtyFile)
 		}
 	}
-}
-
-func (h *History) openDirtyFiles() error {
-	invalidFilesMu := sync.Mutex{}
-	invalidFileItems := make([]*FilesItem, 0)
-	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-			if item.decompressor == nil {
-				fPathMask := h.vFilePathMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-				if err != nil {
-					_, fName := filepath.Split(fPath)
-					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
-					invalidFilesMu.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFilesMu.Unlock()
-					continue
-				}
-				if !ok {
-					_, fName := filepath.Split(fPath)
-					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
-					invalidFilesMu.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFilesMu.Unlock()
-					continue
-				}
-				if !fileVer.Eq(h.version.DataV.Current) {
-					if !fileVer.Less(h.version.DataV.MinSupported) {
-						h.version.DataV.Current = fileVer
-					} else {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, h.version.DataV)
-					}
-				}
-
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
-					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
-						// TODO we do not restore those files so we could just remove them along with indices. Same for domains/indices.
-						//      Those files will keep space on disk and closed automatically as corrupted. So better to remove them, and maybe remove downloading prohibiter to allow downloading them again?
-						//
-						// itemPaths := []string{
-						// 	fPath,
-						// 	h.vAccessorFilePath(fromStep, toStep),
-						// }
-						// for _, fp := range itemPaths {
-						// 	err = os.Remove(fp)
-						// 	if err != nil {
-						// 		h.logger.Warn("[agg] History.openDirtyFiles cannot remove corrupted file", "err", err, "f", fp)
-						// 	}
-						// }
-					} else {
-						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
-					}
-					invalidFilesMu.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFilesMu.Unlock()
-					// don't interrupt on error. other files may be good. but skip indices open.
-					continue
-				}
-			}
-
-			if item.index == nil {
-				fPathMask := h.vAccessorFilePathMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-				if err != nil {
-					_, fName := filepath.Split(fPath)
-					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
-				}
-				if ok {
-					if !fileVer.Eq(h.version.AccessorVI.Current) {
-						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
-							h.version.AccessorVI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, h.version.AccessorVI)
-						}
-					}
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
-						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files may be good
-					}
-				}
-			}
-		}
-		return true
-	})
-	for _, item := range invalidFileItems {
-		item.closeFiles()
-		h.dirtyFiles.Delete(item)
-	}
-
-	return nil
 }
 
 func (h *History) closeWhatNotInList(fNames []string) {
