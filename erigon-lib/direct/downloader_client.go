@@ -52,20 +52,6 @@ func (c *DownloaderClient) ProhibitNewDownloads(ctx context.Context, in *proto_d
 	return c.ProhibitNewDownloads(ctx, in, opts...)
 }
 
-func (c *DownloaderClient) Verify(ctx context.Context, in *proto_downloader.VerifyRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.Verify(ctx, in)
-}
-
-func (c *DownloaderClient) TorrentCompleted(ctx context.Context, in *proto_downloader.TorrentCompletedRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto_downloader.TorrentCompletedReply], error) {
-	ch := make(chan *downloadedReply, 16384)
-	streamServer := &DownloadeSubscribeS{ch: ch, ctx: ctx}
-	go func() {
-		defer close(ch)
-		streamServer.Err(c.server.TorrentCompleted(in, streamServer))
-	}()
-	return &DownloadeSubscribeC{ch: ch, ctx: ctx}, nil
-}
-
 type DownloadeSubscribeC struct {
 	ch  chan *downloadedReply
 	ctx context.Context
