@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
@@ -42,6 +43,7 @@ import (
 type StageHistoryReconstructionCfg struct {
 	beaconCfg                *clparams.BeaconChainConfig
 	downloader               *network.BackwardBeaconDownloader
+	forkchoiceState          forkchoice.ForkChoiceStorage
 	sn                       *freezeblocks.CaplinSnapshots
 	startingRoot             common.Hash
 	caplinConfig             clparams.CaplinConfig
@@ -60,7 +62,7 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, forkchoiceState forkchoice.ForkChoiceStorage, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		beaconCfg:                beaconCfg,
 		downloader:               downloader,
@@ -78,6 +80,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 		executionBlocksCollector: executionBlocksCollector,
 		blockReader:              blockReader,
 		blobStorage:              blobStorage,
+		forkchoiceState:          forkchoiceState,
 	}
 }
 
@@ -353,6 +356,11 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	for currentSlot >= targetSlot {
 		if currentSlot <= cfg.sn.FrozenBlobs() {
 			break
+		}
+
+		if !cfg.forkchoiceState.Synced() {
+			time.Sleep(time.Second)
+			continue
 		}
 
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
