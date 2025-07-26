@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -63,7 +64,7 @@ type BeaconRpcP2P struct {
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
 // It takes a context, a sentinel.Sent
-func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) *BeaconRpcP2P {
+func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, beaconState *state.CachingBeaconState) *BeaconRpcP2P {
 	rpc := &BeaconRpcP2P{
 		ctx:          ctx,
 		sentinel:     sentinel,
@@ -74,6 +75,7 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beac
 		sentinel,
 		beaconConfig,
 		ethClock,
+		beaconState,
 	)
 	return rpc
 }
@@ -129,7 +131,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
+	responsePacket, _, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
 	if err != nil {
 		return nil, pid, 0, err
 	}
@@ -333,8 +335,20 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinel.ResponseData) ([]resp
 			version: version,
 			raw:     raw,
 		})
-		// TODO(issues/5884): figure out why there is this extra byte.
-		r.ReadByte()
+
+		// read next result byte
+		byt, err := r.ReadByte()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Debug("failed to read byte", "err", err)
+			return nil, message.Peer.Pid, err
+		}
+		if byt != 0 {
+			log.Debug("received unexpected response prefix", "prefix", byt)
+			return nil, message.Peer.Pid, fmt.Errorf("received unexpected response prefix: %d", byt)
+		}
 	}
 	return responsePacket, message.Peer.Pid, nil
 }
