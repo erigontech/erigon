@@ -596,6 +596,50 @@ func (c *MockSentryClientReadyCall) DoAndReturn(f func() bool) *MockSentryClient
 	return c
 }
 
+// RemovePeer mocks base method.
+func (m *MockSentryClient) RemovePeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "RemovePeer", varargs...)
+	ret0, _ := ret[0].(*sentryproto.RemovePeerReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemovePeer indicates an expected call of RemovePeer.
+func (mr *MockSentryClientMockRecorder) RemovePeer(ctx, in any, opts ...any) *MockSentryClientRemovePeerCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemovePeer", reflect.TypeOf((*MockSentryClient)(nil).RemovePeer), varargs...)
+	return &MockSentryClientRemovePeerCall{Call: call}
+}
+
+// MockSentryClientRemovePeerCall wrap *gomock.Call
+type MockSentryClientRemovePeerCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryClientRemovePeerCall) Return(arg0 *sentryproto.RemovePeerReply, arg1 error) *MockSentryClientRemovePeerCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryClientRemovePeerCall) Do(f func(context.Context, *sentryproto.RemovePeerRequest, ...grpc.CallOption) (*sentryproto.RemovePeerReply, error)) *MockSentryClientRemovePeerCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryClientRemovePeerCall) DoAndReturn(f func(context.Context, *sentryproto.RemovePeerRequest, ...grpc.CallOption) (*sentryproto.RemovePeerReply, error)) *MockSentryClientRemovePeerCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SendMessageById mocks base method.
 func (m *MockSentryClient) SendMessageById(ctx context.Context, in *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	m.ctrl.T.Helper()
