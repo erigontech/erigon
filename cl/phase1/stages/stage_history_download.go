@@ -466,6 +466,15 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err := cfg.forkchoiceState.GetPeerDas().DownloadColumnsAndRecoverBlobs(ctx, postFuluBlocks); err != nil {
 				return fmt.Errorf("error downloading blobs for post-fulu blocks: %w", err)
 			}
+			for _, block := range postFuluBlocks {
+				blockRoot, err := block.Block.HashSSZ()
+				if err != nil {
+					return fmt.Errorf("error hashing block: %w", err)
+				}
+				if err := cfg.forkchoiceState.GetPeerDas().TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
+					return fmt.Errorf("error scheduling recovery for block %s: %w", blockRoot, err)
+				}
+			}
 		}
 		fmt.Println("[Blobs-Downloader] Downloaded blobs for slot", "blocks", len(batch), "postFuluBlocks", len(postFuluBlocks), "preFuluBlocks", len(preFuluBlocks), "currentSlot", currentSlot)
 		time.Sleep(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
