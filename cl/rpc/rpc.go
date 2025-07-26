@@ -130,10 +130,10 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 
 	data := common.CopyBytes(buffer.Bytes())
 	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
+	fmt.Println("responsePacket", responsePacket, "pid", pid, "cgc", cgc, err)
 	if err != nil {
 		return nil, pid, 0, err
 	}
-	fmt.Println("responsePacket", responsePacket, "pid", pid, "cgc", cgc)
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, data := range responsePacket {
