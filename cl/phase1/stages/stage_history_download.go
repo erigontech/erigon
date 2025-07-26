@@ -476,7 +476,6 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 			}
 		}
-		//fmt.Println("[Blobs-Downloader] Downloaded blobs for slot", "blocks", len(batch), "postFuluBlocks", len(postFuluBlocks), "preFuluBlocks", len(preFuluBlocks), "currentSlot", currentSlot)
 		time.Sleep(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
 	}
 
