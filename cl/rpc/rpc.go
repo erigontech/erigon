@@ -133,6 +133,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	if err != nil {
 		return nil, pid, 0, err
 	}
+	fmt.Println("responsePacket", responsePacket, "pid", pid, "cgc", cgc)
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, data := range responsePacket {

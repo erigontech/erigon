@@ -17,7 +17,6 @@
 package handlers
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -121,7 +120,6 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) statusHandler2(s network.Stream) error {
-	fmt.Println("statusHandler2 called")
 	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
 }
 
