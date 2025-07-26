@@ -418,7 +418,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		default:
 		}
 
-		// separate pre-fulu blocks from post-fulu blocks (this will be legacy code 10mins post-hardfork but we need so this looks ugly)
+		// separate pre-fulu blocks from post-fulu blocks (this will be legacy code 10mins post-hardfork but we need it for now so this looks ugly)
 		preFuluBlocks := make([]*cltypes.SignedBlindedBeaconBlock, 0, len(batch))
 		postFuluBlocks := make([]*cltypes.SignedBlindedBeaconBlock, 0, len(batch))
 		for _, block := range batch {
