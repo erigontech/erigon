@@ -26,7 +26,7 @@ type ProtoForkable struct {
 	cfg      *SnapshotConfig
 	parser   SnapNameSchema
 	builders []AccessorIndexBuilder
-	snaps    *SnapshotRepo
+	snaps    SnapshotRepo
 
 	strategy  kv.CanonicityStrategy
 	unaligned bool
@@ -170,7 +170,7 @@ func (a *ProtoForkable) isCompressionUsed(from, to RootNum) bool {
 }
 
 func (a *ProtoForkable) Repo() *SnapshotRepo {
-	return a.snaps
+	return &a.snaps
 }
 
 func (a *ProtoForkable) Close() {
