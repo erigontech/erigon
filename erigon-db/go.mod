@@ -14,7 +14,7 @@ replace (
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.5.0
+	github.com/RoaringBitmap/roaring/v2 v2.8.0
 	github.com/anacrolix/chansync v0.6.0
 	github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647
 	github.com/anacrolix/go-libutp v1.3.2
@@ -53,7 +53,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/benbjohnson/immutable v0.4.1-0.20221220213129-8932b999621d // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.20.0 // indirect
+	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
