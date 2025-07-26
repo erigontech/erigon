@@ -91,8 +91,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 }
 
-
-//Only runs EEST tests for current devnet - can "skip" on off-seasons
+// Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
