@@ -164,6 +164,10 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		curBlock++
 	}
 	firstBlock := curBlock
+
+	if firstBlock == latestBlock.Uint64() {
+		return nil
+	}
 	log.Info("[Arbitrum] Headers stage started", "firstBlock", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
 
 	var blockNumber big.Int
