@@ -92,7 +92,7 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: GOGC=80 make test-all-race
 
-      - name: SonarCloud
+      - name: SonarCloud scan in case OS Linux and changed_files is not true
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
         uses: SonarSource/sonarqube-scan-action@v5
         env:
