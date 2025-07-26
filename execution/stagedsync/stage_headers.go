@@ -184,24 +184,23 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err := rawdb.WriteBlock(tx, blk); err != nil {
 			return fmt.Errorf("error writing block %d: %w", blockNum, err)
 		}
-		ok, err := rawdb.WriteRawBodyIfNotExists(tx, blk.Header().Hash(), blockNum, blk.RawBody())
+
+		err = rawdb.WriteBody(tx, blk.Header().Hash(), blockNum, blk.Body())
 		if err != nil {
 			return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 		}
-		if ok {
-			if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-				return err
-			}
-			if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-				return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
-			}
-			if err = cfg.blockWriter.MakeBodiesCanonical(tx, blockNum); err != nil {
-				return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
-			}
-			rawdb.WriteHeadBlockHash(tx, blk.Hash())
-			if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
-				return err
-			}
+		if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+			return err
+		}
+		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+		}
+		if err = cfg.blockWriter.MakeBodiesCanonical(tx, blockNum); err != nil {
+			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+		}
+		rawdb.WriteHeadBlockHash(tx, blk.Hash())
+		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+			return err
 		}
 
 		latestProcessedBlock = blockNum
@@ -246,7 +245,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 	}
 	//// TODO need tor ead progress and fill header number index?
-	//cfg.hd.ReadProgressFromDb(tx)
+	cfg.hd.ReadProgressFromDb(tx)
 	//
 	if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), firstBlock+1, latestProcessedBlock, ctx, logger); err != nil {
 		return err
