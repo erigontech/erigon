@@ -113,7 +113,7 @@ jobs:
           path: hive/workspace/logs
       - name: Test Results
         run: |
-          cat result.log
+          cat hive/result.log
           if grep -q "failed" hive/failed.log; then
             echo "One or more tests failed."
             exit 1
