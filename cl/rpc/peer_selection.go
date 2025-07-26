@@ -241,6 +241,6 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 		return newReq, peer.pid, uint64(len(peer.mask)), nil
 	}
 
-	log.Debug("no good peer found", "peerCount", len(c.peersQueue))
+	log.Trace("no good peer found", "peerCount", len(c.peersQueue))
 	return nil, "", 0, ErrNoGoodPeer
 }
