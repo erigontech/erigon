@@ -76,7 +76,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 	bt := new(testMatcher)
 
-	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
+	dir := filepath.Join(".", "execuion-spec-tests", "blockchain_tests")
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 
 	checkStateRoot := true
@@ -88,9 +88,11 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 			t.Error(err)
 		}
 	})
+
 }
 
 
+//Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
