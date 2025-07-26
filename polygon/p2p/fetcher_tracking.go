@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 )
 
@@ -51,6 +52,22 @@ func (tf *TrackingFetcher) FetchHeaders(
 			tf.peerTracker.BlockNumMissing(peerId, start)
 		}
 
+		return FetcherResponse[[]*types.Header]{}, err
+	}
+
+	tf.peerTracker.BlockNumPresent(peerId, res.Data[len(res.Data)-1].Number.Uint64())
+	return res, nil
+}
+
+func (tf *TrackingFetcher) FetchHeadersBackwards(
+	ctx context.Context,
+	hash common.Hash,
+	amount uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Header], error) {
+	res, err := tf.Fetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
+	if err != nil {
 		return FetcherResponse[[]*types.Header]{}, err
 	}
 

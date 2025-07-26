@@ -179,6 +179,208 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenHeaderGtRequestedSta
 	})
 }
 
+func TestPenalizingFetcherFetchHeadersBackwardsShouldPenalizePeerWhenErrTooManyHeaders(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	mockHeaders := newMockBlockHeaders(3)
+	mockHash := mockHeaders[len(mockHeaders)-1].Hash()
+	requestId1 := uint64(1234)
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   blockHeadersPacket66Bytes(t, requestId1, []*types.Header{mockHeaders[2], mockHeaders[1], mockHeaders[0]}),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginHash:       mockHash,
+		wantRequestAmount:           2,
+		wantReverse:                 true,
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId1))
+	test.mockSentryStreams(mockRequestResponse1)
+	// setup expectation that peer should be penalized
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		response, err := test.penalizingFetcher.FetchHeadersBackwards(ctx, mockHash, 2, peerId)
+		require.ErrorIs(t, err, &ErrTooManyHeaders{})
+		require.Nil(t, response.Data, response)
+	})
+}
+
+func TestPenalizingFetcherFetchHeadersBackwardsShouldPenalizePeerWhenErrUnexpectedHeaderHash(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	mockHeaders := newMockBlockHeaders(3)
+	mockHash := mockHeaders[len(mockHeaders)-1].Hash()
+	requestId1 := uint64(1234)
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   blockHeadersPacket66Bytes(t, requestId1, []*types.Header{mockHeaders[0]}),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginHash:       mockHash,
+		wantRequestAmount:           1,
+		wantReverse:                 true,
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId1))
+	test.mockSentryStreams(mockRequestResponse1)
+	// setup expectation that peer should be penalized
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		response, err := test.penalizingFetcher.FetchHeadersBackwards(ctx, mockHash, 1, peerId)
+		require.ErrorIs(t, err, &ErrUnexpectedHeaderHash{})
+		require.Nil(t, response.Data, response)
+	})
+}
+
+func TestPenalizingFetcherFetchHeadersBackwardsShouldPenalizePeerWhenErrNonSequentialHeaderNumbers(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	mockHeaders := newMockBlockHeaders(3)
+	mockHash := mockHeaders[len(mockHeaders)-1].Hash()
+	requestId1 := uint64(1234)
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   blockHeadersPacket66Bytes(t, requestId1, []*types.Header{mockHeaders[2], mockHeaders[0], mockHeaders[1]}),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginHash:       mockHash,
+		wantRequestAmount:           3,
+		wantReverse:                 true,
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId1))
+	test.mockSentryStreams(mockRequestResponse1)
+	// setup expectation that peer should be penalized
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		response, err := test.penalizingFetcher.FetchHeadersBackwards(ctx, mockHash, 3, peerId)
+		require.ErrorIs(t, err, &ErrNonSequentialHeaderNumbers{})
+		require.Nil(t, response.Data, response)
+	})
+}
+
+func TestPenalizingFetcherFetchHeadersBackwardsShouldPenalizePeerWhenErrNonSequentialHeaderHashes(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	mockHeaders := newMockBlockHeaders(3)
+	mockHash := mockHeaders[len(mockHeaders)-1].Hash()
+	// change the hash so it doesn't match with the parent hash of its child
+	mockHeaders[1].TxHash = common.HexToHash("0x00123")
+	requestId1 := uint64(1234)
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   blockHeadersPacket66Bytes(t, requestId1, []*types.Header{mockHeaders[2], mockHeaders[1], mockHeaders[0]}),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginHash:       mockHash,
+		wantRequestAmount:           3,
+		wantReverse:                 true,
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId1))
+	test.mockSentryStreams(mockRequestResponse1)
+	// setup expectation that peer should be penalized
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		response, err := test.penalizingFetcher.FetchHeadersBackwards(ctx, mockHash, 3, peerId)
+		require.ErrorIs(t, err, &ErrNonSequentialHeaderHashes{})
+		require.Nil(t, response.Data, response)
+	})
+}
+
+func TestPenalizingFetcherFetchHeadersBackwardsShouldNotPenalizePeerWhenResponseValid(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	mockHeaders := newMockBlockHeaders(3)
+	mockHash := mockHeaders[len(mockHeaders)-1].Hash()
+	requestId1 := uint64(1234)
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   blockHeadersPacket66Bytes(t, requestId1, []*types.Header{mockHeaders[2], mockHeaders[1], mockHeaders[0]}),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginHash:       mockHash,
+		wantRequestAmount:           3,
+		wantReverse:                 true,
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId1))
+	test.mockSentryStreams(mockRequestResponse1)
+	test.run(func(ctx context.Context, t *testing.T) {
+		response, err := test.penalizingFetcher.FetchHeadersBackwards(ctx, mockHash, 3, peerId)
+		require.NoError(t, err)
+		require.Len(t, response.Data, 3)
+	})
+}
+
+func TestPenalizingFetcherFetchHeadersBackwardsShouldNotPenalizePeerWhenErrMissingHeaderHash(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	mockHeaders := newMockBlockHeaders(3)
+	mockHash := mockHeaders[len(mockHeaders)-1].Hash()
+	requestId1 := uint64(1234)
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   blockHeadersPacket66Bytes(t, requestId1, []*types.Header{}),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginHash:       mockHash,
+		wantRequestAmount:           3,
+		wantReverse:                 true,
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId1))
+	test.mockSentryStreams(mockRequestResponse1)
+	test.run(func(ctx context.Context, t *testing.T) {
+		response, err := test.penalizingFetcher.FetchHeadersBackwards(ctx, mockHash, 3, peerId)
+		require.ErrorIs(t, err, &ErrMissingHeaderHash{})
+		require.Nil(t, response.Data, response)
+	})
+}
+
 func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *testing.T) {
 	t.Parallel()
 
