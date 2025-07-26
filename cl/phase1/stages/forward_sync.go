@@ -133,7 +133,12 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				blocks := []*cltypes.SignedBeaconBlock{fuluBlocks[i]}
+				blinded, err := fuluBlocks[i].Blinded()
+				if err != nil {
+					logger.Warn("[Caplin] failed to get blinded block", "err", err)
+					return
+				}
+				blocks := []*cltypes.SignedBlindedBeaconBlock{blinded}
 				if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
 					if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, blocks); err != nil {
 						logger.Warn("[Caplin] Failed to download columns and recover blobs", "err", err)

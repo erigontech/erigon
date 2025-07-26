@@ -462,12 +462,12 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		// WIP: easy but need to think about this.
 
-		// if len(postFuluBlocks) > 0 {
-		// 	peerdas := cfg.forkchoiceState.GetPeerDas()
-		// 	if err := peerdas.DownloadColumnsAndRecoverBlobs(ctx, postFuluBlocks); err != nil {
-		// 		return fmt.Errorf("error downloading blobs for post-fulu blocks: %w", err)
-		// 	}
-		// }
+		if len(postFuluBlocks) > 0 {
+			peerdas := cfg.forkchoiceState.GetPeerDas()
+			if err := peerdas.DownloadColumnsAndRecoverBlobs(ctx, postFuluBlocks); err != nil {
+				return fmt.Errorf("error downloading blobs for post-fulu blocks: %w", err)
+			}
+		}
 		time.Sleep(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
 	}
 
