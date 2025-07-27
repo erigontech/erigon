@@ -896,7 +896,8 @@ func ExecV3(ctx context.Context,
 				}
 
 				if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
-					return fmt.Errorf("stopping: block %d complete", blockNum)
+					panic(fmt.Sprintf("stopping: block %d complete", blockNum))
+					//return fmt.Errorf("stopping: block %d complete", blockNum)
 				}
 
 				if offsetFromBlockBeginning > 0 {
@@ -1166,7 +1167,8 @@ func ExecV3(ctx context.Context,
 						}
 
 						if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
-							return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
+							//return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
+							panic(fmt.Sprintf("stopping: block %d complete", applyResult.BlockNum))
 						}
 
 						if maxBlockNum == applyResult.BlockNum {
