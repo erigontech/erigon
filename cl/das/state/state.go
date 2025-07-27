@@ -68,6 +68,7 @@ func (s *PeerDasState) SetCustodyGroupCount(cgc uint64) bool {
 		s.advertisedCgc = cgc
 		s.custodyColumnsCache.Store(nil) // clear the cache
 		// maybe need to update earliest available slot
+		log.Debug("SetCustodyGroupCount", "cgc", cgc)
 		return true
 	}
 	return false
