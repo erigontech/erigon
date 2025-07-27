@@ -424,7 +424,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader, chainConfig); err != nil {
+	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader); err != nil {
 		return nil, err
 	}
 
@@ -1471,16 +1471,13 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Config, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
+func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Config, downloaderCfg *downloadercfg.Cfg) error {
 	var err error
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
 		s.logger.Warn("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
-		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
-			return
-		}
-		if !s.config.Snapshot.NoDownloader && s.downloaderClient != nil && len(frozenFileNames) > 0 {
+		if s.downloaderClient != nil && len(frozenFileNames) > 0 {
 			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
 			for _, fName := range frozenFileNames {
 				req.Items = append(req.Items, &protodownloader.AddItem{
@@ -1493,11 +1490,6 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Con
 		}
 	})
 
-	if downloaderCfg != nil && downloaderCfg.ChainName == "" {
-		downloaderCfg.ChainName = cc.ChainName
-		return nil
-	}
-
 	if s.config.Snapshot.NoDownloader {
 		return nil
 	}
@@ -1506,6 +1498,9 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Con
 		// connect to external Downloader
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
+		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
+			return nil
+		}
 		// start embedded Downloader
 		if uploadFs := s.config.Sync.UploadLocation; len(uploadFs) > 0 {
 			downloaderCfg.AddTorrentsFromDisk = false
