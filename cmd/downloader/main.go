@@ -83,6 +83,7 @@ var (
 	datadirCli, chain              string
 	filePath                       string
 	forceRebuild                   bool
+	releaseCheck                   bool
 	verify                         bool
 	verifyFailfast                 bool
 	_verifyFiles                   string
@@ -154,6 +155,7 @@ func init() {
 	withDataDir(printTorrentHashes)
 	withChainFlag(printTorrentHashes)
 	printTorrentHashes.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
+	printTorrentHashes.Flags().BoolVar(&releaseCheck, "release", false, "For 3.0 and 3.1 comparing only")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
@@ -572,6 +574,13 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	torrents, err := downloader.AllTorrentSpecs(dirs, tf)
 	if err != nil {
 		return err
+	}
+
+	if releaseCheck {
+		torrents, err = downloader.AllTorrentReleaseSpecs(dirs, tf)
+		if err != nil {
+			return err
+		}
 	}
 
 	for _, t := range torrents {
