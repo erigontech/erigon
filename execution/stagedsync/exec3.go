@@ -509,42 +509,6 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 	return lastTxNum == inputTxNum, nil
 }
 
-var tracedBlocks map[uint64]struct{}
-var tracedTxIndexes map[int64]struct{}
-
-func traceBlock(blockNum uint64) bool {
-	if tracedBlocks == nil {
-		tracedBlocks = map[uint64]struct{}{}
-		for _, blockNum := range dbg.TraceBlocks {
-			tracedBlocks[blockNum] = struct{}{}
-		}
-	}
-
-	_, ok := tracedBlocks[blockNum]
-	return ok
-}
-
-func traceTx(blockNum uint64, txIndex int) bool {
-	if !traceBlock(blockNum) {
-		return false
-	}
-
-	if tracedTxIndexes == nil {
-		tracedTxIndexes = map[int64]struct{}{}
-		for _, index := range dbg.TraceTxIndexes {
-			tracedTxIndexes[index] = struct{}{}
-		}
-	}
-
-	if len(tracedTxIndexes) != 0 {
-		if _, ok := tracedTxIndexes[int64(txIndex)]; !ok {
-			return false
-		}
-	}
-
-	return true
-}
-
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
 	parallel bool, //nolint
@@ -837,7 +801,7 @@ func ExecV3(ctx context.Context,
 
 						// use history reader instead of state reader to catch up to the tx where we left off
 						HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
-						Trace:            traceTx(blockNum, txIndex),
+						Trace:            dbg.TraceTx(blockNum, txIndex),
 						Hooks:            hooks,
 						Logger:           logger,
 					}
@@ -870,7 +834,7 @@ func ExecV3(ctx context.Context,
 
 				if !dbg.BatchCommitments || shouldGenerateChangesets {
 					start := time.Now()
-					if traceBlock(blockNum) {
+					if dbg.TraceBlock(blockNum) {
 						se.doms.SetTrace(true, false)
 					}
 					rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
@@ -1058,7 +1022,7 @@ func ExecV3(ctx context.Context,
 					case *txResult:
 						uncommittedGas += applyResult.gasUsed
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
-						if dbg.TraceApply && traceBlock(applyResult.blockNum) {
+						if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 							pe.rs.SetTrace(true)
 							fmt.Println(applyResult.blockNum, "apply", applyResult.txNum)
 						}
@@ -1108,12 +1072,12 @@ func ExecV3(ctx context.Context,
 						if !dbg.DiscardCommitment() {
 							if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
-								if dbg.TraceApply && traceBlock(applyResult.BlockNum) {
+								if dbg.TraceApply && dbg.TraceBlock(applyResult.BlockNum) {
 									fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
 								}
 								blockApplyCount = 0
 								var trace bool
-								if traceBlock(applyResult.BlockNum) {
+								if dbg.TraceBlock(applyResult.BlockNum) {
 									fmt.Println(applyResult.BlockNum, "Commitment")
 									trace = true
 								}

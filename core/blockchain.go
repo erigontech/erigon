@@ -402,6 +402,11 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
 	}
+
+	if dbg.LogHashMismatchReason() && dbg.TraceBlock(h.Number.Uint64()) {
+		logReceipts(receipts, txns, chainConfig, h, logger)
+	}
+
 	if checkReceipts && !alwaysSkipReceiptCheck {
 		for _, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})

@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -296,7 +297,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 
 		if task.IsBlockEnd() {
-			if traceBlock(txTask.BlockNumber()) {
+			if dbg.TraceBlock(txTask.BlockNumber()) {
 				var receipts []map[string]interface{}
 				for i, receipt := range blockReceipts {
 					txn := txTask.Txs[i]

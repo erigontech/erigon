@@ -263,3 +263,39 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 		}
 	}
 }
+
+var tracedBlocks map[uint64]struct{}
+var tracedTxIndexes map[int64]struct{}
+
+func TraceBlock(blockNum uint64) bool {
+	if tracedBlocks == nil {
+		tracedBlocks = map[uint64]struct{}{}
+		for _, blockNum := range TraceBlocks {
+			tracedBlocks[blockNum] = struct{}{}
+		}
+	}
+
+	_, ok := tracedBlocks[blockNum]
+	return ok
+}
+
+func TraceTx(blockNum uint64, txIndex int) bool {
+	if !TraceBlock(blockNum) {
+		return false
+	}
+
+	if tracedTxIndexes == nil {
+		tracedTxIndexes = map[int64]struct{}{}
+		for _, index := range TraceTxIndexes {
+			tracedTxIndexes[index] = struct{}{}
+		}
+	}
+
+	if len(tracedTxIndexes) != 0 {
+		if _, ok := tracedTxIndexes[int64(txIndex)]; !ok {
+			return false
+		}
+	}
+
+	return true
+}

@@ -169,7 +169,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	var tracePrefix string
-	if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
+	if dbg.TraceTransactionIO && dbg.TraceTx(blockNum, txIndex) {
 		tracePrefix = fmt.Sprintf("%d (%d.%dF)", blockNum, txIndex, txIncarnation)
 	}
 
@@ -196,7 +196,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 					return nil, err
 				}
 
-				if traceTx(blockNum, txIndex) {
+				if dbg.TraceTx(blockNum, txIndex) {
 					fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txIncarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
 				}
 
@@ -220,7 +220,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		}
 	}
 
-	if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
+	if dbg.TraceTransactionIO && dbg.TraceTx(blockNum, txIndex) {
 		vm.SetTrace(true)
 		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
 	}
@@ -552,7 +552,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 					Config:           te.cfg.chainConfig,
 					Engine:           te.cfg.engine,
-					Trace:            traceTx(blockNum, txIndex),
+					Trace:            dbg.TraceTx(blockNum, txIndex),
 					Hooks:            te.hooks,
 				}
 
@@ -857,7 +857,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		tracePrefix := ""
 
 		var trace bool
-		if trace = dbg.TraceTransactionIO && traceTx(be.blockNum, txVersion.TxIndex); trace {
+		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation)
 			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))
 			be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
@@ -973,7 +973,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if applyResult.stateUpdates.BTreeG != nil {
 					be.applyCount += applyResult.stateUpdates.UpdateCount()
 					if dbg.TraceApply {
-						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, traceBlock(applyResult.blockNum))
+						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, dbg.TraceBlock(applyResult.blockNum))
 					}
 				}
 
@@ -1365,7 +1365,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					}
 
 					blockResult.ApplyCount += stateUpdates.UpdateCount()
-					if dbg.TraceApply && traceBlock(blockResult.BlockNum) {
+					if dbg.TraceApply && dbg.TraceBlock(blockResult.BlockNum) {
 						stateUpdates.TraceBlockUpdates(blockResult.BlockNum, true)
 						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 					}
