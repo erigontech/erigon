@@ -25,8 +25,7 @@ PROTOC_OS = linux
 endif
 
 PROTOC_INCLUDE = build/include/google
-PROTO_PATH = vendor/github.com/erigontech/interfaces
-
+PROTO_PATH = interfaces
 
 default: gen
 
@@ -59,8 +58,7 @@ protoc-clean:
 	rm -rf "$(PROTOC_INCLUDE)"
 
 	# Use go mod replaces until this is made Go workspace aware. Pass GOWORK in the env to disable for this. Don't do it by default so behaviour is not unexpected.
-grpc: protoc-clean protoc-all
-	go mod vendor
+grpc: protoc-all
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
 		--go_opt=Mtypes/types.proto=./typesproto \
 		types/types.proto
@@ -89,7 +87,6 @@ grpc: protoc-clean protoc-all
 		remote/bor.proto remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto execution/execution.proto \
 		txpool/txpool.proto txpool/mining.proto
-	rm -rf vendor
 
 mocks:
 	rm -f $(GOBIN)/mockgen
