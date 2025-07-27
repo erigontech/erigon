@@ -35,6 +35,7 @@ var ourCapabilities = []string{
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
 	"engine_newPayloadV4",
+	"engine_newPayloadV5",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
@@ -45,6 +46,8 @@ var ourCapabilities = []string{
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
+	"engine_getInclusionListV1",
+	"engine_updatePayloadWithInclusionListV1",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
