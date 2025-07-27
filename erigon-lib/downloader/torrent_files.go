@@ -186,6 +186,16 @@ func (tf *AtomicTorrentFS) load(fPath string) (*torrent.TorrentSpec, error) {
 		return nil, fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
 	}
 	mi.AnnounceList = Trackers
+	info, err := mi.UnmarshalInfo()
+	if err != nil {
+		return nil, fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
+	}
+	if strings.HasPrefix(info.Name, "v1-") {
+		info.Name = strings.Replace(info.Name, "v1-", "v1.0-", 1)
+		mi6, _ := CreateMetaInfo(&info, nil)
+		println(fmt.Sprintf("'%s' = '%s'", info.Name, mi6.HashInfoBytes().String()))
+	}
+
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
 
