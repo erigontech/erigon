@@ -20,6 +20,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"math/big"
 	"net/http"
 	"sync"
@@ -194,9 +195,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
 
 	if n.network.Genesis != nil {
-		for addr, account := range n.network.Genesis.Alloc {
-			n.ethCfg.Genesis.Alloc[addr] = account
-		}
+		maps.Copy(n.ethCfg.Genesis.Alloc, n.network.Genesis.Alloc)
 
 		if n.network.Genesis.GasLimit != 0 {
 			n.ethCfg.Genesis.GasLimit = n.network.Genesis.GasLimit

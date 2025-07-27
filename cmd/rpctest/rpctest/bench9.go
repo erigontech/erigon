@@ -18,6 +18,7 @@ package rpctest
 
 import (
 	"fmt"
+	"maps"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
@@ -59,9 +60,7 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 			break
 		} else {
 			page = sr.Result.Next
-			for k, v := range sr.Result.Accounts {
-				accRangeTG[k] = v
-			}
+			maps.Copy(accRangeTG, sr.Result.Accounts)
 		}
 		for address, dumpAcc := range accRangeTG {
 			var proof EthGetProof
