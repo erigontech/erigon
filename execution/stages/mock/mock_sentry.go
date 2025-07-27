@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -449,10 +448,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	snapDownloader.EXPECT().
 		Add(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		ProhibitNewDownloads(gomock.Any(), gomock.Any()).
 		Return(&emptypb.Empty{}, nil).
 		AnyTimes()
 	snapDownloader.EXPECT().

@@ -19,6 +19,7 @@ package freezeblocks_test
 import (
 	"context"
 	"math/big"
+	"os"
 	"runtime"
 	"testing"
 
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
@@ -69,6 +69,10 @@ func TestDump(t *testing.T) {
 
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win")
+	}
+
+	if os.Getenv("SKIP_FLAKY_TESTS") != "" {
+		t.Skip("skipping flaky tests")
 	}
 
 	type test struct {

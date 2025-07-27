@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (
@@ -48,10 +47,6 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
 	d *Downloader
-}
-
-func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	return &emptypb.Empty{}, s.d.torrentFS.ProhibitNewDownloads(req.Type)
 }
 
 // Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
@@ -129,10 +124,6 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 
 func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
-}
-
-func InfoHashes2Proto(in metainfo.Hash) *prototypes.H160 {
-	return gointerfaces.ConvertAddressToH160(in)
 }
 
 func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader.SetLogPrefixRequest) (*emptypb.Empty, error) {

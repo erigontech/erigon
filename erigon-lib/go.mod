@@ -9,7 +9,6 @@ replace (
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250714121110-aad6c75a92b9
-	github.com/erigontech/interfaces v0.0.0-20250723133548-73abe7ce872e
 	github.com/erigontech/mdbx-go v0.39.8
 	github.com/erigontech/secp256k1 v1.2.0
 )
@@ -63,7 +62,6 @@ require (
 	golang.org/x/sync v0.16.0
 	golang.org/x/sys v0.34.0
 	google.golang.org/grpc v1.74.2
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
 	google.golang.org/protobuf v1.36.6
 )
 
@@ -74,8 +72,6 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
-	golang.org/x/mod v0.26.0 // indirect
-	golang.org/x/tools v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250721164621-a45f3dfb1074 // indirect
 )
 
