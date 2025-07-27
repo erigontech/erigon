@@ -77,6 +77,7 @@ var (
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
 	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
+	TraceLogs            = EnvBool("TRACE_LOGS", false)
 	TraceApply           = EnvBool("TRACE_APPLY", false)
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes       = EnvInts("TRACE_TRANSACTIONS", ",", nil)
