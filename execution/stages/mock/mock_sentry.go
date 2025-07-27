@@ -271,7 +271,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
-	cfg.BatchSize = 1 * datasize.MB
+	cfg.BatchSize = 5 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
@@ -449,10 +449,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	snapDownloader.EXPECT().
 		Add(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		ProhibitNewDownloads(gomock.Any(), gomock.Any()).
 		Return(&emptypb.Empty{}, nil).
 		AnyTimes()
 	snapDownloader.EXPECT().

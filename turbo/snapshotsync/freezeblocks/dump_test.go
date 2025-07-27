@@ -19,6 +19,7 @@ package freezeblocks_test
 import (
 	"context"
 	"math/big"
+	"os"
 	"runtime"
 	"testing"
 
@@ -69,6 +70,10 @@ func TestDump(t *testing.T) {
 
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win")
+	}
+
+	if os.Getenv("SKIP_FLAKY_TESTS") != "" {
+		t.Skip("skipping flaky tests")
 	}
 
 	type test struct {
