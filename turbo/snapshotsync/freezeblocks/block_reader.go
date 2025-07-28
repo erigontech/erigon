@@ -1634,6 +1634,7 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 
 	dirtyEnd := r.sn.DirtyBlocksAvailable(coresnaptype.Enums.Headers)
 	visibleEnd := r.sn.VisibleBlocksAvailable(coresnaptype.Enums.Headers)
+	fmt.Printf("headers: visible files end (%d) is not equal to dirty files end (%d)", visibleEnd, dirtyEnd)
 	if dirtyEnd != visibleEnd {
 		return fmt.Errorf("headers: visible files end (%d) is not equal to dirty files end (%d)", visibleEnd, dirtyEnd)
 	}
