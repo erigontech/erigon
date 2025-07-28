@@ -305,6 +305,24 @@ func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *AtomicTorrentFS) (res []*t
 	return res, nil
 }
 
+func AllTorrentReleaseSpecs(dirs datadir.Dirs, torrentFiles *AtomicTorrentFS) (res []*torrent.TorrentSpec, err error) {
+	files, err := AllTorrentPaths(dirs)
+	if err != nil {
+		return nil, err
+	}
+	for _, fPath := range files {
+		if len(fPath) == 0 {
+			continue
+		}
+		a, err := torrentFiles.LoadRelease(fPath)
+		if err != nil {
+			return nil, fmt.Errorf("AllTorrentSpecs: %w", err)
+		}
+		res = append(res, a)
+	}
+	return res, nil
+}
+
 // if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
 func IsSnapNameAllowed(name string) bool {
 	if dbg.DownloaderOnlyBlocks {
