@@ -77,6 +77,7 @@ type ApiHandler struct {
 	stateReader          *historical_states_reader.HistoricalStatesReader
 	sentinel             sentinel.SentinelClient
 	blobStoage           blob_storage.BlobStorage
+	columnStorage        blob_storage.DataColumnStorage
 	caplinSnapshots      *freezeblocks.CaplinSnapshots
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
@@ -131,6 +132,7 @@ func NewApiHandler(
 	routerCfg *beacon_router_configuration.RouterConfiguration,
 	emitters *beaconevents.EventEmitter,
 	blobStoage blob_storage.BlobStorage,
+	columnStorage blob_storage.DataColumnStorage,
 	caplinSnapshots *freezeblocks.CaplinSnapshots,
 	validatorParams *validator_params.ValidatorParams,
 	attestationProducer attestation_producer.AttestationDataProducer,
@@ -181,6 +183,7 @@ func NewApiHandler(
 		routerCfg:                        routerCfg,
 		emitters:                         emitters,
 		blobStoage:                       blobStoage,
+		columnStorage:                    columnStorage,
 		caplinSnapshots:                  caplinSnapshots,
 		attestationProducer:              attestationProducer,
 		blobBundles:                      blobBundles,
@@ -252,6 +255,7 @@ func (a *ApiHandler) init() {
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV1BlindedBlocks))
 					}
+					r.Get("/data_column_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1DebugBeaconDataColumnSidecars))
 					r.Route("/rewards", func(r chi.Router) {
 						r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconRewardsSyncCommittees))
 						r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconRewardsBlocks))
