@@ -9,22 +9,10 @@ if [ -z "$install_dir" ]; then
   install_dir="$(go env GOPATH)/bin"
 fi
 
-if [[ "$1" == "--install-deps" ]]
-then
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$install_dir" "$version"
-	exit
-fi
-
 bin_path="$install_dir/golangci-lint"
 
-which golangci-lint
-ls "$bin_path"
-
 if [ ! -x "$bin_path" ]; then
-  echo "golangci-lint tool is not found in $install_dir, install it with:"
-  echo "    make lint-deps"
-  echo "or follow https://golangci-lint.run/usage/install/"
-  exit 2
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$install_dir" "$version"
 fi
 
 "$bin_path" run --config ./.golangci.yml

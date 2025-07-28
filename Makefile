@@ -271,10 +271,6 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
-## lint-deps:                         install lint dependencies
-lint-deps:
-	@cd erigon-lib && $(MAKE) lint-deps
-
 ## lint:                              run all linters
 lint:
 	@cd erigon-lib && $(MAKE) lint

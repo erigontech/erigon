@@ -101,8 +101,6 @@ mocks:
 lint-mod-tidy:
 	@./tools/mod_tidy_check.sh
 
-lint-deps:
-	@./tools/golangci_lint.sh --install-deps
 lint:
 	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 

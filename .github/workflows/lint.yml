@@ -28,19 +28,4 @@ jobs:
         with:
           go-version: '1.24'
 
-      - name: Lint root module
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: 'v2.3.0'
-
-      - name: Lint erigon-lib module
-        uses: golangci/golangci-lint-action@v8
-        with:
-          working-directory: erigon-lib
-          version: 'v2.3.0'
-
-      - name: Lint erigon-db module
-        uses: golangci/golangci-lint-action@v8
-        with:
-          working-directory: erigon-db
-          version: 'v2.3.0'
+      - run: make lint
