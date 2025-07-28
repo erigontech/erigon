@@ -62,7 +62,7 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 	}
 
 	for _, f := range filesToRemove {
-		if err := os.Remove(f); err != nil {
+		if err := dir.Remove(f); err != nil {
 			return err
 		}
 	}

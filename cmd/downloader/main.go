@@ -457,7 +457,7 @@ var torrentClean = &cobra.Command{
 			if !strings.HasSuffix(de.Name(), ".torrent") || strings.HasPrefix(de.Name(), ".") {
 				return nil
 			}
-			err = os.Remove(filepath.Join(dirs.Snap, path))
+			err = dir.Remove(filepath.Join(dirs.Snap, path))
 			if err != nil {
 				logger.Warn("[snapshots.torrent] remove", "err", err, "path", path)
 				return err
@@ -609,7 +609,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 			return err
 		}
 		for _, filePath := range files {
-			if err := os.Remove(filePath); err != nil {
+			if err := dir.Remove(filePath); err != nil {
 				return err
 			}
 		}

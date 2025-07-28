@@ -67,7 +67,7 @@ func (tf *AtomicTorrentFS) delete(name string) error {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
-	return os.Remove(filepath.Join(tf.dir, name))
+	return dir.Remove(filepath.Join(tf.dir, name))
 }
 
 func (tf *AtomicTorrentFS) writeFile(name string, r io.Reader) (err error) {
@@ -84,7 +84,7 @@ func (tf *AtomicTorrentFS) writeFile(name string, r io.Reader) (err error) {
 		}
 		// I wonder if in some circumstances os.Rename can fail but the source file is gone. I doubt
 		// it.
-		err = errors.Join(os.Remove(f.Name()))
+		err = errors.Join(dir.Remove(f.Name()))
 	}()
 	closed := false
 	defer func() {
