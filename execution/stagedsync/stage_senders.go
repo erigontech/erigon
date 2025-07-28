@@ -195,6 +195,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		return err
 	}
 	defer bodiesC.Close()
+	log.Warn("[dbg] stage_senders.go", "startFrom", startFrom, "to", to)
 
 Loop:
 	for k, v, err := bodiesC.Seek(hexutil.EncodeTs(startFrom)); k != nil; k, v, err = bodiesC.Next() {
@@ -207,6 +208,7 @@ Loop:
 
 		blockNumber := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
+		log.Warn("[dbg] stage_senders.go.see", "blockNumber", blockNumber)
 
 		if blockNumber > to {
 			break
