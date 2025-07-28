@@ -31,8 +31,8 @@ func NewRcacheForkable(pre snapcfg.PreverifiedItems, dirs datadir.Dirs, stepSize
 		return nil, err
 	}
 
-	// app opts: default freezer is fine; 
-	// index builder
+	// app opts: default freezer is fine;
+	// index builder: default is fine as well..
 
 	return f, nil
 }

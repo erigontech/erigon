@@ -105,6 +105,7 @@ type ForkableCfg struct {
 	pruneFrom       kv.Num
 	Accessors       Accessors
 	Compression     seg.FileCompression
+	Enabled         bool
 }
 
 type DomainVersionTypes struct {

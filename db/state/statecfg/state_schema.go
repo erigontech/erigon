@@ -316,7 +316,7 @@ var Schema = SchemaGen{
 	},
 	RCacheForkable: ForkableCfg{
 		Name:        "rcache",
-		valsTbl:     kv.TblRCacheFVAls,
+		ValsTbl:     kv.TblRCacheFVAls,
 		Accessors:   AccessorHashMap,
 		Compression: seg.CompressNone,
 	},
@@ -404,11 +404,12 @@ var HistoryCompressCfg = seg.Cfg{
 }
 
 func EnableHistoricalRCache() {
-	cfg := Schema.RCacheDomain
-	cfg.Hist.IiCfg.Disable = false
-	cfg.Hist.HistoryDisabled = false
-	cfg.Hist.SnapshotsDisabled = false
-	Schema.RCacheDomain = cfg
+	// cfg := Schema.RCacheDomain
+	// cfg.Hist.IiCfg.Disable = false
+	// cfg.Hist.HistoryDisabled = false
+	// cfg.Hist.SnapshotsDisabled = false
+	// Schema.RCacheDomain = cfg
+	Schema.RCacheForkable.Enabled = true
 }
 
 var SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{}
