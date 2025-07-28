@@ -91,8 +91,8 @@ require (
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/rs/cors v1.11.1
 	github.com/spf13/afero v1.9.5
-	github.com/spf13/cobra v1.8.1
-	github.com/spf13/pflag v1.0.6
+	github.com/spf13/cobra v1.9.1
+	github.com/spf13/pflag v1.0.7
 	github.com/stretchr/testify v1.10.0
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.6.0
