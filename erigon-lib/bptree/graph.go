@@ -18,6 +18,7 @@ package bptree
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"log"
 	"os"
 	"os/exec"
@@ -150,8 +151,8 @@ func (g *Node23Graph) saveDotAndPicture(filename string, debug bool) error {
 	graphDir := "testdata/graph/"
 	_ = os.MkdirAll(graphDir, os.ModePerm)
 	filepath := graphDir + filename
-	_ = os.Remove(filepath + ".dot")
-	_ = os.Remove(filepath + ".png")
+	_ = dir.RemoveFile(filepath + ".dot")
+	_ = dir.RemoveFile(filepath + ".png")
 	g.saveDot(filepath, debug)
 	dotExecutable, _ := exec.LookPath("dot")
 	cmdDot := &exec.Cmd{

@@ -18,7 +18,7 @@ package snapshotsync
 
 import (
 	"context"
-	"os"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -380,7 +380,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.Equal(60, len(list))
 
 	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
-	os.Remove(filepath.Join(s.Dir(), list[15].Name()))
+	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
 	require.NoError(s.RemoveOverlaps())
@@ -666,7 +666,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	}
 
 	missingIdxFile := filepath.Join(dir, snaptype.IdxFileName(1, 500_000, 1_000_000, coresnaptype.Headers.Name()))
-	err := os.Remove(missingIdxFile)
+	err := dir2.RemoveFile(missingIdxFile)
 	require.NoError(err)
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
