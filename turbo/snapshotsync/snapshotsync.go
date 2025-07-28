@@ -437,6 +437,10 @@ func SyncSnapshots(
 				continue
 			}
 
+			if isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
+				continue
+			}
+
 			if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
 				continue
 			}

@@ -76,6 +76,7 @@ type ForkableCfg struct {
 	pruneFrom       Num
 	accessors       Accessors
 	compression     seg.FileCompression
+	enabled         bool
 }
 
 // func App
