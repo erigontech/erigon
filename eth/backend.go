@@ -1650,8 +1650,9 @@ func (s *Ethereum) Start() error {
 			// which make use of snapshots and expect them to be initialize
 			// TODO: get the snapshots to call the downloader directly - which will avoid this
 			go func() {
+				log.Warn("[dbg] start1")
 				err := stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.NewTxContainer(nil, nil), s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
-
+				log.Warn("[dbg] start2")
 				if err != nil && !errors.Is(err, context.Canceled) {
 					s.logger.Error("[polygon.sync] downloader stage crashed - stopping node", "err", err)
 					err = s.stopNode()
