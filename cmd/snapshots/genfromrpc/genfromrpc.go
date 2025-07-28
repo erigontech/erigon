@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/arb/chain"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -655,8 +656,8 @@ func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (type
 	return txs, nil
 }
 
-// getBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
+// GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
+func GetBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
@@ -739,7 +740,9 @@ func genFromRPc(cliCtx *cli.Context) error {
 		if curBlock == 0 {
 			// write arb genesis
 			log.Info("Writing arbitrum sepolia-rollup genesis")
-			gen := core.GenesisBlockByChainName("sepolia-rollup")
+
+			gen := chain.ArbSepoliaRollupGenesisBlock()
+
 			b := core.MustCommitGenesis(gen, db, dirs, log.New())
 			log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
 		} else {
@@ -767,7 +770,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
-				blk, err := getBlockByNumber(client, &blockNumber, verification)
+				blk, err := GetBlockByNumber(client, &blockNumber, verification)
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}

@@ -680,6 +680,10 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 	}
 }
 
+func (hd *HeaderDownload) SetSynced() {
+	hd.posStatus = Synced
+}
+
 func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx kv.Getter, peerId [64]byte) ([]PenaltyItem, error) {
 	if len(csHeaders) == 0 {
 		return nil, nil

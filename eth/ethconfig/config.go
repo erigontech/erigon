@@ -111,6 +111,7 @@ var Defaults = Config{
 	RPCTxFeeCap: 1, // 1 ether
 
 	ArbRPCEVMTimeout: 5 * time.Second,
+	L2RPCAddr:        "", // arbitrum only field, url to connect to L2 RPC server
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
@@ -276,6 +277,8 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	L2RPCAddr string
 }
 
 type Sync struct {

@@ -21,7 +21,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/arb/ethdb"
 	"math/big"
+	"os"
 	"runtime"
 	"time"
 
@@ -39,10 +41,13 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
+	snapshots "github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -68,6 +73,8 @@ type HeadersCfg struct {
 	notifications *shards.Notifications
 
 	syncConfig ethconfig.Sync
+
+	L2RPCAddr string // L2 RPC address for Arbitrum
 }
 
 func StageHeadersCfg(
@@ -85,6 +92,7 @@ func StageHeadersCfg(
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
 	notifications *shards.Notifications,
+	L2RPCAddr string, // L2 RPC address for Arbitrum
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -101,6 +109,7 @@ func StageHeadersCfg(
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
 		notifications:     notifications,
+		L2RPCAddr:         L2RPCAddr,
 	}
 }
 
@@ -119,9 +128,159 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return err
 		}
 	}
-	cfg.hd.Progress()
-	return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
+	if !cfg.chainConfig.IsArbitrum() {
+		return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
+	}
 
+	syncStages := []stages.SyncStage{
+		stages.Snapshots,
+		stages.Headers,
+		stages.BlockHashes,
+		stages.Bodies,
+		stages.Senders,
+	}
+
+	jsonRpcAddr := cfg.L2RPCAddr
+	client, err := rpc.Dial(jsonRpcAddr, log.Root())
+	if err != nil {
+		log.Warn("Error connecting to RPC", "err", err)
+		return err
+	}
+	var curBlock uint64
+	curBlock, err = stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		log.Warn("can't check current block", "err", err)
+	}
+	// Query latest block number.
+	var latestBlockHex string
+	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
+		log.Warn("Error fetching latest block number", "err", err)
+		return err
+	}
+
+	latestBlock := new(big.Int)
+	latestBlock.SetString(latestBlockHex[2:], 16)
+	if curBlock > 0 {
+		curBlock++
+	}
+	firstBlock := curBlock
+
+	if firstBlock >= latestBlock.Uint64() {
+		return nil
+	}
+
+	if firstBlock+1 > latestBlock.Uint64() { // print only if 1+ blocks available
+		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
+	}
+
+	var blockNumber big.Int
+	// Process blocks from the starting block up to the latest.
+	prev := curBlock
+	timer := time.NewTicker(40 * time.Second)
+	latestProcessedBlock := uint64(0)
+	// latestBlock.SetUint64(curBlock + 6000)
+	for blockNum := curBlock; blockNum < latestBlock.Uint64(); blockNum++ {
+		blockNumber.SetUint64(blockNum)
+		blk, err := snapshots.GetBlockByNumber(client, &blockNumber, false)
+		if err != nil {
+			return fmt.Errorf("error fetching block %d: %w", blockNum, err)
+		}
+		if err := rawdb.WriteHeader(tx, blk.Header()); err != nil {
+			return fmt.Errorf("error writing header %d: %w", blockNum, err)
+		}
+		if err := rawdb.WriteBlock(tx, blk); err != nil {
+			return fmt.Errorf("error writing block %d: %w", blockNum, err)
+		}
+
+		err = rawdb.WriteBody(tx, blk.Header().Hash(), blockNum, blk.Body())
+		if err != nil {
+			return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+		}
+		if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+			return err
+		}
+		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+		}
+		if err = cfg.blockWriter.MakeBodiesCanonical(tx, blockNum); err != nil {
+			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+		}
+		rawdb.WriteHeadBlockHash(tx, blk.Hash())
+		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+			return err
+		}
+
+		latestProcessedBlock = blockNum
+
+		select {
+		case <-timer.C:
+			for _, stage := range syncStages {
+				if err := stages.SaveStageProgress(tx, stage, blockNum); err != nil {
+					return err
+				}
+			}
+
+			blkSec := float64(blockNum-prev) / 40.0
+			log.Info(fmt.Sprintf("[%s] Header and Block processed", s.LogPrefix()), "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec), "withCommit", !useExternalTx)
+
+			if !useExternalTx {
+				if err := tx.Commit(); err != nil {
+					log.Warn("Error committing transaction", "err", err)
+					return err
+				}
+				log.Info("Committed", "block", blockNum, "hash", blk.Hash())
+				tx, err = cfg.db.BeginRw(ctx)
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+				cfg.hd.ReadProgressFromDb(tx)
+			}
+			prev = blockNum
+		default:
+			// continue processing without waiting
+		}
+	}
+	timer.Stop()
+	if err != nil {
+		log.Warn("Error updating db", "err", err)
+		return err
+	}
+	for _, stage := range syncStages {
+		if err := stages.SaveStageProgress(tx, stage, latestProcessedBlock); err != nil {
+			return err
+		}
+	}
+	//// TODO need tor ead progress and fill header number index?
+	cfg.hd.ReadProgressFromDb(tx)
+	//
+	if err := cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), firstBlock+1, latestProcessedBlock, ctx, logger); err != nil {
+		return err
+	}
+	// This will update bd.maxProgress
+	if err = cfg.bodyDownload.UpdateFromDb(tx); err != nil {
+		return err
+	}
+	defer cfg.bodyDownload.ClearBodyCache()
+
+	if err := cfg.blockWriter.MakeBodiesCanonical(tx, prev); err != nil {
+		return fmt.Errorf("failed to make bodies canonical %d: %w", prev, err)
+	}
+	ethdb.InitialiazeLocalWasmTarget()
+
+	if !useExternalTx {
+		cfg.hd.SetSynced()
+		err = tx.Commit()
+		if err != nil {
+			return err
+		}
+		log.Info("Committed transaction", "block", latestBlock.Uint64())
+	}
+
+	if latestBlock.Uint64()-firstBlock > 1 {
+		log.Info("[Arbitrum] Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "wasTxCommitted", !useExternalTx)
+	}
+	return nil
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
