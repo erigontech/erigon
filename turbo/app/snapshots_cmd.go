@@ -394,6 +394,7 @@ var snapshotCommand = cli.Command{
 					return err
 				}
 				log.Info("done")
+				return nil
 			},
 			Description: "read_v",
 			Flags: joinFlags([]cli.Flag{
@@ -1256,6 +1257,8 @@ func doReadV(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		ids := hexutil.Bytes(buf[8:]).String()
 		fmt.Printf("txNum: %d, ids: %s", txNum, ids)
 	}
+
+	return nil
 }
 
 func doClearIndexing(cliCtx *cli.Context) error {
