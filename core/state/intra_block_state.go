@@ -1243,14 +1243,16 @@ func (sdb *IntraBlockState) Snapshot() int {
 
 // RevertToSnapshot reverts all state changes made since the given revision.
 func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
-	traced := sdb.trace
-	for addr := range tracedAccounts {
-		if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
-			traced = true
-			if err == nil {
-				fmt.Printf("%d (%d.%d) Reverted %x, %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, revid)
-			} else {
-				fmt.Printf("%d (%d.%d) Reverted %x, %d: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, revid, err)
+	var traced bool
+	if sdb.trace || len(tracedAccounts) > 0 {
+		for addr := range sdb.journal.dirties {
+			if sdb.trace || traceAccount(addr) {
+				traced = true
+				if err == nil {
+					fmt.Printf("%d (%d.%d) Reverting %x, %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, revid)
+				} else {
+					fmt.Printf("%d (%d.%d) Reverting %x, %d: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, revid, err)
+				}
 			}
 		}
 	}
