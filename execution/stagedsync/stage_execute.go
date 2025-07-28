@@ -152,6 +152,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		to = min(prevStageProgress, toBlock)
 	}
 	if to < s.BlockNumber {
+		log.Warn("[dbg] stage_exec.exit", "prevStageProgress", prevStageProgress, "toBlock", toBlock, "to", to)
 		return nil
 	}
 
