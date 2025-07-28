@@ -796,17 +796,6 @@ Loop:
 					return err
 				}
 
-				fmt.Printf("SD reopens txns after commit; stack %v\n", dbg.Stack())
-				for i := 0; i < 16; i++ {
-					rotx, err := cfg.db.BeginRo(ctx)
-					if err != nil {
-						return err
-					}
-					defer rotx.Rollback()
-
-					executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
-				}
-
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
 				if !initialCycle && isBatchFull {
 					maxBlockNum = min(maxBlockNum, blockNum+changesetSafeRange) // allow for some changesets to be generated.
@@ -816,6 +805,17 @@ Loop:
 						"block", outputBlockNum.GetValueUint64(), "txNum", inputTxNum,
 						"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
 						"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
+				}
+
+				fmt.Printf("SD reopens txns after commit; stack %v\n", dbg.Stack())
+				for i := 0; i < 16; i++ {
+					rotx, err := cfg.db.BeginRo(ctx)
+					if err != nil {
+						return err
+					}
+					defer rotx.Rollback()
+
+					executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
 				}
 			default:
 			}
@@ -835,19 +835,6 @@ Loop:
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-
-			for i := 0; i < 16; i++ {
-				// rotx := agg.BeginFilesRo()
-				// rotx := cfg.db.BeginRw(context.Background())
-
-				rotx, err := cfg.db.BeginRo(ctx)
-				if err != nil {
-					return err
-				}
-				defer rotx.Rollback()
-
-				executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
-			}
 			_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
@@ -865,18 +852,6 @@ Loop:
 		}
 		if err = executor.tx().Commit(); err != nil {
 			return err
-		}
-		for i := 0; i < 16; i++ {
-			// rotx := agg.BeginFilesRo()
-			// rotx := cfg.db.BeginRw(context.Background())
-
-			rotx, err := cfg.db.BeginRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer rotx.Rollback()
-
-			executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
 		}
 	}
 
