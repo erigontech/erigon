@@ -1653,6 +1653,8 @@ func (s *Ethereum) Start() error {
 				log.Warn("[dbg] start1")
 				err := stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.NewTxContainer(nil, nil), s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
 				log.Warn("[dbg] start2")
+				err = stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.NewTxContainer(nil, nil), s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
+				log.Warn("[dbg] start3")
 				if err != nil && !errors.Is(err, context.Canceled) {
 					s.logger.Error("[polygon.sync] downloader stage crashed - stopping node", "err", err)
 					err = s.stopNode()
