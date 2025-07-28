@@ -281,7 +281,7 @@ func (s *seg_stream) Close() {
 	s.g = nil
 }
 
-// index key factory "manufacturing" index keys only
+// index key factory "manufacturing" index key uint64 -> little endian bytes
 type SimpleIndexKeyFactory struct {
 	num []byte
 }

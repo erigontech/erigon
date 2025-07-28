@@ -421,7 +421,7 @@ func (s *E3SnapSchema) FileExtensions() (extensions []string) {
 	return
 }
 
-// these are kv + kvi or bt/kvei residing in same folder snapshots/forkables.
+// these are kv + kvi or bt/kvei residing in same folder `snapshots/forkables`
 func NewForkableSnapSchema(cfg ForkableCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
 	b := NewE3SnapSchemaBuilder(cfg.accessors, stepSize)
 	b.Data(dirs.SnapForkable, cfg.name, DataExtensionKv, cfg.compression)

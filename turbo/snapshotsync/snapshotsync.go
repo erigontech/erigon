@@ -431,7 +431,7 @@ func SyncSnapshots(
 			continue
 		}
 
-		if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
+		if isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
 			continue
 		}
 
