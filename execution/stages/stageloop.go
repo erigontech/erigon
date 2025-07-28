@@ -137,6 +137,7 @@ func StageLoop(
 
 // ProcessFrozenBlocks - withuot global rwtx
 func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook) error {
+	log.Warn("[dbg] tx.ProcessFrozenBlocks1")
 	sawZeroBlocksTimes := 0
 	initialCycle, firstCycle := true, true
 	for {
@@ -150,10 +151,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 			}
 		}
 
+		log.Warn("[dbg] tx.ProcessFrozenBlocks1", "initialCycle", initialCycle, "firstCycle", firstCycle)
 		more, err := sync.Run(db, wrap.NewTxContainer(nil, nil), initialCycle, firstCycle)
 		if err != nil {
 			return err
 		}
+		log.Warn("[dbg] tx.ProcessFrozenBlocksx2", "initialCycle", initialCycle, "firstCycle", firstCycle, "more", more)
 
 		if hook != nil {
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {

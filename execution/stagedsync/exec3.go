@@ -223,6 +223,8 @@ func ExecV3(ctx context.Context,
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
+	log.Warn("[dbg] Exec3", "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+
 	if !useExternalTx {
 		if !parallel {
 			var err error
