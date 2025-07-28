@@ -165,10 +165,13 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	}
 	firstBlock := curBlock
 
-	if firstBlock == latestBlock.Uint64() {
+	if firstBlock >= latestBlock.Uint64() {
 		return nil
 	}
-	log.Info("[Arbitrum] Headers stage started", "firstBlock", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
+
+	if firstBlock+1 > latestBlock.Uint64()-1 { // print only if 1+ blocks available
+		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
+	}
 
 	var blockNumber big.Int
 	// Process blocks from the starting block up to the latest.
@@ -218,14 +221,14 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			}
 
 			blkSec := float64(blockNum-prev) / 40.0
-			log.Info(fmt.Sprintf("[%s] Header and Block processed", s.LogPrefix()), "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec), "extTx", useExternalTx)
+			log.Info(fmt.Sprintf("[%s] Header and Block processed", s.LogPrefix()), "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec), "withCommit", !useExternalTx)
 
 			if !useExternalTx {
 				if err := tx.Commit(); err != nil {
 					log.Warn("Error committing transaction", "err", err)
 					return err
 				}
-				log.Info("Committed transaction", "block", blockNum, "hash", blk.Hash(), "extTx", useExternalTx)
+				log.Info("Committed", "block", blockNum, "hash", blk.Hash())
 				tx, err = cfg.db.BeginRw(ctx)
 				if err != nil {
 					return err
@@ -271,10 +274,10 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err != nil {
 			return err
 		}
-		log.Info("Committed transaction", "block", latestBlock.Uint64(), "extTx", useExternalTx)
+		log.Info("Committed transaction", "block", latestBlock.Uint64())
 	}
 
-	log.Info("Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "wasTxCommitted", !useExternalTx)
+	log.Info("[Arbitrum] Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "wasTxCommitted", !useExternalTx)
 	return nil
 }
 
