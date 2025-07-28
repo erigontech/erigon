@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -103,7 +104,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	)
 	removeFunc := func(path string) error {
 		logger.Debug("Removing snapshot dir file", "path", path)
-		return os.Remove(filepath.Join(dirs.Snap, path))
+		return dir.RemoveFile(filepath.Join(dirs.Snap, path))
 	}
 	if dryRun {
 		removeFunc = dryRunRemove
@@ -128,7 +129,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	if removeChainData {
 		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
 		if !dryRun {
-			err = os.RemoveAll(dirs.Chaindata)
+			err = dir.RemoveAll(dirs.Chaindata)
 		}
 		if err != nil {
 			err = fmt.Errorf("removing chaindata dir: %w", err)

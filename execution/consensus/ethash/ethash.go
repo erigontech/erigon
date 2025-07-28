@@ -23,6 +23,7 @@ package ethash
 import (
 	"errors"
 	"fmt"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"math/big"
 	"math/rand"
 	"os"
@@ -295,7 +296,7 @@ func (c *cache) generate(dir string, limit int, lock bool, test bool) {
 		for ep := int(c.epoch) - limit; ep >= 0; ep-- {
 			seed := seedHash(uint64(ep)*epochLength + 1)
 			path := filepath.Join(dir, fmt.Sprintf("cache-R%d-%x%s", algorithmRevision, seed[:8], endian))
-			os.Remove(path)
+			dir2.RemoveFile(path)
 		}
 	})
 }
@@ -384,7 +385,7 @@ func (d *dataset) generate(dir string, limit int, lock bool, test bool) {
 		for ep := int(d.epoch) - limit; ep >= 0; ep-- {
 			seed := seedHash(uint64(ep)*epochLength + 1)
 			path := filepath.Join(dir, fmt.Sprintf("full-R%d-%x%s", algorithmRevision, seed[:8], endian))
-			os.Remove(path)
+			dir2.RemoveFile(path)
 		}
 	})
 }

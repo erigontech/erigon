@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -80,9 +80,9 @@ func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs
 
 		state.Cleanup()
 		db.Close()
-		os.RemoveAll(dirs.Snap)
-		os.RemoveAll(dirs.Chaindata)
-		os.RemoveAll(dirs.SnapIdx)
+		dir.RemoveAll(dirs.Snap)
+		dir.RemoveAll(dirs.Chaindata)
+		dir.RemoveAll(dirs.SnapIdx)
 	})
 }
 
