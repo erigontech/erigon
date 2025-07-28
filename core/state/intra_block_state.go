@@ -1284,8 +1284,26 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 		}
 
 		for _, addr := range reverted {
+			if traced {
+				fmt.Printf("%d (%d.%d) Reverted writes: %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+			}
 			sdb.versionMap.DeleteAll(addr, sdb.txIndex)
 			delete(sdb.versionedWrites, addr)
+		}
+
+		reverted = nil
+
+		for addr := range sdb.versionedReads {
+			if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
+				reverted = append(reverted, addr)
+			}
+		}
+
+		for _, addr := range reverted {
+			if traced {
+				fmt.Printf("%d (%d.%d) Reverted reads: %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+			}
+			delete(sdb.versionedReads, addr)
 		}
 	}
 
