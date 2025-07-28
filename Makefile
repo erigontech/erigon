@@ -271,15 +271,6 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
-## lint-deps:                         install lint dependencies
-lint-deps:
-	@cd erigon-lib && $(MAKE) lint-deps
-
-## lintci:                            run golangci-lint linters
-lintci:
-	@cd erigon-lib && $(MAKE) lintci
-	@./erigon-lib/tools/golangci_lint.sh
-
 ## lint:                              run all linters
 lint:
 	@cd erigon-lib && $(MAKE) lint
