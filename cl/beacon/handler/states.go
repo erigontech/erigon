@@ -671,7 +671,10 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 		return true
 	})
 
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(respProposerLookahead).
+		WithHeader("Eth-Consensus-Version", version.String()).
+		WithVersion(version).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
 		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
