@@ -17,6 +17,9 @@ fi
 
 bin_path="$install_dir/golangci-lint"
 
+which golangci-lint
+ls "$bin_path"
+
 if [ ! -x "$bin_path" ]; then
   echo "golangci-lint tool is not found in $install_dir, install it with:"
   echo "    make lint-deps"
