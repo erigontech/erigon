@@ -277,7 +277,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Info("Committed transaction", "block", latestBlock.Uint64())
 	}
 
-	log.Info("[Arbitrum] Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "wasTxCommitted", !useExternalTx)
+	if latestBlock.Uint64()-firstBlock > 1 {
+		log.Info("[Arbitrum] Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(), "latestProcessedBlock", latestProcessedBlock, "wasTxCommitted", !useExternalTx)
+	}
 	return nil
 }
 
