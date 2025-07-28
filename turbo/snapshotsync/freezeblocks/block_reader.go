@@ -23,7 +23,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
@@ -1630,6 +1630,12 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 		if err := r.ensureHeaderNumber(seg.To()-1, seg); err != nil {
 			return err
 		}
+	}
+
+	dirtyEnd := r.sn.DirtyBlocksAvailable(coresnaptype.Enums.Headers)
+	visibleEnd := r.sn.VisibleBlocksAvailable(coresnaptype.Enums.Headers)
+	if dirtyEnd != visibleEnd {
+		return fmt.Errorf("headers: visible files end (%d) is not equal to dirty files end (%d)", visibleEnd, dirtyEnd)
 	}
 	return nil
 }
