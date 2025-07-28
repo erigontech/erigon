@@ -91,6 +91,15 @@ func (s ReadSet) Len() int {
 	return l
 }
 
+func (s ReadSet) Delete(addr common.Address, key AccountKey) {
+	if reads, ok := s[addr]; ok {
+		delete(reads, key)
+		if len(reads) == 0 {
+			delete(s, addr)
+		}
+	}
+}
+
 type WriteSet map[common.Address]map[AccountKey]*VersionedWrite
 
 func (s WriteSet) Set(v VersionedWrite) {

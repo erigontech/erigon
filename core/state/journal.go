@@ -204,8 +204,12 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prevbalance {
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})
+			s.versionedReads.Delete(*ch.account, AccountKey{Path: BalancePath})
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
+				v.Val = ch.prev
+			}
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
 			}
 		}
@@ -239,9 +243,13 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prev {
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})
+			s.versionedReads.Delete(*ch.account, AccountKey{Path: BalancePath})
 			s.versionMap.Delete(*ch.account, BalancePath, common.Hash{}, s.txIndex, false)
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
+				v.Val = ch.prev
+			}
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
 			}
 		}
