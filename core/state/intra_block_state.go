@@ -1036,7 +1036,7 @@ func (sdb *IntraBlockState) GetTransientState(addr common.Address, key common.Ha
 func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, error) {
 	if so, ok := sdb.stateObjects[addr]; ok {
 		if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) getStateObject %x: local\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+			fmt.Printf("%d (%d.%d) getStateObject %x: local: balance: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &so.data.Balance)
 		}
 		return so, nil
 	}
