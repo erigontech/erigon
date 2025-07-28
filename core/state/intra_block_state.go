@@ -393,7 +393,7 @@ func (sdb *IntraBlockState) GetBalance(addr common.Address) (uint256.Int, error)
 		if stateObject != nil && !stateObject.deleted {
 			if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
 				balance := stateObject.Balance()
-				fmt.Printf("%d (%d.%d) GetBalance %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, balance)
+				fmt.Printf("%d (%d.%d) GetBalance %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &balance)
 			}
 			return stateObject.Balance(), nil
 		}
@@ -411,6 +411,9 @@ func (sdb *IntraBlockState) GetBalance(addr common.Address) (uint256.Int, error)
 			return uint256.Int{}, nil
 		})
 
+	if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
+		fmt.Printf("%d (%d.%d) GetBalance %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &balance)
+	}
 	return balance, err
 }
 
