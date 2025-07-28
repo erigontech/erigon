@@ -1546,11 +1546,13 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
+		log.Warn("[dbg] BuildFilesInBackground0: skip ", "vis", a.visibleFilesMinimaxTxNum.Load()/a.aggregationStep, "req", (txNum+1)/a.aggregationStep)
 		close(fin)
 		return fin
 	}
 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
+		log.Warn("[dbg] BuildFilesInBackground: a.buildingFiles is true. skipping")
 		close(fin)
 		return fin
 	}
@@ -1565,6 +1567,8 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		if a.snapshotBuildSema != nil {
 			//we are inside own goroutine - it's fine to block here
 			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil { //TODO: not sure if this ctx is correct
+				log.Warn("[dbg] BuildFilesInBackground3: skip, sema")
+
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				close(fin)
 				return //nolint
@@ -1583,6 +1587,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
+			log.Warn("[dbg] BuildFilesInBackground4: skip, sema", "hasData", hasData, "step", step)
 			close(fin)
 			return
 		}
