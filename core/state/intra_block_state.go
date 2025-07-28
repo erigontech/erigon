@@ -303,7 +303,7 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	log.TxIndex = uint(sdb.txIndex)
 	log.Index = sdb.logSize
 	if dbg.TraceLogs && (sdb.trace || traceAccount(log.Address)) {
-		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, log.Data)
+		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Data:%x (stack %s)\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, log.Data, dbg.Stack())
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
 		sdb.tracingHooks.OnLog(log)
