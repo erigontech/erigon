@@ -1035,18 +1035,12 @@ func (sdb *IntraBlockState) GetTransientState(addr common.Address, key common.Ha
 
 func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, error) {
 	if so, ok := sdb.stateObjects[addr]; ok {
-		if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) getStateObject %x: local: balance: %d stack: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &so.data.Balance, dbg.Stack())
-		}
 		return so, nil
 	}
 
 	// Load the object from the database.
 	if _, ok := sdb.nilAccounts[addr]; ok {
 		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
-			if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
-				fmt.Printf("%d (%d.%d) getStateObject %x: nil\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
-			}
 			return sdb.createObject(addr, nil), nil
 		}
 		return nil, nil
@@ -1089,11 +1083,6 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 	}
 
 	var code []byte
-
-	if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
-		fmt.Printf("%d (%d.%d) getStateObject %x: read\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
-	}
-
 	account := readAccount
 	if sdb.versionMap != nil {
 		// need to do a versioned read of balance/nonce/codehash
@@ -1289,21 +1278,6 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 			}
 			sdb.versionMap.DeleteAll(addr, sdb.txIndex)
 			delete(sdb.versionedWrites, addr)
-		}
-
-		reverted = nil
-
-		for addr := range sdb.versionedReads {
-			if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
-				reverted = append(reverted, addr)
-			}
-		}
-
-		for _, addr := range reverted {
-			if traced {
-				fmt.Printf("%d (%d.%d) Reverted reads: %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
-			}
-			//delete(sdb.versionedReads, addr)
 		}
 	}
 

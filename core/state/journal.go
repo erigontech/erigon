@@ -294,8 +294,12 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if obj.original.Nonce == ch.prev {
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: NoncePath})
+			s.versionedReads.Delete(*ch.account, AccountKey{Path: NoncePath})
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: NoncePath}]; ok {
+				v.Val = ch.prev
+			}
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: NoncePath}]; ok {
 				v.Val = ch.prev
 			}
 		}
@@ -318,11 +322,19 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		if obj.original.CodeHash == ch.prevhash {
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: CodePath})
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: CodeHashPath})
+			s.versionedReads.Delete(*ch.account, AccountKey{Path: CodePath})
+			s.versionedReads.Delete(*ch.account, AccountKey{Path: CodeHashPath})
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: CodePath}]; ok {
 				v.Val = ch.prevcode
 			}
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: CodeHashPath}]; ok {
+				v.Val = ch.prevhash
+			}
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: CodePath}]; ok {
+				v.Val = ch.prevcode
+			}
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: CodeHashPath}]; ok {
 				v.Val = ch.prevhash
 			}
 		}
@@ -344,8 +356,12 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		if ch.wasCommited {
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: StatePath, Key: ch.key})
 			s.versionMap.Delete(*ch.account, StatePath, ch.key, s.txIndex, false)
+			s.versionedReads.Delete(*ch.account, AccountKey{Path: StatePath, Key: ch.key})
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
+				v.Val = ch.prevalue
+			}
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
 				v.Val = ch.prevalue
 			}
 		}
