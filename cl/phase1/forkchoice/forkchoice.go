@@ -130,6 +130,8 @@ type ForkChoiceStore struct {
 	pendingDeposits       *lru.Cache[common.Hash, *solid.ListSSZ[*solid.PendingDeposit]]
 	partialWithdrawals    *lru.Cache[common.Hash, *solid.ListSSZ[*solid.PendingPartialWithdrawal]]
 
+	proposerLookahead *lru.Cache[common.Hash, solid.Uint64VectorSSZ]
+
 	mu sync.RWMutex
 
 	// EL
@@ -245,6 +247,11 @@ func NewForkChoiceStore(
 	if err != nil {
 		return nil, err
 	}
+	proposerLookahead, err := lru.New[common.Hash, solid.Uint64VectorSSZ](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
+
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
@@ -286,6 +293,7 @@ func NewForkChoiceStore(
 		pendingConsolidations:    pendingConsolidations,
 		pendingDeposits:          pendingDeposits,
 		partialWithdrawals:       partialWithdrawals,
+		proposerLookahead:        proposerLookahead,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -718,6 +726,39 @@ func (f *ForkChoiceStore) addPendingPartialWithdrawals(blockRoot common.Hash, pe
 	f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawalsCopy)
 }
 
+func (f *ForkChoiceStore) addProposerLookahead(blockRoot common.Hash, proposerLookahead solid.Uint64VectorSSZ) {
+	header, ok := f.forkGraph.GetHeader(blockRoot)
+	if !ok {
+		cpy := solid.NewUint64VectorSSZ(proposerLookahead.Length())
+		proposerLookahead.CopyTo(cpy)
+		f.proposerLookahead.Add(blockRoot, cpy)
+		return
+	}
+	ppl, ok := f.proposerLookahead.Get(header.ParentRoot)
+	if !ok {
+		cpy := solid.NewUint64VectorSSZ(proposerLookahead.Length())
+		proposerLookahead.CopyTo(cpy)
+		f.proposerLookahead.Add(blockRoot, cpy)
+		return
+	}
+	// check if the two lists are equal
+	equal := proposerLookahead.Length() == ppl.Length()
+	for i := 0; i < proposerLookahead.Length(); i++ {
+		if proposerLookahead.Get(i) != ppl.Get(i) {
+			equal = false
+			break
+		}
+	}
+	if equal {
+		// just take the parent list if they are equal.
+		f.proposerLookahead.Add(blockRoot, ppl)
+	} else {
+		cpy := solid.NewUint64VectorSSZ(proposerLookahead.Length())
+		proposerLookahead.CopyTo(cpy)
+		f.proposerLookahead.Add(blockRoot, cpy)
+	}
+}
+
 func (f *ForkChoiceStore) GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool) {
 	return f.pendingConsolidations.Get(blockRoot)
 }
@@ -728,4 +769,8 @@ func (f *ForkChoiceStore) GetPendingDeposits(blockRoot common.Hash) (*solid.List
 
 func (f *ForkChoiceStore) GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool) {
 	return f.partialWithdrawals.Get(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetProposerLookahead(blockRoot common.Hash) (solid.Uint64VectorSSZ, bool) {
+	return f.proposerLookahead.Get(blockRoot)
 }

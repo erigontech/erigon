@@ -78,6 +78,7 @@ type ForkChoiceStorageReader interface {
 	GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool)
 	GetPendingDeposits(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingDeposit], bool)
 	GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool)
+	GetProposerLookahead(blockRoot common.Hash) (solid.Uint64VectorSSZ, bool)
 
 	ValidateOnAttestation(attestation *solid.Attestation) error
 	IsRootOptimistic(root common.Hash) bool

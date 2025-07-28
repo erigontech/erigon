@@ -306,6 +306,7 @@ func (a *ApiHandler) init() {
 							r.Get("/pending_consolidations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingConsolidations))
 							r.Get("/pending_deposits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingDeposits))
 							r.Get("/pending_partial_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingPartialWithdrawals))
+							r.Get("/proposer_lookahead", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesProposerLookahead))
 						})
 					})
 				})

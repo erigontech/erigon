@@ -627,3 +627,51 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingPartialWithdrawals(w http.Respon
 		WithOptimistic(isOptimistic).
 		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
+
+func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	ctx := r.Context()
+
+	stateId, err := beaconhttp.StateIdFromRequest(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+
+	tx, err := a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, stateId)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(httpStatus, err)
+	}
+
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if slot == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
+	}
+
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return nil, err
+	}
+
+	//proposerLookahead := solid.NewUint64VectorSSZ(int(a.beaconChainCfg.MinSeedLookahead+1) * int(a.beaconChainCfg.SlotsPerEpoch))
+	proposerLookahead, ok := a.forkchoiceStore.GetProposerLookahead(blockRoot)
+	if !ok {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no proposer lookahead found for block root: %x", blockRoot))
+	}
+
+	respProposerLookahead := []string{}
+	proposerLookahead.Range(func(i int, v uint64, length int) bool {
+		respProposerLookahead = append(respProposerLookahead, strconv.FormatUint(v, 10))
+		return true
+	})
+
+	return newBeaconResponse(respProposerLookahead).
+		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
+		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+}
