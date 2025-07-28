@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
@@ -378,6 +379,26 @@ var snapshotCommand = cli.Command{
 			Description: "Clear all indexing data",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
+			}),
+		},
+		{
+			Name: "read_v",
+			Action: func(cliCtx *cli.Context) error {
+				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+				if err := doReadV(cliCtx, dirs); err != nil {
+					log.Error("[read_v]", "err", err)
+					return err
+				}
+				log.Info("done")
+			},
+			Description: "read_v",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&SnapshotFileFlag,
 			}),
 		},
 	},
@@ -1200,6 +1221,41 @@ func doPublishable(cliCtx *cli.Context) error {
 	}
 	log.Info("All snapshots are publishable")
 	return nil
+}
+
+func doReadV(cliCtx *cli.Context, dirs datadir.Dirs) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+
+	sourcefile := cliCtx.String(SnapshotFileFlag.Name)
+	sourcefile = filepath.Join(dirs.SnapHistory, sourcefile)
+
+	exists, err := dir.FileExist(sourcefile)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("file %s does not exist", sourcefile)
+	}
+
+	decomp, err := seg.NewDecompressor(sourcefile)
+	if err != nil {
+		return err
+	}
+	defer decomp.Close()
+	g := decomp.MakeGetter()
+	var buf []byte
+
+	for g.HasNext() {
+		buf, _ := g.Next(buf)
+		g.Skip()
+		txNum := binary.BigEndian.Uint64(buf)
+		ids := hexutil.Bytes(buf[8:]).String()
+		fmt.Printf("txNum: %d, ids: %s", txNum, ids)
+	}
 }
 
 func doClearIndexing(cliCtx *cli.Context) error {
