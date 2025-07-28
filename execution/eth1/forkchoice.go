@@ -198,6 +198,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		hash   common.Hash
 		number uint64
 	}
+	e.logger.Warn("[dbg] tx.Begin1")
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
@@ -399,6 +400,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 	}
 	if isDomainAheadOfBlocks(tx, e.logger) {
+		e.logger.Warn("[dbg] tx.Commit2")
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
@@ -512,6 +514,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if err != nil {
 			e.logger.Warn("Failed to get txnum", "err", err)
 		}
+		e.logger.Warn("[dbg] tx.Commit1")
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
