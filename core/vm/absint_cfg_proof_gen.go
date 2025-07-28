@@ -585,7 +585,7 @@ func (cfg *Cfg) PrintAnlyState() {
 	}
 
 	path := "cfg.dot"
-	_ = dir.Remove(path)
+	_ = dir.RemoveFile(path)
 
 	f, errcr := os.Create(path)
 	if errcr != nil {

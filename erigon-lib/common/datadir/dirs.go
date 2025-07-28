@@ -244,12 +244,12 @@ func CopyFile(from, to string) error {
 	defer w.Close()
 	if _, err = w.ReadFrom(r); err != nil {
 		w.Close()
-		dir.Remove(to)
+		dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	if err = w.Sync(); err != nil {
 		w.Close()
-		dir.Remove(to)
+		dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	return nil
@@ -274,7 +274,7 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 				name := entry.Name()
 				if strings.HasPrefix(name, "v1-") {
 					if strings.HasSuffix(name, ".torrent") {
-						if err := dir.Remove(path); err != nil {
+						if err := dir.RemoveFile(path); err != nil {
 							return err
 						}
 						torrentsRemoved++
@@ -284,7 +284,7 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 					if strings.Contains(entry.Name(), "commitment") &&
 						(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
 						// remove the file instead of renaming
-						if err := dir.Remove(path); err != nil {
+						if err := dir.RemoveFile(path); err != nil {
 							return fmt.Errorf("failed to remove file %s: %w", path, err)
 						}
 						removed++
@@ -337,7 +337,7 @@ func (d Dirs) RenameNewVersions() error {
 				if strings.Contains(dirEntry.Name(), "commitment") &&
 					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
 					// remove the file instead of renaming
-					if err := dir.Remove(path); err != nil {
+					if err := dir.RemoveFile(path); err != nil {
 						return fmt.Errorf("failed to remove file %s: %w", path, err)
 					}
 					return nil

@@ -68,7 +68,7 @@ quit
 		fmt.Fprintln(os.Stderr, "Error: could not create temp file for LLDB script:", err)
 		os.Exit(1)
 	}
-	defer dir.Remove(tmpFile.Name())
+	defer dir.RemoveFile(tmpFile.Name())
 
 	_, err = tmpFile.WriteString(lldbScript)
 	tmpFile.Close()

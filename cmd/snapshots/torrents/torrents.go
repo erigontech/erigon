@@ -391,7 +391,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				return err
 			}
 
-			defer dir.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
+			defer dir.RemoveFile(filepath.Join(srcSession.LocalFsRoot(), file))
 
 			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
@@ -399,7 +399,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				return err
 			}
 
-			defer dir.Remove(filepath.Join(srcSession.LocalFsRoot(), file+".torrent"))
+			defer dir.RemoveFile(filepath.Join(srcSession.LocalFsRoot(), file+".torrent"))
 
 			return srcSession.Upload(gctx, file+".torrent")
 		})
@@ -484,7 +484,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				return err
 			}
 
-			defer dir.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
+			defer dir.RemoveFile(filepath.Join(srcSession.LocalFsRoot(), file))
 
 			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
@@ -494,7 +494,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 			torrentPath := filepath.Join(srcSession.LocalFsRoot(), file+".torrent")
 
-			defer dir.Remove(torrentPath)
+			defer dir.RemoveFile(torrentPath)
 
 			lmi, err := metainfo.LoadFromFile(torrentPath)
 

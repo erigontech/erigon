@@ -1510,7 +1510,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	for _, fn := range fnames {
 		if strings.Contains(fn, kv.CommitmentDomain.String()) {
-			require.NoError(t, dir.Remove(fn))
+			require.NoError(t, dir.RemoveFile(fn))
 			//t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}
@@ -1575,7 +1575,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	require.True(t, exist)
 	agg.closeDirtyFiles() // because windows
 
-	require.NoError(t, dir.Remove(codeMergedFile))
+	require.NoError(t, dir.RemoveFile(codeMergedFile))
 
 	require.NoError(t, agg.OpenFolder())
 	tx, err = tdb.BeginTemporalRo(context.Background())

@@ -126,7 +126,7 @@ func DeleteFiles(dirs ...string) error {
 		}
 		for _, fPath := range files {
 			fPath := fPath
-			g.Go(func() error { return Remove(fPath) })
+			g.Go(func() error { return RemoveFile(fPath) })
 		}
 	}
 	return g.Wait()
@@ -163,7 +163,7 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 	return paths, nil
 }
 
-func Remove(path string) error {
+func RemoveFile(path string) error {
 	if dbg.TraceDeletion {
 		log.Debug("[removing] removing file", "path", path, "stack", dbg.Stack())
 	}

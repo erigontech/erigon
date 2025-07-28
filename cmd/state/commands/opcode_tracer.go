@@ -714,7 +714,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			}
 			// if the summary file for the just-finished range of blocks is empty, delete it
 			if fi.Size() == 0 {
-				dir.Remove(fi.Name())
+				dir.RemoveFile(fi.Name())
 			}
 			fsum.Close()
 			fsum = nil

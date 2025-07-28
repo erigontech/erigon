@@ -177,7 +177,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	require.Equal(t, 3, len(bodiesFiles))
 	lastBodyFile := bodiesFiles[len(bodiesFiles)-1].decompressor.FilePath()
 	agg.Close()
-	require.NoError(t, dir.Remove(lastBodyFile))
+	require.NoError(t, dir.RemoveFile(lastBodyFile))
 
 	// now open folder and check visiblefiles
 	agg = NewForkableAgg(context.Background(), dirs, db, log)
@@ -236,7 +236,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	require.Equal(t, 3, len(bodiesFiles))
 	lastBodyFile := bodiesFiles[len(bodiesFiles)-1].decompressor.FilePath()
 	agg.Close()
-	require.NoError(t, dir.Remove(lastBodyFile))
+	require.NoError(t, dir.RemoveFile(lastBodyFile))
 
 	// now open folder and check visiblefiles
 	agg = NewForkableAgg(context.Background(), dirs, db, log)

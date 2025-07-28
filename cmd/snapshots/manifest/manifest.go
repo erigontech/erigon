@@ -233,7 +233,7 @@ func updateManifest(ctx context.Context, tmpDir string, srcSession *downloader.R
 	}
 
 	_ = os.WriteFile(filepath.Join(tmpDir, manifestFile), manifestEntries.Bytes(), 0644)
-	defer dir.Remove(filepath.Join(tmpDir, manifestFile))
+	defer dir.RemoveFile(filepath.Join(tmpDir, manifestFile))
 
 	return srcSession.Upload(ctx, manifestFile)
 }

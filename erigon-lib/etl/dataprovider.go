@@ -138,7 +138,7 @@ func (p *fileDataProvider) Dispose() {
 		go func() {
 			filePath := file.Name()
 			file.Close()
-			_ = dir.Remove(filePath)
+			_ = dir.RemoveFile(filePath)
 		}()
 	}
 }

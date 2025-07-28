@@ -563,7 +563,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 
 		if removeLatest {
-			q := fmt.Sprintf("remove latest snapshot files with stepFrom=%d?\n1) Remove\n4) Exit\n (pick number): ", _maxFrom)
+			q := fmt.Sprintf("remove latest snapshot files with stepFrom=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom)
 			if promptExit(q) {
 				os.Exit(0)
 			}
@@ -571,7 +571,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 
 		if minS == maxS {
-			q := "remove ALL snapshot files?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): "
+			q := "remove ALL snapshot files?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
 			if promptExit(q) {
 				os.Exit(0)
 			}
@@ -589,7 +589,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			}
 			if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
 				fmt.Printf("this will remove ALL commitment files with state trie\n")
-				q := "Do that anyway?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): "
+				q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
 				if promptExit(q) {
 					os.Exit(0)
 				}
@@ -608,8 +608,8 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 	var removed uint64
 	for _, res := range toRemove {
-		dir2.Remove(res.Path)
-		dir2.Remove(res.Path + ".torrent")
+		dir2.RemoveFile(res.Path)
+		dir2.RemoveFile(res.Path + ".torrent")
 		removed++
 	}
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
@@ -1228,10 +1228,10 @@ func doClearIndexing(cliCtx *cli.Context) error {
 	}
 
 	// remove salt-state.txt and salt-blocks.txt
-	dir2.Remove(filepath.Join(snapDir, "salt-state.txt"))
-	dir2.Remove(filepath.Join(snapDir, "salt-state.txt.torrent"))
-	dir2.Remove(filepath.Join(snapDir, "salt-blocks.txt"))
-	dir2.Remove(filepath.Join(snapDir, "salt-blocks.txt.torrent"))
+	dir2.RemoveFile(filepath.Join(snapDir, "salt-state.txt"))
+	dir2.RemoveFile(filepath.Join(snapDir, "salt-state.txt.torrent"))
+	dir2.RemoveFile(filepath.Join(snapDir, "salt-blocks.txt"))
+	dir2.RemoveFile(filepath.Join(snapDir, "salt-blocks.txt.torrent"))
 
 	return nil
 }
@@ -1250,7 +1250,7 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 		// Check file extensions and delete matching files
 		for _, ext := range extensions {
 			if strings.HasSuffix(info.Name(), ext) {
-				if err := dir2.Remove(path); err != nil {
+				if err := dir2.RemoveFile(path); err != nil {
 					return err
 				}
 			}

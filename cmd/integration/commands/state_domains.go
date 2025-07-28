@@ -538,6 +538,6 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 
 func removeManyIgnoreError(filePaths ...string) {
 	for _, filePath := range filePaths {
-		dir.Remove(filePath)
+		dir.RemoveFile(filePath)
 	}
 }

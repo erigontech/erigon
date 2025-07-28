@@ -65,7 +65,7 @@ func TestDataDirCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temporary file: %v", err)
 	}
-	defer dir2.Remove(file.Name())
+	defer dir2.RemoveFile(file.Name())
 }
 
 // Tests that IPC paths are correctly resolved to valid endpoints of different

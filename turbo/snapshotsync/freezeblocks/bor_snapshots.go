@@ -202,11 +202,11 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 	}
 
 	for _, f := range toDel {
-		_ = dir2.Remove(f)
-		_ = dir2.Remove(f + ".torrent")
+		_ = dir2.RemoveFile(f)
+		_ = dir2.RemoveFile(f + ".torrent")
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
-		_ = dir2.Remove(withoutExt + ".idx")
-		_ = dir2.Remove(withoutExt + ".idx.torrent")
+		_ = dir2.RemoveFile(withoutExt + ".idx")
+		_ = dir2.RemoveFile(withoutExt + ".idx.torrent")
 	}
 }

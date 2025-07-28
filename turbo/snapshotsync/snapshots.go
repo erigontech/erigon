@@ -1591,16 +1591,16 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 
 func removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range toDel {
-		_ = dir.Remove(f)
-		_ = dir.Remove(f + ".torrent")
+		_ = dir.RemoveFile(f)
+		_ = dir.RemoveFile(f + ".torrent")
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
-		_ = dir.Remove(withoutExt + ".idx")
-		_ = dir.Remove(withoutExt + ".idx.torrent")
+		_ = dir.RemoveFile(withoutExt + ".idx")
+		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
 		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 		if isTxnType {
-			_ = dir.Remove(withoutExt + "-to-block.idx")
-			_ = dir.Remove(withoutExt + "-to-block.idx.torrent")
+			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
+			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
 		}
 	}
 	tmpFiles, err := snaptype.TmpFiles(snapDir)
@@ -1608,7 +1608,7 @@ func removeOldFiles(toDel []string, snapDir string) {
 		return
 	}
 	for _, f := range tmpFiles {
-		_ = dir.Remove(f)
+		_ = dir.RemoveFile(f)
 	}
 }
 

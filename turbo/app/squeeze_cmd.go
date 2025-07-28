@@ -220,9 +220,9 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 		if err := freezeblocks.Sqeeze(ctx, dirs, f, f, logger); err != nil {
 			return err
 		}
-		_ = dir.Remove(strings.ReplaceAll(f, ".seg", ".seg.torrent"))
-		_ = dir.Remove(strings.ReplaceAll(f, ".seg", ".idx"))
-		_ = dir.Remove(strings.ReplaceAll(f, ".seg", ".idx.torrent"))
+		_ = dir.RemoveFile(strings.ReplaceAll(f, ".seg", ".seg.torrent"))
+		_ = dir.RemoveFile(strings.ReplaceAll(f, ".seg", ".idx"))
+		_ = dir.RemoveFile(strings.ReplaceAll(f, ".seg", ".idx.torrent"))
 	}
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()

@@ -94,16 +94,16 @@ func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileI
 		}
 		if err != nil {
 			f := sn.Path
-			_ = dir.Remove(f)
-			_ = dir.Remove(f + ".torrent")
+			_ = dir.RemoveFile(f)
+			_ = dir.RemoveFile(f + ".torrent")
 			ext := filepath.Ext(f)
 			withoutExt := f[:len(f)-len(ext)]
-			_ = dir.Remove(withoutExt + ".idx")
-			_ = dir.Remove(withoutExt + ".idx.torrent")
+			_ = dir.RemoveFile(withoutExt + ".idx")
+			_ = dir.RemoveFile(withoutExt + ".idx.torrent")
 			isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 			if isTxnType {
-				_ = dir.Remove(withoutExt + "-to-block.idx")
-				_ = dir.Remove(withoutExt + "-to-block.idx.torrent")
+				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
+				_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
 			}
 		}
 	}()

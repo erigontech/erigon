@@ -145,7 +145,7 @@ func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *
 		if closeFiles {
 			for _, index := range indexes {
 				index.Close()
-				_ = dir.Remove(index.FilePath())
+				_ = dir.RemoveFile(index.FilePath())
 			}
 		}
 	}()

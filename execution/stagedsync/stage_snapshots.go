@@ -810,7 +810,7 @@ func (u *snapshotUploader) uploadManifest(ctx context.Context, remoteRefresh boo
 	}
 
 	_ = os.WriteFile(filepath.Join(u.cfg.dirs.Snap, manifestFile), manifestEntries.Bytes(), 0644)
-	defer dir.Remove(filepath.Join(u.cfg.dirs.Snap, manifestFile))
+	defer dir.RemoveFile(filepath.Join(u.cfg.dirs.Snap, manifestFile))
 
 	return u.uploadSession.Upload(ctx, manifestFile)
 }
@@ -1134,14 +1134,14 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 		}
 
 		for _, f := range toRemove {
-			_ = dir.Remove(f)
-			_ = dir.Remove(f + ".torrent")
+			_ = dir.RemoveFile(f)
+			_ = dir.RemoveFile(f + ".torrent")
 			ext := filepath.Ext(f)
 			withoutExt := f[:len(f)-len(ext)]
-			_ = dir.Remove(withoutExt + ".idx")
+			_ = dir.RemoveFile(withoutExt + ".idx")
 
 			if strings.HasSuffix(withoutExt, "transactions") {
-				_ = dir.Remove(withoutExt + "-to-block.idx")
+				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 			}
 		}
 	}

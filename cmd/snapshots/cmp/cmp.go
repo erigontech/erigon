@@ -562,7 +562,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				f2snaps.Close()
 
 				for _, file := range files {
-					dir.Remove(file)
+					dir.RemoveFile(file)
 				}
 
 				return err
@@ -817,7 +817,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				f2snaps.Close()
 
 				for _, file := range files {
-					dir.Remove(file)
+					dir.RemoveFile(file)
 				}
 
 				return err

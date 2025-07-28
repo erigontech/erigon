@@ -535,7 +535,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 		if info.IsDir() {
 			return nil
 		}
-		dir.Remove(path)
+		dir.RemoveFile(path)
 		return nil
 	})
 }

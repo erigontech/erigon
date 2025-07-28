@@ -41,12 +41,12 @@ func NewWriterOffHeap(filePath string) (*WriterOffHeap, error) {
 func (w *WriterOffHeap) Close() {
 	if w.tmpFile != nil {
 		w.tmpFile.Close()
-		dir.Remove(w.tmpFilePath)
+		dir.RemoveFile(w.tmpFilePath)
 	}
 }
 
 func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
-	defer dir.Remove(w.tmpFilePath)
+	defer dir.RemoveFile(w.tmpFilePath)
 	if w.count%len(w.page) != 0 {
 		if _, err := w.tmpFile.Write(castToBytes(w.page[:w.count%len(w.page)])); err != nil {
 			return nil, err
@@ -144,7 +144,7 @@ func (w *Writer) AddHash(k uint64) error { return w.data.AddHash(k) }
 
 func (w *Writer) Build() error {
 	tmpResultFilePath := w.filePath + ".tmp"
-	defer dir.Remove(tmpResultFilePath)
+	defer dir.RemoveFile(tmpResultFilePath)
 	f, err := os.Create(tmpResultFilePath)
 	if err != nil {
 		return fmt.Errorf("%s %w", w.filePath, err)
@@ -178,7 +178,7 @@ func (w *Writer) Close() {
 	if w.data != nil {
 		w.data.Close()
 		w.data = nil
-		dir.Remove(w.filePath + ".tmp")
+		dir.RemoveFile(w.filePath + ".tmp")
 	}
 }
 
