@@ -1303,7 +1303,7 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 			if traced {
 				fmt.Printf("%d (%d.%d) Reverted reads: %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 			}
-			delete(sdb.versionedReads, addr)
+			//delete(sdb.versionedReads, addr)
 		}
 	}
 
