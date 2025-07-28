@@ -169,7 +169,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return nil
 	}
 
-	if firstBlock+1 > latestBlock.Uint64()-1 { // print only if 1+ blocks available
+	if firstBlock+1 > latestBlock.Uint64() { // print only if 1+ blocks available
 		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
 
