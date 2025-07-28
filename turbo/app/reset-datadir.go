@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -26,7 +27,7 @@ import (
 var (
 	removeLocalFlag = cli.BoolFlag{
 		Name:     "local",
-		Usage:    "Remove files not described in snapshot set (probably generated locally).",
+		Usage:    "RemoveFile files not described in snapshot set (probably generated locally).",
 		Value:    true,
 		Aliases:  []string{"l"},
 		Category: "Reset",
@@ -95,7 +96,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	)
 	removeFunc := func(path string) error {
 		logger.Debug("Removing snapshot dir file", "path", path)
-		return os.Remove(filepath.Join(dirs.Snap, path))
+		return dir.RemoveFile(filepath.Join(dirs.Snap, path))
 	}
 	if dryRun {
 		removeFunc = dryRunRemove
@@ -116,11 +117,11 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	logger.Info("Files removed from snapshots directory",
 		"torrents", reset.stats.removed.torrentFiles,
 		"data", reset.stats.removed.dataFiles)
-	// Remove chaindata last, so that the config is available if there's an error.
+	// RemoveFile chaindata last, so that the config is available if there's an error.
 	if removeLocal {
 		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
 		if !dryRun {
-			err = os.RemoveAll(dirs.Chaindata)
+			err = dir.RemoveAll(dirs.Chaindata)
 		}
 		if err != nil {
 			err = fmt.Errorf("removing chaindata dir: %w", err)

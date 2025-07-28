@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"math"
 	"math/big"
 	"os"
@@ -196,7 +197,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	externalState := cfg.State != nil
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
-		defer os.RemoveAll(tmp) //nolint
+		defer dir.RemoveAll(tmp) //nolint
 
 		db := memdb.NewStateDB(tmp)
 		defer db.Close()

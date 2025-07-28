@@ -3,7 +3,7 @@ package state
 import (
 	"context"
 	"fmt"
-	"os"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"path"
 	"sort"
 
@@ -145,7 +145,7 @@ func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *
 		if closeFiles {
 			for _, index := range indexes {
 				index.Close()
-				_ = os.Remove(index.FilePath())
+				_ = dir.RemoveFile(index.FilePath())
 			}
 		}
 	}()

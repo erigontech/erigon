@@ -19,7 +19,7 @@ package freezeblocks
 import (
 	"context"
 	"fmt"
-	"os"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"reflect"
 
@@ -202,11 +202,11 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 	}
 
 	for _, f := range toDel {
-		_ = os.Remove(f)
-		_ = os.Remove(f + ".torrent")
+		_ = dir2.RemoveFile(f)
+		_ = dir2.RemoveFile(f + ".torrent")
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		_ = os.Remove(withoutExt + ".idx.torrent")
+		_ = dir2.RemoveFile(withoutExt + ".idx")
+		_ = dir2.RemoveFile(withoutExt + ".idx.torrent")
 	}
 }
