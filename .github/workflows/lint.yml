@@ -28,13 +28,13 @@ jobs:
         with:
           go-version: '1.24'
 
-      - name: Install golangci-lint
-        if: runner.os == 'Linux'
+      - name: Lint root module
         uses: golangci/golangci-lint-action@v8
         with:
-          install-mode: "goinstall"
           version: 'v2.3.0'
 
-      - name: Lint
-        if: runner.os == 'Linux'
-        run: make lint
+      - name: Lint erigon-lib module
+        uses: golangci/golangci-lint-action@v8
+        with:
+          working-directory: erigon-lib
+          version: 'v2.3.0'
