@@ -76,7 +76,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 	bt := new(testMatcher)
 
-	dir := filepath.Join(".", "execuion-spec-tests", "blockchain_tests")
+	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 
 	checkStateRoot := true
