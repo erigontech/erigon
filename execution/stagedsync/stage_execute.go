@@ -156,6 +156,8 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 	}
 
 	parallel := txc.Tx == nil
+	log.Warn("[dbg] Exec3.0", "prevStageProgress", prevStageProgress, "toBlock", toBlock, "to", to)
+
 	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
 		return err
 	}
