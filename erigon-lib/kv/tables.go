@@ -145,6 +145,7 @@ const (
 	BorCheckpoints          = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
 	BorCheckpointEnds       = "BorCheckpointEnds"         // start block_num -> checkpoint_id (first block of checkpoint)
 	BorProducerSelections   = "BorProducerSelections"     // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
+	BorWitnesses            = "BorWitnesses"              // block num -> witness
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -356,6 +357,7 @@ var ChaindataTables = []string{
 	BorCheckpoints,
 	BorCheckpointEnds,
 	BorProducerSelections,
+	BorWitnesses,
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
@@ -598,6 +600,7 @@ var BorTablesCfg = TableCfg{
 	BorMilestones:           {Flags: DupSort},
 	BorMilestoneEnds:        {Flags: DupSort},
 	BorProducerSelections:   {Flags: DupSort},
+	BorWitnesses:            {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

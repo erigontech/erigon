@@ -62,6 +62,11 @@ const (
 	MessageId_POOLED_TRANSACTIONS_66     MessageId = 31
 	// ======= eth 68 protocol ===========
 	MessageId_NEW_POOLED_TRANSACTION_HASHES_68 MessageId = 32
+	// ======= wit protocol ===========
+	MessageId_GET_BLOCK_WITNESS_HASHES_W0 MessageId = 33
+	MessageId_BLOCK_WITNESS_HASHES_W0     MessageId = 34
+	MessageId_NEW_WITNESS_W0              MessageId = 35
+	MessageId_NEW_WITNESS_HASHES_W0       MessageId = 36
 )
 
 // Enum value maps for MessageId.
@@ -99,6 +104,10 @@ var (
 		30: "RECEIPTS_66",
 		31: "POOLED_TRANSACTIONS_66",
 		32: "NEW_POOLED_TRANSACTION_HASHES_68",
+		33: "GET_BLOCK_WITNESS_HASHES_W0",
+		34: "BLOCK_WITNESS_HASHES_W0",
+		35: "NEW_WITNESS_W0",
+		36: "NEW_WITNESS_HASHES_W0",
 	}
 	MessageId_value = map[string]int32{
 		"STATUS_65":                        0,
@@ -133,6 +142,10 @@ var (
 		"RECEIPTS_66":                      30,
 		"POOLED_TRANSACTIONS_66":           31,
 		"NEW_POOLED_TRANSACTION_HASHES_68": 32,
+		"GET_BLOCK_WITNESS_HASHES_W0":      33,
+		"BLOCK_WITNESS_HASHES_W0":          34,
+		"NEW_WITNESS_W0":                   35,
+		"NEW_WITNESS_HASHES_W0":            36,
 	}
 )
 
@@ -1520,7 +1533,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\n" +
 	"Disconnect\x10\x01\"(\n" +
 	"\fAddPeerReply\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess*\x80\x06\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess*\xed\x06\n" +
 	"\tMessageId\x12\r\n" +
 	"\tSTATUS_65\x10\x00\x12\x18\n" +
 	"\x14GET_BLOCK_HEADERS_65\x10\x01\x12\x14\n" +
@@ -1554,7 +1567,11 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\fNODE_DATA_66\x10\x1d\x12\x0f\n" +
 	"\vRECEIPTS_66\x10\x1e\x12\x1a\n" +
 	"\x16POOLED_TRANSACTIONS_66\x10\x1f\x12$\n" +
-	" NEW_POOLED_TRANSACTION_HASHES_68\x10 *\x17\n" +
+	" NEW_POOLED_TRANSACTION_HASHES_68\x10 \x12\x1f\n" +
+	"\x1bGET_BLOCK_WITNESS_HASHES_W0\x10!\x12\x1b\n" +
+	"\x17BLOCK_WITNESS_HASHES_W0\x10\"\x12\x12\n" +
+	"\x0eNEW_WITNESS_W0\x10#\x12\x19\n" +
+	"\x15NEW_WITNESS_HASHES_W0\x10$*\x17\n" +
 	"\vPenaltyKind\x12\b\n" +
 	"\x04Kick\x10\x00*6\n" +
 	"\bProtocol\x12\t\n" +

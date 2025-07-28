@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/services"
@@ -79,6 +80,8 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	ids := []proto_sentry.MessageId{
 		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
+		eth.ToProto[direct.WIT0][wit.GetMsgWitness],
+		eth.ToProto[direct.WIT0][wit.NewWitnessHashesMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -143,7 +146,7 @@ type MultiClient struct {
 	IsMock                            bool
 	sentries                          []proto_sentry.SentryClient
 	ChainConfig                       *chain.Config
-	db                                kv.TemporalRoDB
+	db                                kv.TemporalRwDB
 	Engine                            consensus.Engine
 	blockReader                       services.FullBlockReader
 	statusDataProvider                *sentry.StatusDataProvider
@@ -622,6 +625,52 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 	return nil
 }
 
+func (cs *MultiClient) getBlockWitnessHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	var query eth.GetReceiptsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
+	}
+
+	//tx, err := cs.db.BeginRw(ctx)
+	//if err != nil {
+	//	return err
+	//}
+
+	// TODO: get from db and answer
+	return nil
+}
+
+func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	var query wit.NewWitnessPacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding getBlockBodies66: %w, data: %x", err, inreq.Data)
+	}
+
+	tx, err := cs.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	bHash := query.Witness.Header().Hash()
+
+	var witBuf bytes.Buffer
+	if err := query.Witness.EncodeCompressed(&witBuf); err != nil {
+		return fmt.Errorf("error in witness encoding: err: %w", err)
+	}
+
+	if err := tx.Put(kv.BorWitnesses, bHash.Bytes(), witBuf.Bytes()); err != nil {
+		return fmt.Errorf("error writing witness, err: %w", err)
+	}
+
+	return nil
+}
+
+func (cs *MultiClient) newWitnessHash(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	// TODO: known hashes to peer
+	return nil
+}
+
 func MakeInboundMessage() *proto_sentry.InboundMessage {
 	return new(proto_sentry.InboundMessage)
 }
@@ -668,6 +717,12 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 		return cs.receipts66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_RECEIPTS_66:
 		return cs.getReceipts66(ctx, inreq, sentry)
+	case proto_sentry.MessageId_NEW_WITNESS_W0:
+		return cs.newWitness(ctx, inreq, sentry)
+	case proto_sentry.MessageId_NEW_WITNESS_HASHES_W0:
+		return cs.newWitnessHash(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0:
+		return cs.getBlockWitnessHashes(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}

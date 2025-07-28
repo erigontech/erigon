@@ -141,6 +141,7 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *b
 		kv.BorMilestones,
 		kv.BorCheckpoints,
 		kv.BorProducerSelections,
+		kv.BorWitnesses,
 	}
 
 	for _, table := range tables {
