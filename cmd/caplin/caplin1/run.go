@@ -439,6 +439,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			&config.BeaconAPIRouter,
 			emitters,
 			blobStorage,
+			columnStorage,
 			csn,
 			validatorParameters,
 			attestationProducer,
