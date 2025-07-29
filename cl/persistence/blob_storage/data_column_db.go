@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -25,6 +26,7 @@ const (
 	mutexSize = 64
 )
 
+//go:generate mockgen -typed=true -destination=./mock_services/data_column_storage_mock.go -package=mock_services . DataColumnStorage
 type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
 	RemoveColumnSidecar(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) error
@@ -42,17 +44,19 @@ type dataColumnStorageImpl struct {
 	beaconChainConfig *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
 	slotsKept         uint64
+	emitters          *beaconevents.EventEmitter
 
 	dbMutexes map[uint64]*sync.RWMutex
 }
 
-func NewDataColumnStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) DataColumnStorage {
+func NewDataColumnStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, emitters *beaconevents.EventEmitter) DataColumnStorage {
 	impl := &dataColumnStorageImpl{
 		db:                db,
 		fs:                fs,
 		beaconChainConfig: beaconChainConfig,
 		ethClock:          ethClock,
 		slotsKept:         slotsKept,
+		emitters:          emitters,
 		dbMutexes:         make(map[uint64]*sync.RWMutex, mutexSize),
 	}
 	for i := uint64(0); i < mutexSize; i++ {
@@ -147,6 +151,7 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		return err
 	}
 	fh.Close()
+	s.emitters.Operation().SendDataColumnSidecar(columnData)
 	log.Trace("wrote data column sidecar", "slot", columnData.SignedBlockHeader.Header.Slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	return nil
 }
