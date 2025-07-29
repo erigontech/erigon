@@ -460,13 +460,13 @@ func (sdb *IntraBlockState) GetCode(addr common.Address) ([]byte, error) {
 		}
 		if stateObject != nil && !stateObject.deleted {
 			code, err := stateObject.Code()
-			if sdb.trace {
-				fmt.Printf("GetCode %x, returned %d\n", addr, len(code))
+			if sdb.trace || traceAccount(addr) {
+				fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
 			}
 			return code, err
 		}
-		if sdb.trace {
-			fmt.Printf("GetCode %x, returned nil\n", addr)
+		if sdb.trace || traceAccount(addr) {
+			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, 0)
 		}
 		return nil, nil
 	}

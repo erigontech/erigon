@@ -363,11 +363,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 
-		if memorySize > 0 {
-			mem.Resize(memorySize)
-		}
-
-		// Do tracing before memory expansion
+		// Do gas tracing before memory expansion
 		if in.cfg.Tracer != nil {
 			if in.cfg.Tracer.OnGasChange != nil {
 				in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
@@ -376,6 +372,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				in.cfg.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.Depth(), VMErrorFromErr(err))
 				logged = true
 			}
+		}
+
+		if memorySize > 0 {
+			mem.Resize(memorySize)
 		}
 
 		// TODO - move this to a trace & set in the worker
