@@ -1314,8 +1314,6 @@ func (d *Downloader) logProgress() {
 		Peers:                d.stats.PeersUnique,
 		Files:                int32(d.stats.FilesTotal),
 		Connections:          d.stats.ConnectionsTotal,
-		Alloc:                m.Alloc,
-		Sys:                  m.Sys,
 		DownloadFinished:     d.stats.AllTorrentsComplete(),
 		TorrentMetadataReady: int32(d.stats.MetadataReady),
 	})
