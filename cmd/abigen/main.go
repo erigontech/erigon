@@ -192,7 +192,7 @@ func abigen(c *cli.Context) error {
 
 		switch {
 		case c.IsSet(solFlag.Name):
-			contracts, err = compiler.CompileSolidity(c.String(solcFlag.Name), c.String(solFlag.Name))
+			contracts, err = compiler.CompileSolidity(c.Context, c.String(solcFlag.Name), c.String(solFlag.Name))
 			if err != nil {
 				utils.Fatalf("Failed to build Solidity contract: %v", err)
 			}
