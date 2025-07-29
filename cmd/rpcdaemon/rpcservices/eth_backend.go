@@ -432,6 +432,14 @@ func (back *RemoteBackend) AddPeer(ctx context.Context, request *remote.AddPeerR
 	return result, nil
 }
 
+func (back *RemoteBackend) RemovePeer(ctx context.Context, request *remote.RemovePeerRequest) (*remote.RemovePeerReply, error) {
+	result, err := back.remoteEthBackend.RemovePeer(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.RemovePeer() error: %w", err)
+	}
+	return result, nil
+}
+
 func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	rpcPeers, err := back.remoteEthBackend.Peers(ctx, &emptypb.Empty{})
 	if err != nil {
