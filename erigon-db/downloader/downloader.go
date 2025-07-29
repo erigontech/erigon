@@ -350,7 +350,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	// Does WalkDir do path or filepath?
-	return fs.WalkDir(
+	if err := fs.WalkDir(
 		os.DirFS(d.SnapDir()),
 		".",
 		func(path string, de fs.DirEntry, err error) error {
@@ -376,7 +376,12 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
 			}
 			return nil
 		},
-	)
+	); err != nil {
+		return err
+	}
+
+	d.afterAdd()
+	return nil
 }
 
 // This should only be called once...?
@@ -896,15 +901,16 @@ func (d *Downloader) RequestSnapshot(
 	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHash metainfo.Hash,
 	name string,
-) (err error) {
+) error {
 	d.lock.Lock()
+	defer d.lock.Unlock()
 	t, err := d.addPreverifiedTorrent(g.Some(infoHash), name)
-	if err == nil {
-		g.MakeMapIfNil(&d.requiredTorrents)
-		g.MapInsert(d.requiredTorrents, t, struct{}{})
+	if err != nil {
+		return err
 	}
-	d.lock.Unlock()
-	return
+	g.MakeMapIfNil(&d.requiredTorrents)
+	g.MapInsert(d.requiredTorrents, t, struct{}{})
+	return nil
 }
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might

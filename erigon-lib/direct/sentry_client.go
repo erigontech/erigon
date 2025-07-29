@@ -261,6 +261,10 @@ func (c *SentryClientDirect) AddPeer(ctx context.Context, in *sentryproto.AddPee
 	return c.server.AddPeer(ctx, in)
 }
 
+func (c *SentryClientDirect) RemovePeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	return c.server.RemovePeer(ctx, in)
+}
+
 type peersReply struct {
 	r   *sentryproto.PeerEvent
 	err error

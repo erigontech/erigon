@@ -608,6 +608,9 @@ type TemporalDebugDB interface {
 	ReloadFiles() error
 	EnableReadAhead() TemporalDebugDB
 	DisableReadAhead()
+
+	Files() []string
+	MergeLoop(ctx context.Context) error
 }
 
 type WithFreezeInfo interface {
