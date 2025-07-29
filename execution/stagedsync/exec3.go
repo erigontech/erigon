@@ -1024,7 +1024,7 @@ func ExecV3(ctx context.Context,
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 						if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 							pe.rs.SetTrace(true)
-							fmt.Println(applyResult.blockNum, "apply", applyResult.txNum)
+							fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.stateUpdates.UpdateCount())
 						}
 						blockUpdateCount += applyResult.stateUpdates.UpdateCount()
 						err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
@@ -1054,13 +1054,13 @@ func ExecV3(ctx context.Context,
 							if blockUpdateCount != applyResult.ApplyCount {
 								return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 							}
-							blockUpdateCount = 0
 
 							if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 								b.HeaderNoCopy(), pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 								return fmt.Errorf("%w, block=%d, %v", consensus.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 							}
 						}
+
 						if applyResult.BlockNum > lastBlockResult.BlockNum {
 							pe.doms.SetTxNum(applyResult.lastTxNum)
 							pe.doms.SetBlockNum(applyResult.BlockNum)
@@ -1075,7 +1075,7 @@ func ExecV3(ctx context.Context,
 								if dbg.TraceApply && dbg.TraceBlock(applyResult.BlockNum) {
 									fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
 								}
-								blockApplyCount = 0
+
 								var trace bool
 								if dbg.TraceBlock(applyResult.BlockNum) {
 									fmt.Println(applyResult.BlockNum, "Commitment")
@@ -1129,6 +1129,9 @@ func ExecV3(ctx context.Context,
 								uncommittedGas = 0
 							}
 						}
+
+						blockUpdateCount = 0
+						blockApplyCount = 0
 
 						if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 							//return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
