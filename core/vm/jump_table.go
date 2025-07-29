@@ -669,6 +669,7 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			numPop:      0,
 			numPush:     1,
+			string:      stGas,
 		},
 		JUMPDEST: {
 			execute:     opJumpdest,

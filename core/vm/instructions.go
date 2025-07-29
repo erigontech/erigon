@@ -853,6 +853,10 @@ func opGas(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 	return nil, nil
 }
 
+func stGas(pc uint64, scope *ScopeContext) string {
+	return fmt.Sprintf("%s %d", GAS, scope.Contract.Gas)
+}
+
 func opSwap1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	scope.Stack.swap1()
 	return nil, nil
