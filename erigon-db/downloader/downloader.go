@@ -1258,14 +1258,11 @@ func (d *Downloader) SetLogPrefix(prefix string) {
 
 // Currently only called if not all torrents are complete.
 func (d *Downloader) logProgress() {
-	var m runtime.MemStats
 	prefix := d.logPrefix
 
 	if d.logPrefix == "" {
 		prefix = "snapshots"
 	}
-
-	dbg.ReadMemStats(&m)
 
 	bytesDone := d.stats.BytesCompleted
 
@@ -1305,8 +1302,6 @@ func (d *Downloader) logProgress() {
 			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
 			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
 			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
-			"alloc", common.ByteCount(m.Alloc),
-			"sys", common.ByteCount(m.Sys),
 		)
 	}
 
