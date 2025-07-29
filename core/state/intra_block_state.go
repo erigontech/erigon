@@ -1633,9 +1633,9 @@ func (sdb *IntraBlockState) versionWritten(addr common.Address, path AccountPath
 			Val:     val,
 		}
 
-		//if sdb.trace {
-		//	fmt.Printf("%d (%d.%d) WRT %s\n", sdb.blockNum, sdb.txIndex, sdb.version, vw.String())
-		//}
+		if dbg.TraceTransactionIO && (sdb.trace || (traceAccount(addr) && (key == common.Hash{} || traceKey(key)))) {
+			fmt.Printf("%d (%d.%d) WRT %s\n", sdb.blockNum, sdb.txIndex, sdb.version, vw.String())
+		}
 
 		sdb.versionedWrites.Set(vw)
 	}
