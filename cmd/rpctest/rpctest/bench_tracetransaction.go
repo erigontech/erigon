@@ -26,7 +26,6 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 	fmt.Println("BenchTraceTransaction: fromBlock:", blockFrom, ", blockTo:", blockTo)
 
 	setRoutes(erigonUrl, gethUrl)
-
 	var rec *bufio.Writer
 	if recordFileName != "" {
 		f, err := os.Create(recordFileName)

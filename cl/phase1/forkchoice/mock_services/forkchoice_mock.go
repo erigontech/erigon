@@ -420,3 +420,15 @@ func (f *ForkChoiceStorageMock) IsRootOptimistic(root common.Hash) bool {
 func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
 	return false
 }
+
+func (f *ForkChoiceStorageMock) GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool) {
+	return nil, false
+}
+
+func (f *ForkChoiceStorageMock) GetPendingDeposits(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingDeposit], bool) {
+	return nil, false
+}
+
+func (f *ForkChoiceStorageMock) GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool) {
+	return nil, false
+}

@@ -50,10 +50,6 @@ type GrpcServer struct {
 	d *Downloader
 }
 
-func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	return &emptypb.Empty{}, s.d.torrentFS.ProhibitNewDownloads(req.Type)
-}
-
 // Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
@@ -75,7 +71,9 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			case <-ctx.Done():
 				return
 			case <-time.After(interval):
-				interval *= 2
+				if interval < time.Minute {
+					interval *= 2
+				}
 			}
 			logProgress()
 		}
@@ -95,6 +93,10 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			}
 			continue
 		} else {
+			// There's no circuit breaker in Downloader.RequestSnapshot.
+			if ctx.Err() != nil {
+				return nil, context.Cause(ctx)
+			}
 			ih := Proto2InfoHash(it.TorrentHash)
 			if err := s.d.RequestSnapshot(ih, it.Path); err != nil {
 				err = fmt.Errorf("requesting snapshot %s with infohash %v: %w", it.Path, ih, err)
@@ -102,6 +104,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			}
 		}
 	}
+	s.d.afterAdd()
 	progress.Store(int32(len(request.Items)))
 
 	return &emptypb.Empty{}, nil
@@ -125,10 +128,6 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 
 func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
-}
-
-func InfoHashes2Proto(in metainfo.Hash) *prototypes.H160 {
-	return gointerfaces.ConvertAddressToH160(in)
 }
 
 func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader.SetLogPrefixRequest) (*emptypb.Empty, error) {

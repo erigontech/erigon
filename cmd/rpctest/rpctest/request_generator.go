@@ -268,7 +268,7 @@ func (g *RequestGenerator) traceReplayTransaction(hash string) string {
 
 func (g *RequestGenerator) traceTransaction(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"trace_transaction","params":["%s"],"id":%d}`
-	return fmt.Sprintf(template, hash, g.reqID.Load())
+	return fmt.Sprintf(template, hash, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) ethCall(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {

@@ -70,10 +70,6 @@ const (
 	maxRetries         = 5
 )
 
-var (
-	MaxRetriesUnlimited = -1
-)
-
 type apiVersioner interface {
 	Version() HeimdallVersion
 }
@@ -687,7 +683,7 @@ func FetchWithRetryEx[T any](
 	ticker := time.NewTicker(client.retryBackOff)
 	defer ticker.Stop()
 
-	for client.maxRetries == MaxRetriesUnlimited || attempt < client.maxRetries {
+	for attempt < client.maxRetries {
 		attempt++
 
 		request := &HttpRequest{handler: client.handler, url: url, start: time.Now()}

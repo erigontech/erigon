@@ -514,6 +514,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 		gspec       = &types.Genesis{
 			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
+			//Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds, Storage: map[common.Hash]common.Hash{crypto.Keccak256Hash([]byte{0x1}): crypto.Keccak256Hash([]byte{0xf})}}}, // TODO (antonis19)
 		}
 	)
 	m := mock.MockWithGenesis(t, gspec, bankKey, false)

@@ -103,7 +103,7 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.Big, error)
-	Config(_ context.Context) (*EthConfigResp, error)
+	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
 
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Bytes, error)
@@ -170,7 +170,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txNumReader:        blockReader.TxnumReader(context.Background()),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(blockReader, engine),
+		receiptsGenerator:   receipts.NewGenerator(blockReader, engine, evmCallTimeout),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine),
 		dirs:                dirs,
 		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat

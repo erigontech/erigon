@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (
@@ -85,4 +86,13 @@ func AppendReceipt(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlo
 func uvarint(in []byte) (res uint64) {
 	res, _ = binary.Uvarint(in)
 	return res
+}
+
+func ReceiptStoresFirstLogIdx(tx kv.TemporalTx) bool {
+	// this stored firstLogIdx;
+	// latter versions (v1_1 onwards) stores lastLogIdx
+	// this check allows to put some ifchecks to handle
+	// both cases and maintain backward compatibility of
+	// snapshots.
+	return tx.Debug().CurrentDomainVersion(kv.ReceiptDomain).Eq(version.V1_0)
 }

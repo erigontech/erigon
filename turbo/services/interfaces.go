@@ -149,7 +149,15 @@ type FullBlockReader interface {
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error)
-	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
+	RetireBlocksInBackground(
+		ctx context.Context,
+		miBlockNum uint64,
+		maxBlockNum uint64,
+		lvl log.Lvl,
+		seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
+		onDelete func(l []string) error,
+		onFinishRetire func() error,
+		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
 	SetWorkers(workers int)
 	GetWorkers() int

@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   clean-exit-bd-test:
-    runs-on: [self-hosted, qa, Erigon3]
+    runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
