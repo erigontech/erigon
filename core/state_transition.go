@@ -344,7 +344,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		return nil, err
 	}
 	if st.evm.Config().Debug {
-		st.evm.Config().Tracer.CaptureTxStart(st.initialGas)
+		st.evm.Config().Tracer.CaptureTxStart(st.initialGas, st.msg.Authorizations())
 		defer func() {
 			st.evm.Config().Tracer.CaptureTxEnd(st.gasRemaining)
 		}()

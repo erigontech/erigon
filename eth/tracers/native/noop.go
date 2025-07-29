@@ -25,7 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -68,7 +68,7 @@ func (t *noopTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 func (t *noopTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 }
 
-func (*noopTracer) CaptureTxStart(gasLimit uint64) {}
+func (*noopTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
 
 func (*noopTracer) CaptureTxEnd(restGas uint64) {}
 

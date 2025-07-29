@@ -95,6 +95,10 @@ func (tx *AccessListTx) GetAccessList() AccessList {
 	return tx.AccessList
 }
 
+func (tx *AccessListTx) GetAuthorizations() []Authorization {
+	return nil
+}
+
 func (tx *AccessListTx) Protected() bool {
 	return true
 }

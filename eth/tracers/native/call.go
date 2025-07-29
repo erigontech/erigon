@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -277,7 +278,7 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
-func (t *callTracer) CaptureTxStart(gasLimit uint64) {
+func (t *callTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {
 	t.gasLimit = gasLimit
 	t.logIndex = 0
 	t.logGaps = make(map[uint64]int)

@@ -25,7 +25,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -63,7 +63,7 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsoniter.S
 	return logger
 }
 
-func (l *JsonStreamLogger) CaptureTxStart(gasLimit uint64) {}
+func (l *JsonStreamLogger) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
 
 func (l *JsonStreamLogger) CaptureTxEnd(restGas uint64) {}
 

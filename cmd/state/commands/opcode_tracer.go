@@ -182,7 +182,7 @@ type blockTxs struct {
 	Txs      slicePtrTx
 }
 
-func (ot *opcodeTracer) CaptureTxStart(gasLimit uint64) {}
+func (ot *opcodeTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
 
 func (ot *opcodeTracer) CaptureTxEnd(restGas uint64) {}
 

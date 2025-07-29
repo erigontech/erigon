@@ -278,7 +278,7 @@ type OeTracer struct {
 	config       OeTracerConfig
 }
 
-func (ot *OeTracer) CaptureTxStart(gasLimit uint64) {}
+func (ot *OeTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
 
 func (ot *OeTracer) CaptureTxEnd(restGas uint64) {}
 

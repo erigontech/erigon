@@ -25,7 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -106,9 +106,9 @@ func (t *muxTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	}
 }
 
-func (t *muxTracer) CaptureTxStart(gasLimit uint64) {
+func (t *muxTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {
 	for _, t := range t.tracers {
-		t.CaptureTxStart(gasLimit)
+		t.CaptureTxStart(gasLimit, authorizations)
 	}
 }
 

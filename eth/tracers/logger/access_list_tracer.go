@@ -173,7 +173,7 @@ func NewAccessListTracer(acl types.AccessList, exclude map[libcommon.Address]str
 	}
 }
 
-func (a *AccessListTracer) CaptureTxStart(gasLimit uint64) {}
+func (a *AccessListTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
 
 func (a *AccessListTracer) CaptureTxEnd(restGas uint64) {}
 

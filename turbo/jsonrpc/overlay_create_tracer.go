@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -34,8 +35,9 @@ type OverlayCreateTracer struct {
 }
 
 // Transaction level
-func (ct *OverlayCreateTracer) CaptureTxStart(gasLimit uint64) {}
-func (ct *OverlayCreateTracer) CaptureTxEnd(restGas uint64)    {}
+func (ct *OverlayCreateTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {
+}
+func (ct *OverlayCreateTracer) CaptureTxEnd(restGas uint64) {}
 
 // Top call frame
 func (ct *OverlayCreateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {

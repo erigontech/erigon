@@ -20,7 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -30,7 +30,7 @@ import (
 type DefaultTracer struct {
 }
 
-func (t *DefaultTracer) CaptureTxStart(gasLimit uint64) {}
+func (t *DefaultTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
 
 func (t *DefaultTracer) CaptureTxEnd(restGas uint64) {}
 

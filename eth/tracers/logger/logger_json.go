@@ -28,7 +28,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -48,7 +48,7 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 	return l
 }
 
-func (l *JSONLogger) CaptureTxStart(gasLimit uint64) {}
+func (l *JSONLogger) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
 
 func (l *JSONLogger) CaptureTxEnd(restGas uint64) {}
 

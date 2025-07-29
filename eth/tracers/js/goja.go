@@ -31,6 +31,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/stack"
@@ -215,7 +216,7 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (tracer
 
 // CaptureTxStart implements the Tracer interface and is invoked at the beginning of
 // transaction processing.
-func (t *jsTracer) CaptureTxStart(gasLimit uint64) {
+func (t *jsTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {
 	t.gasLimit = gasLimit
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -37,8 +38,8 @@ func (ct *CallTracer) Reset() {
 func (ct *CallTracer) Froms() map[libcommon.Address]struct{} { return ct.froms }
 func (ct *CallTracer) Tos() map[libcommon.Address]struct{}   { return ct.tos }
 
-func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
-func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
+func (ct *CallTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
+func (ct *CallTracer) CaptureTxEnd(restGas uint64)                                          {}
 func (ct *CallTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if ct.froms == nil {
 		ct.froms = map[libcommon.Address]struct{}{}
