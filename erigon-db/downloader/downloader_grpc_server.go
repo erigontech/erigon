@@ -91,7 +91,6 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
 				return nil, err
 			}
-			continue
 		} else {
 			// There's no circuit breaker in Downloader.RequestSnapshot.
 			if ctx.Err() != nil {

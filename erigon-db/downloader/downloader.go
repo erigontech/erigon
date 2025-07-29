@@ -902,12 +902,14 @@ func (d *Downloader) RequestSnapshot(
 	infoHash metainfo.Hash,
 	name string,
 ) error {
+	panicif.Zero(infoHash)
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	t, err := d.addPreverifiedTorrent(g.Some(infoHash), name)
 	if err != nil {
 		return err
 	}
+	panicif.Nil(t)
 	g.MakeMapIfNil(&d.requiredTorrents)
 	g.MapInsert(d.requiredTorrents, t, struct{}{})
 	return nil
@@ -941,12 +943,16 @@ func (d *Downloader) addPreverifiedTorrent(
 		}
 		return infoHashHint.Unwrap()
 	}()
+	panicif.Zero(finalInfoHash)
 
 	ok, err := d.shouldAddTorrent(finalInfoHash, name)
 	if err != nil {
 		return
 	}
 	if !ok {
+		// Return the existing torrent to the caller. If the torrent doesn't exist we should have
+		// returned with an error already.
+		t, _ = d.torrentClient.Torrent(finalInfoHash)
 		return
 	}
 
