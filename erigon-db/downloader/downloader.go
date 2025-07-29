@@ -256,6 +256,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 			//},
 			// Big hammer to achieve one request per connection.
 			//DisableKeepAlives: true,
+			MaxConnsPerHost: 10,
 		},
 	}
 
