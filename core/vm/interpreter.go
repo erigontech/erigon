@@ -363,6 +363,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 
+		if memorySize > 0 {
+			mem.Resize(memorySize)
+		}
+
 		// Do tracing before memory expansion
 		if in.cfg.Tracer != nil {
 			if in.cfg.Tracer.OnGasChange != nil {
@@ -384,10 +388,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 
 			fmt.Printf("%d (%d.%d) %5d %5d %s\n", in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, cost, str)
-		}
-
-		if memorySize > 0 {
-			mem.Resize(memorySize)
 		}
 
 		// execute the operation
