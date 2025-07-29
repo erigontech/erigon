@@ -1572,9 +1572,9 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	var res stream.KV
 	for _, r := range stepDbIters {
 		if res == nil {
-			res = r
-		}else {
-			res = stream.MergeKVS(res, r, limit)
+			res = r.iter
+		} else {
+			res = stream.MergeKVS(res, r.iter, limit)
 		}
 	}
 	return res, nil
