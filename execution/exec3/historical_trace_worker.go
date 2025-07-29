@@ -172,7 +172,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -188,7 +188,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, tracer.Tracer().Hooks, *rw.vmCfg)
+			vmCfg := *rw.vmCfg
+			vmCfg.Tracer = tracer.Tracer().Hooks
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, vmCfg)
 			if err != nil {
 				return nil, err
 			}
@@ -235,8 +237,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		tracer := calltracer.NewCallTracer(nil)
 
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
-		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		rw.vmCfg.Tracer = tracer.Tracer().Hooks
+		vmCfg := *rw.vmCfg
+		vmCfg.SkipAnalysis = txTask.SkipAnalysis
+		vmCfg.Tracer = tracer.Tracer().Hooks
 		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 		txn := txTask.Tx
 
@@ -252,7 +255,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 				break
 			}
 
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, rules)
 			rw.execAATxn(txTask, tracer)
 			break
 		}
@@ -262,7 +265,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if rw.vmCfg.TraceJumpDest {
 			txContext.TxHash = txn.Hash()
 		}
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, vmCfg, rules)
 		if hooks != nil && hooks.OnTxStart != nil {
 			hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
 		}
