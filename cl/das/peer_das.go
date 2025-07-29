@@ -44,8 +44,8 @@ type PeerDas interface {
 
 const (
 	numOfBlobRecoveryWorkers      = 8
-	maxNumberOfCellsPerRequest    = 1024 // 1024*2KB = 2MB
-	maxConcurrentDownloadRequests = 16
+	maxNumberOfCellsPerRequest    = 4096 // 4096*2KB = 8MB
+	maxConcurrentDownloadRequests = 24
 )
 
 type peerdas struct {
@@ -324,31 +324,6 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				p.Set(index+len(branchProof), anyColumnSidecar.KzgCommitmentsInclusionProof.Get(index))
 			}
 		}
-		// verify blobs
-		//blobs := []gokzg4844.BlobRef{}
-		//commitments := []gokzg4844.KZGCommitment{}
-		//proofs := []gokzg4844.KZGProof{}
-		for _, blob := range blobSidecars {
-			if !cltypes.VerifyCommitmentInclusionProof(blob.KzgCommitment, blob.CommitmentInclusionProof, blob.Index, clparams.DenebVersion, blob.SignedBlockHeader.Header.BodyRoot) {
-				log.Debug("[blobsRecover] invalid commitment inclusion proof", "slot", slot, "blockRoot", blockRoot, "blobIndex", blob.Index)
-				return
-			}
-			blobData := ckzg.Blob(blob.Blob[:])
-			commitment := ckzg.Bytes48(blob.KzgCommitment[:])
-			proof := ckzg.Bytes48(blob.KzgProof[:])
-			if ok, err := ckzg.VerifyBlobKZGProof(&blobData, commitment, proof); err != nil {
-				log.Debug("[blobsRecover] failed to verify blob kzg proof", "err", err, "slot", slot, "blockRoot", blockRoot, "blobIndex", blob.Index)
-			} else if !ok {
-				log.Debug("[blobsRecover] invalid blob kzg proof", "slot", slot, "blockRoot", blockRoot, "blobIndex", blob.Index)
-			}
-			//blobs = append(blobs, gokzg4844.BlobRef(blob.Blob[:]))
-			//commitments = append(commitments, gokzg4844.KZGCommitment(blob.KzgCommitment))
-			//proofs = append(proofs, gokzg4844.KZGProof(blob.KzgProof))
-		}
-		// if err := cryptoKzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs); err != nil {
-		// 	log.Debug("[blobsRecover] invalid blob kzg proof", "err", err, "slot", slot, "blockRoot", blockRoot)
-		// 	return
-		// }
 
 		// Save blobs
 		if err := d.blobStorage.WriteBlobSidecars(ctx, blockRoot, blobSidecars); err != nil {
