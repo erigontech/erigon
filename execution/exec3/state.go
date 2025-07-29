@@ -247,6 +247,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			break
 		}
 
+		rw.callTracer.Reset()
+
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, false /* constCall */, hooks, rw.vmCfg)
@@ -262,7 +264,31 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		if err != nil {
 			txTask.Error = err
 		} else {
-			txTask.TraceTos = map[common.Address]struct{}{}
+			txTask.TraceFroms = rw.callTracer.Froms()
+			txTask.TraceTos = rw.callTracer.Tos()
+			if txTask.TraceFroms == nil {
+				txTask.TraceFroms = map[common.Address]struct{}{}
+			}
+			if txTask.TraceTos == nil {
+				txTask.TraceTos = map[common.Address]struct{}{}
+			}
+
+			printFn := func(mp map[common.Address]struct{}, msg string) {
+				if len(mp) > 0 {
+					fmt.Printf("%s:", msg)
+				}
+				for key, _ := range mp {
+					fmt.Printf("%s,", key)
+				}
+
+				if len(mp) > 0 {
+					fmt.Println()
+				}
+			}
+
+			printFn(txTask.TraceFroms, "tracesfrom")
+			printFn(txTask.TraceTos, "tracesto")
+
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
