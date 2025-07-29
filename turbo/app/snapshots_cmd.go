@@ -275,9 +275,9 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:        "reset",
-			Description: "Reset state to resumable initial sync.",
-			Action:      resetCliAction,
+			Name:   "reset",
+			Usage:  "Reset state to resumable initial sync",
+			Action: resetCliAction,
 			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
 			Flags: append(
 				slices.Clone(logging.Flags),
