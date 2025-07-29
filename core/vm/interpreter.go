@@ -267,6 +267,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// copies used by tracer
 		pcCopy  uint64 // needed for the deferred Tracer
 		gasCopy uint64 // for Tracer to log gas remaining before execution
+		callGas uint64
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 		debug   = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
@@ -355,6 +356,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
+			callGas = operation.constantGas + dynamicCost - in.evm.CallGasTemp() 
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
@@ -392,7 +394,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 			switch op {
 			case CALL, CALLCODE, DELEGATECALL, STATICCALL:
-				traceGas = operation.constantGas
+				traceGas = callGas
 			default:
 				traceGas = cost
 			}
