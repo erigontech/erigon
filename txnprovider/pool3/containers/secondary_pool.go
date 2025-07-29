@@ -118,3 +118,80 @@ func (p *SecondaryPool) Shuffle(scoreFn func(*TxnRef)) {
         p.tree.ReplaceOrInsert(it)
     }
 }
+
+
+
+
+
+
+// package containers
+
+// import (
+// 	"sync/atomic"
+
+// 	"github.com/tidwall/btree"
+// )
+
+// type SecondaryPool struct {
+// 	tree      atomic.Pointer[btree.BTreeG[TxnRef]]
+// 	maxCapacity uint64
+// }
+
+// func New(capacity uint64) *SecondaryPool{
+// 	s := &SecondaryPool{
+// 		maxCapacity: capacity,
+// 	}
+// 	s.tree.Store(btree.NewBTreeG[TxnRef](IsTxnAGtTxnB))
+// 	return s
+// }
+
+// func (s *SecondaryPool) InsertBounded(t TxnRef) *TxnRef {
+// 	tr := s.tree.Load()
+// 	tr.Set(t)
+	
+// 	// Fast path: nothing to evict.
+// 	if s.maxCapacity == 0 || tr.Len() <= int(s.maxCapacity) {
+// 		return nil
+// 	}
+// 	ret, _ := tr.PopMin()
+// 	return &ret
+// }
+
+
+// // PeekBest returns a slice of n-best items in the SecondaryPool instance
+// func (s *SecondaryPool) PeekBest(n int) []TxnRef {
+// 	t := s.tree.Load()
+// 	ret := make([]TxnRef, 0, 10)
+// 	i := n
+// 	t.Scan(func(item TxnRef) bool {
+// 		ret = append(ret, item)
+// 		i--
+// 		if i == 0{
+// 			return false
+// 		}
+// 		return true
+// 	})
+// 	return ret
+// }
+
+
+// // PeekBest returns a slice of n-best items in the SecondaryPool instance
+// func (s *SecondaryPool) Worst(n int) []TxnRef {
+// 	t := s.tree.Load()
+// 	ret := make([]TxnRef, 0, 10)
+// 	i := n
+// 	t.Reverse(func(item TxnRef) bool {
+// 		ret = append(ret, item)
+// 		i--
+// 		if i == 0{
+// 			return false
+// 		}
+// 		return true
+// 	})
+// 	return ret
+// }
+
+
+// func (s *SecondaryPool) Size() int {
+// 	return s.tree.Load().Len()
+// }
