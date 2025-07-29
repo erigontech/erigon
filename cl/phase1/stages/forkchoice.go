@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -368,12 +366,8 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to post forkchoice operations: %w", err)
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
 	logger.Debug("Imported chain segment",
-		"hash", headRoot, "slot", headSlot,
-		"alloc", common.ByteCount(m.Alloc),
-		"sys", common.ByteCount(m.Sys))
+		"hash", headRoot, "slot", headSlot)
 
 	return tx.Commit()
 }
