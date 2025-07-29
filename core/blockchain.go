@@ -403,7 +403,7 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
 	}
 
-	if dbg.LogHashMismatchReason() && dbg.TraceBlock(h.Number.Uint64()) {
+	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
 		logReceipts(receipts, txns, chainConfig, h, logger)
 	}
 
