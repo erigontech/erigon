@@ -553,6 +553,12 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	if blockFrom > 0 && firstTxNum == 0 {
+		err := fmt.Errorf("firstTxNum is 0 (blocks=%d-%d); must be a mistake, aborting files build", blockFrom, blockTo)
+		logger.Error("DumpBodies", "err", err)
+		return lastTxNum, err
+	}
+
 	if _, err = dumpRange(ctx, coresnaptype.Headers.FileInfo(snapDir, blockFrom, blockTo),
 		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return 0, err
@@ -943,7 +949,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	from := hexutil.EncodeTs(blockFrom)
 
 	lastTxNum := firstTxNum(ctx)
-
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {
