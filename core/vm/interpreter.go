@@ -379,24 +379,20 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		// TODO - move this to a trace & set in the worker
-		var opstr string
 
 		if trace {
+			var opstr string
 			if operation.string != nil {
 				opstr = operation.string(*pc, callContext)
 			} else {
 				opstr = op.String()
 			}
+			fmt.Printf("%d (%d.%d) %5d %5d %s\n",
+				in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, operation.constantGas, opstr)
 		}
 
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
-
-		if trace {
-			fmt.Printf("%d (%d.%d) %5d %5d %s\n",
-				in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(),
-				_pc, gasCopy-contract.Gas, opstr)
-		}
 
 		if err != nil {
 			break
