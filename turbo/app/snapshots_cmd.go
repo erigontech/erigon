@@ -38,6 +38,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -50,7 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
@@ -1242,21 +1242,42 @@ func doReadV(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return fmt.Errorf("file %s does not exist", sourcefile)
 	}
 
+	index := filepath.Join(dirs.SnapAccessors, "v1.1-receipt.1884-1885.vi")
+	iindex, err := recsplit.OpenIndex(index)
+	if err != nil {
+		return err
+	}
+	var buf []byte
+
+	ireader := recsplit.NewIndexReader(iindex)
+	txNum := uint64(1884 * config3.DefaultStepSize)
+	txNumBytes := binary.BigEndian.AppendUint64(buf[:0], txNum)
+	offset, ok := ireader.Lookup(txNumBytes)
+	if !ok {
+		panic("what")
+	}
+
 	decomp, err := seg.NewDecompressor(sourcefile)
 	if err != nil {
 		return err
 	}
 	defer decomp.Close()
 	g := decomp.MakeGetter()
-	var buf []byte
 
-	for g.HasNext() {
-		buf, _ := g.Next(buf)
-		g.Skip()
-		txNum := binary.BigEndian.Uint64(buf)
-		ids := hexutil.Bytes(buf[8:]).String()
-		fmt.Printf("txNum: %d, ids: %s", txNum, ids)
-	}
+	fmt.Println("number of keys in .v", "count", decomp.Count())
+
+	g.Reset(offset)
+	buf, _ = g.Next(buf)
+	ids := hexutil.Bytes(buf[8:]).String()
+	fmt.Printf(" ids: %s", txNum, ids)
+
+	// for g.HasNext() {
+	// 	buf, _ := g.Next(buf)
+	// 	g.Skip()
+	// 	txNum := binary.BigEndian.Uint64(buf)
+	// 	ids := hexutil.Bytes(buf[8:]).String()
+	// 	fmt.Printf("txNum: %d, ids: %s", txNum, ids)
+	// }
 
 	return nil
 }
