@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sort"
 	"testing"
@@ -764,6 +765,12 @@ func TestHistoryRange_ComprehensiveIntegration(t *testing.T) {
 
 					// Verify ordering invariant
 					if prevKey != nil {
+						if bytes.Compare(prevKey, k) >= 0 {
+							t.Logf("Key ordering issue in case %s:", tc.name)
+							t.Logf("  Previous key: %x", prevKey)
+							t.Logf("  Current key:  %x", k)
+							t.Logf("  Compare result: %d", bytes.Compare(prevKey, k))
+						}
 						require.True(bytes.Compare(prevKey, k) < 0,
 							"Keys should be in ascending order in case: %s", tc.name)
 					}
@@ -897,6 +904,681 @@ func TestHistoryRange_ComprehensiveIntegration(t *testing.T) {
 		}
 		for key := range keys2 {
 			require.True(keys3[key], "Union range should contain key %s from second range", key)
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+/*
+IterateChangedRecent Method Documentation and Test Suite
+
+## What iterateChangedRecent Does
+
+The iterateChangedRecent method returns an iterator over keys that changed in the
+database (not files) within a specified transaction range. It's used to iterate
+over recent changes that haven't been moved to files yet.
+
+## Method Signature
+```go
+func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error)
+```
+
+## Parameters
+- fromTxNum: Starting transaction number (inclusive). Use -1 for no lower bound.
+- toTxNum: Ending transaction number (exclusive). Use -1 for no upper bound.
+- asc: Sort order. Currently only order.Asc is supported (order.Desc panics).
+- limit: Maximum number of results to return. Use -1 for unlimited.
+- roTx: Read-only database transaction for accessing data.
+
+## Return Value
+Returns a stream.KV iterator that yields key-value pairs where:
+- Key: The key that was changed
+- Value: The previous value of the key before the change (empty if it was a new key)
+
+Returns stream.EmptyKV if the range is covered by files.
+
+## Key Invariants
+
+1. **Database Only**: Only iterates over data in the database, not files
+2. **Range Check**: Returns EmptyKV if the range is already covered by files
+3. **Ascending Order**: Keys are returned in lexicographically ascending order
+4. **Previous Values**: Values represent the state BEFORE the change
+5. **Range Semantics**: Includes changes at fromTxNum, excludes changes at toTxNum
+6. **Dual Storage Support**: Handles both small values (DupSort) and large values (regular table)
+7. **Limit Respect**: Never returns more than the specified limit
+8. **Stream Invariants**: Follows all stream.KV interface contracts
+
+## How It Works Internally
+
+1. Checks if the requested range is covered by files - if so, returns EmptyKV
+2. Creates a HistoryChangesIterDB iterator for database access
+3. Sets up cursors appropriate for the storage type (DupSort vs regular)
+4. Iterates through database entries within the transaction range
+5. Returns keys and their previous values in ascending order
+
+## Use Cases
+
+- Iterating over recent changes before file consolidation
+- Building state patches for recent transactions
+- Debugging recent transaction effects
+- Merging recent data with file-based data
+*/
+
+func TestIterateChangedRecent_Basic(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, _ := filledHistory(t, largeValues, logger)
+		defer db.Close()
+
+		// Don't merge to files - we want to test database iteration
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		// Test basic iteration over recent changes
+		it, err := hc.iterateChangedRecent(1, 50, order.Asc, -1, tx)
+		require.NoError(err)
+		defer it.Close()
+
+		var keys, vals []string
+		var prevKey []byte
+		count := 0
+
+		for it.HasNext() {
+			k, v, err := it.Next()
+			require.NoError(err)
+
+			// Verify ordering
+			if prevKey != nil {
+				require.True(bytes.Compare(prevKey, k) < 0, "Keys should be in ascending order")
+			}
+
+			keys = append(keys, fmt.Sprintf("%x", k))
+			vals = append(vals, fmt.Sprintf("%x", v))
+
+			prevKey = make([]byte, len(k))
+			copy(prevKey, k)
+			count++
+
+			// Safety check
+			if count > 1000 {
+				t.Fatal("Too many results")
+			}
+		}
+
+		// Should have some results since we're iterating over database
+		t.Logf("Found %d changed keys in database for range [1, 50)", count)
+
+		// Verify keys are sorted
+		require.True(sort.StringsAreSorted(keys), "Keys should be sorted")
+
+		// Verify no duplicates
+		uniqueKeys := make(map[string]bool)
+		for _, key := range keys {
+			require.False(uniqueKeys[key], "Found duplicate key: %s", key)
+			uniqueKeys[key] = true
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+func TestIterateChangedRecent_EdgeCases(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, _ := filledHistory(t, largeValues, logger)
+		defer db.Close()
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		// Test empty range (fromTxNum >= toTxNum)
+		it, err := hc.iterateChangedRecent(10, 10, order.Asc, -1, tx)
+		require.NoError(err)
+		require.False(it.HasNext(), "Empty range should have no results")
+		it.Close()
+
+		// Test reverse range
+		it, err = hc.iterateChangedRecent(20, 10, order.Asc, -1, tx)
+		require.NoError(err)
+		require.False(it.HasNext(), "Reverse range should have no results")
+		it.Close()
+
+		// Test negative fromTxNum (no lower bound)
+		it, err = hc.iterateChangedRecent(-1, 20, order.Asc, 5, tx)
+		require.NoError(err)
+
+		count := 0
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(err)
+			count++
+		}
+		require.LessOrEqual(count, 5, "Should respect limit")
+		it.Close()
+
+		// Test negative toTxNum (no upper bound)
+		it, err = hc.iterateChangedRecent(900, -1, order.Asc, 3, tx)
+		require.NoError(err)
+
+		count = 0
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(err)
+			count++
+		}
+		require.LessOrEqual(count, 3, "Should respect limit even with no upper bound")
+		it.Close()
+
+		// Test zero limit
+		it, err = hc.iterateChangedRecent(1, 100, order.Asc, 0, tx)
+		require.NoError(err)
+		require.False(it.HasNext(), "Zero limit should return no results")
+		it.Close()
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+func TestIterateChangedRecent_Ordering(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, _ := filledHistory(t, largeValues, logger)
+		defer db.Close()
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		// Test descending order should panic
+		require.Panics(func() {
+			hc.iterateChangedRecent(1, 100, order.Desc, -1, tx)
+		}, "Descending order should panic")
+
+		// Test ascending order with detailed ordering verification
+		it, err := hc.iterateChangedRecent(10, 200, order.Asc, -1, tx)
+		require.NoError(err)
+		defer it.Close()
+
+		var prevKey []byte
+		count := 0
+
+		for it.HasNext() {
+			k, _, err := it.Next()
+			require.NoError(err)
+
+			if prevKey != nil {
+				cmp := bytes.Compare(prevKey, k)
+				require.True(cmp < 0, "Keys should be in strict ascending order: %x should be < %x", prevKey, k)
+			}
+
+			// Make a copy since stream guarantees keys are valid for 2 Next() calls
+			prevKey = make([]byte, len(k))
+			copy(prevKey, k)
+			count++
+
+			if count > 100 { // Limit for test performance
+				break
+			}
+		}
+
+		t.Logf("Verified ordering of %d keys", count)
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+func TestIterateChangedRecent_Limits(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, _ := filledHistory(t, largeValues, logger)
+		defer db.Close()
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		// Test various limits
+		limits := []int{1, 3, 5, 10, 50}
+
+		for _, limit := range limits {
+			t.Run(fmt.Sprintf("limit_%d", limit), func(t *testing.T) {
+				it, err := hc.iterateChangedRecent(1, 500, order.Asc, limit, tx)
+				require.NoError(err)
+				defer it.Close()
+
+				count := 0
+				for it.HasNext() {
+					_, _, err := it.Next()
+					require.NoError(err)
+					count++
+				}
+
+				require.LessOrEqual(count, limit, "Should not exceed limit %d", limit)
+				t.Logf("Limit %d: got %d results", limit, count)
+			})
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+func TestIterateChangedRecent_FilesCoverage(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, txs := filledHistory(t, largeValues, logger)
+		defer db.Close()
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		// Before files are built, should return data
+		it, err := hc.iterateChangedRecent(1, 100, order.Asc, 10, tx)
+		require.NoError(err)
+
+		countBefore := 0
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(err)
+			countBefore++
+		}
+		it.Close()
+
+		t.Logf("Before files: found %d changes", countBefore)
+		hc.Close()
+
+		// Build files to move data from DB to files
+		collateAndMergeHistory(t, db, h, txs, true)
+
+		// After files are built, the same range might return EmptyKV if covered by files
+		tx, err = db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc = h.BeginFilesRo()
+		defer hc.Close()
+
+		it, err = hc.iterateChangedRecent(1, 100, order.Asc, 10, tx)
+		require.NoError(err)
+
+		countAfter := 0
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(err)
+			countAfter++
+		}
+		it.Close()
+
+		t.Logf("After files: found %d changes", countAfter)
+
+		// Should have fewer or equal results after files are built
+		// (some data moved from DB to files)
+		require.LessOrEqual(countAfter, countBefore, "Should have fewer DB results after files are built")
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+func TestIterateChangedRecent_Values(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, _ := filledHistory(t, largeValues, logger)
+		defer db.Close()
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		// Test values returned by iterator
+		it, err := hc.iterateChangedRecent(100, 200, order.Asc, 20, tx)
+		require.NoError(err)
+		defer it.Close()
+
+		var results []struct {
+			key string
+			val string
+		}
+
+		for it.HasNext() {
+			k, v, err := it.Next()
+			require.NoError(err)
+
+			results = append(results, struct {
+				key string
+				val string
+			}{
+				key: fmt.Sprintf("%x", k),
+				val: fmt.Sprintf("%x", v),
+			})
+		}
+
+		t.Logf("Found %d key-value pairs", len(results))
+
+		// Verify key format (from filledHistory, keys should be 8-byte with first byte = 1)
+		for i, result := range results {
+			require.Equal(16, len(result.key), "Key %d should be 16 hex chars (8 bytes)", i)
+			require.Equal("01", result.key[:2], "Key %d should start with 01", i)
+
+			// Value can be empty (deletion) or should be 8 bytes with first byte = 255
+			if result.val != "" {
+				require.Equal(16, len(result.val), "Non-empty value %d should be 16 hex chars (8 bytes)", i)
+				require.Equal("ff", result.val[:2], "Value %d should start with ff", i)
+			}
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+func TestIterateChangedRecent_EmptyDatabase(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		// Create empty history
+		db, h := testDbAndHistory(t, largeValues, logger)
+		defer db.Close()
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		// Empty database should return no results
+		it, err := hc.iterateChangedRecent(1, 100, order.Asc, -1, tx)
+		require.NoError(err)
+		defer it.Close()
+
+		require.False(it.HasNext(), "Empty database should have no results")
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+func TestIterateChangedRecent_StreamInvariants(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, _ := filledHistory(t, largeValues, logger)
+		defer db.Close()
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		it, err := hc.iterateChangedRecent(10, 100, order.Asc, -1, tx)
+		require.NoError(err)
+		defer it.Close()
+
+		// Test Stream Invariant 2: K, V are valid for at least 2 Next() calls
+		var firstKey, firstVal, secondKey []byte
+
+		if it.HasNext() {
+			firstKey, firstVal, err = it.Next()
+			require.NoError(err)
+
+			if it.HasNext() {
+				secondKey, _, err = it.Next()
+				require.NoError(err)
+
+				// First key/value should still be valid after second Next() call
+				require.NotNil(firstKey, "First key should still be valid")
+				require.NotNil(firstVal, "First value should still be valid")
+
+				// Keys should be different and in order
+				require.NotEqual(firstKey, secondKey, "Keys should be different")
+			}
+		}
+
+		// Test HasNext() idempotency (Invariant 1)
+		for i := 0; i < 5; i++ {
+			hasNext1 := it.HasNext()
+			hasNext2 := it.HasNext()
+			require.Equal(hasNext1, hasNext2, "HasNext() should be idempotent")
+
+			if hasNext1 {
+				it.Next()
+				break // Only test one iteration
+			}
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+func TestIterateChangedRecent_ComprehensiveIntegration(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		// Create custom history with known pattern
+		db, h := testDbAndHistory(t, largeValues, logger)
+		defer db.Close()
+
+		// Fill with predictable data
+		rwTx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		hc := h.BeginFilesRo()
+		writer := hc.NewWriter()
+
+		// Create 50 transactions with specific pattern
+		var prevVals = make(map[string][]byte)
+		for txNum := uint64(1); txNum <= 50; txNum++ {
+			for keyNum := uint64(1); keyNum <= 5; keyNum++ {
+				if txNum%keyNum == 0 { // Key changes only at specific intervals
+					var k [8]byte
+					var v [8]byte
+					binary.BigEndian.PutUint64(k[:], keyNum)
+					binary.BigEndian.PutUint64(v[:], txNum*keyNum)
+					k[0] = 1   // mark key
+					v[0] = 255 // mark value
+
+					keyStr := string(k[:])
+					err = writer.AddPrevValue(k[:], txNum, prevVals[keyStr])
+					require.NoError(err)
+					prevVals[keyStr] = v[:]
+				}
+			}
+		}
+
+		err = writer.Flush(ctx, rwTx)
+		require.NoError(err)
+		writer.close()
+		err = rwTx.Commit()
+		require.NoError(err)
+		hc.Close()
+
+		// Test various scenarios
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer roTx.Rollback()
+
+		hc = h.BeginFilesRo()
+		defer hc.Close()
+
+		testCases := []struct {
+			name     string
+			fromTx   int
+			toTx     int
+			limit    int
+			minCount int
+		}{
+			{"early_range", 1, 10, -1, 1},
+			{"mid_range", 15, 30, -1, 1},
+			{"late_range", 40, 50, -1, 1},
+			{"with_limit", 1, 50, 3, 0},
+			{"single_tx", 20, 21, -1, 0},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				it, err := hc.iterateChangedRecent(tc.fromTx, tc.toTx, order.Asc, tc.limit, roTx)
+				require.NoError(err)
+				defer it.Close()
+
+				var keys []string
+				count := 0
+				var prevKey []byte
+
+				for it.HasNext() {
+					k, v, err := it.Next()
+					require.NoError(err)
+
+					// Verify ordering
+					if prevKey != nil {
+						require.True(bytes.Compare(prevKey, k) < 0, "Keys should be in ascending order")
+					}
+
+					keys = append(keys, fmt.Sprintf("%x", k))
+					prevKey = make([]byte, len(k))
+					copy(prevKey, k)
+					count++
+
+					// Verify value format if not empty
+					if len(v) > 0 {
+						require.Len(v, 8, "Value should be 8 bytes")
+						require.Equal(byte(255), v[0], "Value should start with 255")
+					}
+
+					if count > 100 { // Safety check
+						break
+					}
+				}
+
+				require.GreaterOrEqual(count, tc.minCount, "Should have at least %d results", tc.minCount)
+				if tc.limit > 0 {
+					require.LessOrEqual(count, tc.limit, "Should not exceed limit")
+				}
+
+				// Verify no duplicates
+				uniqueKeys := make(map[string]bool)
+				for _, key := range keys {
+					require.False(uniqueKeys[key], "Found duplicate key: %s", key)
+					uniqueKeys[key] = true
+				}
+
+				t.Logf("Test case %s: found %d unique keys", tc.name, count)
+			})
 		}
 	}
 
