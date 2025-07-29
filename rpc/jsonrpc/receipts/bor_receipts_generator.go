@@ -107,11 +107,13 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state
 
 	// set fields
 	var logIndex uint
-	if receiptWithFirstLogIdx {
-		logIndex = logIdxAfterTx
-	} else {
-		logIndex = logIdxAfterTx - uint(len(receiptLogs))
-	}
+	// TODO: bor logs aren't stored in db; so no need to convert logIdxAfterTx to logIndex etc.
+	// when those are added; we can renable this logic.
+	//if receiptWithFirstLogIdx {
+	logIndex = logIdxAfterTx
+	// } else {
+	// 	logIndex = logIdxAfterTx - uint(len(receiptLogs))
+	// }
 	for i, l := range receiptLogs {
 		l.TxIndex = txIndex
 		l.Index = logIndex + uint(i)
