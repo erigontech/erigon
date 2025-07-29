@@ -124,8 +124,6 @@ github.com/anacrolix/missinggo/perf v1.0.0 h1:7ZOGYziGEBytW49+KmYGTaNfnwUqP1HBsy
 github.com/anacrolix/missinggo/perf v1.0.0/go.mod h1:ljAFWkBuzkO12MQclXzZrosP5urunoLS0Cbvb4V0uMQ=
 github.com/anacrolix/missinggo/v2 v2.2.0/go.mod h1:o0jgJoYOyaoYQ4E2ZMISVa9c88BbUBVQQW4QeRkNCGY=
 github.com/anacrolix/missinggo/v2 v2.5.1/go.mod h1:WEjqh2rmKECd0t1VhQkLGTdIWXO6f6NLjp5GlMZ+6FA=
-github.com/anacrolix/missinggo/v2 v2.8.1-0.20250626123431-aa4691b19d56 h1:+VSnod9Zipey/E5mDTrhooV9y8A8ZaUHSzG/TnrIHug=
-github.com/anacrolix/missinggo/v2 v2.8.1-0.20250626123431-aa4691b19d56/go.mod h1:vVO5FEziQm+NFmJesc7StpkquZk+WJFCaL0Wp//2sa0=
 github.com/anacrolix/missinggo/v2 v2.9.0 h1:Z1CTa28fjOWPLlOKFlc+GbtsV9Q/0eCs4pOIdd/pnAU=
 github.com/anacrolix/missinggo/v2 v2.9.0/go.mod h1:vVO5FEziQm+NFmJesc7StpkquZk+WJFCaL0Wp//2sa0=
 github.com/anacrolix/mmsg v1.0.1 h1:TxfpV7kX70m3f/O7ielL/2I3OFkMPjrRCPo7+4X5AWw=
@@ -142,8 +140,6 @@ github.com/anacrolix/sync v0.5.4/go.mod h1:21cUWerw9eiu/3T3kyoChu37AVO+YFue1/H15
 github.com/anacrolix/tagflag v0.0.0-20180109131632-2146c8d41bf0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.0.0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.1.0/go.mod h1:Scxs9CV10NQatSmbyjqmqmeQNwGzlNe0CMUMIxqHIG8=
-github.com/anacrolix/torrent v1.58.2-0.20250728032322-b282e3e29307 h1:TLIFCeFFm9qUOVcp69OIoycVPHH8RYi3/7jdV5K1b8E=
-github.com/anacrolix/torrent v1.58.2-0.20250728032322-b282e3e29307/go.mod h1:w1bVf6LdDPybFRpVIghWPnm0flV8i0OtWwGY1dXyObg=
 github.com/anacrolix/torrent v1.58.2-0.20250729040348-860aebd30d11 h1:m3XeEqf/ZYHZUEs27VAhsh0f4qGZ4zvqdZv/2yZi72o=
 github.com/anacrolix/torrent v1.58.2-0.20250729040348-860aebd30d11/go.mod h1:LhdihWbLhdFx7djCScZ1jCoMOYc4nCT0b3stOZpzEaU=
 github.com/anacrolix/upnp v0.1.4 h1:+2t2KA6QOhm/49zeNyeVwDu1ZYS9dB9wfxyVvh/wk7U=
