@@ -1,9 +1,8 @@
 {
-  "chainName": "hoodi",
-  "chainId": 560048,
+  "chainName": "sepolia",
+  "chainId": 11155111,
   "consensus": "ethash",
   "homesteadBlock": 0,
-  "daoForkBlock": 0,
   "eip150Block": 0,
   "eip155Block": 0,
   "byzantiumBlock": 0,
@@ -13,13 +12,13 @@
   "muirGlacierBlock": 0,
   "berlinBlock": 0,
   "londonBlock": 0,
-  "arrowGlacierBlock": 0,
-  "grayGlacierBlock": 0,
-  "terminalTotalDifficulty": 0,
+  "terminalTotalDifficulty": 17000000000000000,
   "terminalTotalDifficultyPassed": true,
-  "shanghaiTime": 0,
-  "cancunTime": 0,
-  "pragueTime": 1742999832,
+  "mergeNetsplitBlock": 1735371,
+  "mergeBlock": 1450409,
+  "shanghaiTime": 1677557088,
+  "cancunTime": 1706655072,
+  "pragueTime": 1741159776,
   "blobSchedule": {
     "cancun": {
       "target": 3,
@@ -32,7 +31,6 @@
       "baseFeeUpdateFraction": 5007716
     }
   },
-  "depositContractAddress": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
-  "ethash": {},
-  "defaultBlockGasLimit": 60000000
+  "depositContractAddress": "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D",
+  "ethash": {}
 }

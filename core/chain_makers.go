@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // BlockGen creates blocks for testing.
@@ -501,3 +502,4 @@ func (cr *FakeChainReader) BorEventsByBlock(hash common.Hash, number uint64) []r
 func (cr *FakeChainReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
 	return 0
 }
+func (cr *FakeChainReader) BorSpan(spanId uint64) *heimdall.Span { return nil }

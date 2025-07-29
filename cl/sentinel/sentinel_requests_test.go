@@ -30,6 +30,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
@@ -47,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/execution/chainspec"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -72,7 +72,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	ethClock := getEthClock(t)
 	ctx := context.Background()
 	db, blocks, _, _, _, reader := loadChain(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 
 	// Create mock PeerDasStateReader
 	ctrl := gomock.NewController(t)
@@ -185,7 +185,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	ctx := context.Background()
 	db, blocks, _, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 
 	// Create mock PeerDasStateReader
 	ctrl := gomock.NewController(t)
@@ -304,7 +304,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 	ctx := context.Background()
 	db, blocks, _, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 
 	// Create mock PeerDasStateReader
 	ctrl := gomock.NewController(t)

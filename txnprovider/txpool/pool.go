@@ -55,10 +55,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
+
+const DefaultBlockGasLimit = uint64(36000000)
 
 // txMaxBroadcastSize is the max size of a transaction that will be broadcast.
 // All transactions with a higher size will be announced and need to be fetched
@@ -2575,9 +2576,11 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
 
 	if p.feeCalculator != nil {
-		pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
-		if err != nil {
-			return err
+		if chainConfig, _ := ChainConfig(tx); chainConfig != nil {
+			pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(chainConfig, coreTx)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -2606,11 +2609,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 	}
 
 	if blockGasLimit == 0 {
-		if p.chainConfig.DefaultBlockGasLimit != nil {
-			blockGasLimit = *p.chainConfig.DefaultBlockGasLimit
-		} else {
-			blockGasLimit = ethconfig.DefaultBlockGasLimit
-		}
+		blockGasLimit = DefaultBlockGasLimit
 	}
 
 	err = p.senders.registerNewSenders(&txns, p.logger)

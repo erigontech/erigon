@@ -22,9 +22,9 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func downloadGenesisState(url string) ([]byte, error) {
@@ -59,23 +59,23 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 	returnState := state.New(config)
 
 	switch network {
-	case chainspec.MainnetChainID:
+	case networkid.MainnetChainID:
 		if err := returnState.DecodeSSZ(mainnetStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	case chainspec.SepoliaChainID:
+	case networkid.SepoliaChainID:
 		if err := returnState.DecodeSSZ(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	case chainspec.GnosisChainID:
+	case networkid.GnosisChainID:
 		if err := returnState.DecodeSSZ(gnosisStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	case chainspec.ChiadoChainID:
+	case networkid.ChiadoChainID:
 		if err := returnState.DecodeSSZ(chiadoStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	case chainspec.HoleskyChainID:
+	case networkid.HoleskyChainID:
 		// Download genesis state by wget the url
 		encodedState, err := downloadGenesisState("https://github.com/eth-clients/holesky/raw/main/metadata/genesis.ssz")
 		if err != nil {
@@ -84,7 +84,7 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err := returnState.DecodeSSZ(encodedState, int(clparams.BellatrixVersion)); err != nil {
 			return nil, err
 		}
-	case chainspec.HoodiChainID:
+	case networkid.HoodiChainID:
 		// Download genesis state by wget the url
 		encodedState, err := downloadGenesisState("https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
 		if err != nil {
@@ -100,5 +100,5 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 }
 
 func IsGenesisStateSupported(network clparams.NetworkType) bool {
-	return network == chainspec.MainnetChainID || network == chainspec.SepoliaChainID || network == chainspec.GnosisChainID || network == chainspec.ChiadoChainID || network == chainspec.HoleskyChainID || network == chainspec.HoodiChainID
+	return network == networkid.MainnetChainID || network == networkid.SepoliaChainID || network == networkid.GnosisChainID || network == networkid.ChiadoChainID || network == networkid.HoleskyChainID || network == networkid.HoodiChainID
 }

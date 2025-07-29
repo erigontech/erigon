@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	account_services "github.com/erigontech/erigon/cmd/devnet/services/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	polychain "github.com/erigontech/erigon/polygon/chain"
 )
 
 func NewBorDevnetWithoutHeimdall(
@@ -229,7 +229,7 @@ func NewBorDevnetWithLocalHeimdall(
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {
 	var config chain.Config
-	copier.Copy(&config, polychain.BorDevnetChainConfig)
+	copier.Copy(&config, params.BorDevnetChainConfig)
 	borConfig := config.Bor.(*borcfg.BorConfig)
 	if sprintSize > 0 {
 		borConfig.Sprint = map[string]uint64{"0": sprintSize}

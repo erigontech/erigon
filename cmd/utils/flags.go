@@ -39,6 +39,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-db/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -58,7 +59,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
@@ -71,8 +71,6 @@ import (
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 // These are all the command line flags we support.
@@ -1201,7 +1199,7 @@ func GetBootnodesFromFlags(urlsStr, chain string) ([]*enode.Node, error) {
 	if urlsStr != "" {
 		urls = common.CliString2Array(urlsStr)
 	} else {
-		urls = chainspec.BootnodeURLsOfChain(chain)
+		urls = params2.BootnodeURLsOfChain(chain)
 	}
 	return enode.ParseNodesFromURLs(urls)
 }
@@ -1212,7 +1210,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		urls = common.CliString2Array(ctx.String(StaticPeersFlag.Name))
 	} else {
 		chain := ctx.String(ChainFlag.Name)
-		urls = chainspec.StaticPeerURLsOfChain(chain)
+		urls = params2.StaticPeerURLsOfChain(chain)
 	}
 
 	nodes, err := enode.ParseNodesFromURLs(urls)
@@ -1270,17 +1268,19 @@ func NewP2PConfig(
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:      fmt.Sprintf(":%d", port),
-		MaxPeers:        maxPeers,
-		MaxPendingPeers: maxPendPeers,
-		NAT:             nat.Any(),
-		NoDiscovery:     nodiscover,
-		PrivateKey:      serverKey,
-		Name:            nodeName,
-		NodeDatabase:    enodeDBPath,
-		AllowedPorts:    allowedPorts,
-		TmpDir:          dirs.Tmp,
-		MetricsEnabled:  metricsEnabled,
+		ListenAddr:         fmt.Sprintf(":%d", port),
+		MaxPeers:           maxPeers,
+		MaxPendingPeers:    maxPendPeers,
+		NAT:                nat.Any(),
+		NoDiscovery:        nodiscover,
+		PrivateKey:         serverKey,
+		Name:               nodeName,
+		NodeDatabase:       enodeDBPath,
+		AllowedPorts:       allowedPorts,
+		TmpDir:             dirs.Tmp,
+		MetricsEnabled:     metricsEnabled,
+		LookupBootnodeURLs: params2.BootnodeURLsByGenesisHash,
+		LookupDNSNetwork:   params2.KnownDNSNetwork,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1693,7 +1693,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params2.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *chainspec.ConsensusSnapshotConfig, datadir string) {
+func setClique(ctx *cli.Context, cfg *params2.ConsensusSnapshotConfig, datadir string) {
 	cfg.CheckpointInterval = ctx.Uint64(CliqueSnapshotCheckpointIntervalFlag.Name)
 	cfg.InmemorySnapshots = ctx.Int(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.Int(CliqueSnapshotInmemorySignaturesFlag.Name)
@@ -1710,7 +1710,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 
 	heimdall.RecordWayPoints(true)
 
-	chainConfig := chainspec.ChainConfigByChainName(ctx.String(ChainFlag.Name))
+	chainConfig := params2.ChainConfigByChainName(ctx.String(ChainFlag.Name))
 	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
 		// override default max devp2p peers for polygon as per
 		// https://forum.polygon.technology/t/introducing-our-new-dns-discovery-for-polygon-pos-faster-smarter-more-connected/19871
@@ -1935,7 +1935,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
 		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
-			chainName, ok := chainspec.NetworkNameByID[cfg.NetworkID]
+			chainName, ok := networkid.NetworkNameByID[cfg.NetworkID]
 			if !ok {
 				chain = "" // don't default to mainnet if NetworkID != 1 and it's devchain or smth
 			} else {
@@ -1944,7 +1944,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 		}
 	} else {
-		cfg.NetworkID = chainspec.NetworkIDByChainName(chain)
+		cfg.NetworkID = params2.NetworkIDByChainName(chain)
 	}
 
 	cfg.Dirs = nodeConfig.Dirs
@@ -2011,8 +2011,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Override any default configs for hard coded networks.
 	switch chain {
 	default:
-		genesis := chainspec.GenesisBlockByChainName(chain)
-		genesisHash := chainspec.GenesisHashByChainName(chain)
+		genesis := core.GenesisBlockByChainName(chain)
+		genesisHash := params2.GenesisHashByChainName(chain)
 		if (genesis == nil) || (genesisHash == nil) {
 			Fatalf("ChainDB name is not recognized: %s", chain)
 			return
@@ -2021,7 +2021,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		SetDNSDiscoveryDefaults(cfg, *genesisHash)
 	case "":
 		if cfg.NetworkID == 1 {
-			SetDNSDiscoveryDefaults(cfg, chainspec.MainnetGenesisHash)
+			SetDNSDiscoveryDefaults(cfg, params2.MainnetGenesisHash)
 		}
 	case networkname.Dev:
 		// Create new developer account or reuse existing one
@@ -2032,7 +2032,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		logger.Info("Using developer account", "address", developer)
 
 		// Create a new developer genesis block or reuse existing one
-		cfg.Genesis = chainspec.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
+		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
 		logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
 		if !ctx.IsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
@@ -2142,7 +2142,8 @@ func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
 	}
-	if url := chainspec.KnownDNSNetwork(genesis); url != "" {
+	protocol := "all"
+	if url := params2.KnownDNSNetwork(genesis, protocol); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
 }

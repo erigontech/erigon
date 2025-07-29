@@ -1,24 +1,22 @@
 {
-  "chainName": "sepolia",
-  "chainId": 11155111,
-  "consensus": "ethash",
+  "chainName": "holesky",
+  "chainId": 17000,
   "homesteadBlock": 0,
   "eip150Block": 0,
   "eip155Block": 0,
+  "eip158Block": 0,
   "byzantiumBlock": 0,
   "constantinopleBlock": 0,
   "petersburgBlock": 0,
   "istanbulBlock": 0,
-  "muirGlacierBlock": 0,
   "berlinBlock": 0,
   "londonBlock": 0,
-  "terminalTotalDifficulty": 17000000000000000,
+  "mergeForkBlock": 0,
+  "terminalTotalDifficulty": 0,
   "terminalTotalDifficultyPassed": true,
-  "mergeNetsplitBlock": 1735371,
-  "mergeBlock": 1450409,
-  "shanghaiTime": 1677557088,
-  "cancunTime": 1706655072,
-  "pragueTime": 1741159776,
+  "shanghaiTime": 1696000704,
+  "cancunTime": 1707305664,
+  "pragueTime": 1740434112,
   "blobSchedule": {
     "cancun": {
       "target": 3,
@@ -31,7 +29,5 @@
       "baseFeeUpdateFraction": 5007716
     }
   },
-  "depositContractAddress": "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D",
-  "ethash": {},
-  "defaultBlockGasLimit": 60000000
+  "depositContractAddress": "0x4242424242424242424242424242424242424242"
 }

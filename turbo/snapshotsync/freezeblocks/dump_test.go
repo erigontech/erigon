@@ -39,8 +39,8 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -101,15 +101,15 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize:   1000,
-			chainConfig: polychain.BorDevnetChainConfig,
+			chainConfig: params.BorDevnetChainConfig,
 		},
 		{
 			chainSize:   2000,
-			chainConfig: polychain.BorDevnetChainConfig,
+			chainConfig: params.BorDevnetChainConfig,
 		},
 		{
 			chainSize: 1000,
-			chainConfig: withConfig(polychain.BorDevnetChainConfig,
+			chainConfig: withConfig(params.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -118,7 +118,7 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize: 2000,
-			chainConfig: withConfig(polychain.BorDevnetChainConfig,
+			chainConfig: withConfig(params.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,

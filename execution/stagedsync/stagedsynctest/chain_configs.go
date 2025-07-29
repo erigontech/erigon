@@ -1,7 +1,4 @@
-// Copyright 2015 The go-ethereum Authors
-// (original work)
 // Copyright 2024 The Erigon Authors
-// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -17,31 +14,27 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package tests
+package stagedsynctest
 
 import (
-	"testing"
+	"github.com/jinzhu/copier"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-func TestTransaction(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
+func BorDevnetChainConfigWithNoBlockSealDelays() *chain.Config {
+	// take care not to mutate global var (shallow copy)
+	var chainConfigCopy chain.Config
+	copier.Copy(&chainConfigCopy, params.BorDevnetChainConfig)
+	borConfigCopy := *chainConfigCopy.Bor.(*borcfg.BorConfig)
+	borConfigCopy.Period = map[string]uint64{
+		"0": 0,
 	}
-
-	txt := new(testMatcher)
-
-	// We don't allow more than uint64 in gas amount
-	// This is a pseudo-consensus vulnerability, but not in practice
-	// because of the gas limit
-	txt.skipLoad("^ttGasLimit/TransactionWithGasLimitxPriceOverflow.json")
-
-	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
-		t.Parallel()
-		cfg := params.MainnetChainConfig
-		if err := txt.checkFailure(t, test.Run(cfg.ChainID)); err != nil {
-			t.Error(err)
-		}
-	})
+	borConfigCopy.ProducerDelay = map[string]uint64{
+		"0": 0,
+	}
+	chainConfigCopy.Bor = &borConfigCopy
+	return &chainConfigCopy
 }
