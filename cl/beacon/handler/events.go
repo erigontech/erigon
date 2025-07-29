@@ -33,6 +33,7 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.OpAttestation:       {},
 	event.OpAttesterSlashing:  {},
 	event.OpBlobSidecar:       {},
+	event.OpDataColumnSidecar: {},
 	event.OpBlsToExecution:    {},
 	event.OpContributionProof: {},
 	event.OpProposerSlashing:  {},
