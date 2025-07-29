@@ -1486,12 +1486,12 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		panic("not supported yet")
 	}
 	if roTx == nil {
-		return []ReconDBIterOfStep{}, nil
+		return stream.EmptyKV, nil
 	}
 
 	rangeIsInFiles := toTxNum >= 0 && len(ht.iit.files) > 0 && ht.iit.files.EndTxNum() >= uint64(toTxNum)
 	if rangeIsInFiles {
-		return []ReconDBIterOfStep{}, nil
+		return stream.EmptyKV, nil
 	}
 
 	var fromStep, toStep uint64
