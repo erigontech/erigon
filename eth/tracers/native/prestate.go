@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -187,8 +188,20 @@ func (t *prestateTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 	}
 }
 
-func (t *prestateTracer) CaptureTxStart(gasLimit uint64) {
+func (t *prestateTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {
 	t.gasLimit = gasLimit
+
+	// Add accounts with authorizations to the prestate before they get applied.
+	var b [32]byte
+	data := bytes.NewBuffer(nil)
+	for _, auth := range authorizations {
+		data.Reset()
+		addr, err := auth.RecoverSigner(data, b[:])
+		if err != nil {
+			continue
+		}
+		t.lookupAccount(*addr)
+	}
 }
 
 func (t *prestateTracer) CaptureTxEnd(restGas uint64) {

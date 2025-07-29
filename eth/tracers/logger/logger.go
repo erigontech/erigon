@@ -143,7 +143,7 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 	return logger
 }
 
-func (l *StructLogger) CaptureTxStart(gasLimit uint64) {}
+func (l *StructLogger) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
 
 func (l *StructLogger) CaptureTxEnd(restGas uint64) {}
 
@@ -365,7 +365,7 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 	return l
 }
 
-func (t *mdLogger) CaptureTxStart(gasLimit uint64) {}
+func (t *mdLogger) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {}
 
 func (t *mdLogger) CaptureTxEnd(restGas uint64) {}
 
