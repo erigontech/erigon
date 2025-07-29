@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -255,13 +256,21 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 			//	MaxConcurrentStreams: 1,
 			//},
 			// Big hammer to achieve one request per connection.
-			//DisableKeepAlives: true,
-			MaxConnsPerHost: 10,
+			DisableKeepAlives: os.Getenv("DOWNLOADER_DISABLE_KEEP_ALIVES") != "",
 		},
 	}
 
+	if s := os.Getenv("DOWNLOADER_MAX_CONNS_PER_HOST"); s != "" {
+		var err error
+		i64, err := strconv.ParseInt(s, 10, 0)
+		panicif.Err(err)
+		requestHandler.Transport.MaxConnsPerHost = int(i64)
+	}
+
 	// Disable HTTP2. See above.
-	//g.MakeMap(&requestHandler.Transport.TLSNextProto)
+	if os.Getenv("DOWNLOADER_DISABLE_HTTP2") != "" {
+		g.MakeMap(&requestHandler.Transport.TLSNextProto)
+	}
 
 	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
 	cfg.ClientConfig.WebTransport = &requestHandler
