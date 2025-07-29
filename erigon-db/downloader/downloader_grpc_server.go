@@ -69,7 +69,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			log.Info("[snapshots] initializing downloads", "torrents", fmt.Sprintf("%d/%d", progress.Load(), len(request.Items)))
 		}
 		defer logProgress()
-		interval := 2 * time.Second
+		interval := time.Second
 		for {
 			select {
 			case <-ctx.Done():
