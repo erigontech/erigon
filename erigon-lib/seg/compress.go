@@ -258,7 +258,7 @@ func (c *Compressor) Compress() error {
 			return err
 		}
 	}
-	defer dir.RemoveFile(c.tmpOutFilePath)
+	defer dir2.RemoveFile(c.tmpOutFilePath)
 
 	cf, err := os.Create(c.tmpOutFilePath)
 	if err != nil {
