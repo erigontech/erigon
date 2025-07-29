@@ -1481,7 +1481,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 	return s, nil
 }
 
-func (ht *HistoryRoTx) iterateChangedRecentBySteps(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) ([]ReconDBIterOfStep, error) {
+func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
@@ -1569,7 +1569,15 @@ func (ht *HistoryRoTx) iterateChangedRecentBySteps(fromTxNum, toTxNum int, asc o
 		}
 	}
 
-	return stepDbIters, nil
+	var res stream.KV
+	for _, r := range stepDbIters {
+		if res == nil {
+			res = r
+		}else {
+			res = stream.MergeKVS(res, r, limit)
+		}
+	}
+	return res, nil
 }
 
 func (ht *HistoryRoTx) iterateChangedRecentForStep(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx, step uint64) (stream.KV, error) {
@@ -1597,27 +1605,15 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 		panic("not supported yet")
 	}
 
-	stepDbIters, err := ht.iterateChangedRecentBySteps(fromTxNum, toTxNum, asc, limit, roTx)
-	if err != nil {
-		return nil, err
-	}
-	var r stream.KV
-	for _, it := range stepDbIters {
-		if r == nil {
-			r = it.iter
-		} else {
-			r = stream.MergeKVS(r, it.iter, limit)
-		}
-	}
-
 	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit)
 	if err != nil {
 		return nil, err
 	}
-	if itOnFiles != nil {
-		r = stream.MergeKVS(r, itOnFiles, limit)
+	itOnDB, err := ht.iterateChangedRecent(fromTxNum, toTxNum, asc, limit, roTx)
+	if err != nil {
+		return nil, err
 	}
-	return r, nil
+	return stream.MergeKVS(itOnDB, itOnFiles, limit), nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
