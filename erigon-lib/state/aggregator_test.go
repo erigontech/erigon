@@ -22,9 +22,9 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"math"
 	"math/rand"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -980,7 +980,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	db.Close()
 
 	// remove database files
-	require.NoError(t, os.RemoveAll(dirs.Chaindata))
+	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
 	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
@@ -1514,7 +1514,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	for _, fn := range fnames {
 		if strings.Contains(fn, "v1-commitment") {
-			require.NoError(t, os.Remove(fn))
+			require.NoError(t, dir.RemoveFile(fn))
 			t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"math/big"
 	"math/rand"
@@ -198,7 +199,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	for _, d := range dirs {
 		if strings.HasPrefix(d.Name(), "db") {
-			err = os.RemoveAll(path.Join(datadir, d.Name()))
+			err = dir.RemoveAll(path.Join(datadir, d.Name()))
 			t.Logf("remove DB %q err %v", d.Name(), err)
 			require.NoError(t, err)
 			break
@@ -383,7 +384,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	db.Close()
 
 	// ======== delete datadir and restart domains ========
-	err = os.RemoveAll(datadir)
+	err = dir.RemoveAll(datadir)
 	require.NoError(t, err)
 	//t.Logf("datadir has been removed")
 

@@ -189,12 +189,12 @@ func CopyFile(from, to string) error {
 	defer w.Close()
 	if _, err = w.ReadFrom(r); err != nil {
 		w.Close()
-		os.Remove(to)
+		dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	if err = w.Sync(); err != nil {
 		w.Close()
-		os.Remove(to)
+		dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	return nil

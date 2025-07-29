@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -123,7 +123,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 		}
 
 		fPath := filepath.Join(s.d.SnapDir(), name)
-		_ = os.Remove(fPath)
+		_ = dir.RemoveFile(fPath)
 		s.d.torrentFS.Delete(name)
 	}
 	return &emptypb.Empty{}, nil

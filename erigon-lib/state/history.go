@@ -232,7 +232,7 @@ func (h *History) openDirtyFiles() error {
 						// 	h.vAccessorFilePath(fromStep, toStep),
 						// }
 						// for _, fp := range itemPaths {
-						// 	err = os.Remove(fp)
+						// 	err = dir.RemoveFile(fp)
 						// 	if err != nil {
 						// 		h.logger.Warn("[agg] History.openDirtyFiles cannot remove corrupted file", "err", err, "f", fp)
 						// 	}

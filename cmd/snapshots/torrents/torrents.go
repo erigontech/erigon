@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"slices"
@@ -162,7 +163,7 @@ func torrents(cliCtx *cli.Context, command string) error {
 			return err
 		}
 		tempDir = dataDir
-		defer os.RemoveAll(dataDir)
+		defer dir.RemoveAll(dataDir)
 	} else {
 		tempDir = filepath.Join(dataDir, "temp")
 
@@ -391,7 +392,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				return err
 			}
 
-			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
+			defer dir.RemoveFile(filepath.Join(srcSession.LocalFsRoot(), file))
 
 			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
@@ -399,7 +400,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				return err
 			}
 
-			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file+".torrent"))
+			defer dir.RemoveFile(filepath.Join(srcSession.LocalFsRoot(), file+".torrent"))
 
 			return srcSession.Upload(gctx, file+".torrent")
 		})
@@ -484,7 +485,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				return err
 			}
 
-			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
+			defer dir.RemoveFile(filepath.Join(srcSession.LocalFsRoot(), file))
 
 			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
@@ -494,7 +495,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 			torrentPath := filepath.Join(srcSession.LocalFsRoot(), file+".torrent")
 
-			defer os.Remove(torrentPath)
+			defer dir.RemoveFile(torrentPath)
 
 			lmi, err := metainfo.LoadFromFile(torrentPath)
 

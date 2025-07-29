@@ -1669,7 +1669,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 			d.logger.Warn("FileExist error", "file", name, "path", info.Path, "err", err)
 		}
 		if exists {
-			if err := os.Remove(info.Path); err != nil {
+			if err := dir.RemoveFile(info.Path); err != nil {
 				d.logger.Warn("Couldn't remove previous file before download", "file", name, "path", info.Path, "err", err)
 			}
 		}
@@ -1714,7 +1714,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 
 				d.logger.Error("Web download failed", "file", name, "url", peerUrl, "err", err)
 
-				if ferr := os.Remove(info.Path); ferr != nil {
+				if ferr := dir.RemoveFile(info.Path); ferr != nil {
 					d.logger.Warn("Couldn't remove invalid file", "file", name, "path", info.Path, "err", ferr)
 				}
 			}

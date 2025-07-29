@@ -63,7 +63,7 @@ func (tf *AtomicTorrentFS) delete(name string) error {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
-	return os.Remove(filepath.Join(tf.dir, name))
+	return dir.RemoveFile(filepath.Join(tf.dir, name))
 }
 
 func (tf *AtomicTorrentFS) Create(name string, res []byte) (ts *torrent.TorrentSpec, created bool, err error) {
