@@ -387,8 +387,18 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			} else {
 				opstr = op.String()
 			}
+
+			var traceGas uint64
+
+			switch op {
+			case CALL, CALLCODE, DELEGATECALL, STATICCALL:
+				traceGas = operation.constantGas
+			default:
+				traceGas = cost
+			}
+
 			fmt.Printf("%d (%d.%d) %5d %5d %s\n",
-				in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, operation.constantGas, opstr)
+				in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, traceGas, opstr)
 		}
 
 		// execute the operation
