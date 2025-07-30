@@ -350,7 +350,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				}
 			}
 		}
-		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin))
+		log.Debug("[blobsRecover] recovery done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin))
 	}
 
 	// main loop
