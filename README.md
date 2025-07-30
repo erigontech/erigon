@@ -131,11 +131,15 @@ Running `make help` will list and describe the convenience commands available in
 
 ### Upgrading from 3.0 to 3.1
 
-When running Erigon 3.1+, your snapshot files will be upgraded automatically to a new file naming scheme. It's recommended that you take a backup or filesystem snapshot of your datadir before upgrading.
+It's recommended that you take a backup or filesystem snapshot of your datadir before upgrading.
+
+When running Erigon 3.1, your snapshot files will be renamed automatically to a new file naming scheme.
 
 The downloader component in Erigon 3.1 will check the file data of snapshots when `--downloader.verify` is provided. Incorrect data will be repaired.
 
-A new `snapshots reset` subcommand is added, that lets you trigger Erigon to perform an initial sync on the next run, reusing existing files where possible. Use this if your datadir is corrupted, or your client is unable to obtain missing snapshot data due to having committed to a snapshot that is no longer available. It will remove any locally generated files, and your chain data. 
+A new `snapshots reset` subcommand is added, that lets you trigger Erigon to perform an initial sync on the next run, reusing existing files where possible.
+Do not run this before applying file renaming if you are upgrading from 3.0 as you will lose snapshots that used the old naming scheme.
+Use `snapshots reset` if your datadir is corrupted, or your client is unable to obtain missing snapshot data due to having committed to a snapshot that is no longer available. It will remove any locally generated files, and your chain data.
 
 ### Datadir structure
 
