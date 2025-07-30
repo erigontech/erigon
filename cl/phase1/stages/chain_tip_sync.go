@@ -77,10 +77,14 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	})
 
 	denebBlocks := []*cltypes.SignedBeaconBlock{}
-	fuluBlocks := []*cltypes.SignedBeaconBlock{}
+	fuluBlocks := []*cltypes.SignedBlindedBeaconBlock{}
 	for _, block := range blocks {
+		blindedBlock, err := block.Blinded()
+		if err != nil {
+			return nil, err
+		}
 		if block.Version() >= clparams.FuluVersion {
-			fuluBlocks = append(fuluBlocks, block)
+			fuluBlocks = append(fuluBlocks, blindedBlock)
 		} else if block.Version() >= clparams.DenebVersion {
 			denebBlocks = append(denebBlocks, block)
 		}

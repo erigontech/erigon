@@ -109,10 +109,15 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 }
 
 func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBlockProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (err error) {
-	var denebBlocks, fuluBlocks []*cltypes.SignedBeaconBlock
+	fuluBlocks := []*cltypes.SignedBlindedBeaconBlock{}
+	denebBlocks := []*cltypes.SignedBeaconBlock{}
 	for _, block := range blocks {
-		if block.Version() >= clparams.FuluVersion {
-			fuluBlocks = append(fuluBlocks, block)
+		blindedBlock, err := block.Blinded()
+		if err != nil {
+			return err
+		}
+		if blindedBlock.Version() >= clparams.FuluVersion {
+			fuluBlocks = append(fuluBlocks, blindedBlock)
 		} else if block.Version() >= clparams.DenebVersion {
 			denebBlocks = append(denebBlocks, block)
 		}
@@ -141,7 +146,7 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 	return nil
 }
 
-func canDownloadColumnData(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
+func canDownloadColumnData(blocks []*cltypes.SignedBlindedBeaconBlock, cfg *Cfg) bool {
 	return cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling
 
 	// todo: comment out for now
