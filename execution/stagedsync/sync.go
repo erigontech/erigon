@@ -362,20 +362,21 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 	return nil
 }
 
-// ErrLoopBlockLimitExhausted is used to allow the sync loop to continue when one of the stages has
-// reached the loop block limit and has thrown it.
-type ErrLoopBlockLimitExhausted struct {
-	FromBlock uint64
-	ToBlock   uint64
+// ErrLoopExhausted is used to allow the sync loop to continue when one of the stages has thrown it due to reaching
+// some loop iteration limit.
+type ErrLoopExhausted struct {
+	From   uint64
+	To     uint64
+	Reason string
 }
 
-func (e *ErrLoopBlockLimitExhausted) Error() string {
-	return fmt.Sprintf("loop block limit exhausted: from=%d,to=%d", e.FromBlock, e.ToBlock)
+func (e *ErrLoopExhausted) Error() string {
+	return fmt.Sprintf("loop exhausted: from=%d, to=%d, reason=%s", e.From, e.To, e.Reason)
 }
 
-func (e *ErrLoopBlockLimitExhausted) Is(err error) bool {
-	var errLoopBlockLimitExhausted *ErrLoopBlockLimitExhausted
-	return errors.As(err, &errLoopBlockLimitExhausted)
+func (e *ErrLoopExhausted) Is(err error) bool {
+	var errExhausted *ErrLoopExhausted
+	return errors.As(err, &errExhausted)
 }
 
 func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool) (bool, error) {
@@ -426,7 +427,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 			continue
 		}
 		if err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind); err != nil {
-			if errors.Is(err, &ErrLoopBlockLimitExhausted{}) {
+			if errors.Is(err, &ErrLoopExhausted{}) {
 				// we allow the loop to continue with the current progress and inform the caller
 				// there is more work to be done so that Run is called again
 				hasMore = true
@@ -523,13 +524,9 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialC
 	}
 
 	if err = stage.Forward(badBlockUnwind, stageState, s, txc, s.logger); err != nil {
-		var errLoopBlockLimitExhausted *ErrLoopBlockLimitExhausted
-		if errors.As(err, &errLoopBlockLimitExhausted) {
-			s.logger.Debug(
-				fmt.Sprintf("[%s] sync loop block limit exhausted", s.LogPrefix()),
-				"from", errLoopBlockLimitExhausted.FromBlock,
-				"to", errLoopBlockLimitExhausted.ToBlock,
-			)
+		var errExhausted *ErrLoopExhausted
+		if errors.As(err, &errExhausted) {
+			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)
 		} else {
 			s.logger.Debug(fmt.Sprintf("[%s] error while executing stage", s.LogPrefix()), "err", err)
