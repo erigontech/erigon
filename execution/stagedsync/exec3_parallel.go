@@ -176,8 +176,11 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	if task.IsBlockEnd() || txIndex < 0 {
 		if txTask.Config.IsByzantium(blockNum) {
 			ibs.FinalizeTx(txTask.Config.Rules(blockNum, txTask.BlockTime()), stateWriter)
-			coinbase, _ := stateReader.ReadAccountData(result.Coinbase)
-			fmt.Println(txTask.BlockNumber(), "coinbase:", result.Coinbase, "balance:", &coinbase.Balance)
+			if task.IsBlockEnd() {
+				coinbase := result.Task.(*exec.TxTask).EvmBlockContext.Coinbase
+				data, _ := stateReader.ReadAccountData(coinbase)
+				fmt.Println(txTask.BlockNumber(), "coinbase:", coinbase, "balance:", &data.Balance)
+			}
 		}
 		return nil, nil
 	}
