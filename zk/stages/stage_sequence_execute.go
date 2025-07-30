@@ -26,10 +26,11 @@ var shouldCheckForExecutionAndDataStreamAlignment = true
 
 type TxYielder interface {
 	YieldNextTransaction() (types.Transaction, uint8, bool)
-	RemoveMinedTransactions(hashes []common.Hash)
 	AddMined(hash common.Hash)
+	Discard(hash common.Hash)
 	SetExecutionDetails(executionAt uint64, forkId uint64)
 	BeginYielding()
+	Cleanup()
 }
 
 func SpawnSequencingStage(
@@ -280,7 +281,6 @@ func sequencingBatchStep(
 
 	// default to using the normal transaction yielder
 	var yielder TxYielder = cfg.txYielder
-	minedTxHashes := make([]common.Hash, 0)
 
 	for blockNumber := executionAt + 1; runLoopBlocks; blockNumber++ {
 		if batchTimedOut {
@@ -409,7 +409,6 @@ func sequencingBatchStep(
 		sendersToTriggerStatechanges := make(map[common.Address]struct{})
 		nonceTooHighSenders := make(map[common.Address][]uint64)
 		yieldedSomething := false
-		badTxHashes := make([]common.Hash, 0)
 		gasUsed := uint64(0)
 
 	OuterLoopTransactions:
@@ -514,7 +513,6 @@ func sequencingBatchStep(
 						log.Warn("[extractTransaction] Failed to recover sender from transaction, skipping and removing from pool",
 							"error", err,
 							"hash", transaction.Hash())
-						badTxHashes = append(badTxHashes, txHash)
 						batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
 						continue
 					}
@@ -564,15 +562,12 @@ func sequencingBatchStep(
 					if errors.Is(err, core.ErrNonceTooLow) {
 						log.Info(fmt.Sprintf("[%s] nonce too low detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
 						sendersToTriggerStatechanges[txSender] = struct{}{}
-						badTxHashes = append(badTxHashes, txHash)
 						continue
 					}
 
 					if errors.Is(err, core.ErrNonceTooHigh) {
 						log.Info(fmt.Sprintf("[%s] nonce too high detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
 						nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
-						sendersToTriggerStatechanges[txSender] = struct{}{}
-						badTxHashes = append(badTxHashes, txHash)
 						continue
 					}
 
@@ -580,8 +575,9 @@ func sequencingBatchStep(
 					// to stop the pool growing and hampering further processing of good transactions here
 					// we mark it for being discarded
 					log.Warn(fmt.Sprintf("[%s] error adding transaction to batch, discarding from pool", logPrefix), "hash", txHash, "err", err)
-					badTxHashes = append(badTxHashes, txHash)
 					batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
+					yielder.Discard(txHash)
+					cfg.txPool.MarkForDiscardFromPendingBest(txHash)
 				}
 
 				switch anyOverflow {
@@ -624,9 +620,6 @@ func sequencingBatchStep(
 								return err
 							}
 							log.Info(fmt.Sprintf("[%s] single transaction %s cannot fit into batch - overflow", logPrefix, txHash), "context", ocs, "times_seen", counter)
-
-							// ensure this transaction is not attempted again in the next block
-							badTxHashes = append(badTxHashes, txHash)
 						} else {
 							batchState.newOverflowTransaction()
 							transactionNotAddedText := fmt.Sprintf("[%s] transaction %s was not included in this batch because it overflowed.", logPrefix, txHash)
@@ -665,7 +658,6 @@ func sequencingBatchStep(
 				if err == nil {
 					blockDataSizeChecker = &backupDataSizeChecker
 					batchState.onAddedTransaction(transaction, receipt, execResult, effectiveGas)
-					minedTxHashes = append(minedTxHashes, txHash)
 					yielder.AddMined(txHash)
 					gasUsed += execResult.UsedGas
 				}
@@ -807,9 +799,7 @@ func sequencingBatchStep(
 		}
 	}
 
-	// notify the yielder that we can remove mined transactions from the queue
-	yielder.RemoveMinedTransactions(minedTxHashes)
-	minedTxHashes = minedTxHashes[:0]
+	yielder.Cleanup()
 
 	/*
 		if adding something below that line we must ensure

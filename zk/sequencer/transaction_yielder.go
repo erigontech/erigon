@@ -118,21 +118,25 @@ func (y *PoolTransactionYielder) YieldNextTransaction() (types.Transaction, uint
 	return tx, effectiveGas, yieldedSomething
 }
 
-func (y *PoolTransactionYielder) RemoveMinedTransactions(hashes []common.Hash) {
+func (y *PoolTransactionYielder) Cleanup() {
 	y.readyMtx.Lock()
 	defer y.readyMtx.Unlock()
 
-	for _, hash := range hashes {
-		y.decodedTxCache.Remove(hash)
-	}
-
-	// ensure we take a fresh view on the pool
 	y.toSkip = make(map[common.Hash]struct{})
 }
 
 func (y *PoolTransactionYielder) AddMined(hash common.Hash) {
+	y.cleanupTx(hash)
+}
+
+func (y *PoolTransactionYielder) Discard(hash common.Hash) {
+	y.cleanupTx(hash)
+}
+
+func (y *PoolTransactionYielder) cleanupTx(hash common.Hash) {
 	y.readyMtx.Lock()
 	defer y.readyMtx.Unlock()
+
 	y.toSkip[hash] = struct{}{}
 
 	// remove the transaction from the readyTransactions slice. this will save burning CPU for the next yielding
@@ -153,6 +157,7 @@ func (y *PoolTransactionYielder) AddMined(hash common.Hash) {
 		y.readyTransactions = y.readyTransactions[foundIdx+1:]
 		delete(y.readyTransactionBytes, hash)
 	}
+	y.decodedTxCache.Remove(hash)
 }
 
 func (y *PoolTransactionYielder) SetExecutionDetails(executionAt, forkId uint64) {
@@ -296,7 +301,7 @@ func (l *LimboTransactionYielder) AddMined(_ common.Hash) {
 	// no need to maintain this
 }
 
-func (l *LimboTransactionYielder) RemoveMinedTransactions(hashes []common.Hash) {
+func (l *LimboTransactionYielder) Discard(hash common.Hash) {
 	// do nothing as we remove transactions immediately after yielding them
 }
 
@@ -306,6 +311,10 @@ func (l *LimboTransactionYielder) SetExecutionDetails(_, _ uint64) {
 
 func (l *LimboTransactionYielder) BeginYielding() {
 	// do nothing
+}
+
+func (l *LimboTransactionYielder) Cleanup() {
+	// LimboTransactionYielder does not maintain any state that needs cleanup
 }
 
 type RecoveryTransactionYielder struct {
@@ -345,7 +354,7 @@ func (d *RecoveryTransactionYielder) AddMined(_ common.Hash) {
 	// no need to maintain this
 }
 
-func (d *RecoveryTransactionYielder) RemoveMinedTransactions(hashes []common.Hash) {
+func (d *RecoveryTransactionYielder) Discard(hash common.Hash) {
 	// do nothing as we remove transactions immediately after yielding them
 }
 
@@ -355,4 +364,8 @@ func (d *RecoveryTransactionYielder) SetExecutionDetails(_, _ uint64) {
 
 func (d *RecoveryTransactionYielder) BeginYielding() {
 	// do nothing
+}
+
+func (d *RecoveryTransactionYielder) Cleanup() {
+	// RecoveryTransactionYielder does not maintain any state that needs cleanup
 }
