@@ -177,7 +177,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		if txTask.Config.IsByzantium(blockNum) {
 			ibs.FinalizeTx(txTask.Config.Rules(blockNum, txTask.BlockTime()), stateWriter)
 			coinbase, _ := stateReader.ReadAccountData(result.Coinbase)
-			fmt.Println(blockNum, "coinbase balance", &coinbase.Balance)
+			fmt.Println(txTask.BlockNumber(), "coinbase:", result.Coinbase, "balance:", &coinbase.Balance)
 		}
 		return nil, nil
 	}
