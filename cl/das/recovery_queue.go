@@ -1,6 +1,7 @@
 package das
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -61,7 +62,7 @@ type fileBasedQueue struct {
 	waitNewRequest chan struct{}
 }
 
-func NewFileBasedQueue(fs afero.Fs) RecoveryQueue {
+func NewFileBasedQueue(ctx context.Context, fs afero.Fs) RecoveryQueue {
 	q := &fileBasedQueue{
 		fs:             fs,
 		takeCh:         make(chan *recoveryRequest, 16),
@@ -69,24 +70,31 @@ func NewFileBasedQueue(fs afero.Fs) RecoveryQueue {
 		ongoing:        make(map[common.Hash]struct{}),
 		waitNewRequest: make(chan struct{}, 1), // logically size 1 is enough
 	}
-	go func() {
-		for {
-			r, err := q.take()
-			if err != nil {
-				log.Error("take", "err", err)
-				continue
-			}
-			if r == nil {
-				// no more requests in cache, wait for new request
-				<-q.waitNewRequest
-				continue
-			}
-			q.takeCh <- r
-		}
-	}()
+	go q.coordinate(ctx)
 	return q
 }
 
+func (q *fileBasedQueue) coordinate(ctx context.Context) {
+	for {
+		r, err := q.takeOne()
+		if err != nil {
+			log.Error("take", "err", err)
+			continue
+		}
+		if r == nil {
+			// no more requests in cache, wait for new request
+			select {
+			case <-ctx.Done():
+				return
+			case <-q.waitNewRequest:
+			}
+			continue
+		}
+		q.takeCh <- r
+	}
+}
+
+// file path: <base>/<slot/10000>/<slot>_<block_root>.ssz
 func (q *fileBasedQueue) Add(r *recoveryRequest) (bool, error) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
@@ -126,7 +134,10 @@ func (q *fileBasedQueue) Add(r *recoveryRequest) (bool, error) {
 	return true, nil
 }
 
-func (q *fileBasedQueue) take() (*recoveryRequest, error) {
+// takeOne takes a request from the cache or file system.
+// if there is no request in cache, it will read from file system.
+// the returned request is put into ongoing map before returning.
+func (q *fileBasedQueue) takeOne() (*recoveryRequest, error) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
 	for q.cacheIndex < len(q.cache) {
@@ -156,9 +167,9 @@ func (q *fileBasedQueue) take() (*recoveryRequest, error) {
 		return slotI < slotJ
 	})
 
-	// put them back to cache
 	q.cache = make([]*recoveryRequest, 0)
 	q.cacheIndex = 0
+	// put them into cache
 loop:
 	for _, dirName := range dirNames {
 		if !dirName.IsDir() {
@@ -206,6 +217,7 @@ loop:
 	}
 
 	if len(q.cache) == 0 {
+		// no more requests
 		return nil, nil
 	}
 	r := q.cache[0]

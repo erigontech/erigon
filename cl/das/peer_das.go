@@ -86,7 +86,7 @@ func NewPeerDas(
 		blobStorage:   blobStorage,
 		sentinel:      sentinel,
 		ethClock:      ethClock,
-		queue:         NewFileBasedQueue(afero.NewBasePathFs(afero.NewOsFs(), blobRecoveryRequestDir)),
+		queue:         NewFileBasedQueue(ctx, afero.NewBasePathFs(afero.NewOsFs(), blobRecoveryRequestDir)),
 	}
 	if beaconConfig.FuluForkEpoch != math.MaxUint64 {
 		go func() {
