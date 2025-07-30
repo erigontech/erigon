@@ -213,22 +213,6 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 				txTask.TraceTos = map[common.Address]struct{}{}
 			}
 
-			printFn := func(mp map[common.Address]struct{}, msg string) {
-				if len(mp) > 0 {
-					fmt.Printf("%s:", msg)
-				}
-				for key, _ := range mp {
-					fmt.Printf("%s,", key)
-				}
-
-				if len(mp) > 0 {
-					fmt.Println()
-				}
-			}
-
-			printFn(txTask.TraceFroms, "tracesfrom")
-			printFn(txTask.TraceTos, "tracesto")
-
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
