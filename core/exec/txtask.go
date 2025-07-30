@@ -166,7 +166,7 @@ func (r *TxResult) createReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		l.BlockHash = receipt.BlockHash
 	}
 	if r.ExecutionResult.Failed() {
-		fmt.Println(r.BlockNumber(), "exec error", r.ExecutionResult.Err)
+		fmt.Printf("%d (%d) exec error: %s", r.BlockNumber(), txIndex, r.ExecutionResult.Err)
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful

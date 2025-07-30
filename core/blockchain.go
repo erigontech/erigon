@@ -415,7 +415,7 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 			}
 			if dbg.LogHashMismatchReason() {
 				if result := logReceipts(receipts, txns, chainConfig, h, logger); len(result) > 0 {
-					logger.Info("marshalled receipts", "result", string(result))
+					logger.Info("marshalled receipts", "block", h.Number.Uint64(), "result", string(result))
 				}
 			}
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
