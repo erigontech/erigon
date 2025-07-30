@@ -91,7 +91,7 @@ func NewPeerDas(
 		go func() {
 			fuluSlot := beaconConfig.FuluForkEpoch * beaconConfig.SlotsPerEpoch
 			fuluClockTime := ethClock.GetSlotTime(fuluSlot)
-			if fuluClockTime.Before(time.Now()) {
+			if fuluClockTime.After(time.Now()) {
 				// wait until the fulu clock time
 				<-time.After(time.Until(fuluClockTime))
 			}
