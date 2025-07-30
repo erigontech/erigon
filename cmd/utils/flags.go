@@ -2092,14 +2092,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 // humans too.
 type RateLimitFlagValue g.Option[rate.Limit]
 
-// Human-readable representation of the rate limit value, or "Inf" if the value is not set.
-func (me RateLimitFlagValue) String() string {
-	if !me.Ok {
-		return "Inf"
-	}
-	return datasize.ByteSize(me.Value).String()
-}
-
 // Converts the parsed rate limit to the type expected by the Downloader torrent configuration.
 func (me RateLimitFlagValue) TorrentRateLimit() g.Option[rate.Limit] {
 	return g.Option[rate.Limit](me)
