@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/zk/hermez_db"
 	"math/big"
+
+	"github.com/erigontech/erigon/zk/hermez_db"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -81,7 +82,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	// check if the price is too low if we are set to reject low gas price transactions
 	if api.RejectLowGasPriceTransactions &&
 		ShouldRejectLowGasPrice(
-			txn.GetPrice().ToBig(),
+			txn.GetFeeCap().ToBig(),
 			api.gasTracker.GetLowestPrice(),
 			api.RejectLowGasPriceTolerance,
 		) {
