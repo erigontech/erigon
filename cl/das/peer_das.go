@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math"
 	"math/rand"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,7 +48,7 @@ const (
 )
 
 var (
-	numOfBlobRecoveryWorkers = runtime.NumCPU() * 2
+	numOfBlobRecoveryWorkers = 4
 )
 
 type peerdas struct {
@@ -324,20 +323,24 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		log.Trace("[blobsRecover] saved blobs", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
 		// remove column sidecars that are not in our custody group
-		custodyColumns, err := d.state.GetMyCustodyColumns()
+		expectedCustodies, err := d.state.GetMyCustodyColumns()
 		if err != nil {
 			log.Warn("[blobsRecover] failed to get my custody columns", "err", err, "slot", slot, "blockRoot", blockRoot)
 			return
 		}
+		toRemoveColumns := []int64{}
 		for _, column := range existingColumns {
-			if _, ok := custodyColumns[column]; !ok {
-				if err := d.columnStorage.RemoveColumnSidecar(ctx, slot, blockRoot, int64(column)); err != nil {
-					log.Warn("[blobsRecover] failed to remove column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", column)
-				}
+			if _, ok := expectedCustodies[column]; !ok {
+				toRemoveColumns = append(toRemoveColumns, int64(column))
+			}
+		}
+		if len(toRemoveColumns) > 0 {
+			if err := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, toRemoveColumns...); err != nil {
+				log.Warn("[blobsRecover] failed to remove column sidecars", "err", err, "slot", slot, "blockRoot", blockRoot, "columns", toRemoveColumns)
 			}
 		}
 		// add custody data column if it doesn't exist
-		for columnIndex := range custodyColumns {
+		for columnIndex := range expectedCustodies {
 			if exist, err := d.columnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex)); err != nil {
 				log.Warn("[blobsRecover] failed to check if column sidecar exists", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
 			} else if !exist {
