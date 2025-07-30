@@ -209,7 +209,7 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
 			}
-			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: BalancePath}]; ok {
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: BalancePath}]; ok && v.Source == WriteSetRead {
 				v.Val = ch.prev
 			}
 		}
@@ -249,7 +249,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
 			}
-			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: BalancePath}]; ok {
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: BalancePath}]; ok && v.Source == WriteSetRead {
 				v.Val = ch.prev
 			}
 		}
@@ -299,7 +299,7 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: NoncePath}]; ok {
 				v.Val = ch.prev
 			}
-			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: NoncePath}]; ok {
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: NoncePath}]; ok && v.Source == WriteSetRead {
 				v.Val = ch.prev
 			}
 		}
@@ -361,8 +361,8 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
 				v.Val = ch.prevalue
 			}
-			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok && v.Source != StorageRead {
-				v.Val = ch.prevalue
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok && v.Source == WriteSetRead {
+				v.Val = ch.p
 			}
 		}
 	}
