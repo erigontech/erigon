@@ -523,8 +523,12 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	defer sd.Close()
 	txc.Doms = sd
 
-	if _, err = mining.Run(nil, txc, false /* firstCycle */, false); err != nil {
+	hasMore, err := mining.Run(nil, txc, false /* firstCycle */, false)
+	if err != nil {
 		return err
+	}
+	if hasMore {
+		return errors.New("unexpected mining step has more work")
 	}
 	return nil
 }
