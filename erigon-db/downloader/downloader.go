@@ -434,7 +434,7 @@ func (d *Downloader) messyLogWrapper() {
 	}
 
 	// Or files==0?
-	if d.logSeeding {
+	if !d.logSeeding {
 		return
 	}
 
