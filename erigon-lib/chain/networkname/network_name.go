@@ -29,7 +29,7 @@ const (
 	BorE2ETestChain2Val = "bor-e2e-test-2Val"
 	Chiado              = "chiado"
 	ArbiturmMainnet     = "arb1"
-	ArbiturmSepolia     = "sepolia-rollup"
+	ArbiturmSepolia     = "arb-sepolia"
 	Test                = "test"
 )
 
