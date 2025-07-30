@@ -361,7 +361,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
 				v.Val = ch.prevalue
 			}
-			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok && v.Source != StorageRead {
 				v.Val = ch.prevalue
 			}
 		}
