@@ -293,7 +293,8 @@ func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
 	return nil
 }
 
-func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
+func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
+	var hasMore bool
 	initialCycle, firstCycle := false, false
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
@@ -306,7 +307,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 					continue
 				}
 				if err := s.unwindStage(initialCycle, s.unwindOrder[j], db, txc); err != nil {
-					return err
+					return false, err
 				}
 			}
 			s.prevUnwindPoint = s.unwindPoint
@@ -316,7 +317,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 			}
 			s.unwindReason = UnwindReason{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-				return err
+				return false, err
 			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1
@@ -327,7 +328,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 
 		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return common.ErrStopped
+			return false, common.ErrStopped
 		}
 
 		if stage.Disabled || stage.Forward == nil {
@@ -337,13 +338,17 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 			continue
 		}
 
-		if err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind); err != nil {
-			return err
+		stageHasMore, err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind)
+		if err != nil {
+			return false, err
+		}
+		if stageHasMore {
+			hasMore = true
 		}
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return common.ErrStopped
+			return false, common.ErrStopped
 		}
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
@@ -355,11 +360,11 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 	}
 
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
+		return false, err
 	}
 
 	s.currentStage = 0
-	return nil
+	return hasMore, nil
 }
 
 // ErrLoopExhausted is used to allow the sync loop to continue when one of the stages has thrown it due to reaching
@@ -426,14 +431,12 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 			s.NextStage()
 			continue
 		}
-		if err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind); err != nil {
-			if errors.Is(err, &ErrLoopExhausted{}) {
-				// we allow the loop to continue with the current progress and inform the caller
-				// there is more work to be done so that Run is called again
-				hasMore = true
-			} else {
-				return false, err
-			}
+		stageHasMore, err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind)
+		if err != nil {
+			return false, err
+		}
+		if stageHasMore {
+			hasMore = true
 		}
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
@@ -515,12 +518,12 @@ func (s *Sync) PrintTimings() []interface{} {
 	return logCtx
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool, badBlockUnwind bool) (err error) {
+func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
 	start := time.Now()
 	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
 	stageState, err := s.StageState(stage.ID, txc.Tx, db, initialCycle, firstCycle)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if err = stage.Forward(badBlockUnwind, stageState, s, txc, s.logger); err != nil {
@@ -528,14 +531,14 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialC
 		if errors.As(err, &errExhausted) {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)
-		} else {
-			s.logger.Debug(fmt.Sprintf("[%s] error while executing stage", s.LogPrefix()), "err", err)
+			return true, nil
 		}
-		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
+		s.logger.Debug(fmt.Sprintf("[%s] error while executing stage", s.LogPrefix()), "err", err)
+		return false, fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
 	s.logRunStageDone(stageState, start)
-	return nil
+	return false, nil
 }
 
 func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {

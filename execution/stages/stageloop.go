@@ -626,12 +626,20 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		}
 		// Run state sync
 		if !test {
-			if err = stateSync.RunNoInterrupt(nil, txc); err != nil {
+			hasMore, err := stateSync.RunNoInterrupt(nil, txc)
+			if err != nil {
 				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
 					return err
 
 				}
 				return err
+			}
+			if hasMore {
+				// should not ever happen since we exec blocks 1 by 1
+				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
+					return err
+				}
+				return errors.New("unexpected state step has more work")
 			}
 		}
 
@@ -646,13 +654,23 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		return err
 	}
 
-	if err = stateSync.RunNoInterrupt(nil, txc); err != nil {
+	hasMore, err := stateSync.RunNoInterrupt(nil, txc)
+	if err != nil {
 		if !test {
 			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
 				return err
 			}
 		}
 		return err
+	}
+	if hasMore {
+		// should not ever happen since we exec blocks 1 by 1
+		if !test {
+			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
+				return err
+			}
+		}
+		return errors.New("unexpected state step has more work")
 	}
 
 	return nil
