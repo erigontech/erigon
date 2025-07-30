@@ -262,7 +262,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		msg := txTask.TxAsMessage
 		txContext := core.NewEVMTxContext(msg)
-		if rw.vmCfg.TraceJumpDest {
+		if vmCfg.TraceJumpDest {
 			txContext.TxHash = txn.Hash()
 		}
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, vmCfg, rules)
