@@ -249,7 +249,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
 			}
-			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: BalancePath}]; ok && v.Source == WriteSetRead {
+			if v, ok := s.versionedReads[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
 			}
 		}
