@@ -843,7 +843,6 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 		id := &cltypes.DataColumnsByRootIdentifier{
 			BlockRoot: blockRoot,
 			Columns:   solid.NewUint64ListSSZ(int(d.beaconConfig.NumberOfColumns)),
-			Slot:      d.blockRootToBeaconBlock[blockRoot].Block.Slot,
 		}
 		for column := range columns {
 			id.Columns.Append(column)
