@@ -251,9 +251,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txContext.TxHash = txn.Hash()
 		}
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, vmCfg, rules)
-		if hooks != nil && hooks.OnTxStart != nil {
-			hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
-		}
+		// if hooks != nil && hooks.OnTxStart != nil {
+		// 	hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
+		// }
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
