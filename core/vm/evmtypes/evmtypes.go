@@ -147,6 +147,7 @@ type IntraBlockState interface {
 
 	RemoveEscrowProtection(addr common.Address)
 	ExpectBalanceBurn(amount *uint256.Int)
+	ExpectBalanceMint(amount *uint256.Int)
 
 	GetNonce(common.Address) (uint64, error)
 	SetNonce(common.Address, uint64) error
