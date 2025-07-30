@@ -17,7 +17,7 @@
 package handlers
 
 import (
-	"encoding/json"
+	"encoding/hex"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -127,7 +127,7 @@ func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 
 func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
 	status := c.hs.Status()
-	bytes, _ := json.Marshal(status)
-	log.Debug("statusV2Handler", "status", string(bytes))
+	log.Debug("statusV2Handler", "forkDigest", hex.EncodeToString(status.ForkDigest[:]), "finalizedRoot", hex.EncodeToString(status.FinalizedRoot[:]),
+		"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]))
 	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }
