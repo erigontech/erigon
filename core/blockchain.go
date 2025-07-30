@@ -403,11 +403,6 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
 	}
 
-	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
-		result := logReceipts(receipts, txns, chainConfig, h, logger)
-		fmt.Println(h.Number.Uint64(), "reciepts", result)
-	}
-
 	if checkReceipts && !alwaysSkipReceiptCheck {
 		for _, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
@@ -432,5 +427,11 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
 		}
 	}
+
+	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
+		result := logReceipts(receipts, txns, chainConfig, h, logger)
+		fmt.Println(h.Number.Uint64(), "reciepts", result)
+	}
+
 	return nil
 }
