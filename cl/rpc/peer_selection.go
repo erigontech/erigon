@@ -57,6 +57,7 @@ func newColumnPeers(
 		peersQueue:    []peerData{},
 		peersIndex:    0,
 	}
+
 	go s.refreshPeers(context.Background())
 	return s
 }
@@ -133,9 +134,6 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				log.Debug("[peerSelector] empty earliest available slot", "peer", pid)
 				continue
 			}
-			/*status := &cltypes.Status{
-				EarliestAvailableSlot: new(uint64),
-			} // TODO: peer is not reliable for now*/
 
 			// get custody indices
 			enodeId := enode.HexID(peer.EnodeId)
@@ -169,10 +167,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			currentEpoch := c.ethClock.GetCurrentEpoch()
-			if currentEpoch >= c.beaconConfig.FuluForkEpoch {
-				run()
-			}
+			run()
 		}
 	}
 }
@@ -212,7 +207,7 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 		// matching
 		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](req.Len())
 		req.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, length int) bool {
-			/*if item.Slot < peer.earliestAvailableSlot { // TODO: re-enable this. Now peer is not reliable.
+			/*if item.Slot < peer.earliestAvailableSlot { // earlist available slot is not reliable now
 				//log.Debug("skipping peer", "peer", peer.pid, "slot", item.Slot, "earliestAvailableSlot", peer.earliestAvailableSlot)
 				return true
 			}*/

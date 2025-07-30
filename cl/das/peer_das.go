@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,9 +44,12 @@ type PeerDas interface {
 }
 
 const (
-	numOfBlobRecoveryWorkers      = 8
 	maxNumberOfCellsPerRequest    = 4096 // 4096*2KB = 8MB
-	maxConcurrentDownloadRequests = 24
+	maxConcurrentDownloadRequests = 16
+)
+
+var (
+	numOfBlobRecoveryWorkers = runtime.NumCPU() * 2
 )
 
 type peerdas struct {
@@ -287,15 +291,6 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			ckzgBlob := ckzg.Blob(blob)
 			// kzg commitment
 			copy(kzgCommitment[:], anyColumnSidecar.KzgCommitments.Get(blobIndex)[:])
-			//genCommitment, err := ckzg.BlobToKZGCommitment(&ckzgBlob)
-			//if err != nil {
-			//	log.Warn("[blobsRecover] failed to convert blob to kzg commitment", "err", err, "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
-			//}
-			//if !bytes.Equal(kzgCommitment[:], genCommitment[:]) {
-			//	log.Warn("[blobsRecover] invalid kzg commitment", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
-			//}
-			// kzg proof
-			//copy(kzgCommitment[:], genCommitment[:])
 			proof, err := ckzg.ComputeBlobKZGProof(&ckzgBlob, ckzg.Bytes48(kzgCommitment))
 			if err != nil {
 				log.Warn("[blobsRecover] failed to compute blob kzg proof", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
@@ -458,11 +453,16 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*clty
 		return err
 	}
 	requests := req.splitRequest(maxNumberOfCellsPerRequest)
+	sem := semaphore.NewWeighted(maxConcurrentDownloadRequests)
 	wg := sync.WaitGroup{}
 	for _, req := range requests {
 		wg.Add(1)
+		sem.Acquire(context.Background(), 1)
 		go func(req *downloadRequest) {
-			defer wg.Done()
+			defer func() {
+				sem.Release(1)
+				wg.Done()
+			}()
 			if err := d.runDownload(ctx, req, false); err != nil {
 				log.Warn("failed to download columns", "err", err)
 			}
@@ -512,15 +512,15 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	}
 
 	// split the request into multiple requests to avoid overwhelming the peer
-	semConcurrentDownload := semaphore.NewWeighted(maxConcurrentDownloadRequests)
+	sem := semaphore.NewWeighted(maxConcurrentDownloadRequests)
 	wg := sync.WaitGroup{}
 	requests := req.splitRequest(maxNumberOfCellsPerRequest)
 	for _, request := range requests {
 		wg.Add(1)
-		semConcurrentDownload.Acquire(context.Background(), 1)
+		sem.Acquire(context.Background(), 1)
 		go func(req *downloadRequest) {
 			defer func() {
-				semConcurrentDownload.Release(1)
+				sem.Release(1)
 				wg.Done()
 			}()
 			if err := d.runDownload(ctx, req, true); err != nil {
@@ -762,6 +762,8 @@ func initializeDownloadRequest(
 	}, nil
 }
 
+// splitRequest splits the download request into multiple smaller requests by counting the number of cells in the request
+// and the limit is the maximum number of cells per request
 func (d *downloadRequest) splitRequest(limit int) []*downloadRequest {
 	requests := []*downloadRequest{}
 	curTable := make(map[common.Hash]map[uint64]bool)

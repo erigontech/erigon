@@ -1,9 +1,6 @@
 package handlers
 
 import (
-	"bytes"
-	"encoding/hex"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -113,17 +110,8 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	}
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(c.beaconConfig.MaxRequestBlocksDeneb))
-	raw, err := ssz_snappy.DecodeAndReadNoForkDigestRaw(s, clparams.FuluVersion, req)
-	if err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.FuluVersion); err != nil {
 		return err
-	}
-	myraw, err := req.EncodeSSZ(nil)
-	if err != nil {
-		return err
-	}
-
-	if !bytes.Equal(raw, myraw) {
-		log.Debug("raw and myraw are not equal", "raw", hex.EncodeToString(raw), "myraw", hex.EncodeToString(myraw))
 	}
 
 	curSlot := c.ethClock.GetCurrentSlot()
