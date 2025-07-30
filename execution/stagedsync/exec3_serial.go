@@ -2,14 +2,12 @@ package stagedsync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -19,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
-	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
@@ -297,15 +294,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 
 		if task.IsBlockEnd() {
-			if dbg.TraceBlock(txTask.BlockNumber()) {
-				var receipts []map[string]interface{}
-				for i, receipt := range blockReceipts {
-					txn := txTask.Txs[i]
-					receipts = append(receipts, ethutils.MarshalReceipt(receipt, txn, se.cfg.chainConfig, txTask.Header, txn.Hash(), true))
-				}
-				marshalled, _ := json.Marshal(receipts)
-				fmt.Println(txTask.BlockNumber(), "receipts", string(marshalled))
-			}
 			se.executedGas.Add(int64(se.gasUsed))
 			se.gasUsed = 0
 			se.blobGasUsed = 0

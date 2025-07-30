@@ -228,17 +228,17 @@ func ExecuteBlockEphemerally(
 	return execRs, nil
 }
 
-func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
+func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) string {
 	if len(receipts) == 0 {
 		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
-		return
+		return ""
 	}
 
 	// note we do not return errors from this func since this is a debug-only
 	// informative feature that is best-effort and should not interfere with execution
 	if len(receipts) != len(txns) {
 		logger.Error("receipts and txns sizes differ", "receiptsLen", receipts.Len(), "txnsLen", txns.Len())
-		return
+		return ""
 	}
 
 	marshalled := make([]map[string]interface{}, 0, len(receipts))
@@ -250,10 +250,10 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 	result, err := json.Marshal(marshalled)
 	if err != nil {
 		logger.Error("marshalling error when logging receipts", "err", err)
-		return
+		return ""
 	}
 
-	logger.Info("marshalled receipts", "result", string(result))
+	return string(result)
 }
 
 func rlpHash(x interface{}) (h common.Hash) {
@@ -404,7 +404,8 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 	}
 
 	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
-		logReceipts(receipts, txns, chainConfig, h, logger)
+		result := logReceipts(receipts, txns, chainConfig, h, logger)
+		fmt.Println(h.Number.Uint64(), "reciepts", result)
 	}
 
 	if checkReceipts && !alwaysSkipReceiptCheck {
@@ -418,7 +419,9 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 				return nil
 			}
 			if dbg.LogHashMismatchReason() {
-				logReceipts(receipts, txns, chainConfig, h, logger)
+				if result := logReceipts(receipts, txns, chainConfig, h, logger); len(result) > 0 {
+					logger.Info("marshalled receipts", "result", string(result))
+				}
 			}
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
