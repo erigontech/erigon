@@ -78,7 +78,7 @@ func (q *fileBasedQueue) coordinate(ctx context.Context) {
 	for {
 		r, err := q.takeOne()
 		if err != nil {
-			log.Error("take", "err", err)
+			log.Warn("failed to take a request", "err", err)
 			continue
 		}
 		if r == nil {
@@ -200,11 +200,15 @@ loop:
 			}
 			fileData, err := afero.ReadFile(q.fs, fmt.Sprintf("%s/%s", dirPath, file.Name()))
 			if err != nil {
-				return nil, err
+				// Log the error but continue processing other files
+				log.Warn("failed to read file", "file", file.Name(), "err", err)
+				continue
 			}
 			r := &recoveryRequest{}
 			if err := r.UnmarshalSSZ(fileData); err != nil {
-				return nil, err
+				// Log the error but continue processing other files
+				log.Warn("failed to unmarshal file", "file", file.Name(), "err", err)
+				continue
 			}
 			if _, ok := q.ongoing[r.blockRoot]; !ok {
 				// skip if which is already taken
