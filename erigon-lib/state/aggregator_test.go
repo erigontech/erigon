@@ -1569,7 +1569,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	tx.Rollback()
 
 	// delete merged code history file
-	codeMergedFile := filepath.Join(agg.dirs.SnapHistory, "v1.0-code.0-2.v")
+	codeMergedFile := filepath.Join(agg.dirs.SnapHistory, "v1.1-code.0-2.v")
 	exist, err := dir.FileExist(codeMergedFile)
 	require.NoError(t, err)
 	require.True(t, exist)
