@@ -157,10 +157,6 @@ func (d *peerdas) isMyColumnDataAvailable(blockRoot common.Hash) (bool, error) {
 }
 
 func (d *peerdas) resubscribeGossip() {
-	if d.ethClock.GetCurrentEpoch() < d.beaconConfig.FuluForkEpoch {
-		return
-	}
-
 	if d.IsArchivedMode() {
 		// subscribe to all subnets
 		for subnet := range d.beaconConfig.DataColumnSidecarSubnetCount {

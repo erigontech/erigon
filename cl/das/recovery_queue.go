@@ -38,7 +38,7 @@ func (r *recoveryRequest) UnmarshalSSZ(data []byte) error {
 func (r recoveryRequest) Filepath() (string, string) {
 	// path: <base>/recovery_queue/<slot/10000>/<slot>_<block_root>.ssz
 	subdir := r.slot / 10000
-	dir := fmt.Sprintf("%d", subdir)
+	dir := strconv.FormatUint(subdir, 10)
 	filepath := fmt.Sprintf("%s/%d_%s.ssz", dir, r.slot, r.blockRoot.Hex())
 	return dir, filepath
 }
