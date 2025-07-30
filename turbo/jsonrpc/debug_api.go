@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/common/changeset"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -49,6 +50,7 @@ type PrivateDebugAPI interface {
 	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
 	TraceTransactionCounters(ctx context.Context, hash common.Hash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error
 	TraceBatchByNumber(ctx context.Context, number rpc.BlockNumber, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error
+	GetPerformanceStats(ctx context.Context, startBlock *rpc.BlockNumber, endBlock *rpc.BlockNumber) (*PerformanceStats, error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -374,6 +376,23 @@ type AccountResult struct {
 	CodeHash common.Hash      `json:"codeHash"`
 }
 
+// PerformanceStats represents performance statistics for a block range
+type PerformanceStats struct {
+	MaxTPS               float64 `json:"maxTPS"`
+	MaxMGasPerSecond     float64 `json:"maxMGasPerSecond"`
+	AverageTPS           float64 `json:"averageTPS,omitempty"`
+	AverageMGasPerSecond float64 `json:"averageMGasPerSecond,omitempty"`
+	MedianTPS            float64 `json:"medianTPS,omitempty"`
+	MedianMGasPerSecond  float64 `json:"medianMGasPerSecond,omitempty"`
+	BlockRange           struct {
+		Start uint64 `json:"start"`
+		End   uint64 `json:"end"`
+	} `json:"blockRange"`
+	TotalBlocks       uint64 `json:"totalBlocks"`
+	TotalTransactions uint64 `json:"totalTransactions"`
+	TotalGasUsed      uint64 `json:"totalGasUsed"`
+}
+
 func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -491,4 +510,176 @@ func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]
 	}
 
 	return results, nil
+}
+
+// GetPerformanceStats implements debug_getPerformanceStats. Returns performance statistics for a block range.
+func (api *PrivateDebugAPIImpl) GetPerformanceStats(ctx context.Context, startBlock *rpc.BlockNumber, endBlock *rpc.BlockNumber) (*PerformanceStats, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// Determine the block range
+	var start, end uint64
+
+	// Get the latest block number - always use Execution stage for more up-to-date results
+	latestBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest block: %w", err)
+	}
+
+	// Set start block
+	if startBlock == nil {
+		start = 0 // Start from genesis
+	} else {
+		if *startBlock == rpc.LatestBlockNumber {
+			start = latestBlock
+		} else if *startBlock == rpc.EarliestBlockNumber {
+			start = 0
+		} else if *startBlock < 0 {
+			return nil, fmt.Errorf("invalid start block number: %d", *startBlock)
+		} else {
+			start = uint64(*startBlock)
+		}
+	}
+
+	// Set end block
+	if endBlock == nil {
+		end = latestBlock // End at latest
+	} else {
+		if *endBlock == rpc.LatestBlockNumber {
+			end = latestBlock
+		} else if *endBlock == rpc.EarliestBlockNumber {
+			end = 0
+		} else if *endBlock < 0 {
+			return nil, fmt.Errorf("invalid end block number: %d", *endBlock)
+		} else {
+			end = uint64(*endBlock)
+		}
+	}
+
+	// Validate range
+	if start > end {
+		return nil, fmt.Errorf("start block (%d) cannot be greater than end block (%d)", start, end)
+	}
+	if end > latestBlock {
+		return nil, fmt.Errorf("end block (%d) cannot be greater than latest block (%d)", end, latestBlock)
+	}
+
+	// Initialize statistics
+	stats := &PerformanceStats{
+		BlockRange: struct {
+			Start uint64 `json:"start"`
+			End   uint64 `json:"end"`
+		}{
+			Start: start,
+			End:   end,
+		},
+	}
+
+	var tpsValues []float64
+	var mgasValues []float64
+	var prevBlock *types.Block
+	var prevTime uint64
+
+	// Iterate through blocks
+	for blockNum := start; blockNum <= end; blockNum++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read block %d: %w", blockNum, err)
+		}
+		if block == nil {
+			continue // Skip missing blocks
+		}
+
+		// Collect basic stats
+		stats.TotalBlocks++
+		stats.TotalTransactions += uint64(block.Transactions().Len())
+		stats.TotalGasUsed += block.GasUsed()
+
+		// Calculate TPS and MGas/s between consecutive blocks
+		if prevBlock != nil {
+			timeDiff := block.Time() - prevTime
+			if timeDiff > 0 {
+				txCount := block.Transactions().Len()
+				gasUsed := block.GasUsed()
+
+				tps := float64(txCount) / float64(timeDiff)
+				mgasPerSecond := float64(gasUsed) / 1_000_000 / float64(timeDiff)
+
+				tpsValues = append(tpsValues, tps)
+				mgasValues = append(mgasValues, mgasPerSecond)
+
+				// Update max values
+				if tps > stats.MaxTPS {
+					stats.MaxTPS = tps
+				}
+				if mgasPerSecond > stats.MaxMGasPerSecond {
+					stats.MaxMGasPerSecond = mgasPerSecond
+				}
+			}
+		}
+
+		prevBlock = block
+		prevTime = block.Time()
+	}
+
+	// Calculate averages and medians if we have data
+	if len(tpsValues) > 0 {
+		stats.AverageTPS = calculateAverage(tpsValues)
+		stats.AverageMGasPerSecond = calculateAverage(mgasValues)
+		stats.MedianTPS = calculateMedian(tpsValues)
+		stats.MedianMGasPerSecond = calculateMedian(mgasValues)
+	}
+
+	return stats, nil
+}
+
+// calculateAverage calculates the average of a slice of float64 values
+func calculateAverage(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, v := range values {
+		sum += v
+	}
+	return sum / float64(len(values))
+}
+
+// calculateMedian calculates the median of a slice of float64 values
+func calculateMedian(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+
+	// Create a copy to avoid modifying the original slice
+	sorted := make([]float64, len(values))
+	copy(sorted, values)
+
+	// Sort the values
+	for i := 0; i < len(sorted)-1; i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			if sorted[i] > sorted[j] {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+
+	// Calculate median
+	n := len(sorted)
+	if n%2 == 0 {
+		// Even number of elements
+		return (sorted[n/2-1] + sorted[n/2]) / 2
+	} else {
+		// Odd number of elements
+		return sorted[n/2]
+	}
 }

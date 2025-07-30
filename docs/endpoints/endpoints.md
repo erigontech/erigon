@@ -39,6 +39,7 @@ If the endpoint is not in the list below, it means this specific endpoint is not
 - debug_getBadBlocks
 - debug_getModifiedAccountsByHash
 - debug_getModifiedAccountsByNumber
+- debug_getPerformanceStats
 - debug_getRawBlock
 - debug_getRawHeader
 - debug_getRawReceipts

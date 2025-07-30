@@ -579,3 +579,53 @@ func TestGetBadBlocks(t *testing.T) {
 	require.Equal(data[2]["hash"], hash2)
 	require.Equal(data[3]["hash"], hash1)
 }
+
+func TestGetPerformanceStats(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000)
+	ctx := context.Background()
+
+	require := require.New(t)
+
+	// Test with nil parameters (entire chain)
+	stats, err := api.GetPerformanceStats(ctx, nil, nil)
+	require.NoError(err)
+	require.NotNil(stats)
+	require.GreaterOrEqual(stats.TotalBlocks, uint64(0))
+	require.GreaterOrEqual(stats.TotalTransactions, uint64(0))
+	require.GreaterOrEqual(stats.TotalGasUsed, uint64(0))
+	require.GreaterOrEqual(stats.MaxTPS, float64(0))
+	require.GreaterOrEqual(stats.MaxMGasPerSecond, float64(0))
+
+	// Test with specific block range
+	startBlock := rpc.BlockNumber(0)
+	endBlock := rpc.BlockNumber(5)
+	stats, err = api.GetPerformanceStats(ctx, &startBlock, &endBlock)
+	require.NoError(err)
+	require.NotNil(stats)
+	require.Equal(uint64(0), stats.BlockRange.Start)
+	require.Equal(uint64(5), stats.BlockRange.End)
+	require.GreaterOrEqual(stats.TotalBlocks, uint64(0))
+
+	// Test with invalid range (start > end)
+	startBlock = rpc.BlockNumber(10)
+	endBlock = rpc.BlockNumber(5)
+	_, err = api.GetPerformanceStats(ctx, &startBlock, &endBlock)
+	require.Error(err)
+	require.Contains(err.Error(), "start block (10) cannot be greater than end block (5)")
+
+	// Test with latest block
+	latestBlock := rpc.LatestBlockNumber
+	stats, err = api.GetPerformanceStats(ctx, &latestBlock, &latestBlock)
+	require.NoError(err)
+	require.NotNil(stats)
+	require.Equal(stats.BlockRange.Start, stats.BlockRange.End)
+
+	// Test with earliest block
+	earliestBlock := rpc.EarliestBlockNumber
+	stats, err = api.GetPerformanceStats(ctx, &earliestBlock, &earliestBlock)
+	require.NoError(err)
+	require.NotNil(stats)
+	require.Equal(uint64(0), stats.BlockRange.Start)
+	require.Equal(uint64(0), stats.BlockRange.End)
+}
