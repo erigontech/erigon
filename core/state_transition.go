@@ -418,6 +418,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
+	fmt.Printf("TRANSITION_DB: %d\n", st.state.BlockNumber())
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -596,9 +597,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 	}
 
-	if st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
-		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
-	}
+	// if st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
+	fmt.Printf("GAS_CHECK: %d (%d,%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d , baseFee=%d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, &burnAmount, st.gasPrice, st.gasUsed(), st.evm.Context.BaseFee.Uint64())
+	fmt.Printf("RULES %+v\n", rules)
+	// }
 
 	result = &evmtypes.ExecutionResult{
 		GasUsed:             st.gasUsed(),
