@@ -409,6 +409,10 @@ func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
+func (sdb *IntraBlockState) BlockNumber() uint64 {
+	return sdb.blockNum
+}
+
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr common.Address) ([]byte, error) {
 	if sdb.versionMap == nil {

@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -436,7 +437,10 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 
 	head.Root = root
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+	block := types.NewBlock(head, nil, nil, nil, withdrawals)
+	b, _ := json.MarshalIndent(block.HeaderNoCopy(), "", "  ")
+	fmt.Println(string(b))
+	return block, statedb, nil
 }
 
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.
@@ -505,6 +509,15 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		} else {
 			head.RequestsHash = &empty.RequestsHash
 		}
+	}
+
+	fmt.Printf("g.Config=%v , g.Config.Bor=%v\n", g.Config, g.Config.Bor)
+	if g.Config != nil && g.Config.Bor != nil {
+		withdrawals = []*types.Withdrawal{}
+		head.BlobGasUsed = new(uint64)
+		head.ExcessBlobGas = new(uint64)
+		emptyHash := common.HexToHash("0x0")
+		head.ParentBeaconBlockRoot = &emptyHash
 	}
 
 	return

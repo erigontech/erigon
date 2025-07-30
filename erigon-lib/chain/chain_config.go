@@ -191,35 +191,35 @@ func timestampToTime(unixTime *big.Int) *time.Time {
 	return &t
 }
 
-func (c *Config) String() string {
-	engine := c.getEngine()
+// func (c *Config) String() string {
+// 	engine := c.getEngine()
 
-	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Engine: %v}",
-			c.ChainID,
-			c.Bor.GetAgraBlock(),
-			c.Bor.GetNapoliBlock(),
-			c.Bor.GetAhmedabadBlock(),
-			c.Bor.GetBhilaiBlock(),
-			engine,
-		)
-	}
+// 	if c.Bor != nil {
+// 		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Engine: %v}",
+// 			c.ChainID,
+// 			c.Bor.GetAgraBlock(),
+// 			c.Bor.GetNapoliBlock(),
+// 			c.Bor.GetAhmedabadBlock(),
+// 			c.Bor.GetBhilaiBlock(),
+// 			engine,
+// 		)
+// 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
-		c.ChainID,
-		c.TerminalTotalDifficulty,
-		timestampToTime(c.ShanghaiTime),
-		timestampToTime(c.CancunTime),
-		timestampToTime(c.PragueTime),
-		timestampToTime(c.OsakaTime),
-		timestampToTime(c.Bpo1Time),
-		timestampToTime(c.Bpo2Time),
-		timestampToTime(c.Bpo3Time),
-		timestampToTime(c.Bpo4Time),
-		timestampToTime(c.Bpo5Time),
-		engine,
-	)
-}
+// 	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
+// 		c.ChainID,
+// 		c.TerminalTotalDifficulty,
+// 		timestampToTime(c.ShanghaiTime),
+// 		timestampToTime(c.CancunTime),
+// 		timestampToTime(c.PragueTime),
+// 		timestampToTime(c.OsakaTime),
+// 		timestampToTime(c.Bpo1Time),
+// 		timestampToTime(c.Bpo2Time),
+// 		timestampToTime(c.Bpo3Time),
+// 		timestampToTime(c.Bpo4Time),
+// 		timestampToTime(c.Bpo5Time),
+// 		engine,
+// 	)
+// }
 
 func (c *Config) getEngine() string {
 	switch {
