@@ -790,7 +790,7 @@ Loop:
 			}
 		}
 
-		if blockNum-startBlockNum+1 >= uint64(cfg.syncCfg.LoopBlockLimit) {
+		if cfg.syncCfg.LoopBlockLimit > 0 && blockNum-startBlockNum+1 >= uint64(cfg.syncCfg.LoopBlockLimit) {
 			loopBlockLimitExhausted = true
 			break
 		}
