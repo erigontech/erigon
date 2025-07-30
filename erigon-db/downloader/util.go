@@ -326,13 +326,15 @@ func (d *Downloader) addTorrentSpec(
 	name string,
 ) (t *torrent.Torrent, first bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
-	ts.Trackers = Trackers
+	ts.Trackers = nil // to reduce mutex contention - see `afterAdd`
 	ts.Webseeds = nil
+	ts.DisallowDataDownload = true
+	ts.DisallowDataUpload = true
 	// I wonder how this should be handled for AddNewSeedableFile. What if there's bad piece
 	// completion data? We might want to clobber any piece completion and force the client to accept
 	// what we provide, assuming we trust our own metainfo generation more.
 	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
-	ts.DisableInitialPieceCheck = d.cfg.ManualDataVerification
+	ts.DisableInitialPieceCheck = !d.cfg.ManualDataVerification
 	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
 	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
 	t, first, err = d.torrentClient.AddTorrentSpec(ts)
@@ -342,8 +344,17 @@ func (d *Downloader) addTorrentSpec(
 	g.MakeMapIfNil(&d.torrentsByName)
 	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
 	panicif.Eq(first, hadOld)
-	t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
 	return
+}
+
+func (d *Downloader) afterAdd() {
+	for _, t := range d.torrentClient.Torrents() {
+		// add webseed first - otherwise opts will be ignored
+		t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
+		t.AddTrackers(Trackers)
+		t.AllowDataDownload()
+		t.AllowDataUpload()
+	}
 }
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {

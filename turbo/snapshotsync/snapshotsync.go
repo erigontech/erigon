@@ -215,19 +215,38 @@ type blockReader interface {
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
-func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, maxStateStep uint64, historyPruneTo uint64) (minBlockToDownload uint64, minStateStepToDownload uint64, err error) {
+func getMinimumBlocksToDownload(
+	ctx context.Context,
+	blockReader blockReader,
+	maxStateStep uint64,
+	historyPruneTo uint64,
+) (minBlockToDownload uint64, minStateStepToDownload uint64, err error) {
+	started := time.Now()
+	var iterations int64
+	defer func() {
+		log.Debug("getMinimumBlocksToDownload finished",
+			"timeTaken", time.Since(started),
+			"iterations", iterations,
+			"err", err)
+	}()
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
 	minStateStepToDownload = uint64(math.MaxUint32)
 	stateTxNum := maxStateStep * config3.DefaultStepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+		if iterations%1e6 == 0 {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
+		}
+		iterations++
 		if blockNum == historyPruneTo {
 			minStateStepToDownload = (baseTxNum - (config3.DefaultStepSize - 1)) / config3.DefaultStepSize
 			if baseTxNum < (config3.DefaultStepSize - 1) {
 				minStateStepToDownload = 0
 			}
 		}
-		if stateTxNum <= baseTxNum { // only cosnider the block if it
+		if stateTxNum <= baseTxNum { // only consider the block if it
 			return nil
 		}
 		newMinToDownload := uint64(0)
@@ -375,7 +394,7 @@ func SyncSnapshots(
 		if err != nil {
 			return err
 		}
-		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, maxStateStep, historyPrune)
+		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune)
 		if err != nil {
 			return err
 		}

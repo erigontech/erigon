@@ -731,7 +731,9 @@ Loop:
 
 				aggregatorRo := state2.AggTx(executor.tx())
 
-				needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
+				isBatchFull := executor.readState().SizeEstimate() >= commitThreshold
+
+				needCalcRoot := isBatchFull ||
 					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 					aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 				if !needCalcRoot {
