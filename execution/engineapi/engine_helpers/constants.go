@@ -20,6 +20,7 @@ import "github.com/erigontech/erigon/rpc"
 
 const MaxBuilders = 128
 const INVALID_INCLUSION_LIST = "INVALID_INCLUSION_LIST"
+const MaxBytesPerInclusionList = 8192
 
 var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
 var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}

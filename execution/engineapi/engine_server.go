@@ -61,6 +61,11 @@ import (
 var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
 var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
 
+type inclusionListItem struct {
+	parentHash    common.Hash
+	inclusionList engine_types.InclusionList
+}
+
 type EngineServer struct {
 	hd              *headerdownload.HeaderDownload
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
@@ -68,15 +73,16 @@ type EngineServer struct {
 	// Block proposing for proof-of-stake
 	proposing bool
 	// Block consuming for proof-of-stake
-	consuming        atomic.Bool
-	test             bool
-	caplin           bool // we need to send errors for caplin.
-	executionService execution.ExecutionClient
-	txpool           txpool.TxpoolClient // needed for getBlobs
-
-	chainRW eth1_chain_reader.ChainReaderWriterEth1
-	lock    sync.Mutex
-	logger  log.Logger
+	consuming              atomic.Bool
+	test                   bool
+	caplin                 bool // we need to send errors for caplin.
+	executionService       execution.ExecutionClient
+	txpool                 txpool.TxpoolClient // needed for getBlobs
+	inclusionListItems     []*inclusionListItem
+	inclusionListItemsLock sync.RWMutex
+	chainRW                eth1_chain_reader.ChainReaderWriterEth1
+	lock                   sync.Mutex
+	logger                 log.Logger
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	// TODO Remove this on next release
@@ -84,22 +90,24 @@ type EngineServer struct {
 }
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
+const maxInclusionLists = 8
 
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
-		logger:            logger,
-		config:            config,
-		executionService:  executionService,
-		blockDownloader:   blockDownloader,
-		chainRW:           chainRW,
-		proposing:         proposing,
-		hd:                hd,
-		caplin:            caplin,
-		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
-		printPectraBanner: true,
+		logger:             logger,
+		config:             config,
+		executionService:   executionService,
+		blockDownloader:    blockDownloader,
+		inclusionListItems: make([]*inclusionListItem, maxInclusionLists),
+		chainRW:            chainRW,
+		proposing:          proposing,
+		hd:                 hd,
+		caplin:             caplin,
+		engineLogSpamer:    engine_logs_spammer.NewEngineLogsSpammer(logger, config),
+		printPectraBanner:  true,
 	}
 
 	srv.consuming.Store(consuming)

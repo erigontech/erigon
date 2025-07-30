@@ -334,6 +334,6 @@ func ConvertInclusionListToTransactions(inclusionList InclusionList) (types.Tran
 	return txs, nil
 }
 
-func CovertTransactionstoInclusionList(txs types.Transactions) (InclusionList, error) {
+func ConvertTransactionstoInclusionList(txs types.Transactions) (InclusionList, error) {
 	return types.MarshalTransactionsBinary(txs)
 }

@@ -22,9 +22,12 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/params"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var ourCapabilities = []string{
@@ -218,4 +221,62 @@ func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash)
 		return ret, err
 	}
 	return nil, err
+}
+
+func (e *EngineServer) GetInclusionListV1(ctx context.Context, parentHash common.Hash) (engine_types.InclusionList, error) {
+	if inclusionList := e.getInclusionList(parentHash); inclusionList != nil {
+		return inclusionList, nil
+	}
+
+	res, err := e.txpool.Pending(ctx, &emptypb.Empty{})
+	if err != nil {
+		return nil, err
+	}
+
+	var transactions types.Transactions
+	inclusionListSize := 0
+	for _, replyTx := range res.Txs {
+		rlpTx := replyTx.GetRlpTx()
+		tx, err := types.DecodeTransaction(rlpTx)
+		if err != nil {
+			continue
+		}
+
+		if tx.Type() == types.BlobTxType {
+			continue
+		}
+
+		if inclusionListSize+len(rlpTx) > engine_helpers.MaxBytesPerInclusionList {
+			continue
+		}
+		transactions = append(transactions, tx)
+	}
+
+	return engine_types.ConvertTransactionstoInclusionList(transactions)
+}
+
+func (e *EngineServer) addInclusionList(parentHash common.Hash, inclusionList engine_types.InclusionList) {
+	e.inclusionListItemsLock.Lock()
+	defer e.inclusionListItemsLock.Unlock()
+
+	copy(e.inclusionListItems[1:], e.inclusionListItems)
+	e.inclusionListItems[0] = &inclusionListItem{
+		parentHash,
+		inclusionList,
+	}
+}
+
+func (e *EngineServer) getInclusionList(parentHash common.Hash) engine_types.InclusionList {
+	e.inclusionListItemsLock.Lock()
+	defer e.inclusionListItemsLock.Unlock()
+
+	for _, item := range e.inclusionListItems {
+		if item == nil {
+			return nil
+		}
+		if item.parentHash == parentHash {
+			return item.inclusionList
+		}
+	}
+	return nil
 }
