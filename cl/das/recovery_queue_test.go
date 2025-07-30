@@ -563,6 +563,8 @@ func TestFileBasedQueue_CrossDirectorySorting(t *testing.T) {
 		{slot: 3000, blockRoot: common.Hash{0}},  // dir 0
 	}
 
+	// Add first request
+	queue.Add(&recoveryRequest{slot: 1, blockRoot: common.Hash{6}}) // this one is taken and stuck in queue
 	for _, req := range reqs {
 		added, err := queue.Add(req)
 		require.NoError(t, err)
@@ -570,7 +572,7 @@ func TestFileBasedQueue_CrossDirectorySorting(t *testing.T) {
 	}
 
 	// Take requests and verify they come in ascending order by slot
-	expectedSlots := []uint64{3000, 5000, 12000, 15000, 25000}
+	expectedSlots := []uint64{1, 3000, 5000, 12000, 15000, 25000}
 	for i, expectedSlot := range expectedSlots {
 		select {
 		case takenReq := <-queue.Take():

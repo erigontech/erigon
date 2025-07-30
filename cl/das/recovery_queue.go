@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -65,7 +66,7 @@ type fileBasedQueue struct {
 func NewFileBasedQueue(ctx context.Context, fs afero.Fs) RecoveryQueue {
 	q := &fileBasedQueue{
 		fs:             fs,
-		takeCh:         make(chan *recoveryRequest, 16),
+		takeCh:         make(chan *recoveryRequest), // unbuffered, because we already have cache
 		cache:          make([]*recoveryRequest, 0),
 		ongoing:        make(map[common.Hash]struct{}),
 		waitNewRequest: make(chan struct{}, 1), // logically size 1 is enough
@@ -75,7 +76,17 @@ func NewFileBasedQueue(ctx context.Context, fs afero.Fs) RecoveryQueue {
 }
 
 func (q *fileBasedQueue) coordinate(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 	for {
+		select {
+		case <-ticker.C:
+			count := q.countRequests()
+			log.Debug("remaining recovery requests in queue", "count", count)
+		default:
+		}
+
+		// take a request
 		r, err := q.takeOne()
 		if err != nil {
 			log.Warn("failed to take a request", "err", err)
@@ -92,6 +103,30 @@ func (q *fileBasedQueue) coordinate(ctx context.Context) {
 		}
 		q.takeCh <- r
 	}
+}
+
+func (q *fileBasedQueue) countRequests() int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	count := 0
+	// loop over all files in the base directory
+	dirNames, err := afero.ReadDir(q.fs, ".")
+	if err != nil {
+		return 0
+	}
+	for _, dirName := range dirNames {
+		if !dirName.IsDir() {
+			continue
+		}
+		dirPath := dirName.Name()
+		files, err := afero.ReadDir(q.fs, dirPath)
+		if err != nil {
+			return 0
+		}
+		count += len(files)
+	}
+	return count
 }
 
 // file path: <base>/<slot/10000>/<slot>_<block_root>.ssz
