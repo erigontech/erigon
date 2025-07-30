@@ -183,7 +183,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool) {
+func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluation bool) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -219,7 +219,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
-
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
@@ -248,6 +247,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 
 		rw.callTracer.Reset()
+		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
@@ -259,7 +259,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		if isMining {
 			_, _, err = rw.engine.FinalizeAndAssemble(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, nil, rw.logger)
 		} else {
-			_, err = rw.engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
+			_, err = rw.engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluation, rw.logger)
 		}
 		if err != nil {
 			txTask.Error = err
@@ -272,23 +272,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			if txTask.TraceTos == nil {
 				txTask.TraceTos = map[common.Address]struct{}{}
 			}
-
-			printFn := func(mp map[common.Address]struct{}, msg string) {
-				if len(mp) > 0 {
-					fmt.Printf("%s:", msg)
-				}
-				for key, _ := range mp {
-					fmt.Printf("%s,", key)
-				}
-
-				if len(mp) > 0 {
-					fmt.Println()
-				}
-			}
-
-			printFn(txTask.TraceFroms, "tracesfrom")
-			printFn(txTask.TraceTos, "tracesto")
-
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}

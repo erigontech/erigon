@@ -185,11 +185,12 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			break
 		}
 		tracer := calltracer.NewCallTracer(nil)
+		vmCfg := *rw.vmCfg
+		vmCfg.Tracer = tracer.Tracer().Hooks
+		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			vmCfg := *rw.vmCfg
-			vmCfg.Tracer = tracer.Tracer().Hooks
 			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, vmCfg)
 			if err != nil {
 				return nil, err
