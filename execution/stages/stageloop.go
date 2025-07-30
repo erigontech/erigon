@@ -207,10 +207,21 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// avoid crash because Erigon's core does many things
 	defer debug.RecoverPanicIntoError(logger, &err)
 
+	hasMore := true
+	for hasMore {
+		hasMore, err = stageLoopIteration(ctx, db, txc, sync, initialCycle, firstCycle, logger, blockReader, hook)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
 	externalTx := txc.Tx != nil
 	finishProgressBefore, borProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(db, txc.Tx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
@@ -240,17 +251,17 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	if canRunCycleInOneTransaction && !externalTx {
 		txc.Tx, err = db.BeginRwNosync(ctx)
 		if err != nil {
-			return err
+			return false, err
 		}
 		defer txc.Tx.Rollback()
 	}
 
 	if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
-		return err
+		return false, err
 	}
-	_, err = sync.Run(db, txc, initialCycle, firstCycle)
+	hasMore, err = sync.Run(db, txc, initialCycle, firstCycle)
 	if err != nil {
-		return err
+		return false, err
 	}
 	logCtx := sync.PrintTimings()
 	//var tableSizes []interface{}
@@ -261,14 +272,14 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		errTx := txc.Tx.Commit()
 		txc = wrap.NewTxContainer(nil, txc.Doms)
 		if errTx != nil {
-			return errTx
+			return false, errTx
 		}
 		commitTime = time.Since(commitStart)
 	}
 
 	// -- send notifications START
 	if err = hook.AfterRun(txc.Tx, finishProgressBefore); err != nil {
-		return err
+		return false, err
 	}
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
 		logger.Info("Commit cycle", "in", commitTime)
@@ -312,10 +323,10 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}
 
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return nil
+	return hasMore, nil
 }
 
 func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, polygonSync, fin uint64, gasUsed uint64, err error) {
