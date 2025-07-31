@@ -535,6 +535,9 @@ type execResult struct {
 func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
 	task, ok := result.Task.(*taskVersion)
 
+	fmt.Printf("%d (%d.%d) finalize", task.BlockNumber(), task.Version().TxIndex, task.Version().Incarnation)
+	defer fmt.Printf("%d (%d.%d) done finalize", task.BlockNumber(), task.Version().TxIndex, task.Version().Incarnation)
+
 	if !ok {
 		return nil, fmt.Errorf("unexpected task type: %T", result.Task)
 	}
