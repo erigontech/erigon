@@ -162,7 +162,7 @@ require (
 	github.com/elastic/go-freelru v0.16.0 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250619025539-884f4110f6af // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250731094644-2f399d9fb4a1 // indirect
 	github.com/erigontech/evmone_precompiles v0.0.0-20250725125323-222888e44767
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
