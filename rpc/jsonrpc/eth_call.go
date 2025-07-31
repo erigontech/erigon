@@ -270,7 +270,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("can't get the current state")
 		}
 		codeSize, err := state.GetCodeSize(*args.To)
-		if err == nil {
+		if err != nil {
 			return 0, errors.New("getCodeSize failed")
 		}
 		if args.To != nil && codeSize == 0 {
