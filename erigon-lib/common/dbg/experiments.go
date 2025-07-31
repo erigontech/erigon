@@ -18,6 +18,7 @@ package dbg
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -267,14 +268,22 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 }
 
 var tracedBlocks map[uint64]struct{}
+var traceAllBlocks bool
 var tracedTxIndexes map[int64]struct{}
 
 func TraceBlock(blockNum uint64) bool {
 	if tracedBlocks == nil {
 		tracedBlocks = map[uint64]struct{}{}
+		if len(TraceBlocks) == 1 && TraceBlocks[0] == math.MaxUint64 {
+			traceAllBlocks = true
+		}
 		for _, blockNum := range TraceBlocks {
 			tracedBlocks[blockNum] = struct{}{}
 		}
+	}
+
+	if traceAllBlocks {
+		return true
 	}
 
 	_, ok := tracedBlocks[blockNum]
