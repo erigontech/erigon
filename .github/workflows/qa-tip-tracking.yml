@@ -166,7 +166,7 @@ jobs:
         fi
 
         # Check test runner script exit status
-        if [ test_exit_status -eq 0 ]; then
+        if [ $test_exit_status -eq 0 ]; then
           echo "Downgrade & tip-tracking test completed successfully"
           echo "::notice::Downgrade & tip-tracking test completed successfully"
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
