@@ -1088,9 +1088,9 @@ func ExecV3(ctx context.Context,
 									return err
 								}
 
-								executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+								executor.domains().SavePastChangesetAccumulator(applyResult.BlockHash, blockNum, changeset)
 								if !inMemExec {
-									if err := libstate.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
+									if err := libstate.WriteDiffSet(applyTx, blockNum, applyResult.BlockHash, changeset); err != nil {
 										return err
 									}
 								}
