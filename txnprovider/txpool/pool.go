@@ -1091,7 +1091,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	if blobCount == 0 {
 		return txpoolcfg.NoBlobs
 	}
-	if blobCount > int(p.GetMaxBlobsPerBlock()) {
+	if blobCount > min(params.MaxBlobsPerTxn, int(p.GetMaxBlobsPerBlock())) {
 		return txpoolcfg.TooManyBlobs
 	}
 

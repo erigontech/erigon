@@ -299,14 +299,14 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
-		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) {
+		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) || errors.Is(err, types.ErrTooManyBlobs) {
 			bad, latestValidHash := s.hd.IsBadHeaderPoS(req.ParentHash)
 			if !bad {
 				latestValidHash = req.ParentHash
 			}
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString("blobs/blobgas exceeds max"),
+				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
 				LatestValidHash: &latestValidHash,
 			}, nil
 		}
