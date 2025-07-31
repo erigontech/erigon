@@ -535,9 +535,6 @@ type execResult struct {
 func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
 	task, ok := result.Task.(*taskVersion)
 
-	fmt.Printf("%d (%d.%d) finalize", task.BlockNumber(), task.Version().TxIndex, task.Version().Incarnation)
-	defer fmt.Printf("%d (%d.%d) done finalize", task.BlockNumber(), task.Version().TxIndex, task.Version().Incarnation)
-
 	if !ok {
 		return nil, fmt.Errorf("unexpected task type: %T", result.Task)
 	}
@@ -545,6 +542,14 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	blockNum := task.Version().BlockNum
 	txIndex := task.Version().TxIndex
 	txIncarnation := task.Version().Incarnation
+
+	txTrace := dbg.TraceTransactionIO &&
+		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress))
+
+	if txTrace {
+		fmt.Printf("%d (%d.%d) finalize\n", blockNum, txIndex, txIncarnation)
+		defer fmt.Printf("%d (%d.%d) done finalize\n", blockNum, txIndex, txIncarnation)
+	}
 
 	// we want to force a re-read of the conbiase & burnt contract address
 	// if thay where referenced by the tx
@@ -565,7 +570,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	var tracePrefix string
-	if dbg.TraceTransactionIO && dbg.TraceTx(blockNum, txIndex) {
+	if txTrace {
 		tracePrefix = fmt.Sprintf("%d (%d.%dF)", blockNum, txIndex, txIncarnation)
 	}
 
@@ -605,7 +610,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 					return nil, err
 				}
 
-				if dbg.TraceTx(blockNum, txIndex) {
+				if txTrace {
 					fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txIncarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
 				}
 
@@ -629,8 +634,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		}
 	}
 
-	if dbg.TraceTransactionIO &&
-		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress)) {
+	if txTrace {
 		vm.SetTrace(true)
 		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
 	}
