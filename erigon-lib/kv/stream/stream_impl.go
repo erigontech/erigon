@@ -105,8 +105,8 @@ func (m *TransformKV2U64Iter[K, v]) Close() {
 	}
 }
 
-// UnionKVIter - merge 2 kv.Pairs streams to 1 in lexicographically order
-// 1-st stream has higher priority - when 2 streams return same key
+// UnionKVIter - for duplicate keys, the first stream (x) takes precedence.
+// In set theory: A ∪ B contains all elements that are in A, or in B, or in both
 type UnionKVIter struct {
 	x, y               KV
 	xHasNext, yHasNext bool
@@ -116,6 +116,8 @@ type UnionKVIter struct {
 	err                error
 }
 
+// UnionKV - for duplicate keys, the first stream (x) takes precedence.
+// In set theory: A ∪ B contains all elements that are in A, or in B, or in both
 func UnionKV(x, y KV, limit int) KV {
 	if x == nil && y == nil {
 		return EmptyKV
@@ -198,197 +200,4 @@ func (m *UnionKVIter) Close() {
 
 type Closer interface {
 	Close()
-}
-
-// IntersectKVPair merges two KV streams
-type IntersectKVPair struct {
-	x                  KV
-	y                  KV
-	xHasNext, yHasNext bool
-	xNextK, xNextV     []byte
-	yNextK, yNextV     []byte
-	limit              int
-	err                error
-}
-
-func IntersectKV2(x KV, y KV, limit int) KV {
-	if x == nil && y == nil {
-		return EmptyKV
-	}
-	if x == nil {
-		return y
-	}
-	if y == nil {
-		return x
-	}
-	m := &IntersectKVPair{x: x, y: y, limit: limit}
-	m.advanceX()
-	m.advanceY()
-	return m
-}
-
-func (m *IntersectKVPair) HasNext() bool {
-	return m.err != nil || (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
-}
-
-func (m *IntersectKVPair) advanceX() {
-	if m.err != nil {
-		return
-	}
-	m.xHasNext = m.x.HasNext()
-	if m.xHasNext {
-		m.xNextK, m.xNextV, m.err = m.x.Next()
-	}
-}
-
-func (m *IntersectKVPair) advanceY() {
-	if m.err != nil {
-		return
-	}
-	m.yHasNext = m.y.HasNext()
-	if m.yHasNext {
-		m.yNextK, m.yNextV, m.err = m.y.Next()
-	}
-}
-
-func (m *IntersectKVPair) Next() ([]byte, []byte, error) {
-	if m.err != nil {
-		return nil, nil, m.err
-	}
-	m.limit--
-	if m.xHasNext && m.yHasNext {
-		cmp := bytes.Compare(m.xNextK, m.yNextK)
-		if cmp <= 0 {
-			k, v, err := m.xNextK, m.xNextV, m.err
-			m.advanceX()
-			return k, v, err
-		} else {
-			k, v, err := m.yNextK, m.yNextV, m.err
-			m.advanceY()
-			return k, v, err
-		}
-	}
-	if m.xHasNext {
-		k, v, err := m.xNextK, m.xNextV, m.err
-		m.advanceX()
-		return k, v, err
-	}
-	k, v, err := m.yNextK, m.yNextV, m.err
-	m.advanceY()
-	return k, v, err
-}
-
-func (m *IntersectKVPair) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
-	}
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
-	}
-}
-
-type WrapKVSIter struct {
-	y KV
-}
-
-func WrapKVS(y KV) KVS {
-	if y == nil {
-		return EmptyKVS
-	}
-	return &WrapKVSIter{y: y}
-}
-
-func (m *WrapKVSIter) HasNext() bool {
-	return m.y.HasNext()
-}
-
-func (m *WrapKVSIter) Next() ([]byte, []byte, uint64, error) {
-	k, v, err := m.y.Next()
-	return k, v, 0, err
-}
-
-func (m *WrapKVSIter) Close() {
-	m.y.Close()
-}
-
-type MergedKV struct {
-	x                  KV
-	y                  KV
-	xHasNext, yHasNext bool
-	xNextK, xNextV     []byte
-	yNextK, yNextV     []byte
-	limit              int
-	err                error
-}
-
-func MergeKVS(x KV, y KV, limit int) KV {
-	if x == nil && y == nil {
-		return EmptyKV
-	}
-	if x == nil {
-		return y
-	}
-	if y == nil {
-		return x
-	}
-	m := &MergedKV{x: x, y: y, limit: limit}
-	m.advanceX()
-	m.advanceY()
-	return m
-}
-func (m *MergedKV) HasNext() bool {
-	return m.err != nil || (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
-}
-func (m *MergedKV) advanceX() {
-	if m.err != nil {
-		return
-	}
-	m.xHasNext = m.x.HasNext()
-	if m.xHasNext {
-		m.xNextK, m.xNextV, m.err = m.x.Next()
-	}
-}
-func (m *MergedKV) advanceY() {
-	if m.err != nil {
-		return
-	}
-	m.yHasNext = m.y.HasNext()
-	if m.yHasNext {
-		m.yNextK, m.yNextV, m.err = m.y.Next()
-	}
-}
-func (m *MergedKV) Next() ([]byte, []byte, error) {
-	if m.err != nil {
-		return nil, nil, m.err
-	}
-	m.limit--
-	if m.xHasNext && m.yHasNext {
-		cmp := bytes.Compare(m.xNextK, m.yNextK)
-		if cmp <= 0 {
-			k, v, err := m.xNextK, m.xNextV, m.err
-			m.advanceX()
-			return k, v, err
-		}
-		k, v, err := m.yNextK, m.yNextV, m.err
-		m.advanceY()
-		return k, v, err
-	}
-	if m.xHasNext {
-		k, v, err := m.xNextK, m.xNextV, m.err
-		m.advanceX()
-		return k, v, err
-	}
-	k, v, err := m.yNextK, m.yNextV, m.err
-	m.advanceY()
-	return k, v, err
-}
-
-// func (m *MergedKV) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
-func (m *MergedKV) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
-	}
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
-	}
 }
