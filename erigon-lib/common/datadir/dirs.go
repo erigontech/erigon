@@ -152,6 +152,7 @@ func (dirs Dirs) MustFlock() (Dirs, *flock.Flock, error) {
 		return dirs, l, err
 	}
 	if !locked {
+		println("here")
 		return dirs, l, ErrDataDirLocked
 	}
 	return dirs, l, nil
