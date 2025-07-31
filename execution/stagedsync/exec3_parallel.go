@@ -548,7 +548,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	var tracePrefix string
 	if txTrace {
-		tracePrefix = fmt.Sprintf("%d (%d.%dF)", blockNum, txIndex, txIncarnation)
+		tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
 		fmt.Println(tracePrefix, "finalize")
 		defer fmt.Println(tracePrefix, "done finalize")
 	}
