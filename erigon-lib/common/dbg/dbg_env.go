@@ -160,7 +160,7 @@ func EnvUints(envVarName string, sep string, defaultVal []uint64) []uint64 {
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
 	if v != "" {
 		log.Info("[env]", envVarName, v)
-		if v == "all" {
+		if v == strings.ToLower("all") {
 			return []uint64{math.MaxUint64}
 		}
 		var ints []uint64
