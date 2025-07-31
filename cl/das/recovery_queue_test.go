@@ -175,6 +175,7 @@ func TestFileBasedQueue_Take(t *testing.T) {
 	case takenReq := <-queue.Take():
 		assert.Equal(t, req.slot, takenReq.slot)
 		assert.Equal(t, req.blockRoot, takenReq.blockRoot)
+		queue.Done(takenReq)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for request")
 	}
@@ -204,6 +205,7 @@ func TestFileBasedQueue_Take_MultipleRequests(t *testing.T) {
 		select {
 		case takenReq := <-queue.Take():
 			takenReqs = append(takenReqs, takenReq)
+			queue.Done(takenReq)
 		case <-time.After(2 * time.Second):
 			t.Fatal("timeout waiting for request")
 		}
@@ -449,11 +451,15 @@ func TestFileBasedQueue_SortingBySlot(t *testing.T) {
 
 	// Add requests in reverse order - all in same directory (slot/10000 = 0)
 	reqs := []*recoveryRequest{
-		{slot: 3000, blockRoot: common.Hash{3}},
 		{slot: 1000, blockRoot: common.Hash{1}},
 		{slot: 2000, blockRoot: common.Hash{2}},
+		{slot: 3000, blockRoot: common.Hash{3}},
 	}
 
+	// Add one request to let it stuck in the queue
+	added, err := queue.Add(&recoveryRequest{slot: 1, blockRoot: common.Hash{0}})
+	require.NoError(t, err)
+	assert.True(t, added)
 	for _, req := range reqs {
 		added, err := queue.Add(req)
 		require.NoError(t, err)
@@ -461,11 +467,12 @@ func TestFileBasedQueue_SortingBySlot(t *testing.T) {
 	}
 
 	// Take requests and verify they come in ascending order by slot
-	expectedSlots := []uint64{1000, 2000, 3000}
+	expectedSlots := []uint64{1, 1000, 2000, 3000}
 	for i, expectedSlot := range expectedSlots {
 		select {
 		case takenReq := <-queue.Take():
 			assert.Equal(t, expectedSlot, takenReq.slot)
+			queue.Done(takenReq)
 		case <-time.After(2 * time.Second):
 			t.Fatalf("timeout waiting for request %d", i)
 		}
@@ -491,6 +498,7 @@ func TestFileBasedQueue_DuplicateBlockRootHandling(t *testing.T) {
 	case takenReq := <-queue.Take():
 		assert.Equal(t, req1.slot, takenReq.slot)
 		assert.Equal(t, req1.blockRoot, takenReq.blockRoot)
+		queue.Done(takenReq)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for request")
 	}
@@ -509,6 +517,7 @@ func TestFileBasedQueue_DuplicateBlockRootHandling(t *testing.T) {
 	case takenReq := <-queue.Take():
 		assert.Equal(t, req2.slot, takenReq.slot)
 		assert.Equal(t, req2.blockRoot, takenReq.blockRoot)
+		queue.Done(takenReq)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for request")
 	}
@@ -556,11 +565,11 @@ func TestFileBasedQueue_CrossDirectorySorting(t *testing.T) {
 
 	// Add requests across different directories
 	reqs := []*recoveryRequest{
-		{slot: 15000, blockRoot: common.Hash{3}}, // dir 1
-		{slot: 5000, blockRoot: common.Hash{1}},  // dir 0
-		{slot: 25000, blockRoot: common.Hash{5}}, // dir 2
-		{slot: 12000, blockRoot: common.Hash{2}}, // dir 1
 		{slot: 3000, blockRoot: common.Hash{0}},  // dir 0
+		{slot: 5000, blockRoot: common.Hash{1}},  // dir 0
+		{slot: 12000, blockRoot: common.Hash{2}}, // dir 1
+		{slot: 15000, blockRoot: common.Hash{3}}, // dir 1
+		{slot: 25000, blockRoot: common.Hash{5}}, // dir 2
 	}
 
 	// Add first request
@@ -577,6 +586,7 @@ func TestFileBasedQueue_CrossDirectorySorting(t *testing.T) {
 		select {
 		case takenReq := <-queue.Take():
 			assert.Equal(t, expectedSlot, takenReq.slot)
+			queue.Done(takenReq)
 		case <-time.After(2 * time.Second):
 			t.Fatalf("timeout waiting for request %d", i)
 		}

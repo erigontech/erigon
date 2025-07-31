@@ -48,7 +48,7 @@ const (
 )
 
 var (
-	numOfBlobRecoveryWorkers = 4
+	numOfBlobRecoveryWorkers = 8
 )
 
 type peerdas struct {
@@ -556,9 +556,10 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 	go func(req *downloadRequest) {
 		// send the request in a loop with a ticker to avoid overwhelming the peer
 		// keep trying until the request is done
-		ticker := time.NewTicker(500 * time.Millisecond)
+		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
-		wg := sync.WaitGroup{}
+		concurrency := int64(4)
+		sem := semaphore.NewWeighted(concurrency)
 		takeBreak := atomic.Bool{}
 	loop:
 		for {
@@ -571,9 +572,9 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 			case <-stopChan:
 				break loop
 			case <-ticker.C:
-				wg.Add(1)
+				sem.Acquire(context.Background(), 1)
 				go func() {
-					defer wg.Done()
+					defer sem.Release(1)
 					begin := time.Now()
 					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
@@ -603,7 +604,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 				}()
 			}
 		}
-		wg.Wait()
+		sem.Acquire(context.Background(), concurrency)
 		close(resultChan)
 	}(req)
 
