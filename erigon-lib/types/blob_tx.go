@@ -30,7 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
-var ErrNilToFieldTx = errors.New("Tx: field 'To' can not be 'nil'")
+var ErrNilToFieldTx = errors.New("txn: field 'To' can not be 'nil'")
+var ErrTooManyBlobs = errors.New("blob transaction has too many blobs")
 
 type BlobTx struct {
 	DynamicFeeTransaction
@@ -354,6 +355,9 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
 		return errors.New("a blob stx must contain at least one blob")
+	}
+	if len(stx.BlobVersionedHashes) > params.MaxBlobsPerTxn {
+		return ErrTooManyBlobs
 	}
 	// decode V
 	if b, err = s.Uint256Bytes(); err != nil {
