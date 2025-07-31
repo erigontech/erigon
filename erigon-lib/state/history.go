@@ -1334,6 +1334,44 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	return v, true, nil
 }
 
+func (ht *HistoryRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	// For step-prefixed keys, get range from valuesTable
+	var fst, lst []byte
+
+	if ht.h.historyLargeValues {
+		fst, _ = kv.FirstKey(tx, ht.h.valuesTable)
+		lst, _ = kv.LastKey(tx, ht.h.valuesTable)
+	} else {
+		c, err := tx.CursorDupSort(ht.h.valuesTable)
+		if err != nil {
+			return 0, 0
+		}
+		defer c.Close()
+		fst, _, _ = c.First()
+		lst, _, _ = c.Last()
+	}
+
+	if len(fst) >= 8 {
+		invertedStep := binary.BigEndian.Uint64(fst[:8])
+		step := ^invertedStep
+		from = float64(step)
+	}
+	if len(lst) >= 8 {
+		invertedStep := binary.BigEndian.Uint64(lst[:8])
+		step := ^invertedStep
+		to = float64(step)
+	}
+	// With inverted steps, first key has highest step, last key has lowest step
+	// So we need to swap from and to
+	if from > to {
+		from, to = to, from
+	}
+	if to == 0 {
+		to = from
+	}
+	return from, to
+}
+
 func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if !asc {
 		panic("implement me")
