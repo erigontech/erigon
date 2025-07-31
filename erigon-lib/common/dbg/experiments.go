@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 	"sync"
 	"time"
 
@@ -298,4 +299,22 @@ func TraceTx(blockNum uint64, txIndex int) bool {
 	}
 
 	return true
+}
+
+var tracedAccounts map[common.Address]struct{} = func() map[common.Address]struct{} {
+	ta := map[common.Address]struct{}{}
+	for _, account := range TraceAccounts {
+		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
+		ta[common.HexToAddress(account)] = struct{}{}
+	}
+	return ta
+}()
+
+func TraceAccount(addr common.Address) bool {
+	_, ok := tracedAccounts[addr]
+	return ok
+}
+
+func TracingAccounts() bool {
+	return len(tracedAccounts) > 0
 }

@@ -626,7 +626,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		}
 	}
 
-	if dbg.TraceTransactionIO && dbg.TraceTx(blockNum, txIndex) {
+	if dbg.TraceTransactionIO &&
+		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress)) {
 		vm.SetTrace(true)
 		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
 	}

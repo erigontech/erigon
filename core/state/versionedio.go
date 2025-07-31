@@ -404,7 +404,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 	if !commited {
 		if vw, ok := s.versionedWrite(addr, path, key); ok {
-			if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
 				fmt.Printf("%d (%d.%d) RD %s %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val))
 			}
 
@@ -432,7 +432,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if pr.Version == vr.Version {
-				if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
 					fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
 				}
 
@@ -444,7 +444,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 					s.dep = vr.Version.TxIndex
 				}
 
-				if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
 					fmt.Printf("%d (%d.%d) DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 				}
 
@@ -462,7 +462,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 			return defaultV, MapRead, fmt.Errorf("unexpected type: %T", res.Value())
 		}
 
-		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, v))
 		}
 
@@ -473,7 +473,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		vr.Val = copyV(v)
 
 	case MVReadResultDependency:
-		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key})
 		}
 
@@ -491,7 +491,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		if versionedReads := s.versionedReads; versionedReads != nil {
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
-					if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
 						fmt.Printf("%d (%d.%d) RD %s %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val))
 					}
 
@@ -515,7 +515,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 			return defaultV, StorageRead, nil
 		}
 
-		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) RD %s %x %s: %s\n", s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, valueString(path, v))
 		}
 

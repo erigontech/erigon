@@ -23,6 +23,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/holiman/uint256"
 )
 
@@ -236,7 +237,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	if err != nil {
 		return err
 	}
-	if traceAccount(*ch.account) {
+	if dbg.TraceAccount(*ch.account) {
 		fmt.Printf("Revert Balance %x: %d, prev: %d, orig: %d\n", *ch.account, obj.data.Balance, ch.prev, obj.original.Balance)
 	}
 	obj.setBalance(ch.prev)

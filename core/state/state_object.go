@@ -288,7 +288,7 @@ func (so *stateObject) setState(key common.Hash, value uint256.Int) {
 func (so *stateObject) updateStotage(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
 		blockOriginValue := so.blockOriginStorage[key]
-		if dbg.TraceTransactionIO && (so.db.trace || traceAccount(so.address)) {
+		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address)) {
 			fmt.Printf("%d (%d.%d) Update Storage: %x,%x,%s->%s\n", so.db.blockNum, so.db.txIndex, so.db.version, so.address, key, blockOriginValue.Hex(), value.Hex())
 		}
 		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, blockOriginValue, value); err != nil {

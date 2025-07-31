@@ -69,7 +69,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 		var err error
 		stateUpdates.Scan(func(update *stateUpdate) bool {
 			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
-				if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
 					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, update.address)
 				}
 				//del, before create: to clanup code/storage
@@ -83,7 +83,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 
 			if update.bufferedAccount != nil {
 				if update.data != nil {
-					if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
 						fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, update.address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
 					}
 					if err = domains.DomainPut(kv.AccountsDomain, roTx, update.address[:], accounts.SerialiseV3(update.data), txNum, nil, 0); err != nil {
@@ -92,7 +92,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 				}
 
 				if update.code != nil {
-					if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
 						code := update.code
 						if len(code) > 40 {
 							code = code[:40]
@@ -109,14 +109,14 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 						composite := append(update.address[:], i.key[:]...)
 						v := i.value.Bytes()
 						if len(v) == 0 {
-							if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
 								fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, update.address, i.key)
 							}
 							if err = domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
 								return false
 							}
 						} else {
-							if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
 								fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
 							}
 							if err = domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
@@ -131,7 +131,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 					}
 				}
 			} else if update.deleteAccount {
-				if dbg.TraceApply && (rs.trace || traceAccount(update.address)) {
+				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
 					fmt.Printf("%d apply:del account: %x\n", blockNum, update.address)
 				}
 				if err = domains.DomainDel(kv.AccountsDomain, roTx, update.address[:], txNum, nil, 0); err != nil {
@@ -310,7 +310,7 @@ func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
 	}
 
 	v.Scan(func(update *stateUpdate) bool {
-		if traceAll || traceAccount(update.address) {
+		if traceAll || dbg.TraceAccount(update.address) {
 			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
 				fmt.Printf("%d del code+storage: %x\n", blockNum, update.address)
 			}
