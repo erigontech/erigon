@@ -124,7 +124,6 @@ var (
 func convertFileLockError(err error) error {
 	//nolint
 	if errno, ok := err.(syscall.Errno); ok && datadirInUseErrNos[uint(errno)] {
-		println("conv file lock error")
 		return ErrDataDirLocked
 	}
 	return err
@@ -153,7 +152,6 @@ func (dirs Dirs) MustFlock() (Dirs, *flock.Flock, error) {
 		return dirs, l, err
 	}
 	if !locked {
-		println("flock")
 		return dirs, l, ErrDataDirLocked
 	}
 	return dirs, l, nil
@@ -179,7 +177,6 @@ func (dirs *Dirs) TryFlock() (unlock func(), err error) {
 			panicif.Err(f.Unlock())
 		}
 	} else {
-		println("another flock")
 		err = ErrDataDirLocked
 	}
 	return
