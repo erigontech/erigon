@@ -373,7 +373,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
 
-			if dbg.TraceGas && !trace && dynamicCost > 0 {
+			if dbg.TraceGas && dynamicCost > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
 

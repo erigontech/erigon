@@ -516,7 +516,7 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memo
 	}
 
 	if dbg.TraceGas && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) Gas StaticCall: memory(%d): %d call: %d\n",
+		fmt.Printf("%d (%d.%d) StaticCall Gas: memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGasTemp)
 	}
 
