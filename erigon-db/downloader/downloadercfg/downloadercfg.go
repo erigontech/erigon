@@ -26,10 +26,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/missinggo/v2/panicif"
+	pp "github.com/anacrolix/torrent/peer_protocol"
 
 	analog "github.com/anacrolix/log"
 
@@ -50,8 +53,18 @@ import (
 const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
-// default: 16Kb
-const DefaultNetworkChunkSize = 256 << 10
+// BitTorrent client default: 16Kb
+var NetworkChunkSize pp.Integer = 256 << 10 // 256 KiB
+
+func init() {
+	s := os.Getenv("DOWNLOADER_NETWORK_CHUNK_SIZE")
+	if s == "" {
+		return
+	}
+	i64, err := strconv.ParseInt(s, 10, 0)
+	panicif.Err(err)
+	NetworkChunkSize = pp.Integer(i64)
+}
 
 type Cfg struct {
 	Dirs datadir.Dirs

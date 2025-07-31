@@ -42,6 +42,7 @@ import (
 	"github.com/anacrolix/torrent/webseed"
 	"github.com/c2h5oh/datasize"
 	"github.com/puzpuzpuz/xsync/v4"
+	"golang.org/x/net/http2"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 
@@ -162,7 +163,7 @@ func (me *AggStats) AllTorrentsComplete() bool {
 }
 
 type requestHandler struct {
-	http.Transport
+	http.RoundTripper
 	downloader *Downloader
 }
 
@@ -171,9 +172,16 @@ var cloudflareHeaders = http.Header{
 }
 
 func insertCloudflareHeaders(req *http.Request) {
+	// Note this is clobbering the headers.
 	for key, value := range cloudflareHeaders {
 		req.Header[key] = value
 	}
+}
+
+type roundTripperFunc func(req *http.Request) (*http.Response, error)
+
+func (me roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return me(req)
 }
 
 // TODO(anacrolix): Upstream any logic that works reliably.
@@ -200,7 +208,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 	insertCloudflareHeaders(req)
 
 	webseedTripCount.Add(1)
-	resp, err = r.Transport.RoundTrip(req)
+	resp, err = r.RoundTripper.RoundTrip(req)
 	if err != nil {
 		return
 	}
@@ -248,32 +256,56 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	// buckets. If we could limit HTTP requests to 1 per connection we'd do that, but the HTTP2
 	// config field doesn't do anything yet in Go 1.24 (and 1.25rc1). Disabling HTTP2 is another way
 	// to achieve this.
-	requestHandler := requestHandler{
-		Transport: http.Transport{
-			ReadBufferSize: 256 << 10,
-			// Note this does nothing in go1.24.
-			//HTTP2: &http.HTTP2Config{
-			//	MaxConcurrentStreams: 1,
-			//},
-			// Big hammer to achieve one request per connection.
-			DisableKeepAlives: os.Getenv("DOWNLOADER_DISABLE_KEEP_ALIVES") != "",
-		},
+	requestTransport := &http.Transport{
+		ReadBufferSize: 256 << 10,
+		// Note this does nothing in go1.24.
+		//HTTP2: &http.HTTP2Config{
+		//	MaxConcurrentStreams: 1,
+		//},
+		// Big hammer to achieve one request per connection.
+		DisableKeepAlives: os.Getenv("DOWNLOADER_DISABLE_KEEP_ALIVES") != "",
+		// I see requests get stuck waiting for headers to come back. I suspect Go 1.24 HTTP2
+		// bug.
+		ResponseHeaderTimeout: time.Minute,
 	}
 
 	if s := os.Getenv("DOWNLOADER_MAX_CONNS_PER_HOST"); s != "" {
 		var err error
 		i64, err := strconv.ParseInt(s, 10, 0)
 		panicif.Err(err)
-		requestHandler.Transport.MaxConnsPerHost = int(i64)
+		requestTransport.MaxConnsPerHost = int(i64)
 	}
 
+	requestHandler := requestHandler{
+		RoundTripper: requestTransport,
+	}
 	// Disable HTTP2. See above.
-	if os.Getenv("DOWNLOADER_DISABLE_HTTP2") != "" {
-		g.MakeMap(&requestHandler.Transport.TLSNextProto)
+	if os.Getenv("DOWNLOADER_DISABLE_HTTP2") == "" {
+		// Don't set the http2.Transport as the RoundTripper. It's hooked into the http.Transport by
+		// this call.
+		h2t, err := http2.ConfigureTransports(requestTransport)
+		panicif.Err(err)
+		h2t.ReadIdleTimeout = 15 * time.Second
+		h2t.MaxReadFrameSize = 256 << 10 // 256 KiB, same as ReadBufferSize
+	} else {
+		// Disable h2 being added automatically.
+		g.MakeMap(&requestTransport.TLSNextProto)
 	}
 
 	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
 	cfg.ClientConfig.WebTransport = &requestHandler
+	metainfoSourcesTransport := http.Transport{
+		MaxConnsPerHost:       10,
+		ResponseHeaderTimeout: time.Minute,
+	}
+	// Separate transport so webseed requests and metainfo fetching don't block each other.
+	// Additionally, we can tune for their specific workloads.
+	cfg.ClientConfig.MetainfoSourcesClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			insertCloudflareHeaders(req)
+			return metainfoSourcesTransport.RoundTrip(req)
+		}),
+	}
 
 	db, err := openMdbx(ctx, cfg.Dirs.Downloader, cfg.MdbxWriteMap)
 	if err != nil {
