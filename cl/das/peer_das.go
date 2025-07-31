@@ -541,7 +541,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 	type resultData struct {
 		sidecars  []*cltypes.DataColumnSidecar
 		pid       string
-		cgc       uint64
+		custodies uint64
 		reqLength int
 		err       error
 		elapsed   time.Duration
@@ -556,7 +556,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 	go func(req *downloadRequest) {
 		// send the request in a loop with a ticker to avoid overwhelming the peer
 		// keep trying until the request is done
-		ticker := time.NewTicker(250 * time.Millisecond)
+		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		concurrency := int64(4)
 		sem := semaphore.NewWeighted(concurrency)
@@ -592,7 +592,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 					case resultChan <- resultData{
 						sidecars:  s,
 						pid:       pid,
-						cgc:       cgc,
+						custodies: cgc,
 						reqLength: reqLength,
 						err:       err,
 						elapsed:   time.Since(begin),
@@ -636,7 +636,7 @@ mainloop:
 			if len(result.sidecars) == 0 {
 				continue
 			}
-			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars), "cgc", result.cgc, "elapsed", result.elapsed)
+			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars), "custodies", result.custodies, "elapsed", result.elapsed)
 			wg := sync.WaitGroup{}
 			for _, sidecar := range result.sidecars {
 				wg.Add(1)
