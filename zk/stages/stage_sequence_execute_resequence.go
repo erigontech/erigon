@@ -16,6 +16,7 @@ func resequence(
 	cfg SequenceBlockCfg,
 	historyCfg stagedsync.HistoryCfg,
 	lastBatch, highestBatchInDs uint64,
+	logger log.Logger,
 ) (err error) {
 	if !cfg.zk.SequencerResequence {
 		panic(fmt.Sprintf("[%s] The node need re-sequencing but this option is disabled.", s.LogPrefix()))
@@ -37,7 +38,7 @@ func resequence(
 		batchJob := NewResequenceBatchJob(batch)
 		subBatchCount := 0
 		for batchJob.HasMoreBlockToProcess() {
-			if err = sequencingBatchStep(s, u, ctx, cfg, historyCfg, batchJob); err != nil {
+			if err = sequencingBatchStep(s, u, ctx, cfg, historyCfg, batchJob, logger); err != nil {
 				return err
 			}
 
