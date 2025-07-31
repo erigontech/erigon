@@ -427,8 +427,8 @@ func gasCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize
 		return 0, err
 	}
 
-	if dbg.TraceInstructions && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) Dynamic Gas (call): base: %d memory(%d): %d call: %d\n",
+	if dbg.TraceGas && evm.intraBlockState.Trace() {
+		fmt.Printf("%d (%d.%d) Call Gas: base: %d memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGasTemp)
 	}
 
@@ -464,8 +464,8 @@ func gasCallCode(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memory
 		return 0, err
 	}
 
-	if dbg.TraceInstructions && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) Dynamic Gas (callcode): base: %d memory(%d): %d call: %d\n",
+	if dbg.TraceGas && evm.intraBlockState.Trace() {
+		fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGasTemp)
 	}
 
@@ -489,8 +489,8 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 		return 0, err
 	}
 
-	if dbg.TraceInstructions && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) Dynamic Gas (delegatecall): memory(%d): %d call: %d\n",
+	if dbg.TraceGas && evm.intraBlockState.Trace() {
+		fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGasTemp)
 	}
 
@@ -515,8 +515,8 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memo
 		return 0, err
 	}
 
-	if dbg.TraceInstructions && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) Dynamic Gas (staticcall): memory(%d): %d call: %d\n",
+	if dbg.TraceGas && evm.intraBlockState.Trace() {
+		fmt.Printf("%d (%d.%d) Gas StaticCall: memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGasTemp)
 	}
 
