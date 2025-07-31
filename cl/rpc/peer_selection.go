@@ -155,7 +155,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		for _, peer := range newPeers {
 			custodies = append(custodies, uint64(len(peer.mask)))
 		}
-		log.Debug("[peerSelector] updated peers", "peerCount", len(newPeers), "custodies", custodies, "elapsedTime", time.Since(begin))
+		log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "custodies", custodies, "elapsedTime", time.Since(begin))
 	}
 
 	// begin

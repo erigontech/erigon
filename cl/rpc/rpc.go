@@ -337,17 +337,11 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinel.ResponseData) ([]resp
 		})
 
 		// read next result byte
-		byt, err := r.ReadByte()
-		if err == io.EOF {
+		if _, err := r.ReadByte(); err == io.EOF {
 			break
-		}
-		if err != nil {
+		} else if err != nil {
 			log.Debug("failed to read byte", "err", err)
 			return nil, message.Peer.Pid, err
-		}
-		if byt != 0 {
-			log.Debug("received unexpected response prefix", "prefix", byt)
-			return nil, message.Peer.Pid, fmt.Errorf("received unexpected response prefix: %d", byt)
 		}
 	}
 	return responsePacket, message.Peer.Pid, nil
