@@ -55,6 +55,7 @@ import (
 )
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
 // estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
 // allowed to produce in order to speed up calculations.
 const estimateGasErrorRatio = 0.015
@@ -305,9 +306,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	lo = result.GasUsed - 1
 
 	// There's a high probability that the transaction will successfully
-    // execute using the 'usedGas' from the first execution as the gasLimit.
-    // We explicitly check this value and use it as the upper bound for the
-    // binary search.
+	// execute using the 'usedGas' from the first execution as the gasLimit.
+	// We explicitly check this value and use it as the upper bound for the
+	// binary search.
 	optimisticGasLimit := (result.GasUsed + params.CallStipend) * 64 / 63
 	if optimisticGasLimit < hi {
 		result, err := caller.DoCallWithNewGas(ctx, optimisticGasLimit, engine, overrides)
