@@ -54,10 +54,10 @@ func MarshalReceipt(
 		from, _ = txn.Sender(*signer)
 	}
 
-	var logsOutput interface{} 
+	var logsToMarshal interface{}
 
 	if withBlockTimestamp {
-		var rpcLogs []*RPCTransactionLog
+		rpcLogs := []*RPCTransactionLog{}
 		if receipt.Logs != nil {
 			for _, l := range receipt.Logs {
 				rpcLogs = append(rpcLogs, toRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
@@ -65,12 +65,11 @@ func MarshalReceipt(
 		} else {
 			rpcLogs = []*RPCTransactionLog{}
 		}
-		logsOutput = rpcLogs
+		logsToMarshal = rpcLogs
 	} else {
+		logsToMarshal = []*types.Log{}
 		if receipt.Logs == nil {
-			logsOutput = []*types.Log{}
-		} else {
-			logsOutput = receipt.Logs
+			logsToMarshal = receipt.Logs
 		}
 	}
 
@@ -85,7 +84,7 @@ func MarshalReceipt(
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
-		"logs":              logsOutput,
+		"logs":              logsToMarshal,
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
