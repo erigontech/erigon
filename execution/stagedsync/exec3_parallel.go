@@ -546,9 +546,11 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	txTrace := dbg.TraceTransactionIO &&
 		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress))
 
+	var tracePrefix string
 	if txTrace {
-		fmt.Printf("%d (%d.%d) finalize\n", blockNum, txIndex, txIncarnation)
-		defer fmt.Printf("%d (%d.%d) done finalize\n", blockNum, txIndex, txIncarnation)
+		tracePrefix = fmt.Sprintf("%d (%d.%dF)", blockNum, txIndex, txIncarnation)
+		fmt.Println(tracePrefix, "finalize")
+		defer fmt.Println(tracePrefix, "done finalize")
 	}
 
 	// we want to force a re-read of the conbiase & burnt contract address
@@ -567,11 +569,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	if !ok {
 		return nil, nil
-	}
-
-	var tracePrefix string
-	if txTrace {
-		tracePrefix = fmt.Sprintf("%d (%d.%dF)", blockNum, txIndex, txIncarnation)
 	}
 
 	if task.IsBlockEnd() || txIndex < 0 {
