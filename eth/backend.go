@@ -1602,6 +1602,16 @@ func (s *Ethereum) AddPeer(ctx context.Context, req *remote.AddPeerRequest) (*re
 	return &remote.AddPeerReply{Success: true}, nil
 }
 
+func (s *Ethereum) RemovePeer(ctx context.Context, req *remote.RemovePeerRequest) (*remote.RemovePeerReply, error) {
+	for _, sentryClient := range s.sentriesClient.Sentries() {
+		_, err := sentryClient.RemovePeer(ctx, &protosentry.RemovePeerRequest{Url: req.Url})
+		if err != nil {
+			return nil, fmt.Errorf("ethereum backend MultiClient.RemovePeers error: %w", err)
+		}
+	}
+	return &remote.RemovePeerReply{Success: true}, nil
+}
+
 // Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {

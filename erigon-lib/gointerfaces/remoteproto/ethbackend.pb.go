@@ -1378,6 +1378,50 @@ func (x *AddPeerRequest) GetUrl() string {
 	return ""
 }
 
+type RemovePeerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemovePeerRequest) Reset() {
+	*x = RemovePeerRequest{}
+	mi := &file_remote_ethbackend_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemovePeerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemovePeerRequest) ProtoMessage() {}
+
+func (x *RemovePeerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemovePeerRequest.ProtoReflect.Descriptor instead.
+func (*RemovePeerRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *RemovePeerRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
 type NodesInfoReply struct {
 	state         protoimpl.MessageState      `protogen:"open.v1"`
 	NodesInfo     []*typesproto.NodeInfoReply `protobuf:"bytes,1,rep,name=nodes_info,json=nodesInfo,proto3" json:"nodes_info,omitempty"`
@@ -1387,7 +1431,7 @@ type NodesInfoReply struct {
 
 func (x *NodesInfoReply) Reset() {
 	*x = NodesInfoReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[27]
+	mi := &file_remote_ethbackend_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1399,7 +1443,7 @@ func (x *NodesInfoReply) String() string {
 func (*NodesInfoReply) ProtoMessage() {}
 
 func (x *NodesInfoReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[27]
+	mi := &file_remote_ethbackend_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1412,7 +1456,7 @@ func (x *NodesInfoReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodesInfoReply.ProtoReflect.Descriptor instead.
 func (*NodesInfoReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{27}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *NodesInfoReply) GetNodesInfo() []*typesproto.NodeInfoReply {
@@ -1431,7 +1475,7 @@ type PeersReply struct {
 
 func (x *PeersReply) Reset() {
 	*x = PeersReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[28]
+	mi := &file_remote_ethbackend_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1443,7 +1487,7 @@ func (x *PeersReply) String() string {
 func (*PeersReply) ProtoMessage() {}
 
 func (x *PeersReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[28]
+	mi := &file_remote_ethbackend_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1456,7 +1500,7 @@ func (x *PeersReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeersReply.ProtoReflect.Descriptor instead.
 func (*PeersReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{28}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *PeersReply) GetPeers() []*typesproto.PeerInfo {
@@ -1475,7 +1519,7 @@ type AddPeerReply struct {
 
 func (x *AddPeerReply) Reset() {
 	*x = AddPeerReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[29]
+	mi := &file_remote_ethbackend_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1487,7 +1531,7 @@ func (x *AddPeerReply) String() string {
 func (*AddPeerReply) ProtoMessage() {}
 
 func (x *AddPeerReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[29]
+	mi := &file_remote_ethbackend_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1500,10 +1544,54 @@ func (x *AddPeerReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddPeerReply.ProtoReflect.Descriptor instead.
 func (*AddPeerReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{29}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *AddPeerReply) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type RemovePeerReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemovePeerReply) Reset() {
+	*x = RemovePeerReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemovePeerReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemovePeerReply) ProtoMessage() {}
+
+func (x *RemovePeerReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemovePeerReply.ProtoReflect.Descriptor instead.
+func (*RemovePeerReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *RemovePeerReply) GetSuccess() bool {
 	if x != nil {
 		return x.Success
 	}
@@ -1519,7 +1607,7 @@ type PendingBlockReply struct {
 
 func (x *PendingBlockReply) Reset() {
 	*x = PendingBlockReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[30]
+	mi := &file_remote_ethbackend_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1531,7 +1619,7 @@ func (x *PendingBlockReply) String() string {
 func (*PendingBlockReply) ProtoMessage() {}
 
 func (x *PendingBlockReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[30]
+	mi := &file_remote_ethbackend_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1544,7 +1632,7 @@ func (x *PendingBlockReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PendingBlockReply.ProtoReflect.Descriptor instead.
 func (*PendingBlockReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{30}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *PendingBlockReply) GetBlockRlp() []byte {
@@ -1563,7 +1651,7 @@ type EngineGetPayloadBodiesByHashV1Request struct {
 
 func (x *EngineGetPayloadBodiesByHashV1Request) Reset() {
 	*x = EngineGetPayloadBodiesByHashV1Request{}
-	mi := &file_remote_ethbackend_proto_msgTypes[31]
+	mi := &file_remote_ethbackend_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1575,7 +1663,7 @@ func (x *EngineGetPayloadBodiesByHashV1Request) String() string {
 func (*EngineGetPayloadBodiesByHashV1Request) ProtoMessage() {}
 
 func (x *EngineGetPayloadBodiesByHashV1Request) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[31]
+	mi := &file_remote_ethbackend_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1588,7 +1676,7 @@ func (x *EngineGetPayloadBodiesByHashV1Request) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use EngineGetPayloadBodiesByHashV1Request.ProtoReflect.Descriptor instead.
 func (*EngineGetPayloadBodiesByHashV1Request) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{31}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *EngineGetPayloadBodiesByHashV1Request) GetHashes() []*typesproto.H256 {
@@ -1608,7 +1696,7 @@ type EngineGetPayloadBodiesByRangeV1Request struct {
 
 func (x *EngineGetPayloadBodiesByRangeV1Request) Reset() {
 	*x = EngineGetPayloadBodiesByRangeV1Request{}
-	mi := &file_remote_ethbackend_proto_msgTypes[32]
+	mi := &file_remote_ethbackend_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1620,7 +1708,7 @@ func (x *EngineGetPayloadBodiesByRangeV1Request) String() string {
 func (*EngineGetPayloadBodiesByRangeV1Request) ProtoMessage() {}
 
 func (x *EngineGetPayloadBodiesByRangeV1Request) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[32]
+	mi := &file_remote_ethbackend_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1633,7 +1721,7 @@ func (x *EngineGetPayloadBodiesByRangeV1Request) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use EngineGetPayloadBodiesByRangeV1Request.ProtoReflect.Descriptor instead.
 func (*EngineGetPayloadBodiesByRangeV1Request) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{32}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *EngineGetPayloadBodiesByRangeV1Request) GetStart() uint64 {
@@ -1659,7 +1747,7 @@ type AAValidationRequest struct {
 
 func (x *AAValidationRequest) Reset() {
 	*x = AAValidationRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[33]
+	mi := &file_remote_ethbackend_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1671,7 +1759,7 @@ func (x *AAValidationRequest) String() string {
 func (*AAValidationRequest) ProtoMessage() {}
 
 func (x *AAValidationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[33]
+	mi := &file_remote_ethbackend_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1684,7 +1772,7 @@ func (x *AAValidationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AAValidationRequest.ProtoReflect.Descriptor instead.
 func (*AAValidationRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{33}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *AAValidationRequest) GetTx() *typesproto.AccountAbstractionTransaction {
@@ -1703,7 +1791,7 @@ type AAValidationReply struct {
 
 func (x *AAValidationReply) Reset() {
 	*x = AAValidationReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[34]
+	mi := &file_remote_ethbackend_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1715,7 +1803,7 @@ func (x *AAValidationReply) String() string {
 func (*AAValidationReply) ProtoMessage() {}
 
 func (x *AAValidationReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[34]
+	mi := &file_remote_ethbackend_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1728,7 +1816,7 @@ func (x *AAValidationReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AAValidationReply.ProtoReflect.Descriptor instead.
 func (*AAValidationReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{34}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *AAValidationReply) GetValid() bool {
@@ -1747,7 +1835,7 @@ type BlockForTxNumRequest struct {
 
 func (x *BlockForTxNumRequest) Reset() {
 	*x = BlockForTxNumRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[35]
+	mi := &file_remote_ethbackend_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1759,7 +1847,7 @@ func (x *BlockForTxNumRequest) String() string {
 func (*BlockForTxNumRequest) ProtoMessage() {}
 
 func (x *BlockForTxNumRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[35]
+	mi := &file_remote_ethbackend_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1772,7 +1860,7 @@ func (x *BlockForTxNumRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlockForTxNumRequest.ProtoReflect.Descriptor instead.
 func (*BlockForTxNumRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{35}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *BlockForTxNumRequest) GetTxnum() uint64 {
@@ -1792,7 +1880,7 @@ type BlockForTxNumResponse struct {
 
 func (x *BlockForTxNumResponse) Reset() {
 	*x = BlockForTxNumResponse{}
-	mi := &file_remote_ethbackend_proto_msgTypes[36]
+	mi := &file_remote_ethbackend_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1804,7 +1892,7 @@ func (x *BlockForTxNumResponse) String() string {
 func (*BlockForTxNumResponse) ProtoMessage() {}
 
 func (x *BlockForTxNumResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[36]
+	mi := &file_remote_ethbackend_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1817,7 +1905,7 @@ func (x *BlockForTxNumResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlockForTxNumResponse.ProtoReflect.Descriptor instead.
 func (*BlockForTxNumResponse) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{36}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *BlockForTxNumResponse) GetBlockNumber() uint64 {
@@ -1844,7 +1932,7 @@ type SyncingReply_StageProgress struct {
 
 func (x *SyncingReply_StageProgress) Reset() {
 	*x = SyncingReply_StageProgress{}
-	mi := &file_remote_ethbackend_proto_msgTypes[37]
+	mi := &file_remote_ethbackend_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1856,7 +1944,7 @@ func (x *SyncingReply_StageProgress) String() string {
 func (*SyncingReply_StageProgress) ProtoMessage() {}
 
 func (x *SyncingReply_StageProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[37]
+	mi := &file_remote_ethbackend_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1967,6 +2055,8 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x10NodesInfoRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\rR\x05limit\"\"\n" +
 	"\x0eAddPeerRequest\x12\x10\n" +
+	"\x03url\x18\x01 \x01(\tR\x03url\"%\n" +
+	"\x11RemovePeerRequest\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\"E\n" +
 	"\x0eNodesInfoReply\x123\n" +
 	"\n" +
@@ -1975,6 +2065,8 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"PeersReply\x12%\n" +
 	"\x05peers\x18\x01 \x03(\v2\x0f.types.PeerInfoR\x05peers\"(\n" +
 	"\fAddPeerReply\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"+\n" +
+	"\x0fRemovePeerReply\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"0\n" +
 	"\x11PendingBlockReply\x12\x1b\n" +
 	"\tblock_rlp\x18\x01 \x01(\fR\bblockRlp\"L\n" +
@@ -1997,7 +2089,7 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x06HEADER\x10\x00\x12\x10\n" +
 	"\fPENDING_LOGS\x10\x01\x12\x11\n" +
 	"\rPENDING_BLOCK\x10\x02\x12\x10\n" +
-	"\fNEW_SNAPSHOT\x10\x032\xe9\v\n" +
+	"\fNEW_SNAPSHOT\x10\x032\xab\f\n" +
 	"\n" +
 	"ETHBACKEND\x12=\n" +
 	"\tEtherbase\x12\x18.remote.EtherbaseRequest\x1a\x16.remote.EtherbaseReply\x12@\n" +
@@ -2017,7 +2109,9 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\tTxnLookup\x12\x18.remote.TxnLookupRequest\x1a\x16.remote.TxnLookupReply\x12<\n" +
 	"\bNodeInfo\x12\x18.remote.NodesInfoRequest\x1a\x16.remote.NodesInfoReply\x123\n" +
 	"\x05Peers\x12\x16.google.protobuf.Empty\x1a\x12.remote.PeersReply\x127\n" +
-	"\aAddPeer\x12\x16.remote.AddPeerRequest\x1a\x14.remote.AddPeerReply\x12A\n" +
+	"\aAddPeer\x12\x16.remote.AddPeerRequest\x1a\x14.remote.AddPeerReply\x12@\n" +
+	"\n" +
+	"RemovePeer\x12\x19.remote.RemovePeerRequest\x1a\x17.remote.RemovePeerReply\x12A\n" +
 	"\fPendingBlock\x12\x16.google.protobuf.Empty\x1a\x19.remote.PendingBlockReply\x12F\n" +
 	"\fBorTxnLookup\x12\x1b.remote.BorTxnLookupRequest\x1a\x19.remote.BorTxnLookupReply\x12=\n" +
 	"\tBorEvents\x12\x18.remote.BorEventsRequest\x1a\x16.remote.BorEventsReply\x12F\n" +
@@ -2037,7 +2131,7 @@ func file_remote_ethbackend_proto_rawDescGZIP() []byte {
 }
 
 var file_remote_ethbackend_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_remote_ethbackend_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_remote_ethbackend_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_remote_ethbackend_proto_goTypes = []any{
 	(Event)(0),                                       // 0: remote.Event
 	(*EtherbaseRequest)(nil),                         // 1: remote.EtherbaseRequest
@@ -2067,53 +2161,55 @@ var file_remote_ethbackend_proto_goTypes = []any{
 	(*TxnLookupReply)(nil),                           // 25: remote.TxnLookupReply
 	(*NodesInfoRequest)(nil),                         // 26: remote.NodesInfoRequest
 	(*AddPeerRequest)(nil),                           // 27: remote.AddPeerRequest
-	(*NodesInfoReply)(nil),                           // 28: remote.NodesInfoReply
-	(*PeersReply)(nil),                               // 29: remote.PeersReply
-	(*AddPeerReply)(nil),                             // 30: remote.AddPeerReply
-	(*PendingBlockReply)(nil),                        // 31: remote.PendingBlockReply
-	(*EngineGetPayloadBodiesByHashV1Request)(nil),    // 32: remote.EngineGetPayloadBodiesByHashV1Request
-	(*EngineGetPayloadBodiesByRangeV1Request)(nil),   // 33: remote.EngineGetPayloadBodiesByRangeV1Request
-	(*AAValidationRequest)(nil),                      // 34: remote.AAValidationRequest
-	(*AAValidationReply)(nil),                        // 35: remote.AAValidationReply
-	(*BlockForTxNumRequest)(nil),                     // 36: remote.BlockForTxNumRequest
-	(*BlockForTxNumResponse)(nil),                    // 37: remote.BlockForTxNumResponse
-	(*SyncingReply_StageProgress)(nil),               // 38: remote.SyncingReply.StageProgress
-	(*typesproto.H160)(nil),                          // 39: types.H160
-	(*typesproto.H256)(nil),                          // 40: types.H256
-	(*typesproto.NodeInfoReply)(nil),                 // 41: types.NodeInfoReply
-	(*typesproto.PeerInfo)(nil),                      // 42: types.PeerInfo
-	(*typesproto.AccountAbstractionTransaction)(nil), // 43: types.AccountAbstractionTransaction
-	(*emptypb.Empty)(nil),                            // 44: google.protobuf.Empty
-	(*BorTxnLookupRequest)(nil),                      // 45: remote.BorTxnLookupRequest
-	(*BorEventsRequest)(nil),                         // 46: remote.BorEventsRequest
-	(*typesproto.VersionReply)(nil),                  // 47: types.VersionReply
-	(*BorTxnLookupReply)(nil),                        // 48: remote.BorTxnLookupReply
-	(*BorEventsReply)(nil),                           // 49: remote.BorEventsReply
+	(*RemovePeerRequest)(nil),                        // 28: remote.RemovePeerRequest
+	(*NodesInfoReply)(nil),                           // 29: remote.NodesInfoReply
+	(*PeersReply)(nil),                               // 30: remote.PeersReply
+	(*AddPeerReply)(nil),                             // 31: remote.AddPeerReply
+	(*RemovePeerReply)(nil),                          // 32: remote.RemovePeerReply
+	(*PendingBlockReply)(nil),                        // 33: remote.PendingBlockReply
+	(*EngineGetPayloadBodiesByHashV1Request)(nil),    // 34: remote.EngineGetPayloadBodiesByHashV1Request
+	(*EngineGetPayloadBodiesByRangeV1Request)(nil),   // 35: remote.EngineGetPayloadBodiesByRangeV1Request
+	(*AAValidationRequest)(nil),                      // 36: remote.AAValidationRequest
+	(*AAValidationReply)(nil),                        // 37: remote.AAValidationReply
+	(*BlockForTxNumRequest)(nil),                     // 38: remote.BlockForTxNumRequest
+	(*BlockForTxNumResponse)(nil),                    // 39: remote.BlockForTxNumResponse
+	(*SyncingReply_StageProgress)(nil),               // 40: remote.SyncingReply.StageProgress
+	(*typesproto.H160)(nil),                          // 41: types.H160
+	(*typesproto.H256)(nil),                          // 42: types.H256
+	(*typesproto.NodeInfoReply)(nil),                 // 43: types.NodeInfoReply
+	(*typesproto.PeerInfo)(nil),                      // 44: types.PeerInfo
+	(*typesproto.AccountAbstractionTransaction)(nil), // 45: types.AccountAbstractionTransaction
+	(*emptypb.Empty)(nil),                            // 46: google.protobuf.Empty
+	(*BorTxnLookupRequest)(nil),                      // 47: remote.BorTxnLookupRequest
+	(*BorEventsRequest)(nil),                         // 48: remote.BorEventsRequest
+	(*typesproto.VersionReply)(nil),                  // 49: types.VersionReply
+	(*BorTxnLookupReply)(nil),                        // 50: remote.BorTxnLookupReply
+	(*BorEventsReply)(nil),                           // 51: remote.BorEventsReply
 }
 var file_remote_ethbackend_proto_depIdxs = []int32{
-	39, // 0: remote.EtherbaseReply.address:type_name -> types.H160
-	38, // 1: remote.SyncingReply.stages:type_name -> remote.SyncingReply.StageProgress
-	40, // 2: remote.CanonicalHashReply.hash:type_name -> types.H256
-	40, // 3: remote.HeaderNumberRequest.hash:type_name -> types.H256
+	41, // 0: remote.EtherbaseReply.address:type_name -> types.H160
+	40, // 1: remote.SyncingReply.stages:type_name -> remote.SyncingReply.StageProgress
+	42, // 2: remote.CanonicalHashReply.hash:type_name -> types.H256
+	42, // 3: remote.HeaderNumberRequest.hash:type_name -> types.H256
 	0,  // 4: remote.SubscribeRequest.type:type_name -> remote.Event
 	0,  // 5: remote.SubscribeReply.type:type_name -> remote.Event
-	39, // 6: remote.LogsFilterRequest.addresses:type_name -> types.H160
-	40, // 7: remote.LogsFilterRequest.topics:type_name -> types.H256
-	39, // 8: remote.SubscribeLogsReply.address:type_name -> types.H160
-	40, // 9: remote.SubscribeLogsReply.block_hash:type_name -> types.H256
-	40, // 10: remote.SubscribeLogsReply.topics:type_name -> types.H256
-	40, // 11: remote.SubscribeLogsReply.transaction_hash:type_name -> types.H256
-	40, // 12: remote.BlockRequest.block_hash:type_name -> types.H256
-	40, // 13: remote.TxnLookupRequest.txn_hash:type_name -> types.H256
-	41, // 14: remote.NodesInfoReply.nodes_info:type_name -> types.NodeInfoReply
-	42, // 15: remote.PeersReply.peers:type_name -> types.PeerInfo
-	40, // 16: remote.EngineGetPayloadBodiesByHashV1Request.hashes:type_name -> types.H256
-	43, // 17: remote.AAValidationRequest.tx:type_name -> types.AccountAbstractionTransaction
+	41, // 6: remote.LogsFilterRequest.addresses:type_name -> types.H160
+	42, // 7: remote.LogsFilterRequest.topics:type_name -> types.H256
+	41, // 8: remote.SubscribeLogsReply.address:type_name -> types.H160
+	42, // 9: remote.SubscribeLogsReply.block_hash:type_name -> types.H256
+	42, // 10: remote.SubscribeLogsReply.topics:type_name -> types.H256
+	42, // 11: remote.SubscribeLogsReply.transaction_hash:type_name -> types.H256
+	42, // 12: remote.BlockRequest.block_hash:type_name -> types.H256
+	42, // 13: remote.TxnLookupRequest.txn_hash:type_name -> types.H256
+	43, // 14: remote.NodesInfoReply.nodes_info:type_name -> types.NodeInfoReply
+	44, // 15: remote.PeersReply.peers:type_name -> types.PeerInfo
+	42, // 16: remote.EngineGetPayloadBodiesByHashV1Request.hashes:type_name -> types.H256
+	45, // 17: remote.AAValidationRequest.tx:type_name -> types.AccountAbstractionTransaction
 	1,  // 18: remote.ETHBACKEND.Etherbase:input_type -> remote.EtherbaseRequest
 	3,  // 19: remote.ETHBACKEND.NetVersion:input_type -> remote.NetVersionRequest
 	6,  // 20: remote.ETHBACKEND.NetPeerCount:input_type -> remote.NetPeerCountRequest
-	44, // 21: remote.ETHBACKEND.Version:input_type -> google.protobuf.Empty
-	44, // 22: remote.ETHBACKEND.Syncing:input_type -> google.protobuf.Empty
+	46, // 21: remote.ETHBACKEND.Version:input_type -> google.protobuf.Empty
+	46, // 22: remote.ETHBACKEND.Syncing:input_type -> google.protobuf.Empty
 	8,  // 23: remote.ETHBACKEND.ProtocolVersion:input_type -> remote.ProtocolVersionRequest
 	10, // 24: remote.ETHBACKEND.ClientVersion:input_type -> remote.ClientVersionRequest
 	18, // 25: remote.ETHBACKEND.Subscribe:input_type -> remote.SubscribeRequest
@@ -2124,37 +2220,39 @@ var file_remote_ethbackend_proto_depIdxs = []int32{
 	14, // 30: remote.ETHBACKEND.HeaderNumber:input_type -> remote.HeaderNumberRequest
 	24, // 31: remote.ETHBACKEND.TxnLookup:input_type -> remote.TxnLookupRequest
 	26, // 32: remote.ETHBACKEND.NodeInfo:input_type -> remote.NodesInfoRequest
-	44, // 33: remote.ETHBACKEND.Peers:input_type -> google.protobuf.Empty
+	46, // 33: remote.ETHBACKEND.Peers:input_type -> google.protobuf.Empty
 	27, // 34: remote.ETHBACKEND.AddPeer:input_type -> remote.AddPeerRequest
-	44, // 35: remote.ETHBACKEND.PendingBlock:input_type -> google.protobuf.Empty
-	45, // 36: remote.ETHBACKEND.BorTxnLookup:input_type -> remote.BorTxnLookupRequest
-	46, // 37: remote.ETHBACKEND.BorEvents:input_type -> remote.BorEventsRequest
-	34, // 38: remote.ETHBACKEND.AAValidation:input_type -> remote.AAValidationRequest
-	36, // 39: remote.ETHBACKEND.BlockForTxNum:input_type -> remote.BlockForTxNumRequest
-	2,  // 40: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
-	4,  // 41: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
-	7,  // 42: remote.ETHBACKEND.NetPeerCount:output_type -> remote.NetPeerCountReply
-	47, // 43: remote.ETHBACKEND.Version:output_type -> types.VersionReply
-	5,  // 44: remote.ETHBACKEND.Syncing:output_type -> remote.SyncingReply
-	9,  // 45: remote.ETHBACKEND.ProtocolVersion:output_type -> remote.ProtocolVersionReply
-	11, // 46: remote.ETHBACKEND.ClientVersion:output_type -> remote.ClientVersionReply
-	19, // 47: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
-	21, // 48: remote.ETHBACKEND.SubscribeLogs:output_type -> remote.SubscribeLogsReply
-	23, // 49: remote.ETHBACKEND.Block:output_type -> remote.BlockReply
-	17, // 50: remote.ETHBACKEND.CanonicalBodyForStorage:output_type -> remote.CanonicalBodyForStorageReply
-	13, // 51: remote.ETHBACKEND.CanonicalHash:output_type -> remote.CanonicalHashReply
-	15, // 52: remote.ETHBACKEND.HeaderNumber:output_type -> remote.HeaderNumberReply
-	25, // 53: remote.ETHBACKEND.TxnLookup:output_type -> remote.TxnLookupReply
-	28, // 54: remote.ETHBACKEND.NodeInfo:output_type -> remote.NodesInfoReply
-	29, // 55: remote.ETHBACKEND.Peers:output_type -> remote.PeersReply
-	30, // 56: remote.ETHBACKEND.AddPeer:output_type -> remote.AddPeerReply
-	31, // 57: remote.ETHBACKEND.PendingBlock:output_type -> remote.PendingBlockReply
-	48, // 58: remote.ETHBACKEND.BorTxnLookup:output_type -> remote.BorTxnLookupReply
-	49, // 59: remote.ETHBACKEND.BorEvents:output_type -> remote.BorEventsReply
-	35, // 60: remote.ETHBACKEND.AAValidation:output_type -> remote.AAValidationReply
-	37, // 61: remote.ETHBACKEND.BlockForTxNum:output_type -> remote.BlockForTxNumResponse
-	40, // [40:62] is the sub-list for method output_type
-	18, // [18:40] is the sub-list for method input_type
+	28, // 35: remote.ETHBACKEND.RemovePeer:input_type -> remote.RemovePeerRequest
+	46, // 36: remote.ETHBACKEND.PendingBlock:input_type -> google.protobuf.Empty
+	47, // 37: remote.ETHBACKEND.BorTxnLookup:input_type -> remote.BorTxnLookupRequest
+	48, // 38: remote.ETHBACKEND.BorEvents:input_type -> remote.BorEventsRequest
+	36, // 39: remote.ETHBACKEND.AAValidation:input_type -> remote.AAValidationRequest
+	38, // 40: remote.ETHBACKEND.BlockForTxNum:input_type -> remote.BlockForTxNumRequest
+	2,  // 41: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
+	4,  // 42: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
+	7,  // 43: remote.ETHBACKEND.NetPeerCount:output_type -> remote.NetPeerCountReply
+	49, // 44: remote.ETHBACKEND.Version:output_type -> types.VersionReply
+	5,  // 45: remote.ETHBACKEND.Syncing:output_type -> remote.SyncingReply
+	9,  // 46: remote.ETHBACKEND.ProtocolVersion:output_type -> remote.ProtocolVersionReply
+	11, // 47: remote.ETHBACKEND.ClientVersion:output_type -> remote.ClientVersionReply
+	19, // 48: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
+	21, // 49: remote.ETHBACKEND.SubscribeLogs:output_type -> remote.SubscribeLogsReply
+	23, // 50: remote.ETHBACKEND.Block:output_type -> remote.BlockReply
+	17, // 51: remote.ETHBACKEND.CanonicalBodyForStorage:output_type -> remote.CanonicalBodyForStorageReply
+	13, // 52: remote.ETHBACKEND.CanonicalHash:output_type -> remote.CanonicalHashReply
+	15, // 53: remote.ETHBACKEND.HeaderNumber:output_type -> remote.HeaderNumberReply
+	25, // 54: remote.ETHBACKEND.TxnLookup:output_type -> remote.TxnLookupReply
+	29, // 55: remote.ETHBACKEND.NodeInfo:output_type -> remote.NodesInfoReply
+	30, // 56: remote.ETHBACKEND.Peers:output_type -> remote.PeersReply
+	31, // 57: remote.ETHBACKEND.AddPeer:output_type -> remote.AddPeerReply
+	32, // 58: remote.ETHBACKEND.RemovePeer:output_type -> remote.RemovePeerReply
+	33, // 59: remote.ETHBACKEND.PendingBlock:output_type -> remote.PendingBlockReply
+	50, // 60: remote.ETHBACKEND.BorTxnLookup:output_type -> remote.BorTxnLookupReply
+	51, // 61: remote.ETHBACKEND.BorEvents:output_type -> remote.BorEventsReply
+	37, // 62: remote.ETHBACKEND.AAValidation:output_type -> remote.AAValidationReply
+	39, // 63: remote.ETHBACKEND.BlockForTxNum:output_type -> remote.BlockForTxNumResponse
+	41, // [41:64] is the sub-list for method output_type
+	18, // [18:41] is the sub-list for method input_type
 	18, // [18:18] is the sub-list for extension type_name
 	18, // [18:18] is the sub-list for extension extendee
 	0,  // [0:18] is the sub-list for field type_name
@@ -2173,7 +2271,7 @@ func file_remote_ethbackend_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_remote_ethbackend_proto_rawDesc), len(file_remote_ethbackend_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   38,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
