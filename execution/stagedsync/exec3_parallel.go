@@ -1074,8 +1074,8 @@ type blockExecutor struct {
 	// Validate tasks stores the state of each validation task
 	validateTasks execStatusList
 
-	// Finalize tasks stores the state of each finalization task
-	finalizeTasks execStatusList
+	// Publish tasks stores the state tasks ready for publication
+	publishTasks execStatusList
 
 	// Multi-version map
 	versionMap *state.VersionMap
@@ -1261,6 +1261,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	cntInvalid := 0
+	var stateReader state.StateReader
+	var stateWriter *state.BufferedWriter
 
 	for i := 0; i < len(toValidate); i++ {
 		be.cntTotalValidations++
@@ -1283,16 +1285,56 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		if be.skipCheck[tx] ||
+		valid := be.skipCheck[tx] ||
 			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
 				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
 					return readsource == state.MapRead && readVersion == writtenVersion
-				}) {
+				})
 
+		be.versionMap.SetTrace(trace)
+		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
+		be.versionMap.SetTrace(false)
+
+		if valid {
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
-				// note this assumes that tasks are pushed in order as finalization needs to happen in block order
-				be.finalizeTasks.pushPending(tx)
+
+				var prevReceipt *types.Receipt
+				if txVersion.TxIndex > 0 && tx > 0 {
+					prevReceipt = be.results[tx-1].Receipt
+				}
+
+				txResult := be.results[tx]
+
+				if err := be.gasPool.SubGas(txResult.ExecutionResult.GasUsed); err != nil {
+					return nil, err
+				}
+
+				txTask := be.tasks[tx].Task
+
+				if txTask.Tx() != nil {
+					blobGasUsed := txTask.Tx().GetBlobGas()
+					if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
+						return nil, err
+					}
+					be.blobGasUsed += blobGasUsed
+				}
+
+				if stateReader == nil {
+					stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
+				}
+
+				if stateWriter == nil {
+					stateWriter = state.NewBufferedWriter(pe.rs, nil)
+				}
+
+				_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
+
+				if err != nil {
+					return nil, err
+				}
+
+				be.publishTasks.pushPending(tx)
 			}
 		} else {
 			cntInvalid++
@@ -1312,59 +1354,28 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.preValidated[tx] = false
 			be.txIncarnations[tx]++
 		}
-
-		be.versionMap.SetTrace(trace)
-		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
-		be.versionMap.SetTrace(false)
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
+	be.scheduleExecution(ctx, pe)
 
-	if be.finalizeTasks.minPending() != -1 {
-		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
-
+	if be.publishTasks.minPending() != -1 {
 		toFinalize := make(sort.IntSlice, 0, 2)
 
-		for be.finalizeTasks.minPending() <= maxValidated && be.finalizeTasks.minPending() >= 0 {
-			toFinalize = append(toFinalize, be.finalizeTasks.takeNextPending())
+		for be.publishTasks.minPending() <= maxValidated && be.publishTasks.minPending() >= 0 {
+			toFinalize = append(toFinalize, be.publishTasks.takeNextPending())
+		}
+
+		applyResult := txResult{
+			blockNum:   be.blockNum,
+			traceFroms: map[common.Address]struct{}{},
+			traceTos:   map[common.Address]struct{}{},
 		}
 
 		for i := 0; i < len(toFinalize); i++ {
-			stateWriter := state.NewBufferedWriter(pe.rs, nil)
-			applyResult := txResult{
-				blockNum:   be.blockNum,
-				traceFroms: map[common.Address]struct{}{},
-				traceTos:   map[common.Address]struct{}{},
-			}
-
 			tx := toFinalize[i]
 			txTask := be.tasks[tx].Task
-			txIndex := txTask.Version().TxIndex
-
-			var prevReceipt *types.Receipt
-			if txIndex > 0 && tx > 0 {
-				prevReceipt = be.results[tx-1].Receipt
-			}
-
 			txResult := be.results[tx]
-
-			if err := be.gasPool.SubGas(txResult.ExecutionResult.GasUsed); err != nil {
-				return nil, err
-			}
-
-			if txTask.Tx() != nil {
-				blobGasUsed := txTask.Tx().GetBlobGas()
-				if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
-					return nil, err
-				}
-				be.blobGasUsed += blobGasUsed
-			}
-
-			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
-
-			if err != nil {
-				return nil, err
-			}
 
 			applyResult.txNum = txTask.Version().TxNum
 			if txResult.Receipt != nil {
@@ -1372,16 +1383,19 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.gasUsed += txResult.Receipt.GasUsed
 				applyResult.receipts = append(applyResult.receipts, txResult.Receipt)
 			}
+
 			applyResult.blockTime = txTask.BlockTime()
 			applyResult.logs = append(applyResult.logs, txResult.Logs...)
 			maps.Copy(applyResult.traceFroms, txResult.TraceFroms)
 			maps.Copy(applyResult.traceTos, txResult.TraceTos)
 			be.cntFinalized++
-			be.finalizeTasks.markComplete(tx)
+			be.publishTasks.markComplete(tx)
+		}
 
-			if applyResult.txNum > 0 {
-				pe.executedGas.Add(int64(applyResult.gasUsed))
-				pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
+		if applyResult.txNum > 0 {
+			pe.executedGas.Add(int64(applyResult.gasUsed))
+			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
+			if stateWriter != nil {
 				applyResult.stateUpdates = stateWriter.WriteSet()
 
 				if applyResult.stateUpdates.BTreeG != nil {
@@ -1390,18 +1404,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, dbg.TraceBlock(applyResult.blockNum))
 					}
 				}
-
-				be.applyResults <- &applyResult
+				stateWriter = nil
 			}
+
+			be.applyResults <- &applyResult
 		}
 	}
 
-	// this needs to be called after finalization to make sure
-	// that coinbase updates are considered by subsequent
-	// transactions
-	be.scheduleExecution(ctx, pe)
-
-	if be.finalizeTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
+	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
 		pe.logger.Debug("exec summary", "block", be.blockNum, "tasks", len(be.tasks), "execs", be.cntExec,
 			"speculative", be.cntSpecExec, "success", be.cntSuccess, "aborts", be.cntAbort, "validations", be.cntTotalValidations, "failures", be.cntValidationFail,
 			"retries", fmt.Sprintf("%.2f%%", float64(be.cntAbort+be.cntValidationFail)/float64(be.cntExec)*100),
