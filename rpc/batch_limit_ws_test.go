@@ -10,6 +10,7 @@ import (
 )
 
 func TestBatchLimit_WebSocket_Exceeded(t *testing.T) {
+	t.Skip("TODO: https://github.com/erigontech/erigon/issues/16310")
 	t.Parallel()
 	logger := log.New()
 

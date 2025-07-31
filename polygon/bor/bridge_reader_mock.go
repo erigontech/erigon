@@ -111,13 +111,13 @@ func (c *MockbridgeReaderEventsCall) Return(arg0 []*types.Message, arg1 error) *
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockbridgeReaderEventsCall) Do(f func(context.Context, uint64) ([]*types.Message, error)) *MockbridgeReaderEventsCall {
+func (c *MockbridgeReaderEventsCall) Do(f func(context.Context, common.Hash, uint64) ([]*types.Message, error)) *MockbridgeReaderEventsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockbridgeReaderEventsCall) DoAndReturn(f func(context.Context, uint64) ([]*types.Message, error)) *MockbridgeReaderEventsCall {
+func (c *MockbridgeReaderEventsCall) DoAndReturn(f func(context.Context, common.Hash, uint64) ([]*types.Message, error)) *MockbridgeReaderEventsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
