@@ -376,7 +376,7 @@ func (hi *HistoryRangeAsOfDB) Next() ([]byte, []byte, error) {
 	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
-// HistoryChangesIterFiles - producing state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"
+// HistoryChangesIterFiles - producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"
 // Performs multi-way Union of frozen files. Later files override earlier files for same key
 type HistoryChangesIterFiles struct {
 	hc         *HistoryRoTx
