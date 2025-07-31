@@ -584,28 +584,31 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 	Gnosis = fromEmbeddedToml(snapshothashes.Gnosis)
 	Chiado = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi = fromEmbeddedToml(snapshothashes.Hoodi)
+	ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia)
 
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
-		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-		networkname.Amoy:       webseedsParse(webseed.Amoy),
-		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-		networkname.Chiado:     webseedsParse(webseed.Chiado),
-		networkname.Holesky:    webseedsParse(webseed.Holesky),
-		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+		networkname.Mainnet:         webseedsParse(webseed.Mainnet),
+		networkname.Sepolia:         webseedsParse(webseed.Sepolia),
+		networkname.Amoy:            webseedsParse(webseed.Amoy),
+		networkname.BorMainnet:      webseedsParse(webseed.BorMainnet),
+		networkname.Gnosis:          webseedsParse(webseed.Gnosis),
+		networkname.Chiado:          webseedsParse(webseed.Chiado),
+		networkname.Holesky:         webseedsParse(webseed.Holesky),
+		networkname.Hoodi:           webseedsParse(webseed.Hoodi),
+		networkname.ArbiturmSepolia: webseedsParse(webseed.ArbSepolia),
 	}
 
 	knownPreverified = map[string]Preverified{
-		networkname.Mainnet:    Mainnet,
-		networkname.Holesky:    Holesky,
-		networkname.Sepolia:    Sepolia,
-		networkname.Amoy:       Amoy,
-		networkname.BorMainnet: BorMainnet,
-		networkname.Gnosis:     Gnosis,
-		networkname.Chiado:     Chiado,
-		networkname.Hoodi:      Hoodi,
+		networkname.Mainnet:         Mainnet,
+		networkname.Holesky:         Holesky,
+		networkname.Sepolia:         Sepolia,
+		networkname.Amoy:            Amoy,
+		networkname.BorMainnet:      BorMainnet,
+		networkname.Gnosis:          Gnosis,
+		networkname.Chiado:          Chiado,
+		networkname.Hoodi:           Hoodi,
+		networkname.ArbiturmSepolia: ArbSepolia,
 	}
 	return loaded, nil
 }
