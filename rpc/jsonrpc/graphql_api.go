@@ -97,7 +97,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 
-		transaction := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true)
+		transaction := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false)
 		transaction["nonce"] = txn.GetNonce()
 		transaction["value"] = txn.GetValue()
 		transaction["data"] = txn.GetData()
