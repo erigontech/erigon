@@ -1281,10 +1281,10 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	txNum := cliCtx.Int64("txnum")
 
 	if blkNumber < 0 && txNum < 0 {
-		return fmt.Errorf("provide atleast one positive value -- either block or txnum")
+		return errors.New("provide atleast one positive value -- either block or txnum")
 	}
 	if blkNumber >= 0 && txNum >= 0 {
-		return fmt.Errorf("both block and txnum can't be provided")
+		return errors.New("both block and txnum can't be provided")
 	}
 
 	ctx := cliCtx.Context
