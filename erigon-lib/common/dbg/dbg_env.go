@@ -63,23 +63,23 @@ func EnvStrings(envVarName string, sep string, defaultVal []string) []string {
 
 func EnvBool(envVarName string, defaultVal bool) bool {
 	v, _ := os.LookupEnv(envVarName)
-	if v == "true" {
+	if v == strings.ToLower("true") {
 		WarnOnErigonPrefix(envVarName)
 		log.Info("[env]", envVarName, true)
 		return true
 	}
-	if v == "false" {
+	if v == strings.ToLower("false") {
 		WarnOnErigonPrefix(envVarName)
 		log.Info("[env]", envVarName, false)
 		return false
 	}
 
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
-	if v == "true" {
+	if v == strings.ToLower("true") {
 		log.Info("[env]", envVarName, true)
 		return true
 	}
-	if v == "false" {
+	if v == strings.ToLower("false") {
 		log.Info("[env]", envVarName, false)
 		return false
 	}
@@ -160,7 +160,7 @@ func EnvUints(envVarName string, sep string, defaultVal []uint64) []uint64 {
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
 	if v != "" {
 		log.Info("[env]", envVarName, v)
-		if v == strings.ToLower("all") {
+		if v == strings.ToLower("all") || v == strings.ToLower("true") {
 			return []uint64{math.MaxUint64}
 		}
 		var ints []uint64
