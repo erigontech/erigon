@@ -43,8 +43,8 @@ type PeerDas interface {
 }
 
 const (
-	maxNumberOfCellsPerRequest    = 4096 // 4096*2KB = 8MB
-	maxConcurrentDownloadRequests = 16
+	maxNumberOfCellsPerRequest    = 1024 // 1024*2KB = 2MB
+	maxConcurrentDownloadRequests = 32
 )
 
 var (
