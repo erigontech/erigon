@@ -199,9 +199,10 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
+		require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
+		require.True(t, strings.HasSuffix(c.historyPath, "v1.1"+
+			"-accounts.0-1.v"))
 		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.historyValuesOnCompressedPage), c.historyComp.Count())
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
@@ -1136,9 +1137,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
+	require.True(t, strings.HasSuffix(c.historyPath, "v1.1-accounts.0-1.v"))
 	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.hist.historyValuesOnCompressedPage), c.historyComp.Count())
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
