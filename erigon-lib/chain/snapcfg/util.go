@@ -539,14 +539,15 @@ func KnownCfg(networkName string) *Cfg {
 }
 
 var KnownWebseeds = map[string][]string{
-	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-	networkname.Amoy:       webseedsParse(webseed.Amoy),
-	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-	networkname.Chiado:     webseedsParse(webseed.Chiado),
-	networkname.Holesky:    webseedsParse(webseed.Holesky),
-	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+	networkname.Mainnet:         webseedsParse(webseed.Mainnet),
+	networkname.Sepolia:         webseedsParse(webseed.Sepolia),
+	networkname.Amoy:            webseedsParse(webseed.Amoy),
+	networkname.BorMainnet:      webseedsParse(webseed.BorMainnet),
+	networkname.Gnosis:          webseedsParse(webseed.Gnosis),
+	networkname.Chiado:          webseedsParse(webseed.Chiado),
+	networkname.Holesky:         webseedsParse(webseed.Holesky),
+	networkname.Hoodi:           webseedsParse(webseed.Hoodi),
+	networkname.ArbiturmSepolia: webseedsParse(webseed.ArbSepolia),
 }
 
 func webseedsParse(in []byte) (res []string) {
