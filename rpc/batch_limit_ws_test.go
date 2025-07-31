@@ -16,12 +16,12 @@ func TestBatchLimit_WebSocket_Exceeded(t *testing.T) {
 
 	// Create server with batch limit
 	srv := newTestServer(logger)
+	defer srv.Stop()
 	srv.SetBatchLimit(10) // Set limit to 10
 
 	// Start HTTP server with WebSocket support
 	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
 	wsURL := "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
-	defer srv.Stop()
 	defer httpsrv.Close()
 
 	// Connect WebSocket client
