@@ -332,11 +332,6 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "integrity",
 			Action: func(cliCtx *cli.Context) error {
-				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-				if err != nil {
-					return err
-				}
-				defer l.Unlock()
 				if err := doIntegrity(cliCtx); err != nil {
 					log.Error("[integrity]", "err", err)
 					return err
