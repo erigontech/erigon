@@ -141,10 +141,10 @@ type AggStats struct {
 	BytesCompleted, BytesTotal uint64
 	CompletionRate             uint64
 
-	BytesDownload, BytesUpload uint64
-	UploadRate, DownloadRate   uint64
-	LocalFileHashes            int
-	LocalFileHashTime          time.Duration
+	BytesDownload, BytesUpload                                 uint64
+	ClientWebseedBytesDownload, ClientWebseedBytesDownloadRate uint64
+	PeerConnBytesDownload, PeerConnBytesDownloadRate           uint64
+	UploadRate, DownloadRate                                   uint64
 
 	BytesHashed, BytesFlushed uint64
 	HashRate, FlushRate       uint64
@@ -601,6 +601,8 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
+	stats.ClientWebseedBytesDownload = uint64(connStats.WebSeeds.BytesReadData.Int64())
+	stats.PeerConnBytesDownload = uint64(connStats.PeerConns.BytesReadData.Int64())
 
 	stats.BytesCompleted = 0
 	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0
@@ -675,11 +677,16 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 
 	stats.When = time.Now()
 	interval := stats.When.Sub(prevStats.When)
-	stats.DownloadRate = calculateRate(stats.BytesDownload, prevStats.BytesDownload, prevStats.DownloadRate, interval)
-	stats.HashRate = calculateRate(stats.BytesHashed, prevStats.BytesHashed, prevStats.HashRate, interval)
-	stats.FlushRate = calculateRate(stats.BytesFlushed, prevStats.BytesFlushed, prevStats.FlushRate, interval)
-	stats.UploadRate = calculateRate(stats.BytesUpload, prevStats.BytesUpload, prevStats.UploadRate, interval)
-	stats.CompletionRate = calculateRate(stats.BytesCompleted, prevStats.BytesCompleted, prevStats.CompletionRate, interval)
+	calculateRate := func(counter func(*AggStats) uint64, rate func(*AggStats) *uint64) {
+		*rate(&stats) = calculateRate(counter(&stats), counter(&prevStats), *rate(&prevStats), interval)
+	}
+	calculateRate(func(s *AggStats) uint64 { return s.BytesDownload }, func(s *AggStats) *uint64 { return &s.DownloadRate })
+	calculateRate(func(s *AggStats) uint64 { return s.BytesHashed }, func(s *AggStats) *uint64 { return &s.HashRate })
+	calculateRate(func(s *AggStats) uint64 { return s.BytesFlushed }, func(s *AggStats) *uint64 { return &s.FlushRate })
+	calculateRate(func(s *AggStats) uint64 { return s.BytesUpload }, func(s *AggStats) *uint64 { return &s.UploadRate })
+	calculateRate(func(s *AggStats) uint64 { return s.BytesCompleted }, func(s *AggStats) *uint64 { return &s.CompletionRate })
+	calculateRate(func(s *AggStats) uint64 { return s.ClientWebseedBytesDownload }, func(s *AggStats) *uint64 { return &s.ClientWebseedBytesDownloadRate })
+	calculateRate(func(s *AggStats) uint64 { return s.PeerConnBytesDownload }, func(s *AggStats) *uint64 { return &s.PeerConnBytesDownloadRate })
 
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = len(torrents)
@@ -1293,6 +1300,8 @@ func (d *Downloader) logProgress() {
 
 	haveAllMetadata := d.stats.MetadataReady == d.stats.NumTorrents
 
+	// TODO: This condition is not ideal as it means we log even if we're not blocked on initial
+	// sync. This decision belongs in the sync stage.
 	if !d.stats.AllTorrentsComplete() {
 		// We have work to do so start timing.
 		d.setStartTime()
@@ -1319,7 +1328,10 @@ func (d *Downloader) logProgress() {
 			}(),
 			"time-left", timeLeft,
 			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
-			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
+			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.ClientWebseedBytesDownloadRate)),
+			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.PeerConnBytesDownloadRate)),
+			"combined-download-todo-remove", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
+			"upload", fmt.Sprintf("%s/s", common.ByteCount(d.stats.UploadRate)),
 			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys),
