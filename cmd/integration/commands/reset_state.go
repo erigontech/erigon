@@ -203,6 +203,12 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 		}
 		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), dbg.HistoryStartFrom(d), txNum, step)
 	}
+	fmt.Fprintf(w, " \t\t  \t\t  \t\t  \n") // newline acts as a table separator, this is a hack to maintain same tabwriter group
+	for _, ii := range []kv.InvertedIdx{kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
+		txNum := dbg.IIProgress(ii)
+		step := txNum / stepSize
+		fmt.Fprintf(w, "%s \t\t - \t\t %d \t\t %d\n", ii.String(), txNum, step)
+	}
 	fmt.Fprintf(w, "--\n")
 
 	//fmt.Printf("==== state =====\n")
