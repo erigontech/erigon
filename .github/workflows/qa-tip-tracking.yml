@@ -47,12 +47,12 @@ jobs:
 
     # Upgrade + tip-tracking test
 
-    # Uncomment the following lines if you need to run the datadir upgrade procedure explicitly
-    # For now, it is executed automatically by erigon when it detects the old format.
-    #- name: Run the datadir upgrade procedure
-    #  working-directory: ${{ github.workspace }}
-    #  run: |
-    #    ./build/bin/erigon seg update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+    # The following task runs the datadir upgrade procedure explicitly.
+    # It is unnecessary and is executed automatically by erigon when it detects the old format.
+    - name: Run the datadir upgrade procedure
+      working-directory: ${{ github.workspace }}
+      run: |
+        ./build/bin/erigon seg update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step
@@ -150,7 +150,7 @@ jobs:
         
         # Launch the testbed Erigon instance & test its ability to maintain sync
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ env.ERIGON_TESTBED_DATA_DIR }}../ $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+          ${{ env.ERIGON_TESTBED_DATA_DIR }}/../ $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
         
         # Capture monitoring script exit status
         test_exit_status=$?
