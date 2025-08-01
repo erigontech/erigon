@@ -440,6 +440,11 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	block := types.NewBlock(head, nil, nil, nil, withdrawals)
 	b, _ := json.MarshalIndent(block.HeaderNoCopy(), "", "  ")
 	fmt.Println(string(b))
+	genesisAlloc, err := json.MarshalIndent(g.Alloc, "", " ")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("GENESIS_ALLOC = %s\n", string(genesisAlloc))
 	return block, statedb, nil
 }
 

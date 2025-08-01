@@ -45,6 +45,6 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 	if err != nil {
 		return err
 	}
-
+	// fmt.Printf("HEADER_TIME_VALIDATOR: blockNum=%d ,blockHash=%x producers=%v\n", headerNum, header.Hash(), producers)
 	return bor.ValidateHeaderTime(header, now, parent, producers, htv.borConfig, htv.signaturesCache)
 }

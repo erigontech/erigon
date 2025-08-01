@@ -251,6 +251,9 @@ func ValidateHeaderTime(
 		return err
 	}
 
+	proposer := validatorSet.(*valset.ValidatorSet).GetProposer()
+	fmt.Printf("VALIDATE_HEADER_TIME: blockNum=%d , blockHash=%x, signer=%x, proposer=%x succession=%d\n", header.Number.Uint64(), header.Hash(), signer, proposer, succession)
+
 	// Post Bhilai HF, reject blocks form non-primary producers if they're earlier than the expected time
 	if config.IsBhilai(header.Number.Uint64()) && succession != 0 {
 		if header.Time > uint64(now.Unix()) {
@@ -1085,6 +1088,8 @@ func (c *Bor) checkAndCommitSpan(header *types.Header, syscall consensus.SystemC
 		return fmt.Errorf("GetCurrentSpan: %w", err)
 	}
 
+	fmt.Printf("CURRENT_SPAN = %+v\n", currentSpan)
+
 	// Whenever `checkAndCommitSpan` is called for the first time, during the start of 'technically'
 	// second sprint, we need the 0th as well as the 1st span. The contract returns an empty
 	// span (i.e. all fields set to 0). Span 0 doesn't need to be committed explicitly and
@@ -1095,6 +1100,8 @@ func (c *Bor) checkAndCommitSpan(header *types.Header, syscall consensus.SystemC
 			return fmt.Errorf("fetchAndCommitSpan: %w", err)
 		}
 	}
+
+	fmt.Printf("CURRENT_SPAN_2 = %+v\n", currentSpan)
 
 	// For subsequent calls, commit the next span on the first block of the last sprint of a span
 	sprintLength := c.config.CalculateSprintLength(headerNumber)

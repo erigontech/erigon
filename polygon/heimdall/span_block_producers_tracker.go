@@ -107,13 +107,16 @@ func (t *spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
 }
 
 func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
-	t.logger.Debug(heimdallLogPrefix("block producers tracker observing span"), "id", newSpan.Id)
+	t.logger.Info(heimdallLogPrefix("block producers tracker observing span"), "id", newSpan.Id)
+
+	fmt.Printf("OBSERVE_SPAN: %+v\n", newSpan)
 
 	lastProducerSelection, ok, err := t.store.LastEntity(ctx)
 	if err != nil {
 		return err
 	}
 	if !ok {
+		fmt.Printf("NOT OKKKKKKKKKKKKKKKK, INITIAL_PRODUCERS == INITIAL_VALIDATORS")
 		if newSpan.Id != 0 {
 			return errors.New("expected first new span to be span 0")
 		}
@@ -161,6 +164,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
+	fmt.Printf("UPDATE_PRIORITY(observe_span(producers)):  validatorset=%+v\n", producers)
 
 	newProducers := valset.GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
 	newProducers.IncrementProposerPriority(1)
@@ -170,6 +174,8 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 		EndBlock:   newSpan.EndBlock,
 		Producers:  newProducers,
 	}
+
+	fmt.Printf("UPDATE_PRIORITY(observe_span(newProducers)):  validatorset=%+v\n", newProducers)
 
 	err = t.store.PutEntity(ctx, uint64(newProducerSelection.SpanId), newProducerSelection)
 	if err != nil {
@@ -207,6 +213,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 
 	// have we previously calculated the producers for the previous sprint num of the same span (chain tip optimisation)
 	spanId := SpanIdAt(blockNum)
+	fmt.Printf("PRODUCERS: blockNum=%d, spanId=%d\n", blockNum, spanId)
 	var prevSprintNum uint64
 	if currentSprintNum > 0 {
 		prevSprintNum = currentSprintNum - 1
@@ -217,6 +224,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		selectionCopy := selection
 		selectionCopy.Producers = producersCopy
 		t.recentSelections.Add(currentSprintNum, selectionCopy)
+		fmt.Printf("INCREASE_PRIORITY(1): blockNum=%d, validatorset=%+v\n", blockNum, producersCopy)
 		return producersCopy, 1, nil
 	}
 
@@ -242,6 +250,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
+	fmt.Printf("INCREASE_PRIORITY(2): blockNum=%d, validatorset=%+v\n", blockNum, producers)
 
 	t.recentSelections.Add(currentSprintNum, *producerSelection)
 	return producers, increments, nil
