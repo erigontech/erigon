@@ -336,7 +336,6 @@ type Bor struct {
 	DB          kv.RwDB           // Database to store and retrieve snapshot checkpoints
 	blockReader services.FullBlockReader
 
-	Recents      *lru.ARCCache[common.Hash, *Snapshot]      // Snapshots for recent block to speed up reorgs
 	Signatures   *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
 	Dependencies *lru.ARCCache[common.Hash, [][]int]
 
@@ -388,7 +387,6 @@ func New(
 	}
 
 	// Allocate the snapshot caches and create the engine
-	recents, _ := lru.NewARC[common.Hash, *Snapshot](inmemorySnapshots)
 	signatures, _ := lru.NewARC[common.Hash, common.Address](inmemorySignatures)
 	dependencies, _ := lru.NewARC[common.Hash, [][]int](128)
 
@@ -397,7 +395,6 @@ func New(
 		config:          borConfig,
 		DB:              db,
 		blockReader:     blockReader,
-		Recents:         recents,
 		Signatures:      signatures,
 		Dependencies:    dependencies,
 		spanner:         spanner,
@@ -439,7 +436,6 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 		borConfig.Sprint = defaultSprintLength
 	}
 
-	recents, _ := lru.NewARC[common.Hash, *Snapshot](inmemorySnapshots)
 	signatures, _ := lru.NewARC[common.Hash, common.Address](inmemorySignatures)
 	dependencies, _ := lru.NewARC[common.Hash, [][]int](128)
 
@@ -449,7 +445,6 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 		DB:           kv.RwWrapper{RoDB: db},
 		blockReader:  blockReader,
 		logger:       logger,
-		Recents:      recents,
 		Dependencies: dependencies,
 		Signatures:   signatures,
 		execCtx:      context.Background(),

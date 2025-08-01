@@ -31,16 +31,11 @@ import (
 
 // BorAPI Bor specific routines
 type BorAPI interface {
-	// Bor snapshot related (see ./bor_snapshot.go)
-	GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error)
 	GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error)
-	GetSnapshotAtHash(hash common.Hash) (*Snapshot, error)
 	GetSigners(number *rpc.BlockNumber) ([]common.Address, error)
 	GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	GetCurrentProposer() (common.Address, error)
 	GetCurrentValidators() ([]*valset.Validator, error)
-	GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (common.Address, error)
-	GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOrHash) (BlockSigners, error)
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 

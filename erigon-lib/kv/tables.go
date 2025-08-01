@@ -134,7 +134,6 @@ const (
 	// BOR
 	BorFinality             = "BorFinality"
 	BorTxLookup             = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
-	BorSeparate             = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
 	BorEvents               = "BorEvents"                 // event_id -> event_payload
 	BorEventNums            = "BorEventNums"              // block_num -> event_id (last event_id in that block)
 	BorEventProcessedBlocks = "BorEventProcessedBlocks"   // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
@@ -345,7 +344,6 @@ var ChaindataTables = []string{
 	PendingEpoch,
 	BorFinality,
 	BorTxLookup,
-	BorSeparate,
 	BorEvents,
 	BorEventNums,
 	BorEventProcessedBlocks,

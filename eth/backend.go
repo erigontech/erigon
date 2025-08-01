@@ -845,12 +845,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var (
 		snapDb     kv.RwDB
-		recents    *lru.ARCCache[common.Hash, *bor.Snapshot]
 		signatures *lru.ARCCache[common.Hash, common.Address]
 	)
 	if bor, ok := backend.engine.(*bor.Bor); ok {
 		snapDb = bor.DB
-		recents = bor.Recents
 		signatures = bor.Signatures
 	}
 
@@ -1003,7 +1001,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, tracer)
+		blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, signatures, logger, tracer)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
