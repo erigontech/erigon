@@ -32,7 +32,6 @@ import (
 
 type config struct {
 	heimdall    heimdall.Client
-	borDB       kv.RwDB
 	chainDB     kv.RwDB
 	blockReader services.BlockReader
 	logger      log.Logger
@@ -44,14 +43,13 @@ type BorAPI interface {
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 
-func Whitelist(heimdall heimdall.Client, borDB kv.RwDB, chainDB kv.RwDB, blockReader services.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
+func Whitelist(heimdall heimdall.Client, chainDB kv.RwDB, blockReader services.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
 	if !flags.Milestone {
 		return
 	}
 
 	config := &config{
 		heimdall:    heimdall,
-		borDB:       borDB,
 		chainDB:     chainDB,
 		blockReader: blockReader,
 		logger:      logger,

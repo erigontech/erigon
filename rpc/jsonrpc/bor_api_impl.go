@@ -70,18 +70,6 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 		return nil, errUnknownBlock
 	}
 
-	// init consensus engine
-	borEngine, err := api.bor()
-	if err != nil {
-		return nil, err
-	}
-
-	borTx, err := borEngine.DB.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer borTx.Rollback()
-
 	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
@@ -161,18 +149,6 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 		return nil, errUnknownBlock
 	}
 
-	// init consensus engine
-	borEngine, err := api.bor()
-	if err != nil {
-		return nil, err
-	}
-
-	borTx, err := borEngine.DB.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer borTx.Rollback()
-
 	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
@@ -208,19 +184,6 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 		return nil, errUnknownBlock
 	}
 
-	// init consensus engine
-	borEngine, err := api.bor()
-
-	if err != nil {
-		return nil, err
-	}
-
-	borTx, err := borEngine.DB.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer borTx.Rollback()
-
 	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
@@ -245,19 +208,6 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	if header == nil {
 		return nil, errUnknownBlock
 	}
-
-	// init consensus engine
-	borEngine, err := api.bor()
-
-	if err != nil {
-		return nil, err
-	}
-
-	borTx, err := borEngine.DB.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer borTx.Rollback()
 
 	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 	return validatorSet.Signers(), err
@@ -400,17 +350,6 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 		return common.Address{}, errUnknownBlock
 	}
 
-	borEngine, err := api.bor()
-	if err != nil {
-		return common.Address{}, err
-	}
-
-	borTx, err := borEngine.DB.BeginRo(ctx)
-	if err != nil {
-		return common.Address{}, err
-	}
-	defer borTx.Rollback()
-
 	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 	if err != nil {
 		return common.Address{}, err
@@ -449,19 +388,6 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	if header == nil || err != nil {
 		return BlockSigners{}, errUnknownBlock
 	}
-
-	// init consensus engine
-	borEngine, err := api.bor()
-
-	if err != nil {
-		return BlockSigners{}, err
-	}
-
-	borTx, err := borEngine.DB.BeginRo(ctx)
-	if err != nil {
-		return BlockSigners{}, err
-	}
-	defer borTx.Rollback()
 
 	var snap *Snapshot
 

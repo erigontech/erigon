@@ -56,9 +56,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/finality"
-	"github.com/erigontech/erigon/polygon/bor/finality/flags"
-	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -333,7 +330,6 @@ type Bor struct {
 	mutex       sync.Mutex
 	chainConfig *chain.Config     // Chain config
 	config      *borcfg.BorConfig // Consensus engine configuration parameters for bor consensus
-	DB          kv.RwDB           // Database to store and retrieve snapshot checkpoints
 	blockReader services.FullBlockReader
 
 	Signatures   *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
@@ -393,7 +389,6 @@ func New(
 	c := &Bor{
 		chainConfig:     chainConfig,
 		config:          borConfig,
-		DB:              db,
 		blockReader:     blockReader,
 		Signatures:      signatures,
 		Dependencies:    dependencies,
@@ -427,7 +422,7 @@ func New(
 }
 
 // NewRo is used by the rpcdaemon and tests which need read only access to the provided data services
-func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger) *Bor {
+func NewRo(chainConfig *chain.Config, blockReader services.FullBlockReader, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -442,7 +437,6 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 	return &Bor{
 		chainConfig:  chainConfig,
 		config:       borConfig,
-		DB:           kv.RwWrapper{RoDB: db},
 		blockReader:  blockReader,
 		logger:       logger,
 		Dependencies: dependencies,
@@ -1159,28 +1153,11 @@ func (f FinalityAPIFunc) GetRootHash(start uint64, end uint64) (string, error) {
 }
 
 func (c *Bor) Start(chainDB kv.RwDB) {
-	if flags.Milestone {
-		whitelist.RegisterService(c.DB)
-		finality.Whitelist(c.HeimdallClient, c.DB, chainDB, c.blockReader, c.logger,
-			FinalityAPIFunc(func(start uint64, end uint64) (string, error) {
-				ctx := context.Background()
-				tx, err := chainDB.BeginRo(ctx)
-				if err != nil {
-					return "", err
-				}
-				defer tx.Rollback()
 
-				return c.GetRootHash(ctx, tx, start, end)
-			}), c.closeCh)
-	}
 }
 
 func (c *Bor) Close() error {
 	c.closeOnce.Do(func() {
-		if c.DB != nil {
-			c.DB.Close()
-		}
-
 		if c.HeimdallClient != nil {
 			c.HeimdallClient.Close()
 		}

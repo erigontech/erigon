@@ -684,7 +684,6 @@ func SilkwormForExecutionStage(silkworm *silkworm.Silkworm, cfg *ethconfig.Confi
 
 func NewDefaultStages(ctx context.Context,
 	db kv.TemporalRwDB,
-	snapDb kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,

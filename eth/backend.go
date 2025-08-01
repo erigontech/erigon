@@ -843,12 +843,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 
-	var (
-		snapDb     kv.RwDB
-		signatures *lru.ARCCache[common.Hash, common.Address]
-	)
+	var signatures *lru.ARCCache[common.Hash, common.Address]
+
 	if bor, ok := backend.engine.(*bor.Bor); ok {
-		snapDb = bor.DB
 		signatures = bor.Signatures
 	}
 
@@ -1000,7 +997,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
+	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, signatures, logger, tracer)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
