@@ -18,6 +18,7 @@ package engine_block_downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -44,7 +45,15 @@ func (e *EngineBlockDownloader) download(
 ) {
 	if e.v2 {
 		req := BackwardDownloadRequest{MissingHash: hashToDownload, Trigger: trigger, ValidateChainTip: chainTip}
-		e.downloadV2(ctx, req)
+		err := e.downloadV2(ctx, req)
+		if err != nil {
+			args := append(req.LogArgs(), "err", err)
+			e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
+			e.status.Store(Idle)
+			return
+		}
+		e.logger.Info("[EngineBlockDownloader] backward download request successfully processed", req.LogArgs()...)
+		e.status.Store(Synced)
 		return
 	}
 	/* Start download process*/
@@ -121,7 +130,7 @@ func (e *EngineBlockDownloader) download(
 	tx.Rollback() // Discard the original db tx
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
 	if chainTip == nil {
-		e.status.Store(Idle)
+		e.status.Store(Synced)
 		return
 	}
 	// Can fail, not an issue in this case.
@@ -140,52 +149,48 @@ func (e *EngineBlockDownloader) download(
 	}
 	if status == execution.ExecutionStatus_BadBlock {
 		e.logger.Warn("[EngineBlockDownloader] block segments downloaded are invalid")
-		e.status.Store(Idle)
 		e.hd.ReportBadHeaderPoS(chainTip.Hash(), latestValidHash)
+		e.status.Store(Idle)
 		return
 	}
 	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
-	e.status.Store(Idle)
+	e.status.Store(Synced)
 }
 
-func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDownloadRequest) {
-	defer e.status.Store(Idle)
+func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDownloadRequest) error {
 	err := e.downloadBlocksV2(ctx, req)
 	if err != nil {
-		args := append(req.LogArgs(), "err", err)
-		e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
-		return
+		return fmt.Errorf("could not process backward download of blocks: %w", err)
 	}
-	e.logger.Info("[EngineBlockDownloader] backward download request processed successfully", req.LogArgs()...)
+	e.logger.Info("[EngineBlockDownloader] backward download of blocks finished successfully", req.LogArgs()...)
 	if req.ValidateChainTip == nil {
-		return
+		return nil
 	}
 	tip := req.ValidateChainTip
 	err = e.chainRW.InsertBlockAndWait(ctx, tip)
 	if err != nil {
-		e.logger.Warn("[EngineBlockDownloader] could not insert request chain tip for validation", "err", err)
-		return
+		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
 	status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
 	if err != nil {
-		e.logger.Warn("[EngineBlockDownloader] block verification failed", "reason", err)
-		return
+		return fmt.Errorf("request chain tip validation failed: %w", err)
 	}
 	if status == execution.ExecutionStatus_TooFarAway || status == execution.ExecutionStatus_Busy {
 		e.logger.Info("[EngineBlockDownloader] block verification skipped")
-		return
+		return nil
 	}
 	if status == execution.ExecutionStatus_BadBlock {
-		e.logger.Warn("[EngineBlockDownloader] block segments downloaded are invalid")
 		e.hd.ReportBadHeaderPoS(tip.Hash(), latestValidHash)
-		return
+		return errors.New("block segments downloaded are invalid")
 	}
 	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
+	return nil
 }
 
 func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req BackwardDownloadRequest) error {
-	e.logger.Info("[EngineBlockDownloader] processing backward download request", req.LogArgs()...)
-	opts := []bbd.Option{bbd.WithBlocksBatchSize(500)}
+	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
+	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
+	opts := []bbd.Option{bbd.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
 		opts = append(opts, bbd.WithChainLengthLimit(uint64(dbg.MaxReorgDepth)))
 		currentHeader := e.chainRW.CurrentHeader(ctx)
@@ -287,9 +292,12 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 // StartDownloading triggers the download process and returns true if the process started or false if it could not.
 // chainTip is optional and should be the block tip of the download request, which will be inserted at the end of the procedure if specified.
 func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload common.Hash, heightToDownload uint64, chainTip *types.Block, trigger Trigger) bool {
-	if !e.status.CompareAndSwap(Idle, Busy) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	if e.status.Load() == Syncing {
 		return false
 	}
+	e.status.Store(Syncing)
 	go e.download(e.bacgroundCtx, hashToDownload, heightToDownload, requestId, chainTip, trigger)
 	return true
 }
@@ -302,5 +310,6 @@ type Status int
 
 const (
 	Idle Status = iota
-	Busy
+	Syncing
+	Synced
 )

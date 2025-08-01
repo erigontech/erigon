@@ -178,6 +178,8 @@ type BorConfig interface {
 	GetAhmedabadBlock() *big.Int
 	IsBhilai(num uint64) bool
 	GetBhilaiBlock() *big.Int
+	IsVeBlop(num uint64) bool
+	GetVeBlopBlock() *big.Int
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
@@ -195,12 +197,13 @@ func (c *Config) String() string {
 	engine := c.getEngine()
 
 	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, VeBlop: %v, Engine: %v}",
 			c.ChainID,
 			c.Bor.GetAgraBlock(),
 			c.Bor.GetNapoliBlock(),
 			c.Bor.GetAhmedabadBlock(),
 			c.Bor.GetBhilaiBlock(),
+			c.Bor.GetVeBlopBlock(),
 			engine,
 		)
 	}
@@ -441,6 +444,20 @@ func (c *Config) SecondsPerSlot() uint64 {
 		return 5 // Gnosis
 	}
 	return 12 // Ethereum
+}
+
+func (c *Config) SystemContracts(time uint64) map[string]common.Address {
+	contracts := map[string]common.Address{}
+	if c.IsCancun(time) {
+		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
+	}
+	if c.IsPrague(time) {
+		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
+		contracts["DEPOSIT_CONTRACT_ADDRESS"] = c.DepositContract
+		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
+		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
+	}
+	return contracts
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported

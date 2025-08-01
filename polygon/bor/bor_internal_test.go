@@ -45,21 +45,11 @@ func TestUseBridgeReader(t *testing.T) {
 	require.True(t, bor.useBridgeReader)
 }
 
-func TestUseSpanReader(t *testing.T) {
-	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
-	var sr *mockSpanReader
-	b := New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
-	require.False(t, b.useSpanReader)
-	sr = &mockSpanReader{}
-	b = New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
-	require.True(t, b.useSpanReader)
-}
-
 var _ bridgeReader = mockBridgeReader{}
 
 type mockBridgeReader struct{}
 
-func (m mockBridgeReader) Events(context.Context, uint64) ([]*types.Message, error) {
+func (m mockBridgeReader) Events(context.Context, common.Hash, uint64) ([]*types.Message, error) {
 	panic("mock")
 }
 

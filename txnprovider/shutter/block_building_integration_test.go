@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"math/big"
 	"path"
 	"runtime"
@@ -262,6 +263,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		AuthRpcPort:              engineApiPort,
 		JWTSecretPath:            path.Join(dataDir, "jwt.hex"),
 		ReturnDataLimit:          100_000,
+		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
 	}
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}

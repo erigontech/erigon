@@ -813,7 +813,7 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
-	traces, tracingHooks, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
+	traces, _, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
 		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
 
 	if cmErr != nil {
@@ -821,7 +821,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		ret, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks, vm.Config{})
+		ret, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}
 

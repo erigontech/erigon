@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var ( // Compile time interface checks
@@ -566,15 +567,26 @@ func (db *DB) DisableReadAhead() {
 	db.agg.DisableReadAhead()
 }
 
+func (db *DB) Files() []string { return db.agg.Files() }
+
+func (db *DB) MergeLoop(ctx context.Context) error { return db.agg.MergeLoop(ctx) }
+
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
+func (tx *Tx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
+}
+
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 	return tx.aggtx.TxNumsInFiles(domains...)
 }
 
 func (tx *RwTx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
+}
+func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
 }
 func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)

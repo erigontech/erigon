@@ -25,19 +25,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
-	g "github.com/anacrolix/generics"
-
-	analog "github.com/anacrolix/log"
-
 	"golang.org/x/time/rate"
 
+	g "github.com/anacrolix/generics"
+	analog "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -192,7 +188,7 @@ func New(
 			torrentSloggerHandlers,
 			slog.NewJSONHandler(torrentLogFile, &slog.HandlerOptions{
 				AddSource:   true,
-				Level:       erigonToSlogLevel(verbosity),
+				Level:       min(erigonToSlogLevel(verbosity), slog.LevelWarn),
 				ReplaceAttr: nil,
 			}))
 	} else {
@@ -286,12 +282,12 @@ func New(
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
 func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
-	if !slices.Contains(networkname.All, chainName) {
+	if _, known := snapcfg.KnownCfg(chainName); !known {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
 		return snapcfg.NewNonSeededCfg(chainName), nil
 	}
 
-	preverifiedPath := filepath.Join(dirs.Snap, "preverified.toml")
+	preverifiedPath := dirs.PreverifiedPath()
 	exists, err := dir.FileExist(preverifiedPath)
 	if err != nil {
 		return nil, err
@@ -305,14 +301,10 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		snapcfg.SetToml(chainName, haveToml, true)
 	} else {
 		// Fetch the snapshot hashes from the web
-		fetched, err := snapcfg.LoadRemotePreverified(ctx)
+		err := snapcfg.LoadRemotePreverified(ctx)
 		if err != nil {
 			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName, "err", err)
 			return nil, fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
-		}
-		if !fetched {
-			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName)
-			return nil, fmt.Errorf("remote snapshot hashes was not fetched for chain %s", chainName)
 		}
 	}
 	cfg, _ := snapcfg.KnownCfg(chainName)
@@ -325,9 +317,8 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 // from the network. Should only occur when full preverified snapshot is complete. Probably doesn't
 // belong in this package, and neither does LoadSnapshotHashes.
 func SaveSnapshotHashes(dirs datadir.Dirs, chainName string) (err error) {
-	preverifiedPath := filepath.Join(dirs.Snap, "preverified.toml")
 	// TODO: Should the file data be checked to match?
-	err = dir.WriteExclusiveFileWithFsync(preverifiedPath, snapcfg.GetToml(chainName), 0o444)
+	err = dir.WriteExclusiveFileWithFsync(dirs.PreverifiedPath(), snapcfg.GetToml(chainName), 0o444)
 	if errors.Is(err, os.ErrExist) {
 		err = nil
 	}

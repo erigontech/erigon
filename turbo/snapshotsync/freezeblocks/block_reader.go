@@ -23,7 +23,7 @@ import (
 	"sort"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
@@ -1316,10 +1316,10 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 		var buf []byte
 		g := sn.Src().MakeGetter()
 		blockNum := sn.From()
-		var b types.BodyForStorage
+		var b types.BodyOnlyTxn
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
-			if err := rlp.DecodeBytes(buf, &b); err != nil {
+			if err := rlp.DecodeBytesPartial(buf, &b); err != nil {
 				return err
 			}
 			if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
@@ -1483,7 +1483,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		return nil, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
 	}
 
-	return txHandler.WithTx(tx).EventsByBlock(ctx, blockHeight)
+	return txHandler.WithTx(tx).EventsByBlock(ctx, hash, blockHeight)
 }
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time

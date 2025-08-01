@@ -71,7 +71,7 @@ require (
 	github.com/edsrzf/mmap-go v1.2.0 // indirect
 	github.com/elastic/go-freelru v0.16.0 // indirect
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250731094644-2f399d9fb4a1 // indirect
-	github.com/erigontech/mdbx-go v0.39.8 // indirect
+	github.com/erigontech/mdbx-go v0.39.9 // indirect
 	github.com/erigontech/secp256k1 v1.2.0 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect

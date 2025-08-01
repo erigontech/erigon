@@ -9,14 +9,14 @@ replace (
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250731094644-2f399d9fb4a1
-	github.com/erigontech/interfaces v0.0.0-20250630094144-bb8edbef4801
-	github.com/erigontech/mdbx-go v0.39.8
+	github.com/erigontech/mdbx-go v0.39.9
 	github.com/erigontech/secp256k1 v1.2.0
 )
 
 require (
 	github.com/FastFilter/xorfilter v0.2.1
 	github.com/RoaringBitmap/roaring/v2 v2.5.0
+	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c
 	github.com/anacrolix/torrent v1.58.2-0.20250604010703-7c29c120a504
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
@@ -62,7 +62,6 @@ require (
 	golang.org/x/sync v0.15.0
 	golang.org/x/sys v0.33.0
 	google.golang.org/grpc v1.72.1
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
 	google.golang.org/protobuf v1.36.6
 )
 
@@ -73,8 +72,6 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
-	golang.org/x/mod v0.25.0 // indirect
-	golang.org/x/tools v0.34.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
 )
 
@@ -82,7 +79,6 @@ require (
 	github.com/anacrolix/dht/v2 v2.21.1 // indirect
 	github.com/anacrolix/generics v0.0.3-0.20250526144502-593be7092deb // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
-	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

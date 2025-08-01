@@ -208,6 +208,32 @@ func (s *Service) Run(ctx context.Context) error {
 			continue
 		}
 
+		orderedAndNoGaps := true
+		knownEventID := lastFetchedEventId
+
+		for i := 0; i < len(events); i++ {
+			if events[i].ID == knownEventID+1 {
+				knownEventID = events[i].ID
+				continue
+			}
+
+			orderedAndNoGaps = false
+		}
+
+		if !orderedAndNoGaps {
+			s.logger.Warn(
+				bridgeLogPrefix("fetched new events are not ordered or contain gaps"),
+				"count", len(events),
+				"lastKnownEventId", lastFetchedEventId,
+			)
+
+			if err := common.Sleep(ctx, time.Second); err != nil {
+				return err
+			}
+
+			continue
+		}
+
 		// we've received new events
 		s.reachedTip.Store(false)
 		if err := s.store.PutEvents(ctx, events); err != nil {
@@ -474,8 +500,8 @@ func (s *Service) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Ti
 }
 
 // Events returns all sync events at blockNum
-func (s *Service) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	return s.reader.Events(ctx, blockNum)
+func (s *Service) Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error) {
+	return s.reader.Events(ctx, blockHash, blockNum)
 }
 
 func (s *Service) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {

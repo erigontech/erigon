@@ -394,16 +394,26 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	return deleted + deletedBorBlocks, nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinishRetire func() error) {
+func (br *BlockRetire) RetireBlocksInBackground(
+	ctx context.Context,
+	minBlockNum,
+	maxBlockNum uint64,
+	lvl log.Lvl,
+	seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
+	onDeleteSnapshots func(l []string) error,
+	onFinishRetire func() error,
+	onDone func(),
+) bool {
 	if maxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
 
 	if !br.working.CompareAndSwap(false, true) {
-		return
+		return false
 	}
 
 	go func() {
+		defer onDone()
 		defer br.working.Store(false)
 
 		if br.snBuildAllowed != nil {
@@ -424,6 +434,8 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 			return
 		}
 	}()
+
+	return true
 }
 
 func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum uint64, requestedMaxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {
@@ -540,6 +552,12 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+
+	if blockFrom > 0 && firstTxNum == 0 {
+		err := fmt.Errorf("firstTxNum is 0 (blocks=%d-%d); must be a mistake, aborting files build", blockFrom, blockTo)
+		logger.Error("DumpBodies", "err", err)
+		return lastTxNum, err
+	}
 
 	if _, err = dumpRange(ctx, coresnaptype.Headers.FileInfo(snapDir, blockFrom, blockTo),
 		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
@@ -931,7 +949,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	from := hexutil.EncodeTs(blockFrom)
 
 	lastTxNum := firstTxNum(ctx)
-
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {

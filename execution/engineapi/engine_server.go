@@ -304,18 +304,19 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
+		checkMaxBlobsPerTxn := version >= clparams.FuluVersion
+		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions, checkMaxBlobsPerTxn)
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
-		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) {
+		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) || errors.Is(err, ethutils.ErrTooManyBlobs) {
 			bad, latestValidHash := s.hd.IsBadHeaderPoS(req.ParentHash)
 			if !bad {
 				latestValidHash = req.ParentHash
 			}
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString("blobs/blobgas exceeds max"),
+				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
 				LatestValidHash: &latestValidHash,
 			}, nil
 		}
@@ -454,14 +455,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
-			return parent == nil && s.blockDownloader.Status() == engine_block_downloader.Busy, nil
+			return parent == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
 		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
-			return header == nil && s.blockDownloader.Status() == engine_block_downloader.Busy, nil
+			return header == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -788,9 +789,13 @@ func (e *EngineServer) HandleNewPayload(
 			waitTime := time.Duration(e.config.SecondsPerSlot()) * time.Second
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
-			if stillSyncing, _ := waitForStuff(waitTime, func() (bool, error) {
-				return e.blockDownloader.Status() == engine_block_downloader.Busy, nil
-			}); stillSyncing {
+			var respondSyncing bool
+			if _, _ = waitForStuff(waitTime, func() (bool, error) {
+				status := e.blockDownloader.Status()
+				respondSyncing = status != engine_block_downloader.Synced
+				// no point in waiting if the downloader is no longer syncing (e.g. it's dropped the download request)
+				return status == engine_block_downloader.Syncing, nil
+			}); respondSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)

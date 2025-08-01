@@ -20,16 +20,15 @@ var (
 	ZeroVersion            = Version{}
 	V1_0          Version  = Version{1, 0}
 	V1_1          Version  = Version{1, 1}
+	V1_2          Version  = Version{1, 2}
 	V2_0          Version  = Version{2, 0}
+	V2_1          Version  = Version{2, 1}
 	V1_0_standart Versions = Versions{V1_0, V1_0}
 	V1_1_standart Versions = Versions{V1_1, V1_0}
+	V1_2_standart Versions = Versions{V1_2, V1_0}
 	V1_1_exact    Versions = Versions{V1_1, V1_1}
 	V2_0_standart Versions = Versions{V2_0, V1_0}
-
-	// receipt/rcache was upgraded to 1.1, but should have been 2.0
-	// because it's a breaking change. Typically versions would follow
-	// "standart" version. This is a special case.
-	V2_0_standart2 Versions = Versions{V2_0, V1_1}
+	V2_1_standart Versions = Versions{V2_1, V1_0}
 )
 
 func (v Version) Less(rhd Version) bool {

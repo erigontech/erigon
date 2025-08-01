@@ -450,6 +450,9 @@ func ExecV3(ctx context.Context,
 
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+	startBlockNum := blockNum
+	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
+	var errExhausted *ErrLoopExhausted
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -729,9 +732,11 @@ Loop:
 
 				aggregatorRo := state2.AggTx(executor.tx())
 
-				needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
+				isBatchFull := executor.readState().SizeEstimate() >= commitThreshold
+				canPrune := aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load())
+				needCalcRoot := isBatchFull ||
 					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
-					aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
+					canPrune // if have something to prune - better prune ASAP to keep chaindata smaller
 				if !needCalcRoot {
 					break
 				}
@@ -774,15 +779,27 @@ Loop:
 				}
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
-				if !initialCycle {
+				if !initialCycle && isBatchFull {
+					errExhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 					break Loop
 				}
-				logger.Info("Committed", "time", time.Since(commitStart),
-					"block", outputBlockNum.GetValueUint64(), "txNum", inputTxNum,
-					"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
-					"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
+				if !initialCycle && canPrune {
+					errExhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
+					break Loop
+				}
+				if initialCycle {
+					logger.Info("Committed", "time", time.Since(commitStart),
+						"block", outputBlockNum.GetValueUint64(), "txNum", inputTxNum,
+						"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
+						"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
+				}
 			default:
 			}
+		}
+
+		if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
+			errExhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+			break
 		}
 
 		select {
@@ -817,6 +834,12 @@ Loop:
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
+
+	if errExhausted != nil && blockNum < maxBlockNum {
+		// special err allows the loop to continue, caller will call us again to continue from where we left off
+		// only return it if we haven't reached the maxBlockNum
+		return errExhausted
+	}
 
 	return nil
 }
@@ -952,7 +975,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return true, times, nil
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
-		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
+		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		ok, err = handleIncorrectRootHashError(header, applyTx.(kv.TemporalRwTx), cfg, e, maxBlockNum, logger, u)
 		return ok, times, err
 	}

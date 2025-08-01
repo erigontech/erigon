@@ -977,16 +977,8 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isPrague := p.isPrague() || p.isBhilai()
 	isEIP7825 := p.isOsaka()
-	isEIP7907 := p.isOsaka()
-
-	if isEIP7907 {
-		if txn.Creation && txn.DataLen > params.MaxInitCodeSizeEip7907 {
-			return txpoolcfg.InitCodeTooLarge
-		}
-	} else if isEIP3860 {
-		if txn.Creation && txn.DataLen > params.MaxInitCodeSize {
-			return txpoolcfg.InitCodeTooLarge
-		}
+	if isEIP3860 && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
+		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
 
 	if txn.Type == types.AccountAbstractionTxType {
@@ -1099,12 +1091,12 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	if blobCount == 0 {
 		return txpoolcfg.NoBlobs
 	}
-	if blobCount > int(p.GetMaxBlobsPerBlock()) {
+	if blobCount > min(params.MaxBlobsPerTxn, int(p.GetMaxBlobsPerBlock())) {
 		return txpoolcfg.TooManyBlobs
 	}
 
 	if blobCount != len(txn.BlobBundles) {
-		p.logger.Error(fmt.Sprintf("blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
+		p.logger.Debug(fmt.Sprintf("blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	blobs := txn.Blobs()
