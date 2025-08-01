@@ -310,12 +310,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	g.MakeMap(&requestHandler.Transport.TLSNextProto)
 
 	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
-	if cfg == nil {
-		cfg = &downloadercfg.Cfg{}
-	}
-	if cfg.ClientConfig == nil {
-		cfg.ClientConfig = &torrent.ClientConfig{}
-	}
 	cfg.ClientConfig.WebTransport = &requestHandler
 
 	db, err := openMdbx(ctx, cfg.Dirs.Downloader, cfg.MdbxWriteMap)
