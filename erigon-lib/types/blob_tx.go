@@ -30,7 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
-var ErrNilToFieldTx = errors.New("Tx: field 'To' can not be 'nil'")
+var ErrNilToFieldTx = errors.New("txn: field 'To' can not be 'nil'")
+var ErrTooManyBlobs = errors.New("blob transaction has too many blobs")
 
 type BlobTx struct {
 	DynamicFeeTransaction

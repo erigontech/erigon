@@ -188,6 +188,7 @@ const (
 	FieldElementsPerCell    uint64 = 64                                             // Number of Field elements in a cell
 	BytesPerCell                   = FieldElementsPerCell * 32                      // The number of bytes in a cell
 	CellsPerExtBlob                = FieldElementsPerExtBlob / FieldElementsPerCell // The number of cells in an extended blob
+	MaxBlobsPerTxn                 = 6                                              // https://github.com/ethereum/EIPs/pull/9981
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas        uint64 = 3450
