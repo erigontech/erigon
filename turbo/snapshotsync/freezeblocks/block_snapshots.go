@@ -450,7 +450,11 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 	if requestedMaxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(requestedMaxBlockNum)
 	}
-	includeBor := br.chainConfig.Bor != nil && time.Now().After(br.borDataNotReadyBefore)
+	includeBor := br.chainConfig.Bor != nil
+
+	if includeBor && time.Now().After(br.borDataNotReadyBefore) {
+		return nil
+	}
 
 	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
 		return err
