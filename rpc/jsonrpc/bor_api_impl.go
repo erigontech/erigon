@@ -98,7 +98,7 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 		return nil, errUnknownBlock
 	}
 
-	// init consensus db
+	// init consensus engine
 	borEngine, err := api.bor()
 
 	if err != nil {
@@ -128,7 +128,7 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	}
 	defer tx.Rollback()
 
-	// Retreive the header
+	// Retrieve the header
 	header, _ := getHeaderByHash(ctx, api, tx, hash)
 
 	// Ensure we have an actually valid block
@@ -136,7 +136,7 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 		return nil, errUnknownBlock
 	}
 
-	// init consensus db
+	// init consensus engine
 	borEngine, err := api.bor()
 
 	if err != nil {
