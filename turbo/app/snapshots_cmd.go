@@ -308,6 +308,15 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name:   "txnum",
+			Action: doBlkTxNum,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Int64Flag{Name: "block", Value: -1},
+				&cli.Int64Flag{Name: "txnum", Value: -1},
+			}),
+		},
+		{
 			Name:   "meta",
 			Action: doMeta,
 			Flags:  joinFlags([]cli.Flag{}),
@@ -1258,6 +1267,78 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 
 		return nil
 	})
+}
+
+func doBlkTxNum(cliCtx *cli.Context) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	blkNumber := cliCtx.Int64("block")
+	txNum := cliCtx.Int64("txnum")
+
+	if blkNumber < 0 && txNum < 0 {
+		return errors.New("provide atleast one positive value -- either block or txnum")
+	}
+	if blkNumber >= 0 && txNum >= 0 {
+		return errors.New("both block and txnum can't be provided")
+	}
+
+	ctx := cliCtx.Context
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	_, _, _, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	reader, _ := br.IO()
+	txNumReader := reader.TxnumReader(ctx)
+
+	if blkNumber >= 0 {
+		min, err := txNumReader.Min(tx, uint64(blkNumber))
+		if err != nil {
+			return err
+		}
+		max, err := txNumReader.Max(tx, uint64(blkNumber))
+		if err != nil {
+			return err
+		}
+		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max)
+	} else {
+		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			blk2, txNum2, err := txNumReader.Last(tx)
+			if err != nil {
+				return err
+			}
+			logger.Info("didn't find block for txNum", "txNum", txNum, "maxBlock", blk2, "maxTxNum", txNum2)
+		}
+		logger.Info("out", "txNum", txNum, "block", blk)
+	}
+	return nil
 }
 
 func doDiff(cliCtx *cli.Context) error {
