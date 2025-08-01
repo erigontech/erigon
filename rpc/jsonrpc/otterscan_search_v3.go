@@ -101,7 +101,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			return nil, nil, false, err
 		}
 
-		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true)
+		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false)
 		mReceipt["timestamp"] = block.Time()
 		receipts = append(receipts, mReceipt)
 
