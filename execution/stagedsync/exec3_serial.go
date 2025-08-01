@@ -271,10 +271,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 					cumGasUsed = lastReceipt.CumulativeGasUsed
 				}
 			}
-			stateReader := state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx))
-			coinbase := txTask.EvmBlockContext.Coinbase
-			data, _ := stateReader.ReadAccountData(coinbase)
-			fmt.Println(txTask.BlockNumber(), "coinbase:", coinbase, "balance:", &data.Balance)
 		}
 		if !txTask.HistoryExecution {
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {

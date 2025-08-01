@@ -585,7 +585,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 						panic(fmt.Sprintf("unexpected coinbase balance: %d, expecting %d", &data.Balance, &sb.bal))
 					}
 				}
-				fmt.Println(txTask.BlockNumber(), "coinbase:", coinbase, "balance:", &data.Balance)
 			}
 		}
 		return nil, nil
