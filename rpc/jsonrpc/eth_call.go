@@ -328,7 +328,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil && !errors.Is(err, core.ErrIntrinsicGas) {
 			return 0, err
 		}
-		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed()  {
+		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() {
 			lo = mid
 		} else {
 			hi = mid
