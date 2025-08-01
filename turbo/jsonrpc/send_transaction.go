@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/zk/hermez_db"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	txPoolProto "github.com/erigontech/erigon-lib/gointerfaces/txpool"
@@ -83,7 +84,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	if api.RejectLowGasPriceTransactions &&
 		ShouldRejectLowGasPrice(
 			txn.GetFeeCap().ToBig(),
-			api.gasTracker.GetLowestPrice(),
+			api.getLowestPrice(ctx, cc, header),
 			api.RejectLowGasPriceTolerance,
 		) {
 		return common.Hash{}, errors.New("transaction price is too low")
@@ -91,7 +92,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
-	if err = checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
+	if err = checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
 		return common.Hash{}, err
 	}
 
@@ -159,4 +160,14 @@ func ShouldRejectLowGasPrice(txPrice *big.Int, lowestAllowed *big.Int, rejectLow
 		finalCheck.Div(finalCheck, big.NewInt(100))
 	}
 	return txPrice.Cmp(finalCheck) < 0
+}
+
+func (api *APIImpl) getLowestPrice(ctx context.Context, chainConfig *chain.Config, block *types.Block) *big.Int {
+	lowestPrice := api.gasTracker.GetLowestPrice()
+	if chainConfig.IsNormalcy(block.NumberU64()) && chainConfig.IsLondon(block.NumberU64()) {
+		if block.BaseFee() != nil {
+			lowestPrice.Add(lowestPrice, block.BaseFee())
+		}
+	}
+	return lowestPrice
 }
