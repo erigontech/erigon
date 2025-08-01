@@ -365,7 +365,6 @@ type signer struct {
 // New creates a Matic Bor consensus engine.
 func New(
 	chainConfig *chain.Config,
-	db kv.RwDB,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
 	heimdallClient heimdall.Client,
