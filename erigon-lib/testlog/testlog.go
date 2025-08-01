@@ -53,7 +53,7 @@ func (h *handler) Enabled(ctx context.Context, lvl log.Lvl) bool {
 // helpers, so the file and line number in unit test output correspond to the call site
 // which emitted the log message.
 type logger struct {
-	t   *testing.T
+	t   testing.TB
 	log log.Logger
 	mu  *sync.Mutex
 	h   *bufHandler
@@ -74,7 +74,7 @@ func (h *bufHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
 }
 
 // Logger returns a logger which logs to the unit test log of t.
-func Logger(t *testing.T, level log.Lvl) log.Logger {
+func Logger(t testing.TB, level log.Lvl) log.Logger {
 	t.Helper()
 
 	l := &logger{
