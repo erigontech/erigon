@@ -392,8 +392,6 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 		return BlockSigners{}, errUnknownBlock
 	}
 
-	var snap *Snapshot
-
 	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 	if err != nil {
 		return BlockSigners{}, err
@@ -401,8 +399,8 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 
 	var difficulties = make(map[common.Address]uint64)
 
-	proposer := snap.ValidatorSet.GetProposer().Address
-	proposerIndex, _ := snap.ValidatorSet.GetByAddress(proposer)
+	proposer := validatorSet.GetProposer().Address
+	proposerIndex, _ := validatorSet.GetByAddress(proposer)
 
 	signers := validatorSet.Signers()
 	for i := 0; i < len(signers); i++ {
