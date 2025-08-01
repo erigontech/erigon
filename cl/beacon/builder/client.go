@@ -118,6 +118,10 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *cltypes.ExecutionRequests, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/submitBlindedBlocks
 	path := "/eth/v1/builder/blinded_blocks"
+	isPostFulu := block.Version().AfterOrEqual(clparams.FuluVersion)
+	if isPostFulu {
+		path = "/eth/v2/builder/blinded_blocks"
+	}
 	url := b.url.JoinPath(path).String()
 	payload, err := json.Marshal(block)
 	if err != nil {
@@ -126,10 +130,22 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	headers := map[string]string{
 		"Eth-Consensus-Version": block.Version().String(),
 	}
-	resp, err := httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), BlindedBlockResponse{})
-	if err != nil {
-		log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
-		return nil, nil, nil, err
+
+	var resp *BlindedBlockResponse
+
+	if isPostFulu {
+		_, err = httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), "")
+		if err != nil {
+			log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
+			return nil, nil, nil, err
+		}
+		return nil, nil, nil, nil // no content expected for Fulu version
+	} else {
+		resp, err = httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), BlindedBlockResponse{})
+		if err != nil {
+			log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
+			return nil, nil, nil, err
+		}
 	}
 
 	var eth1Block *cltypes.Eth1Block
