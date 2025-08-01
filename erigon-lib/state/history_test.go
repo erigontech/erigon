@@ -1001,7 +1001,7 @@ func TestHistoryScanFiles(t *testing.T) {
 	})
 }
 
-func TestIterateChanged(t *testing.T) {
+func TestHistoryRange1(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1157,7 +1157,7 @@ func TestIterateChanged(t *testing.T) {
 	})
 }
 
-func TestIterateChanged2(t *testing.T) {
+func TestHistoryRange2(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
