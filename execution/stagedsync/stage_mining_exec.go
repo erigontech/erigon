@@ -172,7 +172,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 			// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
 			if len(txns) < amount {
-				if interrupt != nil && atomic.LoadInt32(interrupt) != 0 {
+				if interrupt != nil {
 					// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 					// since there may be new txns that can arrive
 					time.Sleep(50 * time.Millisecond)
