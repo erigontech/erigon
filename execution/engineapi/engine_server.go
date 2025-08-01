@@ -300,7 +300,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
-		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) || errors.Is(err, types.ErrTooManyBlobs) {
+		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) || errors.Is(err, ethutils.ErrTooManyBlobs) {
 			bad, latestValidHash := s.hd.IsBadHeaderPoS(req.ParentHash)
 			if !bad {
 				latestValidHash = req.ParentHash

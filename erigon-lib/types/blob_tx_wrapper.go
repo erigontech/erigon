@@ -277,9 +277,6 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	if l1 == 0 {
 		return errors.New("a blob txn must contain at least one blob")
 	}
-	if l1 > params.MaxBlobsPerTxn {
-		return ErrTooManyBlobs
-	}
 	l2 := len(txw.Commitments)
 	l3 := len(txw.Blobs)
 	l4 := len(txw.Proofs)
