@@ -51,6 +51,7 @@ var (
 	Gnosis     = fromEmbeddedToml(snapshothashes.Gnosis)
 	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
+	ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia)
 )
 
 func fromEmbeddedToml(in []byte) Preverified {
@@ -474,14 +475,15 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 }
 
 var knownPreverified = map[string]Preverified{
-	networkname.Mainnet:    Mainnet,
-	networkname.Holesky:    Holesky,
-	networkname.Sepolia:    Sepolia,
-	networkname.Amoy:       Amoy,
-	networkname.BorMainnet: BorMainnet,
-	networkname.Gnosis:     Gnosis,
-	networkname.Chiado:     Chiado,
-	networkname.Hoodi:      Hoodi,
+	networkname.Mainnet:         Mainnet,
+	networkname.Holesky:         Holesky,
+	networkname.Sepolia:         Sepolia,
+	networkname.Amoy:            Amoy,
+	networkname.BorMainnet:      BorMainnet,
+	networkname.Gnosis:          Gnosis,
+	networkname.Chiado:          Chiado,
+	networkname.Hoodi:           Hoodi,
+	networkname.ArbiturmSepolia: ArbSepolia,
 }
 
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
@@ -537,14 +539,15 @@ func KnownCfg(networkName string) *Cfg {
 }
 
 var KnownWebseeds = map[string][]string{
-	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-	networkname.Amoy:       webseedsParse(webseed.Amoy),
-	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-	networkname.Chiado:     webseedsParse(webseed.Chiado),
-	networkname.Holesky:    webseedsParse(webseed.Holesky),
-	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+	networkname.Mainnet:         webseedsParse(webseed.Mainnet),
+	networkname.Sepolia:         webseedsParse(webseed.Sepolia),
+	networkname.Amoy:            webseedsParse(webseed.Amoy),
+	networkname.BorMainnet:      webseedsParse(webseed.BorMainnet),
+	networkname.Gnosis:          webseedsParse(webseed.Gnosis),
+	networkname.Chiado:          webseedsParse(webseed.Chiado),
+	networkname.Holesky:         webseedsParse(webseed.Holesky),
+	networkname.Hoodi:           webseedsParse(webseed.Hoodi),
+	networkname.ArbiturmSepolia: webseedsParse(webseed.ArbSepolia),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -559,13 +562,14 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
+// TODO remove loaded param in main
 func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
-	loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
+	err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
 	if err != nil {
 		log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
 
 		// Fallback to github if R2 fails
-		loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
 		if err != nil {
 			return false, err
 		}
@@ -580,28 +584,31 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 	Gnosis = fromEmbeddedToml(snapshothashes.Gnosis)
 	Chiado = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi = fromEmbeddedToml(snapshothashes.Hoodi)
+	ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia)
 
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
-		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-		networkname.Amoy:       webseedsParse(webseed.Amoy),
-		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-		networkname.Chiado:     webseedsParse(webseed.Chiado),
-		networkname.Holesky:    webseedsParse(webseed.Holesky),
-		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+		networkname.Mainnet:         webseedsParse(webseed.Mainnet),
+		networkname.Sepolia:         webseedsParse(webseed.Sepolia),
+		networkname.Amoy:            webseedsParse(webseed.Amoy),
+		networkname.BorMainnet:      webseedsParse(webseed.BorMainnet),
+		networkname.Gnosis:          webseedsParse(webseed.Gnosis),
+		networkname.Chiado:          webseedsParse(webseed.Chiado),
+		networkname.Holesky:         webseedsParse(webseed.Holesky),
+		networkname.Hoodi:           webseedsParse(webseed.Hoodi),
+		networkname.ArbiturmSepolia: webseedsParse(webseed.ArbSepolia),
 	}
 
 	knownPreverified = map[string]Preverified{
-		networkname.Mainnet:    Mainnet,
-		networkname.Holesky:    Holesky,
-		networkname.Sepolia:    Sepolia,
-		networkname.Amoy:       Amoy,
-		networkname.BorMainnet: BorMainnet,
-		networkname.Gnosis:     Gnosis,
-		networkname.Chiado:     Chiado,
-		networkname.Hoodi:      Hoodi,
+		networkname.Mainnet:         Mainnet,
+		networkname.Holesky:         Holesky,
+		networkname.Sepolia:         Sepolia,
+		networkname.Amoy:            Amoy,
+		networkname.BorMainnet:      BorMainnet,
+		networkname.Gnosis:          Gnosis,
+		networkname.Chiado:          Chiado,
+		networkname.Hoodi:           Hoodi,
+		networkname.ArbiturmSepolia: ArbSepolia,
 	}
 	return loaded, nil
 }
