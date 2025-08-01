@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -102,7 +103,11 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 		ExecutionRequests:  cltypes.NewExecutionRequests(b.beaconConfig),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 	}}
-	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil, headerIn)
+
+	requestHeader := map[string]string{
+		"Date-Milliseconds": fmt.Sprintf("%d", time.Now().UnixMilli()),
+	}
+	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, requestHeader, nil, headerIn)
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on GetExecutionPayloadHeader", "err", err, "slot", slot, "parentHash", parentHash.Hex(), "pubKey", pubKey.Hex())
 		return nil, err
