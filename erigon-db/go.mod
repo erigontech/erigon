@@ -20,7 +20,7 @@ require (
 	github.com/anacrolix/go-libutp v1.3.2
 	github.com/anacrolix/log v0.16.1-0.20250526073428-5cb74e15092b
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.58.2-0.20250801030430-065c62e6a81e
+	github.com/anacrolix/torrent v1.58.2-0.20250801135146-59b411afcd4b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/go-quicktest/qt v1.101.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
