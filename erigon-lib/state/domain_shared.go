@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -87,6 +88,24 @@ type SharedDomains struct {
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
+}
+
+func (sd *SharedDomainsCommitmentContext) CheckSubTx() bool {
+	for si, stx := range sd.subTtx {
+		if stx == nil {
+			panic(fmt.Errorf("CheckSubTx: unexpected nil sub-tx at index %d", si))
+		}
+		if stx.txNum != sd.mainTtx.txNum {
+			panic(fmt.Errorf("CheckSubTx: sub-tx %d has txNum %d, expected %d", si, stx.txNum, sd.mainTtx.txNum))
+		}
+		if stx.withHistory != sd.mainTtx.withHistory {
+			panic(fmt.Errorf("CheckSubTx: sub-tx %d has withHistory %v, expected %v", si, stx.withHistory, sd.mainTtx.withHistory))
+		}
+		if rtx, ok := stx.roTtx.(kv.Tx); !ok || rtx == nil {
+			panic(fmt.Errorf("CheckSubTx: sub-tx %d has nil roTtx %T", si, stx.roTtx))
+		}
+	}
+	return true
 }
 
 type HasAgg interface {
@@ -373,7 +392,7 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
-	sd.sdCtx.mainTtx.txNum = txNum
+	sd.sdCtx.SetTxNum(txNum)
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
@@ -486,15 +505,16 @@ func (sd *SharedDomains) FlushWithoutCommitment(ctx context.Context, tx kv.RwTx)
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+	fmt.Printf("Flush called with tx %T stack %v\n", tx, dbg.Stack())
 	defer mxFlushTook.ObserveDuration(time.Now())
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
 	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
-	//_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
-	//if err != nil {
-	//	return err
-	//}
+	_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
+	if err != nil {
+		return err
+	}
 
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
@@ -550,6 +570,8 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 		return sd.updateAccountCode(ks, v, txNum, prevVal, prevStep)
 	case kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
 		sd.put(domain, ks, v, txNum)
+		sd.muMaps.Lock()
+		defer sd.muMaps.Unlock()
 		return sd.domainWriters[domain].PutWithPrev(k, v, txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, v) {
