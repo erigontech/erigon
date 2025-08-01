@@ -2,25 +2,25 @@ participants:
 - el_type: erigon
   el_image: test/erigon:current
   el_extra_params:
-    - "--txpool.globalqueue 1000000"
-    - "--txpool.globalslots 1000000"
-    - "--txpool.globalbasefeeslots 1000000"
+    - "--txpool.globalqueue 2000000"
+    - "--txpool.globalslots 2000000"
+    - "--txpool.globalbasefeeslots 2000000"
   cl_type: lighthouse
   count: 1
 - el_type: erigon
   el_image: test/erigon:current
   el_extra_params:
-    - "--txpool.globalqueue 1000000"
-    - "--txpool.globalslots 1000000"
-    - "--txpool.globalbasefeeslots 1000000"
+    - "--txpool.globalqueue 2000000"
+    - "--txpool.globalslots 2000000"
+    - "--txpool.globalbasefeeslots 2000000"
   cl_type: lodestar
   count: 1
 - el_type: erigon
   el_image: test/erigon:current
   el_extra_params:
-    - "--txpool.globalqueue 1000000"
-    - "--txpool.globalslots 1000000"
-    - "--txpool.globalbasefeeslots 1000000"
+    - "--txpool.globalqueue 2000000"
+    - "--txpool.globalslots 2000000"
+    - "--txpool.globalbasefeeslots 2000000"
   cl_type: prysm
   count: 1
 network_params:
