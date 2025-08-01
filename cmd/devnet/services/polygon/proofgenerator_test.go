@@ -99,7 +99,7 @@ func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, 
 		return common.Hash{}, err
 	}
 	defer tx.Rollback()
-	result, err := rg.bor.GetRootHash(ctx, rg.bor.db, startBlock, endBlock)
+	result, err := rg.bor.GetRootHash(ctx, tx, startBlock, endBlock)
 
 	if err != nil {
 		return common.Hash{}, err
