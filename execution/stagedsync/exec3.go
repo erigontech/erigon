@@ -450,6 +450,9 @@ func ExecV3(ctx context.Context,
 
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+	startBlockNum := blockNum
+	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
+	var errExhausted *ErrLoopExhausted
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -730,10 +733,10 @@ Loop:
 				aggregatorRo := state2.AggTx(executor.tx())
 
 				isBatchFull := executor.readState().SizeEstimate() >= commitThreshold
-
+				canPrune := aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load())
 				needCalcRoot := isBatchFull ||
 					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
-					aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
+					canPrune // if have something to prune - better prune ASAP to keep chaindata smaller
 				if !needCalcRoot {
 					break
 				}
@@ -777,7 +780,12 @@ Loop:
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
 				if !initialCycle && isBatchFull {
-					maxBlockNum = min(maxBlockNum, blockNum+changesetSafeRange) // allow for some changesets to be generated.
+					errExhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
+					break Loop
+				}
+				if !initialCycle && canPrune {
+					errExhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
+					break Loop
 				}
 				if initialCycle {
 					logger.Info("Committed", "time", time.Since(commitStart),
@@ -787,6 +795,11 @@ Loop:
 				}
 			default:
 			}
+		}
+
+		if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
+			errExhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+			break
 		}
 
 		select {
@@ -821,6 +834,12 @@ Loop:
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
+
+	if errExhausted != nil && blockNum < maxBlockNum {
+		// special err allows the loop to continue, caller will call us again to continue from where we left off
+		// only return it if we haven't reached the maxBlockNum
+		return errExhausted
+	}
 
 	return nil
 }
