@@ -244,7 +244,7 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 	marshalled := make([]map[string]interface{}, 0, len(receipts))
 	for i, receipt := range receipts {
 		txn := txns[i]
-		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true))
+		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true, false))
 	}
 
 	result, err := json.Marshal(marshalled)
