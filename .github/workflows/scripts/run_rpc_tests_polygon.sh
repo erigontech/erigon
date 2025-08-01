@@ -10,11 +10,7 @@ RESULT_DIR="$2"
 DISABLED_TEST_LIST=(
   bor_getAuthor
   bor_getSnapshot
-<<<<<<< HEAD
   eth_getTransactionReceipt/test_01.json 
-=======
-  eth_getTransactionReceipt/test_01.json
->>>>>>> 29eac19440 (rpcdaemon: add blockTimestamp to the eth_getBlockReceipts (#16356))
 )
 
 # Transform the array into a comma-separated string
