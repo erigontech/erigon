@@ -1099,8 +1099,13 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if err != nil {
 				return err
 			}
+
 			oldVersion := versioned.GetVersions().II.DataEF.Current
 			expectedFileName := strings.Replace(res.Name(), "accounts", snapType, 1)
+			if snapType == "logtopics" {
+				println("version of schema:", libstate.Schema.LogTopicIdx.GetVersions().II.DataEF.String())
+				println("current:", oldVersion.String())
+			}
 
 			if _, err := os.Stat(filepath.Join(dirs.SnapIdx, expectedFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName))
