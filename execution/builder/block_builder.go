@@ -65,11 +65,10 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters,
 		defer timer.Stop()
 		select {
 		case <-timer.C:
-			log.Info("Stopping block builder due to max build time exceeded")
-			_, err := builder.Stop()
-			if err != nil {
-				log.Warn("Failed to stop block builder", "err", err)
-			}
+			log.Warn("Stopping block builder due to max build time exceeded")
+			_, _ = builder.Stop()
+			log.Debug("Stopped block builder due to max build time exceeded")
+			return
 		case <-terminated:
 			return
 		}
