@@ -119,7 +119,6 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/finality/flags"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -645,8 +644,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		backend.polygonBridge = polygonBridge
 		backend.heimdallService = heimdallService
-
-		flags.Milestone = false
 	}
 
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
@@ -843,14 +840,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 
-	var (
-		snapDb     kv.RwDB
-		recents    *lru.ARCCache[common.Hash, *bor.Snapshot]
-		signatures *lru.ARCCache[common.Hash, common.Address]
-	)
+	var signatures *lru.ARCCache[common.Hash, common.Address]
+
 	if bor, ok := backend.engine.(*bor.Bor); ok {
-		snapDb = bor.DB
-		recents = bor.Recents
 		signatures = bor.Signatures
 	}
 
@@ -1002,8 +994,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, tracer)
+	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
+		blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, signatures, logger, tracer)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
