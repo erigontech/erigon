@@ -31,7 +31,6 @@ import (
 )
 
 var ErrNilToFieldTx = errors.New("txn: field 'To' can not be 'nil'")
-var ErrTooManyBlobs = errors.New("blob transaction has too many blobs")
 
 type BlobTx struct {
 	DynamicFeeTransaction
