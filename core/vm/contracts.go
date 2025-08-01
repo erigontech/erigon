@@ -23,9 +23,10 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
-	evmone "github.com/erigontech/evmone_precompiles"
 	"math/big"
 	"math/bits"
+
+	evmone "github.com/erigontech/evmone_precompiles"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -470,7 +471,6 @@ func modExpMultComplexityEip198(x uint32) uint64 {
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bigModExp) RequiredGas(input []byte) uint64 {
-
 	var minGas uint64
 	var adjExpFactor uint64
 	var finalDivisor uint64
@@ -479,7 +479,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	case c.osaka:
 		minGas = 500
 		adjExpFactor = 16
-		finalDivisor = 3
+		finalDivisor = 1
 		calcMultComplexity = modExpMultComplexityEip7883
 	case c.eip2565:
 		minGas = 200
