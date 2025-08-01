@@ -1132,6 +1132,10 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history"},
 	}
+	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
+		Name:  "experimental.always-generate-changesets",
+		Usage: "Enables blazing fast eth_getProof for executed block",
+	}
 	ElBlockDownloaderV2 = cli.BoolFlag{
 		Name:  "el.block.downloader.v2",
 		Usage: "Enables the EL engine v2 block downloader",
@@ -1916,6 +1920,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		state.EnableHistoricalCommitment()
 	}
 
+	cfg.AlwaysGenerateChangesets = ctx.Bool(AlwaysGenerateChangesetsFlag.Name)
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
