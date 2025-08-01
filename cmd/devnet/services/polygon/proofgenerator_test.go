@@ -94,9 +94,9 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 }
 
 func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
-	tx , err := rg.db.BeginRo(ctx)
+	tx, err := rg.db.BeginRo(ctx)
 	if err != nil {
-		common.Hash{}, err
+		return common.Hash{}, err
 	}
 	defer tx.Rollback()
 	result, err := rg.bor.GetRootHash(ctx, rg.bor.db, startBlock, endBlock)
