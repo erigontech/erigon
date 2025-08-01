@@ -19,12 +19,10 @@ package jsonrpc
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -269,25 +267,6 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	}
 
 	localEndBlockHash := localEndBlock.Hash().String()
-
-	// TODO whitelisting service is pending removal - https://github.com/erigontech/erigon/issues/12855
-	if service := whitelist.GetWhitelistingService(); service != nil {
-		isLocked := service.LockMutex(endBlockNr)
-
-		if !isLocked {
-			service.UnlockMutex(false, "", endBlockNr, common.Hash{})
-			return false, errors.New("whitelisted number or locked sprint number is more than the received end block number")
-		}
-
-		if localEndBlockHash != hash {
-			service.UnlockMutex(false, "", endBlockNr, common.Hash{})
-			return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
-		}
-
-		service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
-
-		return true, nil
-	}
 
 	return localEndBlockHash == hash, nil
 }
