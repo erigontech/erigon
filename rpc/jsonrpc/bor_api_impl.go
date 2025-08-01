@@ -30,6 +30,70 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+// bor consensus snapshot (only used for RPC purposes)
+type Snapshot struct {
+	Number       uint64        `json:"number"`       // Block number where the snapshot was created
+	Hash         common.Hash   `json:"hash"`         // Block hash where the snapshot was created
+	ValidatorSet *ValidatorSet `json:"validatorSet"` // Validator set at this moment
+}
+
+type BlockSigners struct {
+	Signers []difficultiesKV
+	Diff    int
+	Author  common.Address
+}
+
+type difficultiesKV struct {
+	Signer     common.Address
+	Difficulty uint64
+}
+
+// GetSnapshot retrieves the state snapshot at a given block.
+func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
+	// init chain db
+	ctx := context.Background()
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// Retrieve the requested block number (or current if none requested)
+	var header *types.Header
+	if number == nil || *number == rpc.LatestBlockNumber {
+		header = rawdb.ReadCurrentHeader(tx)
+	} else {
+		header, _ = getHeaderByNumber(ctx, *number, api, tx)
+	}
+	// Ensure we have an actually valid block
+	if header == nil {
+		return nil, errUnknownBlock
+	}
+
+	// init consensus engine
+	borEngine, err := api.bor()
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := borEngine.DB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer borTx.Rollback()
+
+	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+	snap := &Snapshot{
+		Number:       header.Number.Uint64(),
+		Hash:         header.Hash(),
+		ValidatorSet: validatorSet,
+	}
+	return snap, nil
+}
+
 // GetAuthor retrieves the author a block.
 func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error) {
 	// init consensus engine
@@ -74,6 +138,52 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 	author, err := borEngine.Author(header)
 
 	return &author, err
+}
+
+// GetSnapshotAtHash retrieves the state snapshot at a given block.
+func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
+	// init chain db
+	ctx := context.Background()
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// Retreive the header
+	header, err := getHeaderByHash(ctx, api, tx, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure we have an actually valid block
+	if header == nil {
+		return nil, errUnknownBlock
+	}
+
+	// init consensus engine
+	borEngine, err := api.bor()
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := borEngine.DB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer borTx.Rollback()
+
+	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+
+	snap := &Snapshot{
+		Number:       header.Number.Uint64(),
+		Hash:         header.Hash(),
+		ValidatorSet: validatorSet,
+	}
+	return snap, nil
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
@@ -256,4 +366,138 @@ func (api *BorImpl) getLatestBlockNum(ctx context.Context) (uint64, error) {
 	defer tx.Rollback()
 
 	return rpchelper.GetLatestBlockNumber(tx)
+}
+
+// GetSnapshotProposer retrieves the in-turn signer at a given block.
+func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (common.Address, error) {
+	// init chain db
+	ctx := context.Background()
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	defer tx.Rollback()
+
+	var header *types.Header
+	//nolint:nestif
+	if blockNrOrHash == nil {
+		header = rawdb.ReadCurrentHeader(tx)
+	} else {
+		if blockNr, ok := blockNrOrHash.Number(); ok {
+			if blockNr == rpc.LatestBlockNumber {
+				header = rawdb.ReadCurrentHeader(tx)
+			} else {
+				header, err = getHeaderByNumber(ctx, blockNr, api, tx)
+			}
+		} else {
+			if blockHash, ok := blockNrOrHash.Hash(); ok {
+				header, err = getHeaderByHash(ctx, api, tx, blockHash)
+			}
+		}
+	}
+
+	if header == nil || err != nil {
+		return common.Address{}, errUnknownBlock
+	}
+
+	borEngine, err := api.bor()
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	borTx, err := borEngine.DB.BeginRo(ctx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	defer borTx.Rollback()
+
+	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+	if err != nil {
+		return common.Address{}, err
+	}
+	return validatorSet.GetProposer().Address, nil
+}
+
+func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOrHash) (BlockSigners, error) {
+	// init chain db
+	ctx := context.Background()
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return BlockSigners{}, err
+	}
+	defer tx.Rollback()
+
+	// Retrieve the requested block number (or current if none requested)
+	var header *types.Header
+	if blockNrOrHash == nil {
+		header = rawdb.ReadCurrentHeader(tx)
+	} else {
+		if blockNr, ok := blockNrOrHash.Number(); ok {
+			if blockNr == rpc.LatestBlockNumber {
+				header = rawdb.ReadCurrentHeader(tx)
+			} else {
+				header, err = getHeaderByNumber(ctx, blockNr, api, tx)
+			}
+		} else {
+			if blockHash, ok := blockNrOrHash.Hash(); ok {
+				header, err = getHeaderByHash(ctx, api, tx, blockHash)
+			}
+		}
+	}
+
+	// Ensure we have an actually valid block
+	if header == nil || err != nil {
+		return BlockSigners{}, errUnknownBlock
+	}
+
+	// init consensus engine
+	borEngine, err := api.bor()
+
+	if err != nil {
+		return BlockSigners{}, err
+	}
+
+	borTx, err := borEngine.DB.BeginRo(ctx)
+	if err != nil {
+		return BlockSigners{}, err
+	}
+	defer borTx.Rollback()
+
+	var snap *Snapshot
+
+	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+	if err != nil {
+		return BlockSigners{}, err
+	}
+
+	var difficulties = make(map[common.Address]uint64)
+
+	proposer := snap.ValidatorSet.GetProposer().Address
+	proposerIndex, _ := snap.ValidatorSet.GetByAddress(proposer)
+
+	signers := validatorSet.Signers()
+	for i := 0; i < len(signers); i++ {
+		tempIndex := i
+		if tempIndex < proposerIndex {
+			tempIndex = tempIndex + len(signers)
+		}
+
+		difficulties[signers[i]] = uint64(len(signers) - (tempIndex - proposerIndex))
+	}
+
+	rankedDifficulties := rankMapDifficulties(difficulties)
+
+	author, err := author(api, tx, header)
+	if err != nil {
+		return BlockSigners{}, err
+	}
+
+	diff := int(difficulties[author])
+	blockSigners := BlockSigners{
+		Signers: rankedDifficulties,
+		Diff:    diff,
+		Author:  author,
+	}
+
+	return blockSigners, nil
 }

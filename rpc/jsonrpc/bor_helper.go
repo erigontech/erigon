@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -164,4 +165,17 @@ func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*valset.Val
 func author(api *BorImpl, tx kv.Tx, header *types.Header) (common.Address, error) {
 	borEngine, _ := api.bor()
 	return ecrecover(header, borEngine.Config())
+}
+
+func rankMapDifficulties(values map[common.Address]uint64) []difficultiesKV {
+	ss := make([]difficultiesKV, 0, len(values))
+	for k, v := range values {
+		ss = append(ss, difficultiesKV{k, v})
+	}
+
+	sort.Slice(ss, func(i, j int) bool {
+		return ss[i].Difficulty > ss[j].Difficulty
+	})
+
+	return ss
 }
