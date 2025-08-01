@@ -1956,8 +1956,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	from := uint64(0)
-
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
@@ -2001,17 +1999,10 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	blockReader, _ := br.IO()
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
-
 	if chainConfig.Bor != nil {
 		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
-
-	from2, to2, ok := freezeblocks.CanRetire(to, blocksInSnapshots, coresnaptype.Enums.Headers, nil)
-	if ok {
-		from, to = from2, to2
-	}
-
-	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, blocksInSnapshots, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
 
