@@ -210,6 +210,9 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	}
 
 	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+	if err != nil {
+		return nil, err
+	}
 	return validatorSet.Signers(), err
 
 }
