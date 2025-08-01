@@ -298,13 +298,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, fmt.Errorf("gas required exceeds allowance (%d)", hi)
 	}
 
-	// For almost any transaction, the gas consumed by the unconstrained execution
-	// above lower-bounds the gas limit required for it to succeed. One exception
-	// is those that explicitly check gas remaining in order to execute within a
-	// given limit, but we probably don't want to return the lowest possible gas
-	// limit for these cases anyway.
-	lo = result.GasUsed - 1
-
 	// There's a high probability that the transaction will successfully
 	// execute using the 'usedGas' from the first execution as the gasLimit.
 	// We explicitly check this value and use it as the upper bound for the
