@@ -1284,8 +1284,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		valid := be.skipCheck[tx] ||
 			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
-				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
-					return readsource == state.MapRead && readVersion == writtenVersion
+				func(readVersion, writtenVersion state.Version) bool {
+					return readVersion == writtenVersion &&
+						writtenVersion.TxIndex < be.validateTasks.maxComplete()
 				})
 
 		be.versionMap.SetTrace(trace)
@@ -1500,10 +1501,9 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
 					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
-						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
-							res := writtenVersion.TxIndex < maxValidated &&
+						func(_, writtenVersion state.Version) bool {
+							return writtenVersion.TxIndex < maxValidated &&
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
-							return res
 						})) {
 				be.execTasks.pushPending(nextTx)
 				continue

@@ -310,7 +310,7 @@ func (mvr ReadResult) Status() int {
 	return MVReadResultNone
 }
 
-func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(source ReadSource, readVersion, writeVersion Version) bool) (valid bool) {
+func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(readVersion, writeVersion Version) bool) (valid bool) {
 	valid = true
 
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
@@ -318,11 +318,11 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 			rr := versionMap.Read(vr.Address, vr.Path, vr.Key, txIdx)
 			switch rr.Status() {
 			case MVReadResultDone:
-				valid = checkVersion(vr.Source, vr.Version, rr.Version())
+				valid = vr.Source == MapRead && checkVersion(vr.Version, rr.Version())
 			case MVReadResultDependency:
 				valid = false
 			case MVReadResultNone:
-				valid = vr.Source == StorageRead
+				valid = vr.Source == StorageRead && checkVersion(vr.Version, rr.Version())
 			default:
 				panic(fmt.Errorf("should not happen - undefined vm read status: %v", rr.Status()))
 			}

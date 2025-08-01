@@ -520,6 +520,10 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		}
 
 		vr.Val = copyV(v)
+		vr.Version = Version{
+			TxIndex:     s.TxIndex(),
+			Incarnation: s.Incarnation(),
+		}
 
 	default:
 		return defaultV, UnknownSource, nil
