@@ -31,7 +31,6 @@ import (
 
 // BorAPI Bor specific routines
 type BorAPI interface {
-	// Bor snapshot related (see ./bor_snapshot.go)
 	GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error)
 	GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error)
 	GetSnapshotAtHash(hash common.Hash) (*Snapshot, error)
