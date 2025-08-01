@@ -465,6 +465,9 @@ func (d *Downloader) messyLogWrapper() {
 		d.logProgress()
 	}
 
+	// TODO: The rest of this function either needs be merged into a single Downloader state logger,
+	// or put in its own routine on its own timer.
+
 	// Or files==0?
 	if !d.logSeeding {
 		return
