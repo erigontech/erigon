@@ -423,6 +423,14 @@ func ExecV3(ctx context.Context,
 	computeCommitmentDuration := time.Duration(0)
 	blockNum = executor.domains().BlockNum()
 	outputTxNum.Store(executor.domains().TxNum())
+	//for i := 0; i < 16; i++ {
+	//	ttx := agg.BeginFilesRo()
+	//	c, err := executor.tx().Cursor(kv.TblCommitmentVals)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	executor.domains().GetCommitmentContext().SetTtx(i, ttx, c)
+	//}
 
 	if maxBlockNum < blockNum {
 		return nil
