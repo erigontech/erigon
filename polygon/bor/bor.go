@@ -25,7 +25,6 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -339,12 +338,11 @@ type Bor struct {
 
 	execCtx context.Context // context of caller execution stage
 
-	spanner         Spanner
-	stateReceiver   StateReceiver
-	HeimdallClient  heimdall.Client
-	spanReader      spanReader
-	useBridgeReader bool
-	bridgeReader    bridgeReader
+	spanner        Spanner
+	stateReceiver  StateReceiver
+	HeimdallClient heimdall.Client
+	spanReader     spanReader
+	bridgeReader   bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -387,20 +385,19 @@ func New(
 	dependencies, _ := lru.NewARC[common.Hash, [][]int](128)
 
 	c := &Bor{
-		chainConfig:     chainConfig,
-		config:          borConfig,
-		blockReader:     blockReader,
-		Signatures:      signatures,
-		Dependencies:    dependencies,
-		spanner:         spanner,
-		stateReceiver:   genesisContracts,
-		HeimdallClient:  heimdallClient,
-		execCtx:         context.Background(),
-		logger:          logger,
-		closeCh:         make(chan struct{}),
-		useBridgeReader: bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
-		bridgeReader:    bridgeReader,
-		spanReader:      spanReader,
+		chainConfig:    chainConfig,
+		config:         borConfig,
+		blockReader:    blockReader,
+		Signatures:     signatures,
+		Dependencies:   dependencies,
+		spanner:        spanner,
+		stateReceiver:  genesisContracts,
+		HeimdallClient: heimdallClient,
+		execCtx:        context.Background(),
+		logger:         logger,
+		closeCh:        make(chan struct{}),
+		bridgeReader:   bridgeReader,
+		spanReader:     spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1316,81 +1313,55 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.useBridgeReader {
-		var events []*types.Message
-		var err error
+	var events []*types.Message
+	var err error
 
-		ctx := dbg.ContextWithDebug(c.execCtx, true)
-		if fetchEventsWithingTime {
-			sprintLength := c.config.CalculateSprintLength(blockNum)
+	ctx := dbg.ContextWithDebug(c.execCtx, true)
+	if fetchEventsWithingTime {
+		sprintLength := c.config.CalculateSprintLength(blockNum)
 
-			if blockNum < sprintLength {
-				return nil
-			}
+		if blockNum < sprintLength {
+			return nil
+		}
 
-			prevSprintStart := chain.Chain.GetHeaderByNumber(blockNum - sprintLength)
-			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
+		prevSprintStart := chain.Chain.GetHeaderByNumber(blockNum - sprintLength)
+		stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
 
-			timeFrom := time.Unix(int64(prevSprintStart.Time-stateSyncDelay), 0)
-			timeTo := time.Unix(int64(header.Time-stateSyncDelay), 0)
+		timeFrom := time.Unix(int64(prevSprintStart.Time-stateSyncDelay), 0)
+		timeTo := time.Unix(int64(header.Time-stateSyncDelay), 0)
 
-			// Previous sprint was not indore.
-			if !c.config.IsIndore(prevSprintStart.Number.Uint64()) {
-				if prevSprintStart.Number.Uint64() >= sprintLength {
-					prevPrevSprintStart := chain.Chain.GetHeaderByNumber(prevSprintStart.Number.Uint64() - sprintLength)
-					timeFrom = time.Unix(int64(prevPrevSprintStart.Time), 0)
-				} else {
-					timeFrom = time.Unix(0, 0)
-				}
-			}
-
-			// Current sprint was not indore.
-			if !c.config.IsIndore(blockNum) {
-				timeTo = time.Unix(int64(prevSprintStart.Time), 0)
-			}
-
-			events, err = c.bridgeReader.EventsWithinTime(ctx, timeFrom, timeTo)
-			if err != nil {
-				return err
-			}
-		} else {
-			events, err = c.bridgeReader.Events(ctx, header.Hash(), blockNum)
-			if err != nil {
-				return err
+		// Previous sprint was not indore.
+		if !c.config.IsIndore(prevSprintStart.Number.Uint64()) {
+			if prevSprintStart.Number.Uint64() >= sprintLength {
+				prevPrevSprintStart := chain.Chain.GetHeaderByNumber(prevSprintStart.Number.Uint64() - sprintLength)
+				timeFrom = time.Unix(int64(prevPrevSprintStart.Time), 0)
+			} else {
+				timeFrom = time.Unix(0, 0)
 			}
 		}
 
-		for _, event := range events {
-			_, err := syscall(*event.To(), event.Data())
-			if err != nil {
-				return err
-			}
+		// Current sprint was not indore.
+		if !c.config.IsIndore(blockNum) {
+			timeTo = time.Unix(int64(prevSprintStart.Time), 0)
 		}
-		return nil
-	}
 
-	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
-
-	// set this true to check the current stored events vs the current heimdall contents
-	// it should be false for non debug becuase it causes an additional call to the
-	// heimdall service to check that we have the same events as the remote service
-	const checkEvents = false
-
-	if checkEvents {
-		if err := heimdall.RemoteEventCheckForBlock(
-			header, chain.Chain.GetHeaderByNumber(blockNum-c.config.CalculateSprintLength(blockNum)),
-			c.chainConfig.ChainID.String(), chain.Chain.BorStartEventId(header.Hash(), blockNum),
-			events, c.HeimdallClient, c.config, logger); err != nil {
+		events, err = c.bridgeReader.EventsWithinTime(ctx, timeFrom, timeTo)
+		if err != nil {
+			return err
+		}
+	} else {
+		events, err = c.bridgeReader.Events(ctx, header.Hash(), blockNum)
+		if err != nil {
 			return err
 		}
 	}
 
 	for _, event := range events {
-		if err := c.stateReceiver.CommitState(event, syscall); err != nil {
+		_, err := syscall(*event.To(), event.Data())
+		if err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
