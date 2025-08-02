@@ -876,8 +876,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		}
 		sum += res.To - res.From
 		headerSegName := info.Name()
+
 		// check that all files exist
-		for _, snapType := range []string{"transactions", "bodies"} {
+		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
 			// check that the file exist
 			if _, err := os.Stat(filepath.Join(snapDir, segName)); err != nil {
