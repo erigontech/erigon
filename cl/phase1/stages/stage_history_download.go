@@ -467,6 +467,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 					return fmt.Errorf("error scheduling recovery for block %s: %w", blockRoot, err)
 				}
 			}
+			fmt.Println("Recovered blobs for", len(fuluBlocks))
 		}
 	}
 	if shouldLog {
