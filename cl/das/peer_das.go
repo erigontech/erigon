@@ -124,6 +124,7 @@ func (d *peerdas) IsColumnOverHalf(blockRoot common.Hash) bool {
 		log.Warn("failed to get saved column index", "err", err, "blockRoot", blockRoot)
 		return false
 	}
+	fmt.Println(blockRoot, "existingColumns", len(existingColumns), "requiredColumns", int(d.beaconConfig.NumberOfColumns+1)/2)
 	return len(existingColumns) >= int(d.beaconConfig.NumberOfColumns+1)/2
 }
 
@@ -625,7 +626,6 @@ mainloop:
 			for _, blockRoot := range req.remainingBlockRoots() {
 				if needToRecoverBlobs &&
 					(d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot)) {
-					fmt.Println("block root is over half or already recovered, removing from request", blockRoot)
 					// no need to schedule recovery for this block because someone else will do it
 					req.removeBlock(blockRoot)
 				}
