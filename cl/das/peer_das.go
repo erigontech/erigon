@@ -494,16 +494,16 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 			continue
 		}
 		if d.IsBlobAlreadyRecovered(root) {
-			fmt.Println("XXX")
 			continue
 		}
 		blocksToProcess = append(blocksToProcess, block)
 	}
 
 	if len(blocksToProcess) == 0 {
-		fmt.Println("No blocks to process")
 		return nil
 	}
+
+	fmt.Println("blocks need to be processed", len(blocksToProcess), "blocks", "initial_slot", blocksToProcess[0].Block.Slot, "last_slot", blocksToProcess[len(blocksToProcess)-1].Block.Slot)
 
 	begin := time.Now()
 	defer func() {
