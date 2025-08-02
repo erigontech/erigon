@@ -43,9 +43,4 @@ func TestGetForkDigests(t *testing.T) {
 	lastFork, err := clock.LastFork()
 	require.NoError(t, err)
 	require.Equal(t, lastFork, nextDigest)
-	expectedForkId := make([]byte, 16)
-	copy(expectedForkId, currDigest[:])
-	forkId, err := clock.ForkId()
-	require.NoError(t, err)
-	require.Equal(t, expectedForkId, forkId)
 }

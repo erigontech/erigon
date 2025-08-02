@@ -26,7 +26,7 @@ const (
 
 type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
-	RemoveColumnSidecar(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) error
+	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error
 	RemoveAllColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
 	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
 	ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error)
@@ -207,7 +207,11 @@ func (s *dataColumnStorageImpl) RemoveAllColumnSidecars(ctx context.Context, slo
 	return tx.Commit()
 }
 
-func (s *dataColumnStorageImpl) RemoveColumnSidecar(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) error {
+func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
+	toRemoveIndices := make(map[uint64]bool)
+	for _, columnIndex := range columnIndices {
+		toRemoveIndices[uint64(columnIndex)] = true
+	}
 	mutex := s.acquireMutexBySlot(slot)
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -227,32 +231,32 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecar(ctx context.Context, slot ui
 	}
 	// find the column index in the bytes and remove it
 	count := binary.LittleEndian.Uint32(bytes[0:4])
+	newBytes := make([]byte, 4)
+	remainingCount := 0
 	for i := uint32(0); i < count; i++ {
-		index := binary.LittleEndian.Uint32(bytes[4+i*4 : 4+(i+1)*4])
-		if index == uint32(columnIndex) {
-			// remove the column index
-			count--
-			countBytes := make([]byte, 4)
-			binary.LittleEndian.PutUint32(countBytes, count)
-			newBytes := make([]byte, 4+count*4)
-			copy(newBytes[:4], countBytes)
-			copy(newBytes[4:], bytes[4:4+i*4])
-			copy(newBytes[4+i*4:], bytes[4+(i+1)*4:])
-			if err := tx.Put(kv.BlockRootToDataColumnCount, blockRoot[:], newBytes); err != nil { // truncate bytes
-				return err
-			}
-			break
+		indexBytes := bytes[4+i*4 : 4+(i+1)*4]
+		index := binary.LittleEndian.Uint32(indexBytes)
+		if !toRemoveIndices[uint64(index)] {
+			newBytes = append(newBytes, indexBytes...)
+			remainingCount++
 		}
 	}
-	if count == 0 {
+	if remainingCount > 0 {
+		binary.LittleEndian.PutUint32(newBytes[0:4], uint32(remainingCount))
+		if err := tx.Put(kv.BlockRootToDataColumnCount, blockRoot[:], newBytes); err != nil {
+			return err
+		}
+	} else {
 		if err := tx.Delete(kv.BlockRootToDataColumnCount, blockRoot[:]); err != nil {
 			return err
 		}
 	}
 
-	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
-	if err := s.fs.Remove(filepath); err != nil {
-		return err
+	for _, index := range columnIndices {
+		_, filepath := dataColumnFilePath(slot, blockRoot, uint64(index))
+		if err := s.fs.Remove(filepath); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
