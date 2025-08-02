@@ -243,8 +243,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"datadir", dirs.DataDir,
 		"ipv6-enabled", !disableIPV6,
 		"ipv4-enabled", !disableIPV4,
-		"download.rate", downloadRate.String(),
-		"upload.rate", uploadRate.String(),
+		"download.rate", downloadRateStr,
+		"upload.rate", uploadRateStr,
 		"webseed", webseeds,
 	)
 

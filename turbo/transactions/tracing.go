@@ -235,7 +235,7 @@ func ExecuteTraceTx(
 			returnVal = hex.EncodeToString(result.Revert())
 		}
 		stream.WriteObjectField("returnValue")
-		stream.WriteString("0x" + returnVal)
+		stream.WriteString(returnVal)
 		stream.WriteObjectEnd()
 	} else {
 		r, err := tracer.GetResult()
