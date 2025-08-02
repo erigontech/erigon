@@ -641,7 +641,7 @@ mainloop:
 			if len(result.sidecars) == 0 {
 				continue
 			}
-			log.Info("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars), "custodies", result.custodies, "elapsed", result.elapsed)
+			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars), "custodies", result.custodies, "elapsed", result.elapsed)
 			wg := sync.WaitGroup{}
 			for _, sidecar := range result.sidecars {
 				wg.Add(1)
@@ -674,9 +674,11 @@ mainloop:
 						return
 					}
 					if exist {
+						fmt.Println("column sidecar already exists", "blockRoot", blockRoot, "columnIndex", columnIndex)
 						req.removeColumn(blockRoot, columnIndex)
 						return
 					}
+					fmt.Println("column sidecar does not already exists", "blockRoot", blockRoot, "columnIndex", columnIndex)
 
 					if !VerifyDataColumnSidecar(sidecar) {
 						log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
