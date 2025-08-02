@@ -3,7 +3,6 @@ package das
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -502,8 +501,6 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 		return nil
 	}
 
-	fmt.Println("blocks need to be processed", len(blocksToProcess), "blocks", "initial_slot", blocksToProcess[0].Block.Slot, "last_slot", blocksToProcess[len(blocksToProcess)-1].Block.Slot)
-
 	begin := time.Now()
 	defer func() {
 		slots := []uint64{}
@@ -590,9 +587,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 						reqLength += id.Columns.Length()
 						return true
 					})
-					fmt.Println("Requesting column sidecars for block roots:", ids.Len())
 					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
-					fmt.Println(len(s), err)
 					select {
 					case resultChan <- resultData{
 						sidecars:  s,
@@ -674,11 +669,9 @@ mainloop:
 						return
 					}
 					if exist {
-						fmt.Println("column sidecar already exists", "slot", sidecar.SignedBlockHeader.Header.Slot, "columnIndex", columnIndex)
 						req.removeColumn(blockRoot, columnIndex)
 						return
 					}
-					fmt.Println("column sidecar does not already exists", "slot", sidecar.SignedBlockHeader.Header.Slot, "columnIndex", columnIndex)
 
 					if !VerifyDataColumnSidecar(sidecar) {
 						log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
