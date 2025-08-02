@@ -674,11 +674,11 @@ mainloop:
 						return
 					}
 					if exist {
-						fmt.Println("column sidecar already exists", "blockRoot", blockRoot, "columnIndex", columnIndex)
+						fmt.Println("column sidecar already exists", "slot", sidecar.SignedBlockHeader.Header.Slot, "columnIndex", columnIndex)
 						req.removeColumn(blockRoot, columnIndex)
 						return
 					}
-					fmt.Println("column sidecar does not already exists", "blockRoot", blockRoot, "columnIndex", columnIndex)
+					fmt.Println("column sidecar does not already exists", "slot", sidecar.SignedBlockHeader.Header.Slot, "columnIndex", columnIndex)
 
 					if !VerifyDataColumnSidecar(sidecar) {
 						log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
