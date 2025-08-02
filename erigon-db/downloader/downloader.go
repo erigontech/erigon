@@ -19,6 +19,7 @@ package downloader
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -297,10 +298,11 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	requestHandler := requestHandler{
 		Transport: http.Transport{
 			ReadBufferSize: 64 << 10,
+			TLSNextProto:   map[string]func(string, *tls.Conn) http.RoundTripper{}, // Disable HTTP2.
 			// Note this does nothing in go1.24.
-			HTTP2: &http.HTTP2Config{
-				MaxConcurrentStreams: 1,
-			},
+			//HTTP2: &http.HTTP2Config{
+			//	MaxConcurrentStreams: 1,
+			//},
 			// Big hammer to achieve one request per connection.
 			//DisableKeepAlives: true,
 		},
