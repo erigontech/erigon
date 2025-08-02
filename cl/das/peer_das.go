@@ -115,7 +115,6 @@ func (d *peerdas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
 		log.Warn("failed to get kzg commitments count", "err", err, "blockRoot", blockRoot)
 		return false
 	}
-	fmt.Println(blockRoot, "count", count)
 	return count > 0
 }
 
