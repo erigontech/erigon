@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
@@ -42,6 +43,7 @@ import (
 type StageHistoryReconstructionCfg struct {
 	beaconCfg                *clparams.BeaconChainConfig
 	downloader               *network.BackwardBeaconDownloader
+	forkchoiceState          forkchoice.ForkChoiceStorage
 	sn                       *freezeblocks.CaplinSnapshots
 	startingRoot             common.Hash
 	caplinConfig             clparams.CaplinConfig
@@ -60,7 +62,7 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, forkchoiceState forkchoice.ForkChoiceStorage, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		beaconCfg:                beaconCfg,
 		downloader:               downloader,
@@ -78,6 +80,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 		executionBlocksCollector: executionBlocksCollector,
 		blockReader:              blockReader,
 		blobStorage:              blobStorage,
+		forkchoiceState:          forkchoiceState,
 	}
 }
 
@@ -354,6 +357,11 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			break
 		}
 
+		if !cfg.forkchoiceState.Synced() {
+			time.Sleep(time.Second)
+			continue
+		}
+
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
 		visited := uint64(0)
 		maxIterations := uint64(32)
@@ -409,37 +417,68 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			logger.Info("[Blobs-Downloader] Downloading blobs backwards", "slot", currentSlot, "blks/sec", blkSecStr)
 		default:
 		}
-		// Generate the request
-		req, err := network.BlobsIdentifiersFromBlindedBlocks(batch, cfg.beaconCfg)
-		if err != nil {
-			cfg.logger.Debug("Error generating blob identifiers", "err", err)
-			continue
-		}
-		// Request the blobs
-		blobs, err := network.RequestBlobsFrantically(ctx, rpc, req)
-		if err != nil {
-			cfg.logger.Debug("Error requesting blobs", "err", err)
-			continue
-		}
-		_, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
-			// The block is preverified so just check that the signature is correct against the block
-			for _, block := range batch {
-				if block.Block.Slot != header.Header.Slot {
-					continue
-				}
-				if block.Signature != header.Signature {
-					return errors.New("signature mismatch between blob and stored block")
-				}
-				return nil
+
+		// separate pre-fulu blocks from post-fulu blocks (this will be legacy code 10mins post-hardfork but we need it for now so this looks ugly)
+		preFuluBlocks := make([]*cltypes.SignedBlindedBeaconBlock, 0, len(batch))
+		postFuluBlocks := make([]*cltypes.SignedBlindedBeaconBlock, 0, len(batch))
+		for _, block := range batch {
+			if block.Version() < clparams.FuluVersion {
+				preFuluBlocks = append(preFuluBlocks, block)
+			} else {
+				postFuluBlocks = append(postFuluBlocks, block)
 			}
-			return errors.New("block not in batch")
-		})
-		if err != nil {
-			rpc.BanPeer(blobs.Peer)
-			cfg.logger.Warn("Error verifying blobs", "err", err)
-			continue
 		}
+		if len(preFuluBlocks) > 0 {
+			// Generate the request
+			req, err := network.BlobsIdentifiersFromBlindedBlocks(preFuluBlocks, cfg.beaconCfg)
+			if err != nil {
+				cfg.logger.Debug("Error generating blob identifiers", "err", err)
+				continue
+			}
+			// Request the blobs
+			blobs, err := network.RequestBlobsFrantically(ctx, rpc, req)
+			if err != nil {
+				cfg.logger.Debug("Error requesting blobs", "err", err)
+				continue
+			}
+			_, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
+				// The block is preverified so just check that the signature is correct against the block
+				for _, block := range batch {
+					if block.Block.Slot != header.Header.Slot {
+						continue
+					}
+					if block.Signature != header.Signature {
+						return errors.New("signature mismatch between blob and stored block")
+					}
+					return nil
+				}
+				return errors.New("block not in batch")
+			})
+			if err != nil {
+				rpc.BanPeer(blobs.Peer)
+				cfg.logger.Warn("Error verifying blobs", "err", err)
+				continue
+			}
+		}
+		// WIP: easy but need to think about this.
+
+		if len(postFuluBlocks) > 0 {
+			if err := cfg.forkchoiceState.GetPeerDas().DownloadColumnsAndRecoverBlobs(ctx, postFuluBlocks); err != nil {
+				return fmt.Errorf("error downloading blobs for post-fulu blocks: %w", err)
+			}
+			for _, block := range postFuluBlocks {
+				blockRoot, err := block.Block.HashSSZ()
+				if err != nil {
+					return fmt.Errorf("error hashing block: %w", err)
+				}
+				if err := cfg.forkchoiceState.GetPeerDas().TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
+					return fmt.Errorf("error scheduling recovery for block %s: %w", blockRoot, err)
+				}
+			}
+		}
+		time.Sleep(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
 	}
+
 	if shouldLog {
 		logger.Info("[Blobs-Downloader] Blob history download finished successfully")
 	}

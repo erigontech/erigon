@@ -26,8 +26,8 @@ import (
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
-	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
-	DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
+	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error
+	DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error
 	IsDataAvailable(blockRoot common.Hash) (bool, error)
 	Prune(keepSlotDistance uint64) error
 	UpdateValidatorsCustody(cgc uint64)
@@ -388,7 +388,7 @@ var (
 )
 
 // DownloadMissingColumns downloads the missing columns for the given blocks but not recover the blobs
-func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
 	custodyColumns, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		return err
@@ -400,9 +400,9 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*clty
 	return d.runDownload(ctx, req, false)
 }
 
-func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
 	// filter out blocks that don't need to be processed
-	blocksToProcess := []*cltypes.SignedBeaconBlock{}
+	blocksToProcess := []*cltypes.SignedBlindedBeaconBlock{}
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion ||
 			block.Block.Body.BlobKzgCommitments == nil ||
@@ -604,19 +604,19 @@ mainloop:
 type downloadRequest struct {
 	beaconConfig           *clparams.BeaconChainConfig
 	mutex                  sync.RWMutex
-	blockRootToBeaconBlock map[common.Hash]*cltypes.SignedBeaconBlock
+	blockRootToBeaconBlock map[common.Hash]*cltypes.SignedBlindedBeaconBlock
 	downloadTable          map[common.Hash]map[uint64]bool
 	cacheRequest           *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]
 }
 
 func initializeDownloadRequest(
-	blocks []*cltypes.SignedBeaconBlock,
+	blocks []*cltypes.SignedBlindedBeaconBlock,
 	beaconConfig *clparams.BeaconChainConfig,
 	columnStorage blob_storage.DataColumnStorage,
 	expectedColumns map[cltypes.CustodyIndex]bool,
 ) (*downloadRequest, error) {
 	downloadTable := make(map[common.Hash]map[uint64]bool)
-	blockRootToBeaconBlock := make(map[common.Hash]*cltypes.SignedBeaconBlock)
+	blockRootToBeaconBlock := make(map[common.Hash]*cltypes.SignedBlindedBeaconBlock)
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion {
 			continue

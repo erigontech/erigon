@@ -119,7 +119,6 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 	}, SuccessfulResponsePrefix)
 }
 
-// TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
 }
