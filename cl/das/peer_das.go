@@ -593,7 +593,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 					})
 					fmt.Println("Requesting column sidecars for block roots:", ids.Len())
 					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
-					fmt.Println(s, err)
+					fmt.Println(len(s), err)
 					select {
 					case resultChan <- resultData{
 						sidecars:  s,
