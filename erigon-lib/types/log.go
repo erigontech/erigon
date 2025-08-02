@@ -61,6 +61,8 @@ type Log struct {
 	Removed bool `json:"removed" codec:"-"`
 }
 
+type Logs []*Log
+
 type ErigonLog struct {
 	Address     common.Address `json:"address" gencodec:"required" codec:"1"`
 	Topics      []common.Hash  `json:"topics" gencodec:"required" codec:"2"`
@@ -76,7 +78,13 @@ type ErigonLog struct {
 
 type ErigonLogs []*ErigonLog
 
-type Logs []*Log
+// RPCLog Extends `types.Log` and add BlockTimestamp field
+type RPCLog struct {
+	Log
+	BlockTimestamp uint64 `json:"blockTimestamp" codec:"-"`
+}
+
+type RPCLogs []*RPCLog
 
 func (logs Logs) Copy() Logs {
 	if logs == nil {
@@ -87,6 +95,14 @@ func (logs Logs) Copy() Logs {
 		logsCopy[i] = log.Copy()
 	}
 	return logsCopy
+}
+
+// ToRPCTransactionLog converts types.Log in a RPCLog.
+func ToRPCTransactionLog(log *Log, header *Header, txHash common.Hash, txIndex uint64) *RPCLog {
+	return &RPCLog{
+		Log:            *log,
+		BlockTimestamp: header.Time,
+	}
 }
 
 func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
