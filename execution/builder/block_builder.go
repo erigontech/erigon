@@ -36,11 +36,13 @@ type BlockBuilder struct {
 	err       error
 }
 
-func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters) *BlockBuilder {
+func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters, maxBuildTimeSecs uint64) *BlockBuilder {
 	builder := new(BlockBuilder)
 	builder.syncCond = sync.NewCond(new(sync.Mutex))
+	terminated := make(chan struct{})
 
 	go func() {
+		defer close(terminated)
 		log.Info("Building block...")
 		t := time.Now()
 		result, err := build(param, &builder.interrupt)
@@ -56,6 +58,20 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters)
 		builder.result = result
 		builder.err = err
 		builder.syncCond.Broadcast()
+	}()
+
+	go func() {
+		timer := time.NewTimer(time.Duration(maxBuildTimeSecs) * time.Second)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			log.Warn("Stopping block builder due to max build time exceeded")
+			_, _ = builder.Stop()
+			log.Debug("Stopped block builder due to max build time exceeded")
+			return
+		case <-terminated:
+			return
+		}
 	}()
 
 	return builder
