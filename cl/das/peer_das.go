@@ -3,6 +3,7 @@ package das
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -492,12 +493,14 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 			continue
 		}
 		if d.IsBlobAlreadyRecovered(root) {
+			fmt.Println("XXX")
 			continue
 		}
 		blocksToProcess = append(blocksToProcess, block)
 	}
 
 	if len(blocksToProcess) == 0 {
+		fmt.Println("No blocks to process")
 		return nil
 	}
 
