@@ -625,6 +625,7 @@ mainloop:
 			for _, blockRoot := range req.remainingBlockRoots() {
 				if needToRecoverBlobs &&
 					(d.IsColumnOverHalf(blockRoot) || d.IsBlobAlreadyRecovered(blockRoot)) {
+					fmt.Println("block root is over half or already recovered, removing from request", blockRoot)
 					// no need to schedule recovery for this block because someone else will do it
 					req.removeBlock(blockRoot)
 				}
