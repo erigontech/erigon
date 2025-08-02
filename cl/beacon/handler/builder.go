@@ -100,7 +100,6 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 }
 
 func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	//fmt.Println("PostEthV1BuilderRegisterValidator")
 	registerReq := []*cltypes.ValidatorRegistration{}
 	if err := json.NewDecoder(r.Body).Decode(&registerReq); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
