@@ -277,6 +277,8 @@ github.com/erigontech/erigon-snapshot v1.3.1-0.20250801132700-96159ef3ec53 h1:k7
 github.com/erigontech/erigon-snapshot v1.3.1-0.20250801132700-96159ef3ec53/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/erigon-snapshot v1.3.1-0.20250802002747-c9735641d19c h1:sfGUEeFFpo1B9whJpvyLFfo/6SNvcUA6nwaPGKJSL5Q=
 github.com/erigontech/erigon-snapshot v1.3.1-0.20250802002747-c9735641d19c/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20250802193606-7ad812e78f75 h1:EbxDolpPtBnIV2EJ7LdKe7IbgcpNZ6lyo9wXSMnYV4k=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20250802193606-7ad812e78f75/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXEfZoBjV4buzjWmCmoqVLXiGCq0ZmQ2OjeRvQ=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
 github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86 h1:UKcIbFZUGIKzK4aQbkv/dYiOVxZSUuD3zKadhmfwdwU=
