@@ -1,11 +1,5 @@
 {
     "current": null,
-    "currentHash": "0x",
-    "currentForkId": "0x",
     "next": null,
-    "nextHash": null,
-    "nextForkId": null,
-    "last": null,
-    "lastHash": null,
-    "lastForkId": null
+    "last": null
 }
