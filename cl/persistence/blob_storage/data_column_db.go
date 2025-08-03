@@ -39,7 +39,7 @@ type dataColumnStorageImpl struct {
 	ethClock          eth_clock.EthereumClock
 	slotsKept         uint64
 
-	dbMutexes map[uint64]*sync.RWMutex
+	lock sync.RWMutex
 }
 
 func NewDataColumnStore(fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) DataColumnStorage {
@@ -48,10 +48,6 @@ func NewDataColumnStore(fs afero.Fs, slotsKept uint64, beaconChainConfig *clpara
 		beaconChainConfig: beaconChainConfig,
 		ethClock:          ethClock,
 		slotsKept:         slotsKept,
-		dbMutexes:         make(map[uint64]*sync.RWMutex, mutexSize),
-	}
-	for i := uint64(0); i < mutexSize; i++ {
-		impl.dbMutexes[i] = &sync.RWMutex{}
 	}
 	return impl
 }
@@ -64,6 +60,8 @@ func dataColumnFilePath(slot uint64, blockRoot common.Hash, columnIndex uint64) 
 }
 
 func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	dir, filepath := dataColumnFilePath(columnData.SignedBlockHeader.Header.Slot, blockRoot, uint64(columnIndex))
 	if err := s.fs.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -88,16 +86,14 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		return err
 	}
 
-	mutex := s.acquireMutexBySlot(columnData.SignedBlockHeader.Header.Slot)
-	mutex.Lock()
-	defer mutex.Unlock()
-
 	fh.Close()
 	log.Trace("wrote data column sidecar", "slot", columnData.SignedBlockHeader.Header.Slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	return nil
 }
 
 func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
 	fh, err := s.fs.Open(filepath)
 	if err != nil {
@@ -113,6 +109,8 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 }
 
 func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
 	if _, err := s.fs.Stat(filepath); os.IsNotExist(err) {
 		return false, nil
@@ -123,10 +121,8 @@ func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot ui
 }
 
 func (s *dataColumnStorageImpl) RemoveAllColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
-	mutex := s.acquireMutexBySlot(slot)
-	mutex.Lock()
-	defer mutex.Unlock()
-
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	for i := uint64(0); i < s.beaconChainConfig.NumberOfColumns; i++ {
 		_, filepath := dataColumnFilePath(slot, blockRoot, i)
 		s.fs.Remove(filepath)
@@ -135,10 +131,8 @@ func (s *dataColumnStorageImpl) RemoveAllColumnSidecars(ctx context.Context, slo
 }
 
 func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
-	mutex := s.acquireMutexBySlot(slot)
-	mutex.Lock()
-	defer mutex.Unlock()
-
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	for _, index := range columnIndices {
 		_, filepath := dataColumnFilePath(slot, blockRoot, uint64(index))
 		if err := s.fs.Remove(filepath); err != nil {
@@ -153,6 +147,8 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 }
 
 func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	_, filepath := dataColumnFilePath(slot, blockRoot, idx)
 	fh, err := s.fs.Open(filepath)
 	if err != nil {
@@ -165,6 +161,8 @@ func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot 
 
 // GetSavedColumnIndex returns the list of saved column indices for the given slot and block root.
 func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	var savedColumns []uint64
 	for i := uint64(0); i < s.beaconChainConfig.NumberOfColumns; i++ {
 		_, filepath := dataColumnFilePath(slot, blockRoot, i)
@@ -178,12 +176,9 @@ func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot ui
 	return savedColumns, nil
 }
 
-func (s *dataColumnStorageImpl) acquireMutexBySlot(slot uint64) *sync.RWMutex {
-	index := slot % mutexSize
-	return s.dbMutexes[index]
-}
-
 func (s *dataColumnStorageImpl) Prune(keepSlotDistance uint64) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	currentSlot := s.ethClock.GetCurrentSlot()
 	currentSlot -= keepSlotDistance
 	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
