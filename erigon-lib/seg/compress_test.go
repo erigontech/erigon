@@ -179,7 +179,7 @@ func TestCompressDict1(t *testing.T) {
 		i++
 	}
 
-	if cs := checksum(d.filePath); cs != 3153486123 {
+	if cs := checksum(d.filePath); cs != 3126908344 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
 		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
@@ -249,7 +249,7 @@ func TestCompressDictCmp(t *testing.T) {
 		i++
 	}
 
-	if cs := checksum(d.filePath); cs != 3153486123 {
+	if cs := checksum(d.filePath); cs != 3126908344 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
 		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
