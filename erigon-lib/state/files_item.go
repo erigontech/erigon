@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -64,6 +65,9 @@ type filesItem struct {
 func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
+	if startStep <= endStep {
+		log.Warn("[dbg] newFilesItem: file with too close start/end tx nums", "startTxNum", startTxNum, "endTxNum", endTxNum, "stack", dbg.Stack())
+	}
 	frozen := endStep-startStep == config3.StepsInFrozenFile
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
