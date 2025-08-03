@@ -92,6 +92,7 @@ var Defaults = Config{
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
+		PersistReceiptsCacheV2:   true, // store receipts on disk
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
