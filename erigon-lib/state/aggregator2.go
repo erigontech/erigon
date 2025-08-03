@@ -70,7 +70,7 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	a.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
 	a.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
 
-	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
+	//a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
