@@ -234,7 +234,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
 			if err != nil {
 				log.Debug("[blobsRecover] failed to read column sidecar", "err", err)
-				d.columnStorage.RemoveAllColumnSidecars(ctx, slot, blockRoot)
+				d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex))
 				return
 			}
 			for i := 0; i < sidecar.Column.Len(); i++ {
