@@ -427,7 +427,7 @@ func gasCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize
 		return 0, err
 	}
 
-	if dbg.TraceGas && evm.intraBlockState.Trace() {
+	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) Call Gas: base: %d memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGasTemp)
 	}
@@ -464,7 +464,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memory
 		return 0, err
 	}
 
-	if dbg.TraceGas && evm.intraBlockState.Trace() {
+	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGasTemp)
 	}
@@ -489,7 +489,7 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 		return 0, err
 	}
 
-	if dbg.TraceGas && evm.intraBlockState.Trace() {
+	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGasTemp)
 	}
@@ -515,7 +515,7 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memo
 		return 0, err
 	}
 
-	if dbg.TraceGas && evm.intraBlockState.Trace() {
+	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) StaticCall Gas: memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGasTemp)
 	}

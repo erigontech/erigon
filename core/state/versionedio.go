@@ -402,17 +402,6 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		return defaultV, MapRead, nil
 	}
 
-	if !commited {
-		if vw, ok := s.versionedWrite(addr, path, key); ok {
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-				fmt.Printf("%d (%d.%d) RD %s %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val))
-			}
-
-			val := vw.Val.(T)
-			return val, WriteSetRead, nil
-		}
-	}
-
 	res := s.versionMap.Read(addr, path, key, s.txIndex)
 
 	var v T
@@ -426,6 +415,38 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		},
 	}
 
+	if !commited {
+		if vw, ok := s.versionedWrite(addr, path, key); ok {
+			if res.Status() == MVReadResultDone {
+				if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
+					if vr.Version.TxIndex > pr.Version.TxIndex || vr.Version.Incarnation > pr.Version.Incarnation {
+						if vr.Version.TxIndex > s.dep {
+							s.dep = vr.Version.TxIndex
+						}
+
+						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+							fmt.Printf("%d (%d.%d) DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
+						}
+
+						if s.versionedReads == nil {
+							s.versionedReads = ReadSet{}
+						}
+						s.versionedReads.Set(vr)
+
+						panic(ErrDependency)
+					}
+				}
+			}
+
+			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+				fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val))
+			}
+
+			val := vw.Val.(T)
+			return val, WriteSetRead, nil
+		}
+	}
+
 	switch res.Status() {
 	case MVReadResultDone:
 		vr.Source = MapRead
@@ -433,7 +454,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if pr.Version == vr.Version {
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-					fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
+					fmt.Printf("%d (%d.%d) RD (%s %d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
 				}
 
 				return pr.Val.(T), MapRead, nil
@@ -463,7 +484,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		}
 
 		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, v))
+			fmt.Printf("%d (%d.%d) RD (%s %d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, v))
 		}
 
 		if copyV == nil {
@@ -492,7 +513,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-						fmt.Printf("%d (%d.%d) RD %s %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val))
+						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val))
 					}
 
 					return pr.Val.(T), ReadSetRead, nil
@@ -516,14 +537,10 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		}
 
 		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) RD %s %x %s: %s\n", s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, valueString(path, v))
+			fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, valueString(path, v))
 		}
 
 		vr.Val = copyV(v)
-		vr.Version = Version{
-			TxIndex:     s.TxIndex(),
-			Incarnation: s.Incarnation(),
-		}
 
 	default:
 		return defaultV, UnknownSource, nil

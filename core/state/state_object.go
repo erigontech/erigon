@@ -304,10 +304,11 @@ func (so *stateObject) printTrie() {
 	}
 }
 
-func (so *stateObject) SetBalance(amount uint256.Int, reason tracing.BalanceChangeReason) {
+func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
-		account: &so.address,
-		prev:    so.data.Balance,
+		account:     &so.address,
+		prev:        so.data.Balance,
+		wasCommited: wasCommited,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
 		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
@@ -357,15 +358,16 @@ func (so *stateObject) Code() ([]byte, error) {
 	return code, nil
 }
 
-func (so *stateObject) SetCode(codeHash common.Hash, code []byte) error {
+func (so *stateObject) SetCode(codeHash common.Hash, code []byte, wasCommited bool) error {
 	prevcode, err := so.Code()
 	if err != nil {
 		return err
 	}
 	so.db.journal.append(codeChange{
-		account:  &so.address,
-		prevhash: so.data.CodeHash,
-		prevcode: prevcode,
+		account:     &so.address,
+		prevhash:    so.data.CodeHash,
+		prevcode:    prevcode,
+		wasCommited: wasCommited,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
 		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
@@ -380,10 +382,11 @@ func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
 	so.dirtyCode = true
 }
 
-func (so *stateObject) SetNonce(nonce uint64) {
+func (so *stateObject) SetNonce(nonce uint64, wasCommited bool) {
 	so.db.journal.append(nonceChange{
-		account: &so.address,
-		prev:    so.data.Nonce,
+		account:     &so.address,
+		prev:        so.data.Nonce,
+		wasCommited: wasCommited,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
 		so.db.tracingHooks.OnNonceChange(so.address, so.data.Nonce, nonce)

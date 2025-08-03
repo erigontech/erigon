@@ -61,10 +61,10 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	s.state.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	c.Check(err, checker.IsNil)
-	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
+	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3}, true)
 	obj3, err := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
 	c.Check(err, checker.IsNil)
-	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
+	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)
 
 	// write some of them to the trie
 	err = s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
@@ -278,9 +278,9 @@ func TestSnapshot2(t *testing.T) {
 	if err != nil {
 		t.Fatal("getting state", err)
 	}
-	so0.SetBalance(*uint256.NewInt(42), tracing.BalanceChangeUnspecified)
-	so0.SetNonce(43)
-	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
+	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
+	so0.SetNonce(43, true)
+	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'}, true)
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
@@ -300,9 +300,9 @@ func TestSnapshot2(t *testing.T) {
 	if err != nil {
 		t.Fatal("getting state", err)
 	}
-	so1.SetBalance(*uint256.NewInt(52), tracing.BalanceChangeUnspecified)
-	so1.SetNonce(53)
-	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
+	so1.SetBalance(*uint256.NewInt(52), true, tracing.BalanceChangeUnspecified)
+	so1.SetNonce(53, true)
+	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'}, true)
 	so1.selfdestructed = true
 	so1.deleted = true
 	state.setStateObject(stateobjaddr1, so1)
@@ -436,11 +436,11 @@ func TestDump(t *testing.T) {
 	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	require.NoError(t, err)
-	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
+	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3}, true)
 	obj2.setIncarnation(1)
 	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
 	require.NoError(t, err)
-	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
+	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)
 
 	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	// write some of them to the trie

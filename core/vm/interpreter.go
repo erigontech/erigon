@@ -325,7 +325,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if steps%5000 == 0 && in.evm.Cancelled() {
 			break
 		}
-		if dbg.TraceGas || debug || trace {
+		if dbg.TraceDyanmicGas || debug || trace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 			blockNum, txIndex, txIncarnation = in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation()
@@ -373,7 +373,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
 
-			if dbg.TraceGas && dynamicCost > 0 {
+			if dbg.TraceDyanmicGas && dynamicCost > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
 

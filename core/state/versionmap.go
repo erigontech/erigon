@@ -310,19 +310,48 @@ func (mvr ReadResult) Status() int {
 	return MVReadResultNone
 }
 
-func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(readVersion, writeVersion Version) bool) (valid bool) {
-	valid = true
+type VersionValidity int
+
+func (v VersionValidity) String() string {
+	switch v {
+	case VersionValid:
+		return "valid"
+	case VerionInvalid:
+		return "invalid"
+	case VerionTooEarly:
+		return "too early"
+	default:
+		return "unknown"
+	}
+}
+
+const (
+	VersionValid VersionValidity = iota
+	VerionInvalid
+	VerionTooEarly
+)
+
+func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(readVersion, writeVersion Version) VersionValidity) (valid VersionValidity) {
+	valid = VersionValid
 
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
 		readSet.Scan(func(vr *VersionedRead) bool {
 			rr := versionMap.Read(vr.Address, vr.Path, vr.Key, txIdx)
 			switch rr.Status() {
 			case MVReadResultDone:
-				valid = vr.Source == MapRead && checkVersion(vr.Version, rr.Version())
+				if vr.Source != MapRead {
+					valid = VerionInvalid
+				} else {
+					valid = checkVersion(vr.Version, rr.Version())
+				}
 			case MVReadResultDependency:
-				valid = false
+				valid = VerionInvalid
 			case MVReadResultNone:
-				valid = vr.Source == StorageRead && checkVersion(vr.Version, rr.Version())
+				if vr.Source != StorageRead {
+					valid = VerionInvalid
+				} else {
+					valid = checkVersion(vr.Version, vr.Version)
+				}
 			default:
 				panic(fmt.Errorf("should not happen - undefined vm read status: %v", rr.Status()))
 			}
@@ -339,10 +368,10 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 					default:
 						return "unknown"
 					}
-				}(), vr.Version, rr.depIdx, rr.incarnation, valid)
+				}(), vr.Source, vr.Version, rr.depIdx, rr.incarnation, valid)
 			}
 
-			return valid
+			return valid == VersionValid
 		})
 	}
 

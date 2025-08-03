@@ -81,6 +81,7 @@ var (
 	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
 	TraceLogs            = EnvBool("TRACE_LOGS", false)
 	TraceGas             = EnvBool("TRACE_GAS", false)
+	TraceDyanmicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
 	TraceApply           = EnvBool("TRACE_APPLY", false)
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes       = EnvInts("TRACE_TRANSACTIONS", ",", nil)

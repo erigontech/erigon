@@ -606,11 +606,12 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 					return nil, err
 				}
 
-				if txTrace {
-					fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txIncarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
+				if coinbase != nil {
+					if txTrace {
+						fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txIncarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
+					}
+					execResult.CoinbaseInitBalance = coinbase.Balance
 				}
-
-				execResult.CoinbaseInitBalance = coinbase.Balance
 
 				message, err := task.TxMessage()
 				if err != nil {
@@ -1281,12 +1282,31 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		valid := be.skipCheck[tx] ||
-			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
-				func(readVersion, writtenVersion state.Version) bool {
-					return readVersion == writtenVersion &&
-						writtenVersion.TxIndex < be.validateTasks.maxComplete()
-				})
+		validity := state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
+			func(readVersion, writtenVersion state.Version) state.VersionValidity {
+				vv := state.VersionValid
+
+				if readVersion != writtenVersion {
+					vv = state.VerionInvalid
+				} else if writtenVersion.TxIndex == -1 && txVersion.TxIndex > be.validateTasks.maxComplete() {
+					vv = state.VerionTooEarly
+				}
+				if vv != state.VersionValid {
+					fmt.Println(be.blockNum, fmt.Sprintf("(%d.%d)", txVersion.TxIndex, txVersion.Incarnation), "ValidateVersion Failed",
+						vv, readVersion, writtenVersion, be.validateTasks.maxComplete())
+					be.versionMap.SetTrace(true)
+				}
+				return vv
+			})
+
+		be.versionMap.SetTrace(false)
+
+		if validity == state.VerionTooEarly {
+			cntInvalid++
+			continue
+		}
+
+		valid := be.skipCheck[tx] || validity == state.VersionValid
 
 		be.versionMap.SetTrace(trace)
 		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
@@ -1499,11 +1519,14 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
-					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
-						func(_, writtenVersion state.Version) bool {
-							return writtenVersion.TxIndex < maxValidated &&
-								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
-						})) {
+					state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
+						func(_, writtenVersion state.Version) state.VersionValidity {
+							if writtenVersion.TxIndex < maxValidated &&
+								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1] {
+								return state.VersionValid
+							}
+							return state.VerionInvalid
+						}) != state.VersionValid) {
 				be.execTasks.pushPending(nextTx)
 				continue
 			}

@@ -279,6 +279,8 @@ type storageItem struct {
 	value uint256.Int
 }
 
+var deleted accounts.Account
+
 type bufferedAccount struct {
 	originalIncarnation uint64
 	data                *accounts.Account
@@ -452,7 +454,7 @@ func (w *BufferedWriter) UpdateAccountData(address common.Address, original, acc
 
 	w.rs.accountsMutex.Lock()
 	obj, ok := w.rs.accounts[address]
-	if !ok {
+	if !ok || obj.data == &deleted {
 		obj = &bufferedAccount{}
 	}
 	obj.originalIncarnation = original.Incarnation
@@ -479,7 +481,7 @@ func (w *BufferedWriter) UpdateAccountCode(address common.Address, incarnation u
 
 	w.rs.accountsMutex.Lock()
 	obj, ok := w.rs.accounts[address]
-	if !ok {
+	if !ok || obj.data == &deleted {
 		obj = &bufferedAccount{}
 		w.rs.accounts[address] = obj
 	}
@@ -505,7 +507,14 @@ func (w *BufferedWriter) DeleteAccount(address common.Address, original *account
 	}
 
 	w.rs.accountsMutex.Lock()
-	delete(w.rs.accounts, address)
+	obj, ok := w.rs.accounts[address]
+	if !ok {
+		obj = &bufferedAccount{
+			data: &deleted,
+		}
+		w.rs.accounts[address] = obj
+	}
+	*obj = bufferedAccount{data: &deleted}
 	w.rs.accountsMutex.Unlock()
 	return nil
 }
@@ -540,7 +549,7 @@ func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation
 
 	w.rs.accountsMutex.Lock()
 	obj, ok := w.rs.accounts[address]
-	if !ok {
+	if !ok || obj.data == &deleted {
 		obj = &bufferedAccount{}
 		w.rs.accounts[address] = obj
 	}
@@ -691,7 +700,7 @@ type ReaderV3 struct {
 
 func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
-		//trace:     true,
+		//trace:  true,
 		getter: getter,
 	}
 }
@@ -728,6 +737,9 @@ func (r *ReaderV3) readAccountData(address common.Address) ([]byte, *accounts.Ac
 		return nil, nil, err
 	}
 	if r.trace {
+		if fmt.Sprintf("%x", address) == "b537ceaea048f8f1ac9f071ac628c5a3b2204403" {
+			fmt.Println("b537ceaea048f8f1ac9f071ac628c5a3b2204403")
+		}
 		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
 	}
 	return enc, &acc, nil
@@ -811,6 +823,12 @@ func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Acco
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if data != nil {
+		if data == &deleted {
+			if r.reader.trace {
+				fmt.Printf("ReadAccountData [%x] => [empty]\n", address)
+			}
+			return nil, nil
+		}
 		if r.reader.trace {
 			fmt.Printf("ReadAccountData (buf) [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, data.Nonce, &data.Balance, data.CodeHash, r.reader.txNum)
 		}
@@ -832,6 +850,9 @@ func (r *bufferedReader) ReadAccountDataForDebug(address common.Address) (*accou
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if data != nil {
+		if data == &deleted {
+			return nil, nil
+		}
 		result := *data
 		return &result, nil
 	}
@@ -843,12 +864,19 @@ func (r *bufferedReader) ReadAccountStorage(address common.Address, key common.H
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
 
-	if ok && so.storage != nil {
-		item, ok := so.storage.Get(storageItem{key: key})
-
-		if ok {
+	if ok {
+		if so.data == &deleted {
 			r.bufferedState.accountsMutex.RUnlock()
-			return item.value, true, nil
+			return uint256.Int{}, false, nil
+		}
+
+		if so.storage != nil {
+			item, ok := so.storage.Get(storageItem{key: key})
+
+			if ok {
+				r.bufferedState.accountsMutex.RUnlock()
+				return item.value, true, nil
+			}
 		}
 	}
 
@@ -861,11 +889,18 @@ func (r *bufferedReader) HasStorage(address common.Address) (bool, error) {
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
 
-	if ok && so.storage != nil && so.storage.Len() > 0 {
-		// TODO - we really need to return the first key
-		// for this we need to order the list of hashes
-		r.bufferedState.accountsMutex.RUnlock()
-		return true, nil
+	if ok {
+		if so.data == &deleted {
+			r.bufferedState.accountsMutex.RUnlock()
+			return false, nil
+		}
+
+		if so.storage != nil && so.storage.Len() > 0 {
+			// TODO - we really need to return the first key
+			// for this we need to order the list of hashes
+			r.bufferedState.accountsMutex.RUnlock()
+			return true, nil
+		}
 	}
 	r.bufferedState.accountsMutex.RUnlock()
 	return r.reader.HasStorage(address)
@@ -875,8 +910,15 @@ func (r *bufferedReader) ReadAccountCode(address common.Address) ([]byte, error)
 	var code []byte
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
-	if ok && len(so.code) != 0 {
-		code = so.code
+	if ok {
+		if so.data == &deleted {
+			r.bufferedState.accountsMutex.RUnlock()
+			return nil, nil
+		}
+
+		if len(so.code) != 0 {
+			code = so.code
+		}
 	}
 	r.bufferedState.accountsMutex.RUnlock()
 
@@ -891,9 +933,17 @@ func (r *bufferedReader) ReadAccountCodeSize(address common.Address) (int, error
 	var code []byte
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
-	if ok && len(so.code) != 0 {
-		code = so.code
+	if ok {
+		if so.data == &deleted {
+			r.bufferedState.accountsMutex.RUnlock()
+			return 0, nil
+		}
+
+		if len(so.code) != 0 {
+			code = so.code
+		}
 	}
+
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if len(code) != 0 {
