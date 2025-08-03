@@ -418,6 +418,8 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 		return nil
 	}
 
+	fmt.Println("TryScheduleRecover", "slot", slot, "blockRoot", blockRoot)
+
 	// schedule
 	added, err := d.queue.Add(&recoveryRequest{
 		slot:      slot,
@@ -488,15 +490,10 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 		}
 		ids, _ := d.columnStorage.GetSavedColumnIndex(ctx, block.Block.Slot, root) // ensure the column index is loaded
 
-		if d.IsColumnOverHalf(block.Block.Slot, root) {
+		if d.IsColumnOverHalf(block.Block.Slot, root) || d.IsBlobAlreadyRecovered(root) {
 			if err := d.TryScheduleRecover(block.Block.Slot, root); err != nil {
 				log.Warn("failed to schedule recover", "err", err, "slot", block.Block.Slot, "blockRoot", root)
 			}
-			fmt.Println("DownloadColumnsAndRecoverBlobs over half", "slot", block.Block.Slot, "blockRoot", root, "columns", len(ids))
-			continue
-		}
-		if d.IsBlobAlreadyRecovered(root) {
-			fmt.Println("DownloadColumnsAndRecoverBlobs rec", "slot", block.Block.Slot, "blockRoot", root, "columns", len(ids))
 			continue
 		}
 
