@@ -261,7 +261,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				continue
 			}
 			blockHash = header.Hash()
-			exec.ChangeBlock(header)
+			exec.ChangeBlock(ctx, header)
 			timestamp = header.Time
 			blockCount++
 
