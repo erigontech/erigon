@@ -28,11 +28,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
-	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
@@ -57,12 +57,12 @@ type StageHistoryReconstructionCfg struct {
 	backfillingThrottling    time.Duration
 	blockReader              freezeblocks.BeaconSnapshotReader
 	blobStorage              blob_storage.BlobStorage
-	peerdas                  das.PeerDas
+	forkchoiceStore          forkchoice.ForkChoiceStorage
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, peerdas das.PeerDas) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, forkchoiceStore forkchoice.ForkChoiceStorage) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		beaconCfg:                beaconCfg,
 		downloader:               downloader,
@@ -80,7 +80,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 		executionBlocksCollector: executionBlocksCollector,
 		blockReader:              blockReader,
 		blobStorage:              blobStorage,
-		peerdas:                  peerdas,
+		forkchoiceStore:          forkchoiceStore,
 	}
 }
 
@@ -356,6 +356,10 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if currentSlot <= cfg.sn.FrozenBlobs() {
 			break
 		}
+		if !cfg.forkchoiceStore.Synced() {
+			time.Sleep(5 * time.Second)
+			continue
+		}
 
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
 		visited := uint64(0)
@@ -455,7 +459,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 		if len(fuluBlocks) > 0 {
-			if err := cfg.peerdas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
+			if err := cfg.forkchoiceStore.GetPeerDas().DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
 				cfg.logger.Warn("Error downloading columns and recovering blobs", "err", err)
 			}
 			for _, block := range fuluBlocks {
@@ -463,7 +467,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 				if err != nil {
 					return fmt.Errorf("error hashing block: %w", err)
 				}
-				if err := cfg.peerdas.TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
+				if err := cfg.forkchoiceStore.GetPeerDas().TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
 					return fmt.Errorf("error scheduling recovery for block %s: %w", blockRoot, err)
 				}
 			}
