@@ -472,7 +472,6 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 			}
 		}
-		time.Sleep(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
 	}
 	if shouldLog {
 		logger.Info("[Blobs-Downloader] Blob history download finished successfully")
