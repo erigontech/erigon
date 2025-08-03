@@ -24,7 +24,7 @@ const (
 
 type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
-	RemoveColumnSidecar(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) error
+	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error
 	RemoveAllColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
 	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
 	ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error)
@@ -134,14 +134,20 @@ func (s *dataColumnStorageImpl) RemoveAllColumnSidecars(ctx context.Context, slo
 	return nil
 }
 
-func (s *dataColumnStorageImpl) RemoveColumnSidecar(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) error {
+func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
 	mutex := s.acquireMutexBySlot(slot)
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
-	if err := s.fs.Remove(filepath); err != nil {
-		return err
+	for _, index := range columnIndices {
+		_, filepath := dataColumnFilePath(slot, blockRoot, uint64(index))
+		if err := s.fs.Remove(filepath); err != nil {
+			if os.IsNotExist(err) {
+				continue // file does not exist, nothing to remove
+			}
+			return fmt.Errorf("failed to remove column sidecar: %v", err)
+		}
+		log.Trace("removed data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", index)
 	}
 	return nil
 }
