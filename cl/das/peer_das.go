@@ -481,6 +481,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 			block.Block.Body.BlobKzgCommitments.Len() == 0 {
 			continue
 		}
+		ids, _ := d.columnStorage.GetSavedColumnIndex(ctx, block.Block.Slot, root) // ensure the column index is loaded
 		root, err := block.Block.HashSSZ()
 		if err != nil {
 			log.Warn("failed to get block root", "err", err)
@@ -490,13 +491,15 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 			if err := d.TryScheduleRecover(block.Block.Slot, root); err != nil {
 				log.Warn("failed to schedule recover", "err", err, "slot", block.Block.Slot, "blockRoot", root)
 			}
+			fmt.Println("DownloadColumnsAndRecoverBlobs over half", "slot", block.Block.Slot, "blockRoot", root, "columns", len(ids))
 			continue
 		}
 		if d.IsBlobAlreadyRecovered(root) {
+			fmt.Println("DownloadColumnsAndRecoverBlobs rec", "slot", block.Block.Slot, "blockRoot", root, "columns", len(ids))
 			continue
 		}
-		ids, _ := d.columnStorage.GetSavedColumnIndex(ctx, block.Block.Slot, root) // ensure the column index is loaded
-		fmt.Println("DownloadColumnsAndRecoverBlobs", "slot", block.Block.Slot, "blockRoot", root, "columns", ids)
+
+		fmt.Println("DownloadColumnsAndRecoverBlobs", "slot", block.Block.Slot, "blockRoot", root, "columns", len(ids))
 		blocksToProcess = append(blocksToProcess, block)
 	}
 
