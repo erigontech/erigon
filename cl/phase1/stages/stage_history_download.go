@@ -462,15 +462,15 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err := cfg.forkchoiceStore.GetPeerDas().DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
 				cfg.logger.Warn("Error downloading columns and recovering blobs", "err", err)
 			}
-			for _, block := range fuluBlocks {
-				blockRoot, err := block.Block.HashSSZ()
-				if err != nil {
-					return fmt.Errorf("error hashing block: %w", err)
-				}
-				if err := cfg.forkchoiceStore.GetPeerDas().TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
-					return fmt.Errorf("error scheduling recovery for block %s: %w", blockRoot, err)
-				}
-			}
+			// for _, block := range fuluBlocks {
+			// 	blockRoot, err := block.Block.HashSSZ()
+			// 	if err != nil {
+			// 		return fmt.Errorf("error hashing block: %w", err)
+			// 	}
+			// 	if err := cfg.forkchoiceStore.GetPeerDas().TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
+			// 		return fmt.Errorf("error scheduling recovery for block %s: %w", blockRoot, err)
+			// 	}
+			// }
 		}
 	}
 	if shouldLog {
