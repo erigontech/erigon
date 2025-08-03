@@ -1456,6 +1456,9 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	}
 	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
 		if cv, ok := dt.getFromFileCache.Get(hi); ok {
+			if dt.files[cv.lvl].startTxNum/dt.d.aggregationStep == dt.files[cv.lvl].endTxNum/dt.d.aggregationStep {
+				log.Warn("[dbg] getLatestFromFiles1: file with too close start/end tx nums", "startTxNum", dt.files[cv.lvl].startTxNum, "endTxNum", dt.files[cv.lvl].endTxNum, "file", dt.files[cv.lvl].src.decompressor.FileName())
+			}
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1500,6 +1503,9 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 
 		if dt.getFromFileCache != nil {
 			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
+		}
+		if dt.files[i].startTxNum/dt.d.aggregationStep == dt.files[i].endTxNum/dt.d.aggregationStep {
+			log.Warn("[dbg] getLatestFromFiles2: file with too close start/end tx nums", "startTxNum", dt.files[i].startTxNum, "endTxNum", dt.files[i].endTxNum, "file", dt.files[i].src.decompressor.FileName())
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
