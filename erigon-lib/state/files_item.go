@@ -328,6 +328,9 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 				newVisibleFiles[len(newVisibleFiles)-1].src = nil
 				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
 			}
+			if item.startTxNum == item.endTxNum {
+				log.Warn("[dbg] calc_visible_files: file with empty range", "file", item.decompressor.FileName())
+			}
 
 			// log.Warn("willBeVisible", "newVisibleFile", item.decompressor.FileName())
 			newVisibleFiles = append(newVisibleFiles, visibleFile{

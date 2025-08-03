@@ -306,6 +306,11 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 		}
 		dirtyFile.frozen = false
 
+		if dirtyFile.startTxNum <= dirtyFile.endTxNum {
+			log.Warn("[dbg] scanDirtyFiles: file with empty range", "startStep", startStep, "endStep", endStep)
+			continue
+		}
+
 		if _, has := d.dirtyFiles.Get(dirtyFile); !has {
 			d.dirtyFiles.Set(dirtyFile)
 		}
