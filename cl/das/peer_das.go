@@ -221,7 +221,7 @@ func (d *peerdas) Prune(keepSlotDistance uint64) error {
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 	recover := func(toRecover *recoveryRequest) {
 		begin := time.Now()
-		log.Trace("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
+		log.Info("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
 		ctx := context.Background()
 		slot, blockRoot := toRecover.slot, toRecover.blockRoot
 		existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
@@ -425,11 +425,12 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 		slot:      slot,
 		blockRoot: blockRoot,
 	})
+	fmt.Println(added, err)
 	if err != nil {
 		return err
 	}
 	if added {
-		log.Debug("[blobsRecover] scheduled recover", "slot", slot, "blockRoot", blockRoot)
+		log.Info("[blobsRecover] scheduled recover", "slot", slot, "blockRoot", blockRoot)
 	}
 	return nil
 }
