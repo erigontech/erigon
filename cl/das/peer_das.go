@@ -417,6 +417,9 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 		}
 
 		if d.IsColumnOverHalf(block.Block.Slot, root) || d.IsBlobAlreadyRecovered(root) {
+			if err := d.TryScheduleRecover(block.Block.Slot, root); err != nil {
+				log.Debug("failed to schedule recover", "err", err)
+			}
 			continue
 		}
 		blocksToProcess = append(blocksToProcess, block)
