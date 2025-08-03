@@ -451,7 +451,6 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 	type resultData struct {
 		sidecars  []*cltypes.DataColumnSidecar
 		pid       string
-		cgc       uint64
 		reqLength int
 		err       error
 	}
@@ -488,12 +487,11 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 						reqLength += id.Columns.Length()
 						return true
 					})
-					s, pid, cgc, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
+					s, pid, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
 					select {
 					case resultChan <- resultData{
 						sidecars:  s,
 						pid:       pid,
-						cgc:       cgc,
 						reqLength: reqLength,
 						err:       err,
 					}:
@@ -535,7 +533,7 @@ mainloop:
 			if len(result.sidecars) == 0 {
 				continue
 			}
-			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars), "cgc", result.cgc)
+			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
 			wg := sync.WaitGroup{}
 			for _, sidecar := range result.sidecars {
 				wg.Add(1)
