@@ -3,6 +3,7 @@ package das
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -494,6 +495,8 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 		if d.IsBlobAlreadyRecovered(root) {
 			continue
 		}
+		ids, _ := d.columnStorage.GetSavedColumnIndex(ctx, block.Block.Slot, root) // ensure the column index is loaded
+		fmt.Println("DownloadColumnsAndRecoverBlobs", "slot", block.Block.Slot, "blockRoot", root, "columns", ids)
 		blocksToProcess = append(blocksToProcess, block)
 	}
 
