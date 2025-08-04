@@ -178,7 +178,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 			}
 			if item.startTxNum > s.Min() {
 				if minc == 0 {
-					err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, s.Min(), g.FileName(), common.Shorten(k, 8))
+					err := fmt.Errorf("[integrity] .ef file has foreign txNum (example): %d > %d, %s, %x", item.startTxNum, s.Min(), g.FileName(), common.Shorten(k, 8))
 					if failFast {
 						return err
 					} else {
@@ -189,7 +189,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 			}
 			if item.endTxNum < s.Max() {
 				if maxc == 0 {
-					err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, s.Max(), g.FileName(), common.Shorten(k, 8))
+					err := fmt.Errorf("[integrity] .ef file has foreign txNum (example): %d < %d, %s, %x", item.endTxNum, s.Max(), g.FileName(), common.Shorten(k, 8))
 					if failFast {
 						return err
 					} else {
@@ -211,7 +211,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 			}
 		}
 		if minc > 0 || maxc > 0 {
-			log.Warn("[integrity] foreign txNum", "min cases", minc, "max cases", maxc)
+			log.Warn("[integrity] foreign txNum", "file", g.FileName(), "min cases", minc, "max cases", maxc)
 		}
 		return nil
 	}
