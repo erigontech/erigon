@@ -212,7 +212,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 			}
 		}
 		if minc > 0 || maxc > 0 {
-			log.Warn("[integrity] foreign txNum", "file", g.FileName(), "min cases", minc, "max cases", maxc)
+			log.Warn("[integrity] foreign txNum", "file", g.FileName(), "min foreign txNum cases", minc, "max foreign txNum cases", maxc)
 		}
 		return nil
 	}
