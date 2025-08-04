@@ -3,8 +3,8 @@ name: All tests
 on:
   push:
    branches:
-        - release/*
-        - main
+      - release/*
+      - main
   workflow_dispatch:
 
 jobs:
