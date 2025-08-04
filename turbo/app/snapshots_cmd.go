@@ -1853,11 +1853,13 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err != nil {
 		return err
 	}
+	defer tdb.Close()
 
 	rotx, err := tdb.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
+	defer rotx.Rollback()
 
 	v, ok, err := rotx.HistorySeek(kv.AccountsDomain, hexutil.FromHex("0x0000000000000000000000000000000000000000"), 2950113689)
 	if err != nil {
