@@ -1265,8 +1265,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txIncarnation := be.txIncarnations[tx]
 		tracePrefix := ""
 
-		fmt.Println("Validate", be.blockNum, tx, toValidate)
-
 		var trace bool
 		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation)
@@ -1289,10 +1287,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				} else if writtenVersion.TxIndex == -1 && tx-1 > be.validateTasks.maxComplete() {
 					vv = state.VerionTooEarly
 				}
-				if vv != state.VersionValid {
-					fmt.Println(be.blockNum, fmt.Sprintf("(%d.%d)", txVersion.TxIndex, txVersion.Incarnation), "ValidateVersion Failed",
-						vv, readVersion, writtenVersion, tx-1, be.validateTasks.maxComplete())
-				}
+
 				return vv
 			})
 
@@ -1310,7 +1305,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if valid {
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
-				fmt.Println(tx, "Valid", be.validateTasks.maxComplete())
 				var prevReceipt *types.Receipt
 				if txVersion.TxIndex > 0 && tx > 0 {
 					prevReceipt = be.results[tx-1].Receipt
@@ -1350,7 +1344,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		} else {
 			cntInvalid++
-			fmt.Println(tx, "Invalid", be.validateTasks.maxComplete())
 			be.cntValidationFail++
 			be.execFailed[tx]++
 
