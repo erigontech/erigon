@@ -158,40 +158,45 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 				err = fmt.Errorf("panic in file: %s. Stack: %s", fileName, dbg.Stack())
 			}
 		}()
-		item.src.decompressor.MadvSequential()
-		defer item.src.decompressor.DisableReadAhead()
+		defer item.src.decompressor.MadvSequential().DisableReadAhead()
 
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)
 
-		i := 0
+		i, minc, maxc := 0, 0, 0
 		var s multiencseq.SequenceReader
+		var k, encodedSeq []byte
 
 		for g.HasNext() {
-			k, _ := g.NextUncompressed()
-			_ = k
+			k, _ := g.Next(k[:0])
 
-			encodedSeq, _ := g.NextUncompressed()
+			encodedSeq, _ := g.Next(encodedSeq[:0])
 			s.Reset(item.startTxNum, encodedSeq)
 
 			if s.Count() == 0 {
 				continue
 			}
 			if item.startTxNum > s.Min() {
-				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, s.Min(), g.FileName(), common.Shorten(k, 8))
-				if failFast {
-					return err
-				} else {
-					log.Warn(err.Error())
+				if minc == 0 {
+					err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, s.Min(), g.FileName(), common.Shorten(k, 8))
+					if failFast {
+						return err
+					} else {
+						log.Warn(err.Error())
+					}
 				}
+				minc++
 			}
 			if item.endTxNum < s.Max() {
-				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, s.Max(), g.FileName(), common.Shorten(k, 8))
-				if failFast {
-					return err
-				} else {
-					log.Warn(err.Error())
+				if maxc == 0 {
+					err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, s.Max(), g.FileName(), common.Shorten(k, 8))
+					if failFast {
+						return err
+					} else {
+						log.Warn(err.Error())
+					}
 				}
+				maxc++
 			}
 			i++
 
@@ -204,6 +209,9 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 				default:
 				}
 			}
+		}
+		if minc > 0 || maxc > 0 {
+			log.Warn("[integrity] foreign txNum", "min cases", minc, "max cases", maxc)
 		}
 		return nil
 	}
