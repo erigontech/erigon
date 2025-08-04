@@ -234,3 +234,15 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 
 	return nil
 }
+
+func (iit *InvertedIndexRoTx) RepairInvertedindex(ctx context.Context, file string) error {
+	file = filepath.Clean(file)
+	for _, vf := range iit.files {
+		if filepath.Clean(vf.src.decompressor.FileName()) != file {
+			continue
+		}
+
+	}
+
+	return fmt.Errorf("%s not found in iirotx", file)
+}

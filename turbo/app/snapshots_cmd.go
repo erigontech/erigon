@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
@@ -226,6 +227,17 @@ var snapshotCommand = cli.Command{
 			Name:   "decompress-speed",
 			Action: doDecompressSpeed,
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
+			Name: "inspect-history",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				return doInspectHistory(cliCtx, dirs)
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&SnapshotFileFlag,
+			}),
 		},
 		{
 			Name:   "bt-search",
@@ -1782,12 +1794,49 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 
-func repairInvertedIndex(cliCtx *cli.Context) error {
+func doRepairInvertedIndex(cliCtx *cli.Context) error {
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
 	defer logger.Info("Done")
+
+	return nil
+}
+
+func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+
+	sourcefile := cliCtx.String(SnapshotFileFlag.Name)
+	sourcefile = filepath.Join(dirs.Snap, sourcefile)
+
+	exists, err := dir2.FileExist(sourcefile)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("file %s does not exist", sourcefile)
+	}
+
+	decomp, err := seg.NewDecompressor(sourcefile)
+	if err != nil {
+		return err
+	}
+	defer decomp.Close()
+	g := decomp.MakeGetter()
+
+	var buf []byte
+
+	for g.HasNext() {
+		buf, _ = g.Next(buf[:0])
+		buf2 := bytes.Clone(buf)
+
+		fmt.Println(hexutil.Encode(buf2))
+	}
 
 	return nil
 
