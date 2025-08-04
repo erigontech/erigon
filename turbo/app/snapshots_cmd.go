@@ -1831,11 +1831,16 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	var buf []byte
 
+	i := 0
 	for g.HasNext() {
 		buf, _ = g.Next(buf[:0])
 		buf2 := bytes.Clone(buf)
 
 		fmt.Println(hexutil.Encode(buf2))
+		i++
+		if i > 100 {
+			break
+		}
 	}
 
 	return nil
