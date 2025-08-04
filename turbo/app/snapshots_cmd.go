@@ -1861,7 +1861,7 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer rotx.Rollback()
 
-	v, ok, err := rotx.HistorySeek(kv.AccountsDomain, hexutil.FromHex("0x0000000000000000000000000000000000000000"), 2950113689)
+	v, ok, err := rotx.HistorySeek(kv.AccountsDomain, hexutil.FromHex("0x0000000000000000000000000000000000000000"), 2963611881)
 	if err != nil {
 		return err
 	}
