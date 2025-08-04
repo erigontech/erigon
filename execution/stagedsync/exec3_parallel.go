@@ -1292,12 +1292,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if vv != state.VersionValid {
 					fmt.Println(be.blockNum, fmt.Sprintf("(%d.%d)", txVersion.TxIndex, txVersion.Incarnation), "ValidateVersion Failed",
 						vv, readVersion, writtenVersion, tx-1, be.validateTasks.maxComplete())
-					be.versionMap.SetTrace(true)
 				}
 				return vv
 			})
-
-		be.versionMap.SetTrace(false)
 
 		if validity == state.VerionTooEarly {
 			cntInvalid++
@@ -1313,7 +1310,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if valid {
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
-
+				fmt.Println(tx, "Valid", be.validateTasks.maxComplete())
 				var prevReceipt *types.Receipt
 				if txVersion.TxIndex > 0 && tx > 0 {
 					prevReceipt = be.results[tx-1].Receipt
@@ -1506,8 +1503,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	for be.execTasks.minPending() >= 0 {
 		toExecute = append(toExecute, be.execTasks.takeNextPending())
 	}
-
-	fmt.Println("Execute", be.blockNum, toExecute)
 
 	maxValidated := be.validateTasks.maxComplete()
 	for i := 0; i < len(toExecute); i++ {
