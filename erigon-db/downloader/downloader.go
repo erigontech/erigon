@@ -257,7 +257,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	// config field doesn't do anything yet in Go 1.24 (and 1.25rc1). Disabling HTTP2 is another way
 	// to achieve this.
 	requestTransport := &http.Transport{
-		ReadBufferSize: 256 << 10,
+		ReadBufferSize: 2 << 20,
 		// Note this does nothing in go1.24.
 		//HTTP2: &http.HTTP2Config{
 		//	MaxConcurrentStreams: 1,
@@ -286,7 +286,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		h2t, err := http2.ConfigureTransports(requestTransport)
 		panicif.Err(err)
 		h2t.ReadIdleTimeout = 15 * time.Second
-		h2t.MaxReadFrameSize = 256 << 10 // 256 KiB, same as ReadBufferSize
+		h2t.MaxReadFrameSize = 2 << 20 // Same as ReadBufferSize?
 	} else {
 		// Disable h2 being added automatically.
 		g.MakeMap(&requestTransport.TLSNextProto)
