@@ -1934,8 +1934,8 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	i := 0
 	var hv []byte
 	iiReader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetIINewReader(decomp)
-	//hreader, _ := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
-	hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
+	hreader, _ := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
+	//hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
 	seq := &multiencseq.SequenceReader{}
 	for iiReader.HasNext() {
 		k, offset := iiReader.Next(nil)
