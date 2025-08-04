@@ -587,12 +587,6 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	if cfg.syncCfg.LoopBlockLimit > 0 && blockNum+uint64(cfg.syncCfg.LoopBlockLimit) < maxBlockNum {
-		log.Info(fmt.Sprintf("[%s] loop limit: max adjusted", execStage.LogPrefix()),
-			"from", blockNum, "limit", cfg.syncCfg.LoopBlockLimit, "expected", maxBlockNum, "adjusted", blockNum+uint64(cfg.syncCfg.LoopBlockLimit))
-		maxBlockNum = blockNum + uint64(cfg.syncCfg.LoopBlockLimit)
-	}
-
 	outputTxNum.Store(doms.TxNum())
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
@@ -706,11 +700,6 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	if maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", outputTxNum.Load(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
-	}
-
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	var uncommittedGas int64
@@ -726,6 +715,9 @@ func ExecV3(ctx context.Context,
 		readAhead, clean = exec3.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
 	}
+
+	startBlockNum := blockNum
+	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
 	if !parallel {
 		err = func() error {
@@ -885,9 +877,10 @@ func ExecV3(ctx context.Context,
 					//	}
 					//}
 
-					needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold || havePartialBlock
+					isBatchFull := executor.readState().SizeEstimate() >= commitThreshold
+					canPrune := state2.AggTx(applyTx).CanPrune(applyTx, outputTxNum.Load())
+					needCalcRoot := isBatchFull || havePartialBlock || canPrune
 					// If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
-					//TEMP aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 
 					// this will only happen for the first executed block
 					havePartialBlock = false
@@ -945,7 +938,13 @@ func ExecV3(ctx context.Context,
 
 					// on chain-tip: if batch is full then stop execution - to allow stages commit
 					if !initialCycle {
-						return nil
+						if isBatchFull {
+							return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
+						}
+
+						if canPrune {
+							return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
+						}
 					}
 
 					if !useExternalTx {
@@ -963,6 +962,10 @@ func ExecV3(ctx context.Context,
 				case <-ctx.Done():
 					return ctx.Err()
 				default:
+				}
+
+				if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
+					return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 				}
 			}
 
@@ -985,6 +988,10 @@ func ExecV3(ctx context.Context,
 		}
 
 		applyResults := make(chan applyResult, 100_000)
+
+		if blockLimit > 0 && blockNum+uint64(blockLimit) < maxBlockNum {
+			maxBlockNum = blockNum + blockLimit
+		}
 
 		if err := executor.executeBlocks(executorContext, asyncTx, blockNum, maxBlockNum, readAhead, applyResults); err != nil {
 			return err
@@ -1134,8 +1141,17 @@ func ExecV3(ctx context.Context,
 						blockApplyCount = 0
 
 						if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
-							//return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
-							panic(fmt.Sprintf("stopping: block %d complete", applyResult.BlockNum))
+							return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
+						}
+
+						if blockLimit > 0 && applyResult.BlockNum-startBlockNum+1 >= blockLimit {
+							return &ErrLoopExhausted{From: startBlockNum, To: applyResult.BlockNum, Reason: "block limit reached"}
+						}
+
+						if !initialCycle {
+							if state2.AggTx(applyTx).CanPrune(applyTx, outputTxNum.Load()) {
+								return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
+							}
 						}
 
 						if maxBlockNum == applyResult.BlockNum {
@@ -1159,10 +1175,15 @@ func ExecV3(ctx context.Context,
 					}
 				case <-flushEvery.C:
 					if flushPending {
-						flushPending = false
 						if applyTx, err = pe.flushAndCommit(ctx, execStage, applyTx, asyncTxChan, useExternalTx); err != nil {
 							return fmt.Errorf("flush failed: %w", err)
 						}
+
+						if !initialCycle {
+							return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
+						}
+
+						flushPending = false
 					}
 				}
 			}
@@ -1222,12 +1243,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
-
-	if errExhausted != nil && blockNum < maxBlockNum {
-		// special err allows the loop to continue, caller will call us again to continue from where we left off
-		// only return it if we haven't reached the maxBlockNum
-		return errExhausted
-	}
 
 	return nil
 }
