@@ -312,7 +312,7 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 	}
 	if renamed > 0 || removed > 0 {
 		log.Warn("Your snapshots are compatible but old. We recommend you (for better experience) " +
-			"upgrade them with snapshot-reset tool `./build/bin/erigon snapshot reset --datadir /your`, after this command: next Erigon start - will download latest files (but re-use unchanged files) - likely will take many hours")
+			"upgrade them with snapshot-reset tool `./build/bin/erigon snapshots reset --datadir /your`, after this command: next Erigon start - will download latest files (but re-use unchanged files) - likely will take many hours")
 	}
 	if d.Downloader != "" && (renamed > 0 || removed > 0) {
 		if err := dir.RemoveAll(d.Downloader); err != nil {
