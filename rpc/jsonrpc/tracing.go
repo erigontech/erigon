@@ -109,8 +109,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	if *config.BorTraceEnabled {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 
-		var ok bool
-		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 
 		if err != nil {
 			return err

@@ -359,9 +359,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	if chainConfig.Bor != nil {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 
-		var ok bool
-		var err error
-		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		if err != nil {
 			return nil, err
 		}
@@ -403,9 +401,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	if chainConfig.Bor != nil {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 
-		var ok bool
-		var err error
-		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		if err != nil {
 			return nil, err
 		}
