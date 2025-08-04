@@ -80,8 +80,9 @@ type ConsensusHandlers struct {
 
 const (
 	SuccessfulResponsePrefix  = 0x00
-	RateLimitedPrefix         = 0x01
-	ResourceUnavailablePrefix = 0x02
+	InvalidRequestPrefix      = 0x01
+	ServerErrorPrefix         = 0x02
+	ResourceUnavailablePrefix = 0x03
 )
 
 func NewConsensusHandlers(
@@ -122,7 +123,7 @@ func NewConsensusHandlers(
 		communication.PingProtocolV1:                        c.pingHandler,
 		communication.GoodbyeProtocolV1:                     c.goodbyeHandler,
 		communication.StatusProtocolV1:                      c.statusHandler,
-		communication.StatusProtocolV2:                      c.statusHandler,
+		communication.StatusProtocolV2:                      c.statusV2Handler,
 		communication.MetadataProtocolV1:                    c.metadataV1Handler,
 		communication.MetadataProtocolV2:                    c.metadataV2Handler,
 		communication.MetadataProtocolV3:                    c.metadataV3Handler,

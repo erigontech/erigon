@@ -37,32 +37,32 @@ func InitSchemas() {
 	Schema.CommitmentDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
 	Schema.CommitmentDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
-	Schema.ReceiptDomain.version.DataKV = version.V2_0_standart2
-	Schema.ReceiptDomain.version.AccessorBT = version.V1_0_standart
-	Schema.ReceiptDomain.version.AccessorKVEI = version.V1_0_standart
-	Schema.ReceiptDomain.hist.version.DataV = version.V2_0_standart2
-	Schema.ReceiptDomain.hist.version.AccessorVI = version.V1_0_standart
-	Schema.ReceiptDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
-	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
+	Schema.ReceiptDomain.version.DataKV = version.V2_1_standart
+	Schema.ReceiptDomain.version.AccessorBT = version.V1_2_standart
+	Schema.ReceiptDomain.version.AccessorKVEI = version.V1_2_standart
+	Schema.ReceiptDomain.hist.version.DataV = version.V2_1_standart
+	Schema.ReceiptDomain.hist.version.AccessorVI = version.V1_2_standart
+	Schema.ReceiptDomain.hist.iiCfg.version.DataEF = version.V2_1_standart
+	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = version.V2_1_standart
 
-	Schema.RCacheDomain.version.DataKV = version.V2_0_standart2
+	Schema.RCacheDomain.version.DataKV = version.V2_0_standart
 	Schema.RCacheDomain.version.AccessorKVI = version.V2_0_standart
-	Schema.RCacheDomain.hist.version.DataV = version.V2_0_standart2
+	Schema.RCacheDomain.hist.version.DataV = version.V2_0_standart
 	Schema.RCacheDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.RCacheDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
 	Schema.RCacheDomain.hist.iiCfg.version.AccessorEFI = version.V2_0_standart
 
-	Schema.LogAddrIdx.version.DataEF = version.V2_0_standart
-	Schema.LogAddrIdx.version.AccessorEFI = version.V2_0_standart
+	Schema.LogAddrIdx.version.DataEF = version.V2_1_standart
+	Schema.LogAddrIdx.version.AccessorEFI = version.V2_1_standart
 
-	Schema.LogTopicIdx.version.DataEF = version.V2_0_standart
-	Schema.LogTopicIdx.version.AccessorEFI = version.V2_0_standart
+	Schema.LogTopicIdx.version.DataEF = version.V2_1_standart
+	Schema.LogTopicIdx.version.AccessorEFI = version.V2_1_standart
 
-	Schema.TracesFromIdx.version.DataEF = version.V2_0_standart
-	Schema.TracesFromIdx.version.AccessorEFI = version.V2_0_standart
+	Schema.TracesFromIdx.version.DataEF = version.V2_1_standart
+	Schema.TracesFromIdx.version.AccessorEFI = version.V2_1_standart
 
-	Schema.TracesToIdx.version.DataEF = version.V2_0_standart
-	Schema.TracesToIdx.version.AccessorEFI = version.V2_0_standart
+	Schema.TracesToIdx.version.DataEF = version.V2_1_standart
+	Schema.TracesToIdx.version.AccessorEFI = version.V2_1_standart
 
 	SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{
 		"accounts": {

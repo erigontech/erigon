@@ -21,7 +21,6 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -51,7 +50,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/version"
 )
 
 type InvertedIndex struct {
@@ -302,94 +300,6 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 			return ii.buildEfAccessor(ctx, item, ps)
 		})
 	}
-}
-
-func (ii *InvertedIndex) openDirtyFiles() error {
-	var invalidFileItems []*FilesItem
-	invalidFileItemsLock := sync.Mutex{}
-	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			item := item
-			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			if item.decompressor == nil {
-				fPathPattern := ii.efFilePathMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
-				if err != nil {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
-					invalidFileItemsLock.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFileItemsLock.Unlock()
-					continue
-				}
-
-				if !ok {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
-					invalidFileItemsLock.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFileItemsLock.Unlock()
-					continue
-				}
-
-				if !fileVer.Eq(ii.version.DataEF.Current) {
-					if !fileVer.Less(ii.version.DataEF.MinSupported) {
-						ii.version.DataEF.Current = fileVer
-					} else {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, ii.version.DataEF)
-					}
-				}
-
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
-					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
-					} else {
-						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
-					}
-					invalidFileItemsLock.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFileItemsLock.Unlock()
-					// don't interrupt on error. other files may be good. but skip indices open.
-					continue
-				}
-			}
-
-			if item.index == nil {
-				fPathPattern := ii.efAccessorFilePathMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
-				if err != nil {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
-					// don't interrupt on error. other files may be good
-				}
-				if ok {
-					if !fileVer.Eq(ii.version.AccessorEFI.Current) {
-						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
-							ii.version.AccessorEFI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, ii.version.AccessorEFI)
-						}
-					}
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
-						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files may be good
-					}
-				}
-			}
-		}
-
-		return true
-	})
-	for _, item := range invalidFileItems {
-		item.closeFiles()
-		ii.dirtyFiles.Delete(item)
-	}
-
-	return nil
 }
 
 func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
@@ -1057,9 +967,14 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 			ii1.hasNextInDb = false
 		}
 		g := iit.dataReader(item.src.decompressor)
-		if g.HasNext() {
-			key, _ := g.Next(nil)
-			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key})
+		g.Reset(0)
+		wrapper := NewSegReaderWrapper(g)
+		if wrapper.HasNext() {
+			key, val, err := wrapper.Next()
+			if err != nil {
+				return ii1
+			}
+			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: wrapper, key: key, val: val, txNum: ^item.endTxNum})
 			ii1.hasNextInFiles = true
 		}
 	}

@@ -2237,7 +2237,7 @@ func TestDomain_Unwind(t *testing.T) {
 			ut, err := uc.ht.HistoryRange(int(unwindTo)-1, -1, order.Asc, -1, utx)
 			require.NoError(t, err)
 
-			compareIteratorsS(t, et, ut)
+			compareIterators(t, et, ut)
 		})
 	}
 
@@ -2280,21 +2280,6 @@ func compareIterators(t *testing.T, et, ut stream.KV) {
 		require.Equal(t, err1, err2)
 		require.Equal(t, string(ek), string(uk))
 		require.Equal(t, string(ev), string(uv))
-		if !et.HasNext() {
-			require.False(t, ut.HasNext(), "unwindedIter has more keys than expectedIter got\n")
-			break
-		}
-	}
-}
-func compareIteratorsS(t *testing.T, et, ut stream.KVS) {
-	t.Helper()
-	for {
-		ek, ev, estep, err1 := et.Next()
-		uk, uv, ustep, err2 := ut.Next()
-		require.Equal(t, err1, err2)
-		require.Equal(t, ek, uk)
-		require.Equal(t, ev, uv)
-		require.Equal(t, estep, ustep)
 		if !et.HasNext() {
 			require.False(t, ut.HasNext(), "unwindedIter has more keys than expectedIter got\n")
 			break
@@ -2380,7 +2365,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 
 		for hit.HasNext() {
-			k, v, _, err := hit.Next()
+			k, v, err := hit.Next()
 			require.NoError(t, err)
 
 			require.Equal(t, pruningKey, k)

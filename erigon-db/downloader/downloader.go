@@ -249,7 +249,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	// to achieve this.
 	requestHandler := requestHandler{
 		Transport: http.Transport{
-			ReadBufferSize: 64 << 10,
+			ReadBufferSize: 256 << 10,
 			// Note this does nothing in go1.24.
 			//HTTP2: &http.HTTP2Config{
 			//	MaxConcurrentStreams: 1,
@@ -350,7 +350,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	// Does WalkDir do path or filepath?
-	return fs.WalkDir(
+	if err := fs.WalkDir(
 		os.DirFS(d.SnapDir()),
 		".",
 		func(path string, de fs.DirEntry, err error) error {
@@ -376,7 +376,12 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
 			}
 			return nil
 		},
-	)
+	); err != nil {
+		return err
+	}
+
+	d.afterAdd()
+	return nil
 }
 
 // This should only be called once...?
@@ -405,7 +410,7 @@ restart:
 		case <-time.After(time.Until(nextLog)):
 			d.messyLogWrapper()
 			nextLog = nextLog.Add(step)
-			step = min(step*2, time.Minute)
+			step = min(step*2, 30*time.Second)
 		case <-reset:
 			goto restart
 		}
@@ -578,7 +583,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 	peers := make(map[torrent.PeerID]struct{}, 16)
 	stats := prevStats
 	logger := d.logger
-	verbosity := d.verbosity
 
 	// Call these methods outside `lock` critical section, because they have own locks with contention.
 	torrents := torrentClient.Torrents()
@@ -632,8 +636,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			bytesCompleted = t.BytesCompleted()
 		}
 
-		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
-
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
@@ -641,24 +643,16 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			peers[peer.PeerID] = struct{}{}
 		}
 
-		webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
-		rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
-
-		// more detailed statistic: download rate of each peer (for each file)
-		if !torrentComplete && progress != 0 {
-			logger.Log(verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-			logger.Log(verbosity, "[snapshots] webseed peers", webseedRates...)
-			logger.Log(verbosity, "[snapshots] bittorrent peers", rates...)
-		}
+		_, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
+		_, segmentPeers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 
 		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
 			Name:            torrentName,
 			TotalBytes:      uint64(tLen),
 			DownloadedBytes: uint64(bytesCompleted),
 			Webseeds:        webseeds,
-			Peers:           peers,
+			Peers:           segmentPeers,
 		})
-
 	}
 
 	if len(noMetadata) > 0 {
@@ -689,7 +683,8 @@ func calculateRate(current, previous uint64, prevRate uint64, interval time.Dura
 		return math.MaxUint64
 	}
 	if current > previous {
-		return uint64(time.Second) * (current - previous) / uint64(interval)
+		// Well shit I was overflowing uint64, switching to float.
+		return uint64(float64(current-previous) / interval.Seconds())
 	}
 	// TODO: Probably assert and find out what is wrong.
 	return 0
@@ -906,15 +901,16 @@ func (d *Downloader) RequestSnapshot(
 	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHash metainfo.Hash,
 	name string,
-) (err error) {
+) error {
 	d.lock.Lock()
+	defer d.lock.Unlock()
 	t, err := d.addPreverifiedTorrent(g.Some(infoHash), name)
-	if err == nil {
-		g.MakeMapIfNil(&d.requiredTorrents)
-		g.MapInsert(d.requiredTorrents, t, struct{}{})
+	if err != nil {
+		return err
 	}
-	d.lock.Unlock()
-	return
+	g.MakeMapIfNil(&d.requiredTorrents)
+	g.MapInsert(d.requiredTorrents, t, struct{}{})
+	return nil
 }
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might

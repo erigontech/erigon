@@ -15,17 +15,17 @@ concurrency:
 jobs:
   minimal-node-sync-from-scratch-test:
     runs-on: [self-hosted, qa, long-running]
-    timeout-minutes: 1100  # 18 hours plus 20 minutes
+    timeout-minutes: 740  # 12 hours plus 20 minutes
     strategy:
       fail-fast: false
       matrix:
-        chain: [ mainnet ]  # Chain name as specified on the erigon command line
+        chain: [ mainnet, bor-mainnet ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ERIGON_ASSERT: true
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 86400 # 24 hours
+      TOTAL_TIME_SECONDS: 43200 # 12 hours
       CHAIN: ${{ matrix.chain }}
 
     steps:

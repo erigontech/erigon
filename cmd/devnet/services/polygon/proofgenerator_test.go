@@ -62,6 +62,7 @@ type requestGenerator struct {
 	sentry     *mock.MockSentry
 	bor        *bor.Bor
 	chain      *core.ChainPack
+	db         kv.RwDB
 	txBlockMap map[common.Hash]*types.Block
 }
 
@@ -84,20 +85,20 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 	}
 
 	return &requestGenerator{
+		db:         db,
 		chain:      chain,
 		sentry:     sentry,
-		bor:        bor.NewRo(polychain.BorDevnetChainConfig, db, reader, log.Root()),
+		bor:        bor.NewRo(polychain.BorDevnetChainConfig, reader, log.Root()),
 		txBlockMap: map[common.Hash]*types.Block{},
 	}, nil
 }
 
 func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
-	tx, err := rg.bor.DB.BeginRo(context.Background())
+	tx, err := rg.db.BeginRo(ctx)
 	if err != nil {
 		return common.Hash{}, err
 	}
 	defer tx.Rollback()
-
 	result, err := rg.bor.GetRootHash(ctx, tx, startBlock, endBlock)
 
 	if err != nil {

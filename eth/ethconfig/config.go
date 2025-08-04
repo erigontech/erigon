@@ -92,6 +92,7 @@ var Defaults = Config{
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
+		PersistReceiptsCacheV2:   true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -268,6 +269,8 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	ElBlockDownloaderV2 bool
 }
 
 type Sync struct {

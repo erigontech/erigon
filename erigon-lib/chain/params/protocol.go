@@ -152,14 +152,14 @@ const (
 	IdentityBaseGas     uint64 = 15   // Base price for a data copy operation
 	IdentityPerWordGas  uint64 = 3    // Per-work price for a data copy operation
 
-	Bn256AddGasByzantium             uint64 = 500    // Byzantium gas needed for an elliptic curve addition
-	Bn256AddGasIstanbul              uint64 = 150    // Gas needed for an elliptic curve addition
-	Bn256ScalarMulGasByzantium       uint64 = 40000  // Byzantium gas needed for an elliptic curve scalar multiplication
-	Bn256ScalarMulGasIstanbul        uint64 = 6000   // Gas needed for an elliptic curve scalar multiplication
-	Bn256PairingBaseGasByzantium     uint64 = 100000 // Byzantium base price for an elliptic curve pairing check
-	Bn256PairingBaseGasIstanbul      uint64 = 45000  // Base price for an elliptic curve pairing check
-	Bn256PairingPerPointGasByzantium uint64 = 80000  // Byzantium per-point price for an elliptic curve pairing check
-	Bn256PairingPerPointGasIstanbul  uint64 = 34000  // Per-point price for an elliptic curve pairing check
+	Bn254AddGasByzantium             uint64 = 500    // Byzantium gas needed for an elliptic curve addition
+	Bn254AddGasIstanbul              uint64 = 150    // Gas needed for an elliptic curve addition
+	Bn254ScalarMulGasByzantium       uint64 = 40000  // Byzantium gas needed for an elliptic curve scalar multiplication
+	Bn254ScalarMulGasIstanbul        uint64 = 6000   // Gas needed for an elliptic curve scalar multiplication
+	Bn254PairingBaseGasByzantium     uint64 = 100000 // Byzantium base price for an elliptic curve pairing check
+	Bn254PairingBaseGasIstanbul      uint64 = 45000  // Base price for an elliptic curve pairing check
+	Bn254PairingPerPointGasByzantium uint64 = 80000  // Byzantium per-point price for an elliptic curve pairing check
+	Bn254PairingPerPointGasIstanbul  uint64 = 34000  // Per-point price for an elliptic curve pairing check
 
 	Bls12381G1AddGas          uint64 = 375   // Price for BLS12-381 elliptic curve G1 point addition
 	Bls12381G1MulGas          uint64 = 12000 // Price for BLS12-381 elliptic curve G1 point scalar multiplication
@@ -188,6 +188,7 @@ const (
 	FieldElementsPerCell    uint64 = 64                                             // Number of Field elements in a cell
 	BytesPerCell                   = FieldElementsPerCell * 32                      // The number of bytes in a cell
 	CellsPerExtBlob                = FieldElementsPerExtBlob / FieldElementsPerCell // The number of cells in an extended blob
+	MaxBlobsPerTxn                 = 6                                              // https://github.com/ethereum/EIPs/pull/9981
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas        uint64 = 3450
@@ -238,9 +239,9 @@ var (
 
 // See EIP-7840: Add blob schedule to EL config files
 type BlobConfig struct {
-	Target                uint64 `json:"target"`
-	Max                   uint64 `json:"max"`
 	BaseFeeUpdateFraction uint64 `json:"baseFeeUpdateFraction"`
+	Max                   uint64 `json:"max"`
+	Target                uint64 `json:"target"`
 }
 
 var DefaultCancunBlobConfig = BlobConfig{

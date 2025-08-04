@@ -33,7 +33,7 @@ const (
 )
 
 var AllChecks = []Check{
-	Blocks, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents, BorSpans, BorCheckpoints,
+	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents, BorSpans, BorCheckpoints,
 }
 
 var NonDefaultChecks = []Check{

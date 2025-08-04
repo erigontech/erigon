@@ -289,6 +289,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true, false); err != nil {
+		err = fmt.Errorf("error opening segments after syncing header chain: %w", err)
 		return err
 	}
 
@@ -454,35 +455,46 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []snapshotsync.DownloadRequest) error {
-			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
+		started := cfg.blockRetire.RetireBlocksInBackground(
+			ctx,
+			minBlockNumber,
+			s.ForwardProgress,
+			log.LvlDebug,
+			func(downloadRequest []snapshotsync.DownloadRequest) error {
+				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
+					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
+						return err
+					}
+				}
+
+				return nil
+			}, func(l []string) error {
+				//if cfg.snapshotUploader != nil {
+				// TODO - we need to also remove files from the uploader (100k->500K transition)
+				//}
+
+				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
+					_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
 					return err
 				}
-			}
 
-			return nil
-		}, func(l []string) error {
-			//if cfg.snapshotUploader != nil {
-			// TODO - we need to also remove files from the uploader (100k->500K transition)
-			//}
-
-			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-				_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+				return nil
+			}, func() error {
+				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+				if filesDeleted && cfg.notifier != nil {
+					cfg.notifier.Events.OnNewSnapshot()
+				}
 				return err
-			}
-
-			return nil
-		}, func() error {
-			filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
-			if filesDeleted && cfg.notifier != nil {
-				cfg.notifier.Events.OnNewSnapshot()
-			}
-			return err
-		})
+			}, func() {
+				if cfg.notifier != nil {
+					cfg.notifier.Events.OnRetirementDone()
+				}
+			})
+		if cfg.notifier != nil {
+			cfg.notifier.Events.OnRetirementStart(started)
+		}
 
 		//	cfg.agg.BuildFilesInBackground()
-
 	}
 
 	pruneLimit := 10
