@@ -2099,12 +2099,16 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	iiReader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetIINewReader(decomp)
 	//hreader, hvocp := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
 	//fmt.Println("hvocp", hvocp)
-	hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetNewReader(decomp)
-	hreaderv := state.Schema.GetDomainCfg(kv.AccountsDomain).GetNewReader(decomp)
+
+	hdecomp, err := seg.NewDecompressor(vfile)
+	if err != nil {
+		return err
+	}
+	defer hdecomp.Close()
+	hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetNewReader(hdecomp)
 	seq := &multiencseq.SequenceReader{}
 	iiReader.Reset(0)
 	hreader.Reset(0)
-	hreaderv.Reset(0)
 	for iiReader.HasNext() {
 		k, offset := iiReader.NextUncompressed()
 		kc := bytes.Clone(k)
@@ -2142,20 +2146,9 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 			}
 			fmt.Println("txNum offset", txNum, offset2)
 			hreader.Reset(offset2)
-			//hreader.Skip()
 			hv, offset2 := hreader.Next(nil)
 			hvc := bytes.Clone(hv)
-
-			vbyte, _ := hreaderv.Next(nil)
-			// if !bytes.Equal(k, hvc) {
-			// 	panic(fmt.Sprintf("bytes not equal: %s vs %s", hexutil.Encode(k), hexutil.Encode(hvc)))
-			// }
 			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2, hexutil.Encode(vbyte), len(vbyte))
-			// hv, offset2 = hreader.Next(hv[:0])
-			// hvc = bytes.Clone(hv)
-			// //offset2, length := hreader.Skip()
-			// fmt.Println("..............", "some_value", len(hvc), offset2, hexutil.Encode(hvc[:8]))
-			// //fmt.Println("................", offset2, length)
 			fmt.Println()
 			i++
 		}
