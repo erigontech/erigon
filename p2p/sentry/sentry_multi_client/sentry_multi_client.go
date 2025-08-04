@@ -19,6 +19,7 @@ package sentry_multi_client
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -35,11 +36,13 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/direct"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -80,8 +83,9 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	ids := []proto_sentry.MessageId{
 		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
-		eth.ToProto[direct.WIT0][wit.GetMsgWitness],
-		eth.ToProto[direct.WIT0][wit.NewWitnessHashesMsg],
+		wit.ToProto[direct.WIT0][wit.GetMsgWitness],
+		wit.ToProto[direct.WIT0][wit.NewWitnessHashesMsg],
+		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -166,7 +170,7 @@ type MultiClient struct {
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
 func NewMultiClient(
-	db kv.TemporalRoDB,
+	db kv.TemporalRwDB,
 	chainConfig *chain.Config,
 	engine consensus.Engine,
 	sentries []proto_sentry.SentryClient,
@@ -625,18 +629,108 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 	return nil
 }
 
-func (cs *MultiClient) getBlockWitnessHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
-	var query eth.GetReceiptsPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
+func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	var req wit.GetWitnessPacket
+	if err := rlp.DecodeBytes(inreq.Data, &req); err != nil {
+		return fmt.Errorf("decoding GetWitnessPacket: %w, data: %x", err, inreq.Data)
 	}
 
-	//tx, err := cs.db.BeginRw(ctx)
-	//if err != nil {
-	//	return err
-	//}
+	tx, err := cs.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-	// TODO: get from db and answer
+	seen := make(map[common.Hash]struct{}, len(req.WitnessPages))
+	for _, witnessPage := range req.WitnessPages {
+		seen[witnessPage.Hash] = struct{}{}
+	}
+
+	witnessSize := make(map[common.Hash]uint64, len(seen))
+	for witnessBlockHash := range seen {
+		sizeBytes, err := tx.GetOne(kv.BorWitnessSizes, witnessBlockHash[:])
+		if err != nil {
+			return fmt.Errorf("reading witness size for hash %x: %w", witnessBlockHash, err)
+		}
+		if len(sizeBytes) > 0 {
+			witnessSize[witnessBlockHash] = binary.BigEndian.Uint64(sizeBytes)
+		} else {
+			witnessSize[witnessBlockHash] = 0
+		}
+	}
+
+	var response wit.WitnessPacketResponse
+	witnessCache := make(map[common.Hash][]byte, len(seen))
+	totalResponsePayloadDataAmount := 0
+	totalCached := 0
+
+	for _, witnessPage := range req.WitnessPages {
+		size := witnessSize[witnessPage.Hash]
+		totalPages := (size + wit.PageSize - 1) / wit.PageSize // Ceiling division
+
+		var witnessPageResponse wit.WitnessPageResponse
+		witnessPageResponse.Page = witnessPage.Page
+		witnessPageResponse.Hash = witnessPage.Hash
+		witnessPageResponse.TotalPages = totalPages
+
+		if witnessPage.Page < totalPages {
+			var witnessBytes []byte
+			if cachedRLPBytes, exists := witnessCache[witnessPage.Hash]; exists {
+				witnessBytes = cachedRLPBytes
+			} else {
+				queriedBytes, err := tx.GetOne(kv.BorWitnesses, witnessPage.Hash[:])
+				if err != nil {
+					return fmt.Errorf("reading witness for hash %x: %w", witnessPage.Hash, err)
+				}
+				witnessCache[witnessPage.Hash] = queriedBytes
+				witnessBytes = queriedBytes
+				totalCached += len(queriedBytes)
+			}
+
+			start := wit.PageSize * witnessPage.Page
+			if start > uint64(len(witnessBytes)) {
+				start = uint64(len(witnessBytes))
+			}
+			end := start + wit.PageSize
+			if end > uint64(len(witnessBytes)) {
+				end = uint64(len(witnessBytes))
+			}
+			witnessPageResponse.Data = witnessBytes[start:end]
+			totalResponsePayloadDataAmount += len(witnessPageResponse.Data)
+		}
+		response = append(response, witnessPageResponse)
+
+		// fast fail check
+		if totalCached >= wit.MaximumCachedWitnessOnARequest {
+			return fmt.Errorf("request demands too much memory: %d bytes", totalCached)
+		}
+
+		// memory protection check
+		if totalResponsePayloadDataAmount >= wit.MaximumResponseSize {
+			return fmt.Errorf("response exceeds maximum p2p payload size: %d bytes", totalResponsePayloadDataAmount)
+		}
+	}
+
+	reply := wit.WitnessPacketRLPPacket{
+		RequestId:             req.RequestId,
+		WitnessPacketResponse: response,
+	}
+	b, err := rlp.EncodeToBytes(&reply)
+	if err != nil {
+		return fmt.Errorf("encoding witness response: %w", err)
+	}
+
+	outreq := proto_sentry.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0,
+			Data: b,
+		},
+	}
+	_, err = sentryClient.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil && !isPeerNotFoundErr(err) {
+		return fmt.Errorf("sending witness response: %w", err)
+	}
 	return nil
 }
 
@@ -659,8 +753,15 @@ func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.Inbou
 		return fmt.Errorf("error in witness encoding: err: %w", err)
 	}
 
-	if err := tx.Put(kv.BorWitnesses, bHash.Bytes(), witBuf.Bytes()); err != nil {
+	witBytes := witBuf.Bytes()
+	witLen := uint64(len(witBytes))
+
+	if err := tx.Put(kv.BorWitnesses, bHash.Bytes(), witBytes); err != nil {
 		return fmt.Errorf("error writing witness, err: %w", err)
+	}
+
+	if err := tx.Put(kv.BorWitnessSizes, bHash.Bytes(), dbutils.EncodeBlockNumber(witLen)); err != nil {
+		return fmt.Errorf("error writing witness size, err: %w", err)
 	}
 
 	return nil
@@ -722,7 +823,7 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 	case proto_sentry.MessageId_NEW_WITNESS_HASHES_W0:
 		return cs.newWitnessHash(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0:
-		return cs.getBlockWitnessHashes(ctx, inreq, sentry)
+		return cs.getBlockWitnesses(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}

@@ -33,6 +33,13 @@ var ProtocolLengths = map[uint]uint64{WIT1: 4}
 // MaxMessageSize is the maximum cap on the size of a protocol message.
 const MaxMessageSize = 16 * 1024 * 1024
 
+// Witness Response constants
+const (
+	PageSize                       = 15 * 1024 * 1024  // 15 MB
+	MaximumCachedWitnessOnARequest = 200 * 1024 * 1024 // 200 MB, the maximum amount of memory a request can demand while getting witness
+	MaximumResponseSize            = 16 * 1024 * 1024  // 16 MB, helps to fast fail check
+)
+
 const (
 	NewWitnessMsg       = 0x00 // sends witness hash
 	NewWitnessHashesMsg = 0x01 // announces witness availability
