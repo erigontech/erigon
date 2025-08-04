@@ -152,7 +152,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 		if isBorStateSyncTxn {
 			var stateSyncEvents []*types.Message
-			stateSyncEvents, err := api.bridgeReader.Events(ctx, block.Hash(), blockNumber)
+			stateSyncEvents, err = api.bridgeReader.Events(ctx, block.Hash(), blockNumber)
 			if err != nil {
 				return err
 			}
