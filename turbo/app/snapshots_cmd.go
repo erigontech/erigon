@@ -38,6 +38,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -237,6 +239,8 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFileFlag,
+				&SnapshotFileFlagEf,
+				&SnapshotFileFlagVi,
 			}),
 		},
 		{
@@ -411,6 +415,14 @@ var (
 	}
 	SnapshotFileFlag = cli.StringFlag{
 		Name:  "file",
+		Usage: "Snapshot file",
+	}
+	SnapshotFileFlagEf = cli.StringFlag{
+		Name:  "effile",
+		Usage: "Snapshot file",
+	}
+	SnapshotFileFlagVi = cli.StringFlag{
+		Name:  "vifile",
 		Usage: "Snapshot file",
 	}
 )
@@ -1812,43 +1824,195 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer logger.Info("Done")
 
 	sourcefile := cliCtx.String(SnapshotFileFlag.Name)
-	sourcefile = filepath.Join(dirs.SnapHistory, sourcefile)
+	effile := cliCtx.String(SnapshotFileFlagEf.Name)
+	vifile := cliCtx.String(SnapshotFileFlagVi.Name)
+	//sourcefile = filepath.Join(dirs.SnapHistory, sourcefile)
 
-	exists, err := dir2.FileExist(sourcefile)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("file %s does not exist", sourcefile)
-	}
+	// exists, err := dir2.FileExist(sourcefile)
+	// if err != nil {
+	// 	return err
+	// }
+	// if !exists {
+	// 	return fmt.Errorf("file %s does not exist", sourcefile)
+	// }
+
+	return readAttempt3(sourcefile, effile, vifile, dirs)
+	//return readAttempt1(sourcefile)
+	//return readAttempt2(sourcefile)
+
+	//return nil
+
+}
+
+func readAttempt2(sourcefile string) error {
+	// assuming account
+	cfg := state.Schema.GetDomainCfg(kv.AccountsDomain)
 
 	decomp, err := seg.NewDecompressor(sourcefile)
 	if err != nil {
 		return err
 	}
 	defer decomp.Close()
-	g := decomp.MakeGetter()
 
-	var buf []byte
+	reader, ninpage := cfg.GetPagedReader(decomp)
+	reader.Reset(0)
 
 	i := 0
-	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		buf2 := bytes.Clone(buf)
 
-		if i%2 == 0 {
-			fmt.Println(hexutil.Encode(buf2), len(buf2), hexutil.Encode(buf2[:8]), hexutil.Encode(buf2[8:]))
-		} else {
-			fmt.Println(hexutil.Encode(buf2), len(buf2))
+	for reader.HasNextPage() {
+		var j int
+		for j = 0; j < ninpage && reader.HasNextOnPage(); j++ {
+			k, v, _, _ := reader.Next2(nil)
+			fmt.Println(hexutil.Encode(k), len(k), hexutil.Encode(v), len(v))
+			i++
+			if i > 20 {
+				break
+			}
 		}
-		i++
-		if i > 100 {
+		fmt.Println("j is", j, ninpage)
+		if i > 20 {
 			break
+		}
+		if reader.HasNextOnPage() {
+			panic("has next on page")
+		}
+		if reader.HasNextPage() {
+			reader.NextPage()
 		}
 	}
 
-	return nil
+	for reader.HasNext() {
+		k, v, _, _ := reader.Next2(nil)
+		fmt.Println(hexutil.Encode(k), len(k), hexutil.Encode(v), len(v))
+		i++
+		if i > 20 {
+			break
+		}
+	}
+	//0x000a02fd9dfa554baca2dee70000
+	//
 
+	return nil
+}
+
+func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
+	eff := effile
+	eff = filepath.Join(dirs.SnapIdx, eff)
+
+	hf := vfile //"v1.0-accounts.1888-1890.v"
+	hf = filepath.Join(dirs.SnapHistory, hf)
+
+	vi := vifile //"v1.0-accounts.1888-1890.vi"
+	vi = filepath.Join(dirs.SnapAccessors, vi)
+
+	fn := func(file string) {
+		exists, err := dir2.FileExist(file)
+		if err != nil {
+			panic(err)
+		}
+		if !exists {
+			panic(fmt.Sprintf("file not found:%s", file))
+		}
+	}
+	fn(eff)
+	fn(hf)
+	fn(vi)
+
+	index, err := recsplit.OpenIndex(vi)
+	if err != nil {
+		return err
+	}
+	ireader := index.GetReaderFromPool()
+
+	baseTxNum := uint64(1888 * config3.DefaultStepSize)
+
+	decomp, err := seg.NewDecompressor(eff)
+	if err != nil {
+		return err
+	}
+	defer decomp.Close()
+	i := 0
+	var hv []byte
+	iiReader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetIINewReader(decomp)
+	//hreader, _ := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
+	hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
+	seq := &multiencseq.SequenceReader{}
+	for iiReader.HasNext() {
+		k, offset := iiReader.Next(nil)
+		kc := bytes.Clone(k)
+		fmt.Println(hexutil.Encode(kc), len(kc), offset, i)
+		if i > 5 {
+			break
+		}
+		efv, _ := iiReader.Next(nil)
+
+		seq.Reset(baseTxNum, efv)
+		it := seq.Iterator(0)
+
+		for it.HasNext() {
+			txNum, err := it.Next()
+			if err != nil {
+				return nil
+			}
+
+			// txNum, ok = multiencseq.Seek(baseTxNum, efv, txNum)
+			// if !ok {
+			// 	break
+			// }
+
+			key := historyKey(txNum, kc[:], nil)
+			offset2, ok2 := ireader.Lookup(key)
+			if !ok2 {
+				panic("fails")
+			}
+			fmt.Println("k txNum offset", hexutil.Encode(kc), txNum, offset2)
+			hreader.Reset(offset2)
+			hv, offset2 := hreader.Next(hv[:0])
+			hvc := bytes.Clone(hv)
+			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+			hv, offset2 = hreader.Next(hv[:0])
+			hvc = bytes.Clone(hv)
+			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+			fmt.Println()
+		}
+		i++
+		fmt.Println("hello-----------------")
+	}
+	return nil
+}
+
+func historyKey(txNum uint64, key []byte, buf []byte) []byte {
+	if buf == nil || cap(buf) < 8+len(key) {
+		buf = make([]byte, 8+len(key))
+	}
+	buf = buf[:8+len(key)]
+	binary.BigEndian.PutUint64(buf, txNum)
+	copy(buf[8:], key)
+	return buf
+}
+
+func readAttempt1(sourcefile string) error {
+	decomp, err := seg.NewDecompressor(sourcefile)
+	if err != nil {
+		return err
+	}
+	defer decomp.Close()
+
+	reader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
+	//reader.Reset(0)
+	i := 0
+	for reader.HasNext() {
+		v, offset := reader.Next(nil)
+		fmt.Println(hexutil.Encode(v), len(v), offset)
+		if i > 20 {
+			break
+		}
+		i++
+		reader.Skip()
+
+	}
+
+	return nil
 }
 
 func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {

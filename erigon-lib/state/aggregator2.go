@@ -146,6 +146,18 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
 	return v
 }
 
+func (d domainCfg) GetPagedReader(decomp *seg.Decompressor) (*seg.PagedReader, int) {
+	return seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), d.hist.Compression), d.hist.historyValuesOnCompressedPage, true), d.hist.historyValuesOnCompressedPage
+}
+
+func (d domainCfg) GetHistNewReader(decomp *seg.Decompressor) *seg.Reader {
+	return seg.NewReader(decomp.MakeGetter(), d.hist.Compression)
+}
+
+func (d domainCfg) GetIINewReader(decomp *seg.Decompressor) *seg.Reader {
+	return seg.NewReader(decomp.MakeGetter(), d.hist.iiCfg.Compression)
+}
+
 func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
 	var v iiCfg
 	switch name {

@@ -76,9 +76,12 @@ func TestPagedReader(t *testing.T) {
 	for g.HasNext() {
 		w := loremStrings[i]
 		var word []byte
-		_, word, buf, _ = g.Next2(buf[:0])
+		var key []byte
+		key, word, buf, _ = g.Next2(buf[:0])
 		expected := fmt.Sprintf("%s %d", w, i)
 		require.Equal(expected, string(word))
+		expected = fmt.Sprintf("key %d", i)
+		require.Equal(expected, string(key))
 		i++
 	}
 
