@@ -338,16 +338,6 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	return api._blockReader.Header(ctx, tx, hash, *number)
 }
 
-func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {
-	var stateSyncEvents []*types.Message
-	events, err := api.bridgeReader.Events(ctx, blockHash, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	stateSyncEvents = events
-	return stateSyncEvents, nil
-}
-
 // checks the pruning state to see if we would hold information about this
 // block in state history or not.  Some strange issues arise getting account
 // history for blocks that have been pruned away giving nonce too low errors
