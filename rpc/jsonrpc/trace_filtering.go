@@ -844,9 +844,7 @@ func (api *TraceAPIImpl) callTransaction(
 		blockHash := header.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 
-		var ok bool
-		var err error
-		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 		if err != nil {
 			return nil, err
 		}
