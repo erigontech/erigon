@@ -1265,7 +1265,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txIncarnation := be.txIncarnations[tx]
 		tracePrefix := ""
 
-		fmt.Println("Validate", be.blockNum, txVersion.TxIndex, len(toValidate))
+		fmt.Println("Validate", be.blockNum, txVersion.TxIndex, toValidate)
 
 		var trace bool
 		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {

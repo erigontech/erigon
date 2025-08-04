@@ -667,11 +667,11 @@ func (h *Queue[T]) Pop() any {
 // Tasks added by method `ReTry` have higher priority than tasks added by `Add`.
 // Method `Add` expecting already-ordered (by priority) tasks - doesn't do any additional sorting of new tasks.
 type QueueWithRetry struct {
-	closed      bool
-	newTasks    chan Task
-	retires     Queue[Task]
-	retiresLock sync.Mutex
-	capacity    int
+	closed   bool
+	newTasks chan Task
+	retires  Queue[Task]
+	lock     sync.Mutex
+	capacity int
 }
 
 func NewQueueWithRetry(capacity int) *QueueWithRetry {
@@ -681,17 +681,17 @@ func NewQueueWithRetry(capacity int) *QueueWithRetry {
 func (q *QueueWithRetry) NewTasksLen() int { return len(q.newTasks) }
 func (q *QueueWithRetry) Capacity() int    { return q.capacity }
 func (q *QueueWithRetry) RetriesLen() (l int) {
-	q.retiresLock.Lock()
+	q.lock.Lock()
 	l = q.retires.Len()
-	q.retiresLock.Unlock()
+	q.lock.Unlock()
 	return l
 }
 func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
-	q.retiresLock.Lock()
+	q.lock.Lock()
 	for _, t := range q.retires {
 		out = append(out, t.Version().TxNum)
 	}
-	q.retiresLock.Unlock()
+	q.lock.Unlock()
 	return out
 }
 func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + len(q.newTasks) }
@@ -699,7 +699,11 @@ func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + len(q.newTasks)
 // Add "new task" (which was never executed yet). May block internal channel is full.
 // Expecting already-ordered tasks.
 func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
-	if !q.closed {
+	q.lock.Lock()
+	closed := q.closed
+	q.lock.Unlock()
+
+	if !closed {
 		select {
 		case <-ctx.Done():
 			return
@@ -712,12 +716,13 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 // All failed tasks have higher priority than new one.
 // No limit on amount of txs added by this method.
 func (q *QueueWithRetry) ReTry(t Task) {
+	q.lock.Lock()
 	if q.closed {
+		q.lock.Unlock()
 		return
 	}
-	q.retiresLock.Lock()
 	heap.Push(&q.retires, t)
-	q.retiresLock.Unlock()
+	q.lock.Unlock()
 	select {
 	case q.newTasks <- nil:
 	default:
@@ -739,6 +744,8 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 	}
 
 	var checkEmpty = func() bool {
+		q.lock.Lock()
+		defer q.lock.Unlock()
 		if q.closed && q.newTasks != nil && len(q.newTasks) == 0 {
 			newTasks := q.newTasks
 			q.newTasks = nil
@@ -758,22 +765,22 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 		select {
 		case inTask, ok := <-q.newTasks:
 			if !ok {
-				q.retiresLock.Lock()
+				q.lock.Lock()
 				if q.retires.Len() > 0 {
 					task = heap.Pop(&q.retires).(Task)
 				}
-				q.retiresLock.Unlock()
+				q.lock.Unlock()
 				return task, task != nil
 			}
 
-			q.retiresLock.Lock()
+			q.lock.Lock()
 			if inTask != nil {
 				heap.Push(&q.retires, inTask)
 			}
 			if q.retires.Len() > 0 {
 				task = heap.Pop(&q.retires).(Task)
 			}
-			q.retiresLock.Unlock()
+			q.lock.Unlock()
 			if task != nil {
 				return task, true
 			}
@@ -783,12 +790,12 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 	}
 }
 func (q *QueueWithRetry) popNoWait() (task Task, ok bool) {
-	q.retiresLock.Lock()
+	q.lock.Lock()
 	has := q.retires.Len() > 0
 	if has { // means have conflicts to re-exec: it has higher priority than new tasks
 		task = heap.Pop(&q.retires).(Task)
 	}
-	q.retiresLock.Unlock()
+	q.lock.Unlock()
 
 	if has {
 		return task, task != nil
@@ -810,6 +817,9 @@ func (q *QueueWithRetry) popNoWait() (task Task, ok bool) {
 
 // Close safe to call multiple times
 func (q *QueueWithRetry) Close() {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
 	if q.closed {
 		return
 	}
