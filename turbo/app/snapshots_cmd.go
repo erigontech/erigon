@@ -2100,7 +2100,7 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	//hreader, hvocp := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
 	//fmt.Println("hvocp", hvocp)
 
-	hdecomp, err := seg.NewDecompressor(vfile)
+	hdecomp, err := seg.NewDecompressor(vi)
 	if err != nil {
 		return err
 	}
