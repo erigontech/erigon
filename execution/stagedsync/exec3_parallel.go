@@ -1350,7 +1350,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		} else {
 			cntInvalid++
-
+			fmt.Println(tx, "Inalid", be.validateTasks.maxComplete())
 			be.cntValidationFail++
 			be.execFailed[tx]++
 
