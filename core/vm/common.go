@@ -90,14 +90,14 @@ func ToWordSize(size uint64) uint64 {
 
 func allZero(b []byte) bool {
 	// 8-byte strides
-	eights := len(b) / 8
-	for i := 0; i < eights; i += 8 {
+	n8 := len(b) - len(b)%8
+	for i := 0; i < n8; i += 8 {
 		if 0 != binary.BigEndian.Uint64(b[i:i+8]) {
 			return false
 		}
 	}
 	// 1-byte strides for the remainder
-	for _, byte := range b[8*eights:] {
+	for _, byte := range b[n8:] {
 		if byte != 0 {
 			return false
 		}
