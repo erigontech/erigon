@@ -385,7 +385,7 @@ func checkSnapshotsCompatibility(d datadir.Dirs) error {
 					return errors.New("The datadir has bad snapshot files or they are " +
 						"incompatible with the current erigon version. If you want to upgrade from an" +
 						"older version, you may run the following to rename files to the " +
-						"new version: `erigon seg update-to-new-ver-format`")
+						"new version: `erigon snapshots update-to-new-ver-format`")
 				}
 				fileInfo, _, _ := snaptype.ParseFileName("", name)
 

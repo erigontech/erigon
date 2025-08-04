@@ -120,7 +120,7 @@ It allows to process this blocks again
 erigon --snap.skip-state-snapshot-download
 
 # Option 2 (on synced datadir):
-erigon seg rm-all-state-snapshots
+erigon snapshots rm-all-state
 integration stage_exec --reset
 integration stage_exec 
 
@@ -137,7 +137,7 @@ integration commitment_rebuild
 
 ```sh
 # By parallel executing blocks on existing historical state. Can be 1 or many domains:
-erigon seg rm-state-snapshots --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
+erigon snapshots rm-state-snapshots --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
 integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto --reset
 integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
 ```
@@ -148,7 +148,7 @@ integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,traces
 rm -rf datadir/heimdall
 rm -rf datadir/snapshots/*borch*
 # Start erigon, it will gen. Then:
-erigon seg integrity --datadir /erigon-data/ --check=BorCheckpoints
+erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
 ```
 
 ## See tables size
