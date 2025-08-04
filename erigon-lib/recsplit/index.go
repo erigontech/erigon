@@ -169,7 +169,7 @@ func (idx *Index) init() (err error) {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if rec := recover(); rec != nil {
 			// do r with only the stack trace
-			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", idx.fileName, rec, dbg.Stack())
+			err = fmt.Errorf("incomplete file: %s, %+v, %w, trace: %s", idx.fileName, rec, IncompatibleErr, dbg.Stack())
 		}
 		if err != nil || !validationPassed {
 			idx.Close()
