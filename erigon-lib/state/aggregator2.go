@@ -150,7 +150,7 @@ func (d domainCfg) GetPagedReader(decomp *seg.Decompressor) (*seg.PagedReader, i
 	return seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), d.hist.Compression), d.hist.historyValuesOnCompressedPage, true), d.hist.historyValuesOnCompressedPage
 }
 
-func (d domainCfg) GetHistNewReader(decomp *seg.Decompressor) *seg.Reader {
+func (d domainCfg) GetNewReader(decomp *seg.Decompressor) *seg.Reader {
 	return seg.NewReader(decomp.MakeGetter(), d.hist.Compression)
 }
 

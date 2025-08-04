@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/etl"
@@ -1005,6 +1006,16 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newAgg.Close()
 
 	require.NoError(t, err)
+}
+
+func TestDesAc(t *testing.T) {
+	hex := "0000000000000000000000000000000000000000"
+	bh := hexutil.Hex2Bytes(hex)
+
+	acc := accounts.Account{}
+	err := accounts.DeserialiseV3(&acc, bh)
+	require.NoError(t, err)
+	require.Equal(t, acc.Nonce, 1)
 }
 
 func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {

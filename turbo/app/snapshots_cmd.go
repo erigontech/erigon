@@ -1836,6 +1836,34 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	// if !exists {
 	// 	return fmt.Errorf("file %s does not exist", sourcefile)
 	// }
+	ctx := cliCtx.Context
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+
+	tdb, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+
+	rotx, err := tdb.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+
+	v, ok, err := rotx.HistorySeek(kv.AccountsDomain, hexutil.FromHex("0x0000000000000000000000000000000000000000"), 2950113689)
+	if err != nil {
+		return err
+	}
+	fmt.Println("%s %d", hexutil.Encode(v), ok)
 
 	return readAttempt3(sourcefile, effile, vifile, dirs)
 	//return readAttempt1(sourcefile)
@@ -1896,6 +1924,125 @@ func readAttempt2(sourcefile string) error {
 	return nil
 }
 
+func readAttempt4(vfile, effile, vifile string, dirs datadir.Dirs) error {
+	eff := effile
+	eff = filepath.Join(dirs.SnapIdx, eff)
+
+	hf := vfile //"v1.0-accounts.1888-1890.v"
+	hf = filepath.Join(dirs.SnapHistory, hf)
+
+	vi := vifile //"v1.0-accounts.1888-1890.vi"
+	vi = filepath.Join(dirs.SnapAccessors, vi)
+
+	fn := func(file string) {
+		exists, err := dir2.FileExist(file)
+		if err != nil {
+			panic(err)
+		}
+		if !exists {
+			panic(fmt.Sprintf("file not found:%s", file))
+		}
+	}
+	fn(eff)
+	fn(hf)
+	fn(vi)
+
+	// index, err := recsplit.OpenIndex(vi)
+	// if err != nil {
+	// 	return err
+	// }
+	// ireader := index.GetReaderFromPool()
+
+	re := regexp.MustCompile(`\.(\d{4})-(\d{4})\.`)
+	matches := re.FindStringSubmatch(vifile)
+	var result string
+	if len(matches) > 1 {
+		result = matches[1] // "1896"
+	}
+
+	startstep, err := strconv.ParseUint(result, 10, 64)
+	if err != nil {
+		return nil
+	}
+
+	fmt.Println("the start step is", startstep, result)
+	// baseTxNum := uint64(startstep * config3.DefaultStepSize)
+
+	decomp, err := seg.NewDecompressor(hf)
+	if err != nil {
+		return err
+	}
+	defer decomp.Close()
+	i := 0
+	// var hv []byte
+	//iiReader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetIINewReader(decomp)
+	hreader, _ := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
+	//hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
+	//seq := &multiencseq.SequenceReader{}
+	hreader.Reset(0)
+	var buf2, buf []byte
+	var offset, offset2 uint64
+
+	for hreader.HasNext() {
+		buf, offset = hreader.Next(nil)
+		buf2, offset2 = hreader.Next(nil)
+		fmt.Println("k offset", hexutil.Encode(buf), len(buf), offset, hexutil.Encode(buf2), len(buf2), offset2)
+		if i > 5 {
+			break
+		}
+
+		i++
+	}
+
+	// iiReader.Reset(0)
+	// for iiReader.HasNext() {
+	// 	k, offset := iiReader.NextUncompressed()
+	// 	kc := bytes.Clone(k)
+	// 	if i > 5 {
+	// 		break
+	// 	}
+	// 	efv, _ := iiReader.NextUncompressed()
+
+	// 	seq.Reset(baseTxNum, efv)
+	// 	if seq.Count() == 0 {
+	// 		continue
+	// 	}
+	// 	fmt.Println(hexutil.Encode(kc), len(kc), offset, i, seq.Min(), seq.Max())
+
+	// 	it := seq.Iterator(0)
+
+	// 	for it.HasNext() {
+	// 		txNum, err := it.Next()
+	// 		if err != nil {
+	// 			return nil
+	// 		}
+
+	// 		// txNum, ok = multiencseq.Seek(baseTxNum, efv, txNum)
+	// 		// if !ok {
+	// 		// 	break
+	// 		// }
+
+	// 		key := historyKey(txNum, kc[:], nil)
+	// 		offset2, ok2 := ireader.Lookup(key)
+	// 		if !ok2 {
+	// 			panic("fails")
+	// 		}
+	// 		fmt.Println("k txNum offset", hexutil.Encode(kc), txNum, offset2)
+	// 		// 	hreader.Reset(offset2)
+	// 		hv, offset2 := hreader.Next(hv[:0])
+	// 		hvc := bytes.Clone(hv)
+	// 		fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+	// 		hv, offset2 = hreader.Next(hv[:0])
+	// 		hvc = bytes.Clone(hv)
+	// 		fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+	// 		fmt.Println()
+	// 	}
+	// 	i++
+	// 	fmt.Println("hello-----------------")
+	// }
+	return nil
+}
+
 func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	eff := effile
 	eff = filepath.Join(dirs.SnapIdx, eff)
@@ -1946,10 +2093,11 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	}
 	defer decomp.Close()
 	i := 0
-	var hv []byte
+	//var hv []byte
 	iiReader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetIINewReader(decomp)
-	hreader, _ := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
-	//hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
+	//hreader, hvocp := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
+	//fmt.Println("hvocp", hvocp)
+	hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetNewReader(decomp)
 	seq := &multiencseq.SequenceReader{}
 	iiReader.Reset(0)
 	for iiReader.HasNext() {
@@ -1964,11 +2112,14 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 		if seq.Count() == 0 {
 			continue
 		}
-		fmt.Println(hexutil.Encode(kc), len(kc), offset, i, seq.Min(), seq.Max())
+		fmt.Println(hexutil.Encode(kc), len(kc), offset, i, seq.Min(), seq.Max(), seq.Count())
 
 		it := seq.Iterator(0)
 
 		for it.HasNext() {
+			if i > 5 {
+				break
+			}
 			txNum, err := it.Next()
 			if err != nil {
 				return nil
@@ -1984,17 +2135,27 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 			if !ok2 {
 				panic("fails")
 			}
-			fmt.Println("k txNum offset", hexutil.Encode(kc), txNum, offset2)
-			// 	hreader.Reset(offset2)
-			hv, offset2 := hreader.Next(hv[:0])
+			fmt.Println("txNum offset", txNum, offset2)
+			hreader.Reset(offset2)
+			//hreader.Skip()
+			hv, offset2 := hreader.Next(nil)
 			hvc := bytes.Clone(hv)
+			// if !bytes.Equal(k, hvc) {
+			// 	panic(fmt.Sprintf("bytes not equal: %s vs %s", hexutil.Encode(k), hexutil.Encode(hvc)))
+			// }
 			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
-			hv, offset2 = hreader.Next(hv[:0])
-			hvc = bytes.Clone(hv)
-			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+			// hv, offset2 = hreader.Next(hv[:0])
+			// hvc = bytes.Clone(hv)
+			// //offset2, length := hreader.Skip()
+			// fmt.Println("..............", "some_value", len(hvc), offset2, hexutil.Encode(hvc[:8]))
+			// //fmt.Println("................", offset2, length)
 			fmt.Println()
+			i++
 		}
-		i++
+		if i > 5 {
+			break
+		}
+
 		fmt.Println("hello-----------------")
 	}
 	return nil
@@ -2017,7 +2178,7 @@ func readAttempt1(sourcefile string) error {
 	}
 	defer decomp.Close()
 
-	reader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
+	reader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetNewReader(decomp)
 	//reader.Reset(0)
 	i := 0
 	for reader.HasNext() {
