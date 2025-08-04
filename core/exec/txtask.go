@@ -814,7 +814,7 @@ func (q *QueueWithRetry) Close() {
 		return
 	}
 	q.closed = true
-	if len(q.newTasks) == 0 {
+	if q.newTasks != nil && len(q.newTasks) == 0 {
 		newTasks := q.newTasks
 		q.newTasks = nil
 		close(newTasks)

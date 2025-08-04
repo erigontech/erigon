@@ -899,11 +899,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 		}()
 
 		for ; blockNum <= maxBlockNum; blockNum++ {
-			changeset := &libstate.StateChangeSet{}
-			if te.shouldGenerateChangesets && blockNum > 0 {
-				te.doms.SetChangesetAccumulator(changeset)
-			}
-
 			select {
 			case readAhead <- blockNum:
 			default:
