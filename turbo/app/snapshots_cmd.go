@@ -1938,12 +1938,12 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	//hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
 	seq := &multiencseq.SequenceReader{}
 	for iiReader.HasNext() {
-		k, offset := iiReader.Next(nil)
+		k, offset := iiReader.NextUncompressed()
 		kc := bytes.Clone(k)
 		if i > 5 {
 			break
 		}
-		efv, _ := iiReader.Next(nil)
+		efv, _ := iiReader.NextUncompressed()
 
 		seq.Reset(baseTxNum, efv)
 		fmt.Println(hexutil.Encode(kc), len(kc), offset, i, seq.Min(), seq.Max())
