@@ -1313,6 +1313,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txResult := be.results[tx]
 
 				if err := be.gasPool.SubGas(txResult.ExecutionResult.GasUsed); err != nil {
+					fmt.Println("Gas Limit Reached", be.blockNum, txVersion.TxIndex, txResult.ExecutionResult.GasUsed)
 					return nil, err
 				}
 
