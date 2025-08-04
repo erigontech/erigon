@@ -1507,6 +1507,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		toExecute = append(toExecute, be.execTasks.takeNextPending())
 	}
 
+	fmt.Println("Execute", be.blockNum, toExecute)
+
 	maxValidated := be.validateTasks.maxComplete()
 	for i := 0; i < len(toExecute); i++ {
 		nextTx := toExecute[i]
