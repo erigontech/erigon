@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -105,7 +106,7 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 	}}
 
 	requestHeader := map[string]string{
-		"Date-Milliseconds": fmt.Sprintf("%d", time.Now().UnixMilli()),
+		"Date-Milliseconds": strconv.FormatInt(time.Now().UnixMilli(), 10),
 	}
 	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, requestHeader, nil, headerIn)
 	if err != nil {
