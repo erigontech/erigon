@@ -1937,7 +1937,7 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 		return nil
 	}
 
-	fmt.Println("the start step is", startstep)
+	fmt.Println("the start step is", startstep, result)
 	baseTxNum := uint64(startstep * config3.DefaultStepSize)
 
 	decomp, err := seg.NewDecompressor(eff)
