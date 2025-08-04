@@ -1151,10 +1151,6 @@ func (f FinalityAPIFunc) GetRootHash(start uint64, end uint64) (string, error) {
 	return f(start, end)
 }
 
-func (c *Bor) Start(chainDB kv.RwDB) {
-
-}
-
 func (c *Bor) Close() error {
 	c.closeOnce.Do(func() {
 		if c.HeimdallClient != nil {
