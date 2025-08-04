@@ -1265,7 +1265,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txIncarnation := be.txIncarnations[tx]
 		tracePrefix := ""
 
-		fmt.Println("Validate", be.blockNum, be.tasks[tx].Task, txVersion, toValidate)
+		fmt.Println("Validate", be.blockNum, tx, toValidate)
 
 		var trace bool
 		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
@@ -1286,12 +1286,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if readVersion != writtenVersion {
 					vv = state.VerionInvalid
-				} else if writtenVersion.TxIndex == -1 && txVersion.TxIndex > be.validateTasks.maxComplete() {
+				} else if writtenVersion.TxIndex == -1 && tx >= be.validateTasks.maxComplete() {
 					vv = state.VerionTooEarly
 				}
 				if vv != state.VersionValid {
 					fmt.Println(be.blockNum, fmt.Sprintf("(%d.%d)", txVersion.TxIndex, txVersion.Incarnation), "ValidateVersion Failed",
-						vv, readVersion, writtenVersion, be.validateTasks.maxComplete())
+						vv, readVersion, writtenVersion, tx, be.validateTasks.maxComplete())
 					be.versionMap.SetTrace(true)
 				}
 				return vv
@@ -1847,9 +1847,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	var executor *blockExecutor
 
 	for i, txTask := range execRequest.tasks {
-		if txTask.BlockNumber() == 74033823 {
-			fmt.Println("REQ", txTask.BlockNumber(), i, txTask)
-		}
 		t := &execTask{
 			Task:               txTask,
 			index:              i,
