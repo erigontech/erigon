@@ -89,6 +89,8 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+
+	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

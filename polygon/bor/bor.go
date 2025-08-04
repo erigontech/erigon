@@ -279,12 +279,16 @@ func ValidateHeaderTime(
 		// from non-primary producer. Such blocks will be rejected later when we know the succession
 		// number of the signer in the current sprint.
 		if header.Time > uint64(now.Unix())+config.CalculatePeriod(header.Number.Uint64()) {
-			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			}
 		}
 	} else {
 		// Don't waste time checking blocks from the future
 		if header.Time > uint64(now.Unix()) {
-			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			}
 		}
 	}
 
@@ -305,7 +309,9 @@ func ValidateHeaderTime(
 	// Post Bhilai HF, reject blocks form non-primary producers if they're earlier than the expected time
 	if config.IsBhilai(header.Number.Uint64()) && succession != 0 {
 		if header.Time > uint64(now.Unix()) {
-			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			}
 		}
 	}
 
@@ -534,12 +540,16 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		// from non-primary producer. Such blocks will be rejected later when we know the succession
 		// number of the signer in the current sprint.
 		if header.Time > uint64(now)+c.config.CalculatePeriod(number) {
-			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			}
 		}
 	} else {
 		// Don't waste time checking blocks from the future
 		if header.Time > uint64(now) {
-			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			}
 		}
 	}
 

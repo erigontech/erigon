@@ -1257,12 +1257,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	var stateWriter *state.BufferedWriter
 
 	for i := 0; i < len(toValidate); i++ {
+
 		be.cntTotalValidations++
 
 		tx := toValidate[i]
 		txVersion := be.tasks[tx].Task.Version()
 		txIncarnation := be.txIncarnations[tx]
 		tracePrefix := ""
+
+		fmt.Println("Validate", be.blockNum, txVersion.TxIndex)
 
 		var trace bool
 		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
