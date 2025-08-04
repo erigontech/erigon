@@ -1925,7 +1925,7 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	}
 	ireader := index.GetReaderFromPool()
 
-	re := regexp.MustCompile(`\.(\d+)-`)
+	re := regexp.MustCompile(`\.(\d{4})-(\d{4})\.`)
 	matches := re.FindStringSubmatch("v1.1-accounts.1896-1900.vi")
 	var result string
 	if len(matches) > 1 {
