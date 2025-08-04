@@ -25,12 +25,12 @@ const ProtocolName = "wit"
 // is primary).
 var ProtocolVersions = []uint{WIT1}
 
-// protocolLengths are the number of implemented message corresponding to
+// ProtocolLengths are the number of implemented message corresponding to
 // different protocol versions.
-var protocolLengths = map[uint]uint64{WIT1: 4}
+var ProtocolLengths = map[uint]uint64{WIT1: 4}
 
-// maxMessageSize is the maximum cap on the size of a protocol message.
-const maxMessageSize = 16 * 1024 * 1024
+// MaxMessageSize is the maximum cap on the size of a protocol message.
+const MaxMessageSize = 16 * 1024 * 1024
 
 const (
 	NewWitnessMsg       = 0x00 // sends witness hash

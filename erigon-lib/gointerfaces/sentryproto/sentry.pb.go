@@ -226,6 +226,7 @@ const (
 	Protocol_ETH66 Protocol = 1
 	Protocol_ETH67 Protocol = 2
 	Protocol_ETH68 Protocol = 3
+	Protocol_WIT1  Protocol = 4
 )
 
 // Enum value maps for Protocol.
@@ -235,12 +236,14 @@ var (
 		1: "ETH66",
 		2: "ETH67",
 		3: "ETH68",
+		4: "WIT1",
 	}
 	Protocol_value = map[string]int32{
 		"ETH65": 0,
 		"ETH66": 1,
 		"ETH67": 2,
 		"ETH68": 3,
+		"WIT1":  4,
 	}
 )
 
@@ -1573,12 +1576,13 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x0eNEW_WITNESS_W0\x10#\x12\x19\n" +
 	"\x15NEW_WITNESS_HASHES_W0\x10$*\x17\n" +
 	"\vPenaltyKind\x12\b\n" +
-	"\x04Kick\x10\x00*6\n" +
+	"\x04Kick\x10\x00*@\n" +
 	"\bProtocol\x12\t\n" +
 	"\x05ETH65\x10\x00\x12\t\n" +
 	"\x05ETH66\x10\x01\x12\t\n" +
 	"\x05ETH67\x10\x02\x12\t\n" +
-	"\x05ETH68\x10\x032\xdc\a\n" +
+	"\x05ETH68\x10\x03\x12\b\n" +
+	"\x04WIT1\x10\x042\xdc\a\n" +
 	"\x06Sentry\x127\n" +
 	"\tSetStatus\x12\x12.sentry.StatusData\x1a\x16.sentry.SetStatusReply\x12C\n" +
 	"\fPenalizePeer\x12\x1b.sentry.PenalizePeerRequest\x1a\x16.google.protobuf.Empty\x12C\n" +

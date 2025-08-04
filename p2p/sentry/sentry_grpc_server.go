@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -563,6 +564,50 @@ func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType s
 		diagnostics.Send(stats)
 	}
 }
+func runWitPeer(
+	ctx context.Context,
+	peerID [64]byte,
+	rw p2p.MsgReadWriter,
+	peerInfo *PeerInfo,
+	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
+	hasSubscribers func(msgId proto_sentry.MessageId) bool,
+	logger log.Logger,
+) *p2p.PeerError {
+	protocol := uint(wit.WIT1)
+	for {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.runPeer: context stopped")
+		}
+		if err := peerInfo.RemoveReason(); err != nil {
+			return err
+		}
+
+		msg, err := rw.ReadMsg()
+		if err != nil {
+			return p2p.NewPeerError(p2p.PeerErrorMessageReceive, p2p.DiscNetworkError, err, "sentry.runPeer: ReadMsg error")
+		}
+
+		if msg.Size > wit.MaxMessageSize {
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
+		}
+
+		switch msg.Code {
+		case wit.NewWitnessMsg | wit.GetMsgWitness | wit.MsgWitness | wit.NewWitnessHashesMsg:
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+			send(eth.ToProto[direct.WIT0][msg.Code], peerID, b)
+		default:
+			logger.Error(fmt.Sprintf("%s: unknown message code: %d", hex.EncodeToString(peerID[:]), msg.Code))
+		}
+	}
+}
 
 func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, healthCheck bool) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
@@ -673,6 +718,34 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			return nil
 		},
 		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+	})
+
+	// TODO: only for bor
+	ss.Protocols = append(ss.Protocols, p2p.Protocol{
+		Name:           wit.ProtocolName,
+		Version:        wit.ProtocolVersions[0],
+		Length:         wit.ProtocolLengths[wit.ProtocolVersions[0]],
+		DialCandidates: disc,
+		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
+			peerID := peer.Pubkey()
+			peerInfo := ss.getPeer(peerID)
+
+			return runWitPeer(
+				ctx,
+				peerID,
+				rw,
+				peerInfo,
+				ss.send,
+				ss.hasSubscribers,
+				logger,
+			)
+		},
+		NodeInfo: func() interface{} {
+			return readNodeInfo()
+		},
+		PeerInfo: func(peerID [64]byte) interface{} {
+			return nil
+		},
 	})
 
 	return ss
