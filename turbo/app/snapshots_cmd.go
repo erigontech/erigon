@@ -1812,7 +1812,7 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer logger.Info("Done")
 
 	sourcefile := cliCtx.String(SnapshotFileFlag.Name)
-	sourcefile = filepath.Join(dirs.Snap, sourcefile)
+	sourcefile = filepath.Join(dirs.SnapHistory, sourcefile)
 
 	exists, err := dir2.FileExist(sourcefile)
 	if err != nil {
