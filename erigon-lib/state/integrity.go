@@ -173,7 +173,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 
 			dprint := filepath.Clean(g.FileName()) == filepath.Clean("v2.0-accounts.1896-1900.ef")
 			dprint2 := hexutil.Encode(k) == "0x000000000000000000000000000000000000dead"
-			fmt.Printf("%s---", filepath.Clean(g.FileName()))
+			//fmt.Printf("%s---", filepath.Clean(g.FileName()))
 			if dprint && dprint2 {
 				fmt.Println("fund match")
 			}
