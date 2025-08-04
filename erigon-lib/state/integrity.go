@@ -171,6 +171,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 			_ = k
 
 			dprint := filepath.Clean(g.FileName()) == filepath.Clean("v2.0-accounts.1896-1900.ef")
+			fmt.Println("%s---", filepath.Clean(g.FileName()))
 			if dprint {
 				fmt.Println("fund match")
 			}
