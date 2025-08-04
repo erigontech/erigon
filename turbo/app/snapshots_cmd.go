@@ -1836,7 +1836,11 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		buf, _ = g.Next(buf[:0])
 		buf2 := bytes.Clone(buf)
 
-		fmt.Println(hexutil.Encode(buf2), len(buf2), hexutil.Encode(buf2[:8]), hexutil.Encode(buf2[8:]))
+		if i%2 == 0 {
+			fmt.Println(hexutil.Encode(buf2), len(buf2), hexutil.Encode(buf2[:8]), hexutil.Encode(buf2[8:]))
+		} else {
+			fmt.Println(hexutil.Encode(buf2), len(buf2))
+		}
 		i++
 		if i > 100 {
 			break
