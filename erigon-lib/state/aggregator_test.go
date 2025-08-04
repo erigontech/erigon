@@ -1009,8 +1009,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 }
 
 func TestDesAc(t *testing.T) {
-	hex := "0000000000000000000000000000000000000000"
-	bh := hexutil.Hex2Bytes(hex)
+	hex := "0x000a02fd9dfab00487f3dae70000"
+	bh := hexutil.MustDecode(hex)
 
 	acc := accounts.Account{}
 	err := accounts.DeserialiseV3(&acc, bh)

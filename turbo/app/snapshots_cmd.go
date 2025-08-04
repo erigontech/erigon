@@ -1863,9 +1863,9 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("%s %d", hexutil.Encode(v), ok)
+	fmt.Printf("%s %d\n", hexutil.Encode(v), ok)
 
-	return readAttempt3(sourcefile, effile, vifile, dirs)
+	return readAttempt4(sourcefile, effile, vifile, dirs)
 	//return readAttempt1(sourcefile)
 	//return readAttempt2(sourcefile)
 
