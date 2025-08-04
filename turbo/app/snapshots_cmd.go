@@ -1940,13 +1940,14 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	for iiReader.HasNext() {
 		k, offset := iiReader.Next(nil)
 		kc := bytes.Clone(k)
-		fmt.Println(hexutil.Encode(kc), len(kc), offset, i)
 		if i > 5 {
 			break
 		}
 		efv, _ := iiReader.Next(nil)
 
 		seq.Reset(baseTxNum, efv)
+		fmt.Println(hexutil.Encode(kc), len(kc), offset, i, seq.Min(), seq.Max())
+
 		it := seq.Iterator(0)
 
 		for it.HasNext() {
