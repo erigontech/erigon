@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -1924,7 +1925,20 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	}
 	ireader := index.GetReaderFromPool()
 
-	baseTxNum := uint64(1888 * config3.DefaultStepSize)
+	re := regexp.MustCompile(`\.(\d+)-`)
+	matches := re.FindStringSubmatch("v1.1-accounts.1896-1900.vi")
+	var result string
+	if len(matches) > 1 {
+		result = matches[1] // "1896"
+	}
+
+	startstep, err := strconv.ParseUint(result, 10, 64)
+	if err != nil {
+		return nil
+	}
+
+	fmt.Println("the start step is", startstep)
+	baseTxNum := uint64(startstep * config3.DefaultStepSize)
 
 	decomp, err := seg.NewDecompressor(eff)
 	if err != nil {
@@ -1937,6 +1951,7 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	//hreader, _ := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
 	//hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
 	seq := &multiencseq.SequenceReader{}
+	iiReader.Reset(0)
 	for iiReader.HasNext() {
 		k, offset := iiReader.NextUncompressed()
 		kc := bytes.Clone(k)
