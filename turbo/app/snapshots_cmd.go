@@ -1946,6 +1946,9 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 		efv, _ := iiReader.NextUncompressed()
 
 		seq.Reset(baseTxNum, efv)
+		if seq.Count() == 0 {
+			continue
+		}
 		fmt.Println(hexutil.Encode(kc), len(kc), offset, i, seq.Min(), seq.Max())
 
 		it := seq.Iterator(0)
