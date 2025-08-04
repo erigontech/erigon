@@ -61,6 +61,10 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
+var (
+	BorDataNotReadyTimeout = 5 * time.Minute
+)
+
 type RoSnapshots struct {
 	snapshotsync.RoSnapshots
 }
@@ -160,8 +164,9 @@ type BlockRetire struct {
 	chainConfig *chain.Config
 	config      *ethconfig.Config
 
-	heimdallStore heimdall.Store
-	bridgeStore   bridge.Store
+	heimdallStore         heimdall.Store
+	bridgeStore           bridge.Store
+	borDataNotReadyBefore time.Time
 }
 
 func NewBlockRetire(
@@ -179,18 +184,19 @@ func NewBlockRetire(
 	logger log.Logger,
 ) *BlockRetire {
 	r := &BlockRetire{
-		tmpDir:         dirs.Tmp,
-		dirs:           dirs,
-		blockReader:    blockReader,
-		blockWriter:    blockWriter,
-		db:             db,
-		snBuildAllowed: snBuildAllowed,
-		chainConfig:    chainConfig,
-		config:         config,
-		notifier:       notifier,
-		logger:         logger,
-		heimdallStore:  heimdallStore,
-		bridgeStore:    bridgeStore,
+		tmpDir:                dirs.Tmp,
+		dirs:                  dirs,
+		blockReader:           blockReader,
+		blockWriter:           blockWriter,
+		db:                    db,
+		snBuildAllowed:        snBuildAllowed,
+		chainConfig:           chainConfig,
+		config:                config,
+		notifier:              notifier,
+		logger:                logger,
+		heimdallStore:         heimdallStore,
+		bridgeStore:           bridgeStore,
+		borDataNotReadyBefore: time.Now(),
 	}
 	r.workers.Store(int32(compressWorkers))
 	return r
@@ -416,6 +422,8 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 
 		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots, onFinishRetire)
 		if errors.Is(err, heimdall.ErrHeimdallDataIsNotReady) {
+			br.borDataNotReadyBefore = time.Now().Add(BorDataNotReadyTimeout)
+			br.logger.Debug("[snapshots] bor data is not ready to be retired", "nextAttemptAt", br.borDataNotReadyBefore)
 			return
 		}
 		if err != nil {
@@ -430,6 +438,10 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 		br.maxScheduledBlock.Store(requestedMaxBlockNum)
 	}
 	includeBor := br.chainConfig.Bor != nil
+
+	if includeBor && time.Now().After(br.borDataNotReadyBefore) {
+		return nil
+	}
 
 	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
 		return err
