@@ -20,7 +20,7 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 

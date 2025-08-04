@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer *PeerPenalizer) *PenalizingFetcher {

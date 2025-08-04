@@ -25,10 +25,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // JsonStreamLogger is an EVM state logger and implements Tracer.

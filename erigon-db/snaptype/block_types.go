@@ -35,8 +35,8 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func init() {
