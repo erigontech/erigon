@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -171,8 +172,9 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 			_ = k
 
 			dprint := filepath.Clean(g.FileName()) == filepath.Clean("v2.0-accounts.1896-1900.ef")
+			dprint2 := hexutil.Encode(k) == "0x000000000000000000000000000000000000dead"
 			fmt.Printf("%s---", filepath.Clean(g.FileName()))
-			if dprint {
+			if dprint && dprint2 {
 				fmt.Println("fund match")
 			}
 
@@ -182,7 +184,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 			if s.Count() == 0 {
 				continue
 			}
-			if dprint {
+			if dprint && dprint2 {
 				fmt.Println("item.start item.end s.min s.max", item.startTxNum, item.endTxNum, s.Min(), s.Max())
 			}
 			if item.startTxNum > s.Min() {
