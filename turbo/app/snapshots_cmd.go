@@ -1836,34 +1836,34 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	// if !exists {
 	// 	return fmt.Errorf("file %s does not exist", sourcefile)
 	// }
-	// ctx := cliCtx.Context
-	// chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
-	// defer chainDB.Close()
+	ctx := cliCtx.Context
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
 
-	// chainConfig := fromdb.ChainConfig(chainDB)
-	// cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	// _, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	// if err != nil {
-	// 	return err
-	// }
-	// defer clean()
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
 
-	// tdb, err := temporal.New(chainDB, agg)
-	// if err != nil {
-	// 	return err
-	// }
+	tdb, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
 
-	// rotx, err := tdb.BeginTemporalRo(ctx)
-	// if err != nil {
-	// 	return err
-	// }
+	rotx, err := tdb.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
 
-	// v, ok, err := rotx.HistorySeek(kv.AccountsDomain, hexutil.FromHex("0x0000000000000000000000000000000000000000"), 2950113689)
-	// if err != nil {
-	// 	return err
-	// }
-	// fmt.Printf("%s %d\n", hexutil.Encode(v), ok)
+	v, ok, err := rotx.HistorySeek(kv.AccountsDomain, hexutil.FromHex("0x0000000000000000000000000000000000000000"), 2950113689)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s %d\n", hexutil.Encode(v), ok)
 
 	return readAttempt3(sourcefile, effile, vifile, dirs)
 	//return readAttempt1(sourcefile)
