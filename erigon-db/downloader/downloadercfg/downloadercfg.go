@@ -25,19 +25,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
-	g "github.com/anacrolix/generics"
-
-	analog "github.com/anacrolix/log"
-
 	"golang.org/x/time/rate"
 
+	g "github.com/anacrolix/generics"
+	analog "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -67,7 +63,7 @@ type Cfg struct {
 	ClientConfig   *torrent.ClientConfig
 	SnapshotConfig *snapcfg.Cfg
 
-	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: Remove this.
+	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: RemoveFile this.
 	// Check with @mh0lt for best way to do this. I couldn't find the GitHub issue for cleaning up
 	// the Downloader API and responsibilities.
 	AddTorrentsFromDisk bool
@@ -286,7 +282,7 @@ func New(
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
 func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
-	if !slices.Contains(networkname.All, chainName) {
+	if _, known := snapcfg.KnownCfg(chainName); !known {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
 		return snapcfg.NewNonSeededCfg(chainName), nil
 	}

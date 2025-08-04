@@ -55,7 +55,9 @@ var (
 
 func init() {
 	chainspec.RegisterChain(networkname.Amoy, AmoyChainConfig, AmoyGenesisBlock(), AmoyGenesisHash, AmoyBootnodes, "")
-	chainspec.RegisterChain(networkname.BorDevnet, BorDevnetChainConfig, BorDevnetGenesisBlock(), BorDevnetGenesisHash, nil, "")
 	chainspec.RegisterChain(networkname.BorMainnet, BorMainnetChainConfig, BorMainnetGenesisBlock(), BorMainnetGenesisHash, BorMainnetBootnodes,
 		"enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io")
+
+	chainspec.RegisterChain(networkname.BorDevnet, BorDevnetChainConfig, BorDevnetGenesisBlock(), BorDevnetGenesisHash, nil, "")
+	delete(chainspec.NetworkNameByID, BorDevnetChainConfig.ChainID.Uint64()) // chain ID 1337 is used in non-Bor testing (e.g. Hive)
 }

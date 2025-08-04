@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -187,7 +188,7 @@ var compactDomains = &cobra.Command{
 			logger.Error("Error creating temporary directory", "error", err)
 			return
 		}
-		defer os.RemoveAll(tmpDir)
+		defer dir.RemoveAll(tmpDir)
 		// make a temporary DB to store the keys
 
 		compactionDB := mdbx.MustOpen(tmpDir)
@@ -537,6 +538,6 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 
 func removeManyIgnoreError(filePaths ...string) {
 	for _, filePath := range filePaths {
-		os.Remove(filePath)
+		dir.RemoveFile(filePath)
 	}
 }

@@ -20,22 +20,16 @@ import "github.com/erigontech/erigon-lib/version"
 
 var (
 	BeaconBlocks = snapType{
-		enum: CaplinEnums.BeaconBlocks,
-		name: "beaconblocks",
-		versions: Versions{
-			Current:      version.V1_0,
-			MinSupported: version.V1_0,
-		},
-		indexes: []Index{CaplinIndexes.BeaconBlockSlot},
+		enum:     CaplinEnums.BeaconBlocks,
+		name:     "beaconblocks",
+		versions: version.V1_1_standart,
+		indexes:  []Index{CaplinIndexes.BeaconBlockSlot},
 	}
 	BlobSidecars = snapType{
-		enum: CaplinEnums.BlobSidecars,
-		name: "blobsidecars",
-		versions: Versions{
-			Current:      version.V1_0,
-			MinSupported: version.V1_0,
-		},
-		indexes: []Index{CaplinIndexes.BlobSidecarSlot},
+		enum:     CaplinEnums.BlobSidecars,
+		name:     "blobsidecars",
+		versions: version.V1_1_standart,
+		indexes:  []Index{CaplinIndexes.BlobSidecarSlot},
 	}
 
 	CaplinSnapshotTypes = []Type{BeaconBlocks, BlobSidecars}

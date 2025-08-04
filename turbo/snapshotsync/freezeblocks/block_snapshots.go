@@ -22,7 +22,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -541,6 +540,12 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	if blockFrom > 0 && firstTxNum == 0 {
+		err := fmt.Errorf("firstTxNum is 0 (blocks=%d-%d); must be a mistake, aborting files build", blockFrom, blockTo)
+		logger.Error("DumpBodies", "err", err)
+		return lastTxNum, err
+	}
+
 	if _, err = dumpRange(ctx, coresnaptype.Headers.FileInfo(snapDir, blockFrom, blockTo),
 		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return 0, err
@@ -931,7 +936,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	from := hexutil.EncodeTs(blockFrom)
 
 	lastTxNum := firstTxNum(ctx)
-
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {
@@ -1063,12 +1067,12 @@ func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
 		if err != nil {
 			if errors.Is(err, recsplit.IncompatibleErr) {
 				_, fName := filepath.Split(fPath)
-				if err = os.Remove(fPath); err != nil {
+				if err = dir2.RemoveFile(fPath); err != nil {
 					log.Warn("Removing incompatible index", "file", fName, "err", err)
 				} else {
 					log.Info("Removing incompatible index", "file", fName)
 				}
-				if err = os.Remove(fPath + ".torrent"); err != nil {
+				if err = dir2.RemoveFile(fPath + ".torrent"); err != nil {
 					log.Warn("Removing incompatible index", "file", fName, "err", err)
 				} else {
 					log.Info("Removing incompatible index", "file", fName)
