@@ -1946,9 +1946,9 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	}
 	defer decomp.Close()
 	i := 0
-	//var hv []byte
+	var hv []byte
 	iiReader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetIINewReader(decomp)
-	//hreader, _ := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
+	hreader, _ := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(decomp)
 	//hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetHistNewReader(decomp)
 	seq := &multiencseq.SequenceReader{}
 	iiReader.Reset(0)
@@ -1986,9 +1986,9 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 			}
 			fmt.Println("k txNum offset", hexutil.Encode(kc), txNum, offset2)
 			// 	hreader.Reset(offset2)
-			// 	hv, offset2 := hreader.Next(hv[:0])
-			// 	hvc := bytes.Clone(hv)
-			// 	fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+			hv, offset2 := hreader.Next(hv[:0])
+			hvc := bytes.Clone(hv)
+			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
 			// 	hv, offset2 = hreader.Next(hv[:0])
 			// 	hvc = bytes.Clone(hv)
 			// 	fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
