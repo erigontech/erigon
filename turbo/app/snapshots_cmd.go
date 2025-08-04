@@ -1782,6 +1782,17 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 
+func repairInvertedIndex(cliCtx *cli.Context) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+
+	return nil
+
+}
+
 func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
