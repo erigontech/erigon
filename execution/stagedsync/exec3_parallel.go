@@ -1286,12 +1286,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if readVersion != writtenVersion {
 					vv = state.VerionInvalid
-				} else if writtenVersion.TxIndex == -1 && tx >= be.validateTasks.maxComplete() {
+				} else if writtenVersion.TxIndex == -1 && tx-1 > be.validateTasks.maxComplete() {
 					vv = state.VerionTooEarly
 				}
 				if vv != state.VersionValid {
 					fmt.Println(be.blockNum, fmt.Sprintf("(%d.%d)", txVersion.TxIndex, txVersion.Incarnation), "ValidateVersion Failed",
-						vv, readVersion, writtenVersion, tx, be.validateTasks.maxComplete())
+						vv, readVersion, writtenVersion, tx-1, be.validateTasks.maxComplete())
 					be.versionMap.SetTrace(true)
 				}
 				return vv
