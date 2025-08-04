@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
-	"fmt"
 	"math"
 
 	btree2 "github.com/tidwall/btree"
@@ -443,14 +442,14 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 }
 
 type SegStreamReader struct {
-	s *seg.Reader
+	s *seg.PagedReader
 
 	limit int
 }
 
 // SegStreamReader implements stream.KV for segment reader.
 // limit -1 means no limit.
-func NewSegStreamReader(s *seg.Reader, limit int) *SegStreamReader {
+func NewSegStreamReader(s *seg.PagedReader, limit int) *SegStreamReader {
 	s.Reset(0)
 	return &SegStreamReader{
 		s: s, limit: limit,
@@ -461,11 +460,7 @@ func (sr *SegStreamReader) HasNext() bool { return sr.s.HasNext() && (sr.limit =
 func (sr *SegStreamReader) Close()        { sr.s = nil }
 
 func (sr *SegStreamReader) Next() (k, v []byte, err error) {
-	k, _ = sr.s.Next(k)
-	if !sr.s.HasNext() {
-		return nil, nil, fmt.Errorf("key %x has no associated value: %s", k, sr.s.FileName())
-	}
-	v, _ = sr.s.Next(v)
+	k, v, _, _, _ = sr.s.Next2Copy(nil, nil)
 	if sr.limit > 0 {
 		sr.limit--
 	}
