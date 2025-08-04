@@ -1,4 +1,4 @@
-name: All tests
+name: All tests (with -race)
 
 on:
   push:
