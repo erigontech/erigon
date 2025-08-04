@@ -110,11 +110,8 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 
 		var ok bool
-		if api.useBridgeReader {
-			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-		} else {
-			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
-		}
+		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
+
 		if err != nil {
 			return err
 		}
@@ -245,11 +242,8 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		if api.useBridgeReader {
-			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
-		} else {
-			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)
-		}
+		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
+
 		if err != nil {
 			stream.WriteNil()
 			return err
