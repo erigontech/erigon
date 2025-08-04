@@ -62,6 +62,10 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
+var (
+	BorDataNotReadyTimeout = 5 * time.Minute
+)
+
 type RoSnapshots struct {
 	snapshotsync.RoSnapshots
 }
@@ -161,8 +165,9 @@ type BlockRetire struct {
 	chainConfig *chain.Config
 	config      *ethconfig.Config
 
-	heimdallStore heimdall.Store
-	bridgeStore   bridge.Store
+	heimdallStore         heimdall.Store
+	bridgeStore           bridge.Store
+	borDataNotReadyBefore time.Time
 }
 
 func NewBlockRetire(
@@ -180,18 +185,19 @@ func NewBlockRetire(
 	logger log.Logger,
 ) *BlockRetire {
 	r := &BlockRetire{
-		tmpDir:         dirs.Tmp,
-		dirs:           dirs,
-		blockReader:    blockReader,
-		blockWriter:    blockWriter,
-		db:             db,
-		snBuildAllowed: snBuildAllowed,
-		chainConfig:    chainConfig,
-		config:         config,
-		notifier:       notifier,
-		logger:         logger,
-		heimdallStore:  heimdallStore,
-		bridgeStore:    bridgeStore,
+		tmpDir:                dirs.Tmp,
+		dirs:                  dirs,
+		blockReader:           blockReader,
+		blockWriter:           blockWriter,
+		db:                    db,
+		snBuildAllowed:        snBuildAllowed,
+		chainConfig:           chainConfig,
+		config:                config,
+		notifier:              notifier,
+		logger:                logger,
+		heimdallStore:         heimdallStore,
+		bridgeStore:           bridgeStore,
+		borDataNotReadyBefore: time.Now(),
 	}
 	r.workers.Store(int32(compressWorkers))
 	return r
@@ -427,6 +433,8 @@ func (br *BlockRetire) RetireBlocksInBackground(
 
 		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots, onFinishRetire)
 		if errors.Is(err, heimdall.ErrHeimdallDataIsNotReady) {
+			br.borDataNotReadyBefore = time.Now().Add(BorDataNotReadyTimeout)
+			br.logger.Debug("[snapshots] bor data is not ready to be retired", "nextAttemptAt", br.borDataNotReadyBefore)
 			return
 		}
 		if err != nil {
@@ -443,6 +451,10 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 		br.maxScheduledBlock.Store(requestedMaxBlockNum)
 	}
 	includeBor := br.chainConfig.Bor != nil
+
+	if includeBor && time.Now().After(br.borDataNotReadyBefore) {
+		return nil
+	}
 
 	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
 		return err
@@ -552,6 +564,12 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+
+	if blockFrom > 0 && firstTxNum == 0 {
+		err := fmt.Errorf("firstTxNum is 0 (blocks=%d-%d); must be a mistake, aborting files build", blockFrom, blockTo)
+		logger.Error("DumpBodies", "err", err)
+		return lastTxNum, err
+	}
 
 	if _, err = dumpRange(ctx, coresnaptype.Headers.FileInfo(snapDir, blockFrom, blockTo),
 		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
@@ -943,7 +961,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	from := hexutil.EncodeTs(blockFrom)
 
 	lastTxNum := firstTxNum(ctx)
-
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {

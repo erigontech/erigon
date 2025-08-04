@@ -10,19 +10,21 @@ import (
 )
 
 func TestBatchLimit_WebSocket_Exceeded(t *testing.T) {
-	t.Skip("TODO: https://github.com/erigontech/erigon/issues/16310")
+	t.Skip("TODO: https://github.com/erigontech/erigon/issues/16382")
 	t.Parallel()
 	logger := log.New()
 
 	// Create server with batch limit
 	srv := newTestServer(logger)
+	defer srv.Stop()
+
 	srv.SetBatchLimit(10) // Set limit to 10
 
 	// Start HTTP server with WebSocket support
 	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
-	wsURL := "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
-	defer srv.Stop()
 	defer httpsrv.Close()
+
+	wsURL := "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 
 	// Connect WebSocket client
 	client, err := DialWebsocket(context.Background(), wsURL, "", logger)

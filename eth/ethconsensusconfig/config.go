@@ -118,15 +118,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
 			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
 			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
-
-			var err error
-			var db kv.RwDB
-			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "bor", readonly, logger)
-			if err != nil {
-				panic(err)
-			}
-
-			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, stateReceiver, logger, polygonBridge, heimdallService)
+			eng = bor.New(chainConfig, blockReader, spanner, heimdallClient, stateReceiver, logger, polygonBridge, heimdallService)
 		}
 	}
 
