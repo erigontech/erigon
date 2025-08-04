@@ -1847,7 +1847,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	var executor *blockExecutor
 
 	for i, txTask := range execRequest.tasks {
-		fmt.Println("REQ", txTask.BlockNumber(), i, txTask)
+		//fmt.Println("REQ", txTask.BlockNumber(), i, txTask)
 		t := &execTask{
 			Task:               txTask,
 			index:              i,
