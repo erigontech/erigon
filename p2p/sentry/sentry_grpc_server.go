@@ -73,13 +73,13 @@ const (
 // PeerInfo collects various extra bits of information about the peer,
 // for example deadlines that is used for regulating requests sent to the peer
 type PeerInfo struct {
-	peer          *p2p.Peer
-	lock          sync.RWMutex
-	deadlines     []time.Time // Request deadlines
-	latestDealine time.Time
-	height        uint64
-	rw            p2p.MsgReadWriter
-	protocol      uint
+	peer                  *p2p.Peer
+	lock                  sync.RWMutex
+	deadlines             []time.Time // Request deadlines
+	latestDealine         time.Time
+	height                uint64
+	rw                    p2p.MsgReadWriter
+	protocol, witProtocol uint
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -594,7 +594,7 @@ func runWitPeer(
 
 		switch msg.Code {
 		case wit.NewWitnessMsg | wit.GetMsgWitness | wit.MsgWitness | wit.NewWitnessHashesMsg:
-			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
 				continue
 			}
 
@@ -602,7 +602,7 @@ func runWitPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
-			send(eth.ToProto[direct.WIT0][msg.Code], peerID, b)
+			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		default:
 			logger.Error(fmt.Sprintf("%s: unknown message code: %d", hex.EncodeToString(peerID[:]), msg.Code))
 		}
@@ -718,6 +718,8 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			return nil
 		},
 		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+		FromProto: eth.FromProto[protocol],
+		ToProto:   eth.ToProto[protocol],
 	})
 
 	// TODO: only for bor
@@ -729,6 +731,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 			peerID := peer.Pubkey()
 			peerInfo := ss.getPeer(peerID)
+			peerInfo.witProtocol = wit.ProtocolVersions[0]
 
 			return runWitPeer(
 				ctx,
@@ -746,6 +749,8 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		PeerInfo: func(peerID [64]byte) interface{} {
 			return nil
 		},
+		FromProto: wit.FromProto[wit.ProtocolVersions[0]],
+		ToProto:   wit.ToProto[wit.ProtocolVersions[0]],
 	})
 
 	return ss
@@ -826,8 +831,8 @@ func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
-		msgType := eth.ToProto[peerInfo.protocol][msgcode]
-		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), fmt.Sprintf("%s/%d", eth.ProtocolName, peerInfo.protocol), len(data))
+		msgType, protocolName, protocolVersion := ss.protoMessageID(msgcode)
+		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), fmt.Sprintf("%s/%d", protocolName, protocolVersion), len(data))
 
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
@@ -979,8 +984,8 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *proto_sentry.Sen
 		return reply, nil
 	}
 
-	msgcode, ok := eth.FromProto[peerInfo.protocol][inreq.Data.Id]
-	if !ok {
+	msgcode, protocolVersions := ss.messageCode(inreq.Data.Id)
+	if protocolVersions.Cardinality() == 0 {
 		return reply, fmt.Errorf("msgcode not found for message Id: %s (peer protocol %d)", inreq.Data.Id, peerInfo.protocol)
 	}
 
@@ -993,9 +998,18 @@ func (ss *GrpcServer) messageCode(id proto_sentry.MessageId) (code uint64, proto
 	protocolVersions = mapset.NewSet[uint]()
 	for i := 0; i < len(ss.Protocols); i++ {
 		version := ss.Protocols[i].Version
-		if val, ok := eth.FromProto[version][id]; ok {
+		if val, ok := ss.Protocols[i].FromProto[id]; ok {
 			code = val // assuming that the code doesn't change between protocol versions
 			protocolVersions.Add(version)
+		}
+	}
+	return
+}
+
+func (ss *GrpcServer) protoMessageID(code uint64) (id proto_sentry.MessageId, protocolName string, protocolVersion uint) {
+	for i := 0; i < len(ss.Protocols); i++ {
+		if val, ok := ss.Protocols[i].ToProto[code]; ok {
+			return val, ss.Protocols[i].Name, ss.Protocols[i].Version
 		}
 	}
 	return

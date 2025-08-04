@@ -5,6 +5,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/core/stateless"
 )
 
@@ -109,3 +110,21 @@ func (w *NewWitnessPacket) Kind() byte   { return NewWitnessMsg }
 
 func (w *NewWitnessHashesPacket) Name() string { return "NewWitnessHashes" }
 func (w *NewWitnessHashesPacket) Kind() byte   { return NewWitnessHashesMsg }
+
+var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
+	direct.WIT0: {
+		NewWitnessMsg:       proto_sentry.MessageId_NEW_WITNESS_W0,
+		NewWitnessHashesMsg: proto_sentry.MessageId_NEW_WITNESS_HASHES_W0,
+		GetMsgWitness:       proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+		MsgWitness:          proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0,
+	},
+}
+
+var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
+	direct.WIT0: {
+		proto_sentry.MessageId_NEW_WITNESS_W0:              NewWitnessMsg,
+		proto_sentry.MessageId_NEW_WITNESS_HASHES_W0:       NewWitnessHashesMsg,
+		proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0: GetMsgWitness,
+		proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0:     MsgWitness,
+	},
+}
